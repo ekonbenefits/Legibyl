@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VeraPdfTool.Gui/VeraPdfTool.Gui.csproj" />
+    <Project Path="src/VeraPdfTool.Validation/VeraPdfTool.Validation.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VeraPdfTool.Validation.Tests/VeraPdfTool.Validation.Tests.csproj" />
+  </Folder>
+</Solution>

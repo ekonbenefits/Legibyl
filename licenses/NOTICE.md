@@ -1,0 +1,36 @@
+# Third-Party Notices
+
+**veraPDF-tool's own source code is licensed under the Mozilla Public
+License 2.0 — see the `LICENSE` file at the repository root.**
+
+This application also bundles the `greenfield-apps-1.28.1.jar` Java
+archive from the **veraPDF** project (https://verapdf.org /
+https://github.com/veraPDF), loaded into the .NET process via
+[IKVM.NET](https://ikvm.org/) so that the application can call veraPDF's
+PDF/A and PDF/UA validation engine directly.
+
+Copyright (c) 2015-2026, veraPDF Consortium <info@verapdf.org>. All rights
+reserved.
+
+veraPDF is free software, dual-licensed (recipient's choice) under:
+
+- The GNU General Public License, version 3 or later ("GPLv3+") — see
+  `LICENSE.GPL` in this directory, or
+  <https://www.gnu.org/licenses/gpl-3.0.en.html>.
+- The Mozilla Public License, version 2.0 or later ("MPLv2+") — see
+  `LICENSE.MPL` in this directory, or <https://mozilla.org/MPL/2.0/>.
+
+See `lib/vendor/verapdf-jars/README.md` for the exact artifact, version,
+and checksum of the bundled jar, and provenance/attribution details.
+
+veraPDF's bundled fat jar in turn includes third-party dependencies
+(Jackson databind/core/annotations, JAXB API/Core/Runtime
+(`javax.xml.bind`, `org.glassfish.jaxb`), `javax.activation`, and others)
+under their own respective open-source licenses. Consult the individual
+project pages for full license texts of those transitive dependencies.
+
+## IKVM.NET
+
+This application also uses [IKVM.NET](https://github.com/ikvmnet/ikvm),
+licensed under the Apache License, Version 2.0, to execute the veraPDF
+Java bytecode from .NET.
