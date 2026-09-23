@@ -22,6 +22,7 @@ VeraPdfTool.slnx
 src/
   VeraPdfTool.Validation/   C# facade over the veraPDF Java validation core (IKVM)
   VeraPdfTool.Gui/          WPF UI: file picker, profile selector, results grid
+  VeraPdfTool.Cli/          Command-line tool (verapdf-tool.exe), JSON-first, agent-friendly
 tests/
   VeraPdfTool.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
 lib/vendor/verapdf-jars/    Vendored veraPDF jar + provenance/checksum README
@@ -56,6 +57,69 @@ the app runs standalone with no external Java installation.
 ## Supported profiles
 
 PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
+
+## Command-line tool (for scripts / AI agents)
+
+`VeraPdfTool.Cli` builds a standalone `verapdf-tool` executable intended for
+use in scripts or by an AI agent iterating on PDF/UA compatibility fixes.
+Output defaults to structured JSON on stdout, and the **process exit code**
+tells you the outcome without needing to parse output:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0`  | All files validated and are compliant. |
+| `1`  | All files validated successfully, but at least one is non-compliant. |
+| `2`  | At least one file could not be validated (missing/corrupt/encrypted). |
+| `64` | Invalid command-line usage. |
+
+```powershell
+dotnet run --project src\VeraPdfTool.Cli\VeraPdfTool.Cli.csproj -- <file.pdf> [<file2.pdf> ...] [options]
+```
+
+Or after building, run the exe directly:
+`src\VeraPdfTool.Cli\bin\Debug\net8.0\verapdf-tool.exe <file.pdf>`
+
+Options:
+- `--profile <name>` — profile to validate against (default `pdfua1`). Run
+  `--list-profiles` for all accepted names (`pdfua1`, `pdfa1b`, `pdfa2b`,
+  `pdfa2u`, `pdfa3b`, `pdfa4`).
+- `--format <json|text>` — output format (default `json`).
+- `--output <path>` — write output to a file instead of stdout.
+- `--list-profiles` — print supported profile names and exit `0`.
+- `--help` / `-h` — print usage and exit `0`.
+
+Multiple PDF paths can be passed at once (batch mode); output is always a
+JSON array (one object per file) or one text line/block per file.
+
+Example JSON output (one non-compliant file):
+
+```json
+[
+  {
+    "file": "document.pdf",
+    "profile": "pdfua1",
+    "flavourId": "ua1",
+    "isCompliant": false,
+    "totalAssertions": 794,
+    "failedCount": 2,
+    "failures": [
+      {
+        "specification": "ISO 14289-1:2014",
+        "clause": "7.1",
+        "testNumber": 1,
+        "message": "Content marked as Artifact should not be present inside tagged content",
+        "errorMessage": null,
+        "locationContext": null
+      }
+    ],
+    "error": null
+  }
+]
+```
+
+If a file can't be validated at all (missing, corrupt, encrypted), its
+entry has `"error": "<message>"` and the other fields are `null` — check
+`error` first before reading `isCompliant`.
 
 ## Licensing
 
