@@ -23,6 +23,14 @@ veraPDF is free software, dual-licensed (recipient's choice) under:
 See `lib/vendor/verapdf-jars/README.md` for the exact artifact, version,
 and checksum of the bundled jar, and provenance/attribution details.
 
+**Corresponding source code** for this exact jar version is publicly
+available, unmodified from upstream, at:
+<https://github.com/veraPDF/veraPDF-apps/tree/v1.28.1> (and the
+`greenfield-apps` module's dependencies are likewise all public open-source
+projects resolvable from that tag's Maven POMs). This repository does not
+modify the vendored jar in any way (see the SHA-256 checksum in
+`lib/vendor/verapdf-jars/README.md`).
+
 veraPDF's bundled fat jar in turn includes third-party dependencies
 (Jackson databind/core/annotations, JAXB API/Core/Runtime
 (`javax.xml.bind`, `org.glassfish.jaxb`), `javax.activation`, and others)

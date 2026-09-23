@@ -36,6 +36,12 @@ internal static class ProfileNames
     /// <summary>The default profile used when none is specified.</summary>
     public const string DefaultName = "pdfua1";
 
+    /// <summary>
+    /// Version of the vendored veraPDF engine (see lib/vendor/verapdf-jars/README.md).
+    /// Kept in sync with the first three components of the assembly version.
+    /// </summary>
+    public const string VendoredEngineVersion = "1.28.1";
+
     public static bool TryParse(string name, out PdfProfile profile) =>
         Aliases.TryGetValue(name.Trim(), out profile);
 

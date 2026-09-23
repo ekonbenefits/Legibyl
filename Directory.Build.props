@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    Versioning convention for this repo: the first three components track the
+    vendored veraPDF engine version (see lib/vendor/verapdf-jars/README.md),
+    and the fourth component is a build/revision number for this tool that
+    increments independently of the vendored engine.
+
+    When the vendored jar is upgraded, reset VersionBuild to 0 and update
+    VersionPrefix to match the new jar version.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>1.28.1</VersionPrefix>
+    <VersionBuild>0</VersionBuild>
+    <Version>$(VersionPrefix).$(VersionBuild)</Version>
+  </PropertyGroup>
+</Project>

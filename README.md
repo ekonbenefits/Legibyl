@@ -86,6 +86,7 @@ Options:
 - `--format <json|text>` — output format (default `json`).
 - `--output <path>` — write output to a file instead of stdout.
 - `--list-profiles` — print supported profile names and exit `0`.
+- `--version` — print tool build + vendored veraPDF engine version and exit `0`.
 - `--help` / `-h` — print usage and exit `0`.
 
 Multiple PDF paths can be passed at once (batch mode); output is always a
@@ -120,6 +121,17 @@ Example JSON output (one non-compliant file):
 If a file can't be validated at all (missing, corrupt, encrypted), its
 entry has `"error": "<message>"` and the other fields are `null` — check
 `error` first before reading `isCompliant`.
+
+## Versioning
+
+All projects share a single version, set centrally in `Directory.Build.props`:
+the first three components (`Major.Minor.Patch`) track the **vendored veraPDF
+engine version** (currently `1.28.1`), and the fourth component is a
+build/revision number that increments for tool-only releases (CLI/GUI/facade
+changes that don't touch the vendored jar). When the vendored jar is
+upgraded, the revision resets to `0` and the base is updated to match the new
+jar version. Run `verapdf-tool --version` to see both numbers at once
+(e.g. `verapdf-tool 1.28.1.0 (vendored veraPDF engine 1.28.1)`).
 
 ## Licensing
 

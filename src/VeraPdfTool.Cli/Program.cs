@@ -21,6 +21,7 @@ OPTIONS:
   --format <json|text> Output format (default: json).
   --output <path>      Write output to a file instead of stdout.
   --list-profiles      Print supported profile names and exit 0.
+  --version            Print tool + vendored veraPDF engine version and exit 0.
   --help, -h           Print this help and exit 0.
 
 EXIT CODES:
@@ -55,6 +56,11 @@ for (int i = 0; i < args.Length; i++)
             {
                 Console.WriteLine(name);
             }
+            return ExitCodes.Success;
+
+        case "--version":
+            var asmVersion = typeof(Program).Assembly.GetName().Version;
+            Console.WriteLine($"verapdf-tool {asmVersion} (vendored veraPDF engine {ProfileNames.VendoredEngineVersion})");
             return ExitCodes.Success;
 
         case "--profile":
