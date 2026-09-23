@@ -1,0 +1,44 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+
+    <ComponentGroup Id="GuiPayload" Directory="INSTALLFOLDER">
+
+      <Component Id="MainExecutableComponent" Guid="*">
+        <File Id="MainExe"
+              Source="$(var.GuiPublishDir)\VeraPdfTool.Gui.exe"
+              KeyPath="yes">
+
+          <Shortcut Id="StartMenuShortcut"
+                    Directory="InstallProgramMenuFolder"
+                    Name="veraPDF Tool"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Advertise="yes" />
+
+          <Shortcut Id="DesktopShortcut"
+                    Directory="DesktopFolder"
+                    Name="veraPDF Tool"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Advertise="yes" />
+        </File>
+
+        <RemoveFolder Id="CleanUpShortCut" Directory="InstallProgramMenuFolder" On="uninstall" />
+      </Component>
+
+      <!-- Everything else from the self-contained publish output (IKVM.Java.dll, translated jar, .NET runtime files, etc.) -->
+      <Files Include="$(var.GuiPublishDir)\**\*">
+        <Exclude Files="$(var.GuiPublishDir)\VeraPdfTool.Gui.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <!--
+      Our own MPL-2.0 license plus veraPDF's dual GPLv3+/MPLv2+ texts and the
+      third-party NOTICE (attribution + source pointer for the bundled jar).
+      Installed alongside the app so the license.rtf shown during setup isn't
+      the only copy a recipient of the installed product has access to.
+    -->
+    <ComponentGroup Id="LicenseFiles" Directory="LicensesFolder">
+      <Files Include="$(var.RepoRoot)LICENSE" />
+      <Files Include="$(var.RepoRoot)licenses\*" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

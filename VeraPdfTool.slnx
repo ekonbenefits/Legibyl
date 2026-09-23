@@ -7,4 +7,10 @@
   <Folder Name="/tests/">
     <Project Path="tests/VeraPdfTool.Validation.Tests/VeraPdfTool.Validation.Tests.csproj" />
   </Folder>
+  <Folder Name="/installer/">
+    <Project Path="installer/VeraPdfTool.Gui.Installer/VeraPdfTool.Gui.Installer.wixproj">
+      <Platform Solution="*|Any CPU" Project="x64" />
+      <Build Solution="*|*" />
+    </Project>
+  </Folder>
 </Solution>

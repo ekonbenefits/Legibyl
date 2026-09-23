@@ -1,0 +1,38 @@
+﻿<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <OutputName>VeraPdfToolSetup</OutputName>
+    <OutputPath>..\..\artifacts\msi\</OutputPath>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Cabinet>embed</Cabinet>   <!-- Ensures all files are embedded in the MSI, no external CAB will be created -->
+    <SuppressIces>ICE60</SuppressIces>
+    <!--
+      MSI ProductVersion only supports three numeric fields (major.minor.build),
+      so we use $(VersionPrefix) (the vendored veraPDF engine version, e.g.
+      "1.28.1") for AppVersion. The full four-field $(Version) (including the
+      tool build number) is still shown to the user via SummaryInformation
+      Comments below. See root Directory.Build.props / README "Versioning".
+    -->
+    <DefineConstants>$(DefineConstants);AppVersion=$(VersionPrefix);FullVersion=$(Version);RepoRoot=$(MSBuildThisFileDirectory)..\..\;GuiPublishDir=$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="license.rtf" />
+  </ItemGroup>
+
+  <!--
+    Publish a self-contained win-x64 build of the GUI as the MSI payload.
+    Self-contained is used (not framework-dependent) because it bundles
+    IKVM's translated JRE, so the installed app has no external JDK/.NET
+    runtime dependency, matching the standalone publish already verified
+    during development.
+  -->
+  <Target Name="PublishGuiPayload" BeforeTargets="BeforeBuild">
+    <MakeDir Directories="$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\src\VeraPdfTool.Gui\VeraPdfTool.Gui.csproj&quot; -c $(Configuration) -r win-x64 --self-contained true -o &quot;$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui&quot;" />
+  </Target>
+</Project>

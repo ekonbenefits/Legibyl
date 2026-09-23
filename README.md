@@ -25,6 +25,8 @@ src/
   VeraPdfTool.Cli/          Command-line tool (verapdf-tool.exe), JSON-first, agent-friendly
 tests/
   VeraPdfTool.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
+installer/
+  VeraPdfTool.Gui.Installer/      WiX v6 MSI installer for the GUI (VeraPdfToolSetup.msi)
 lib/vendor/verapdf-jars/    Vendored veraPDF jar + provenance/checksum README
 licenses/                   GPLv3+/MPLv2+ license texts and third-party NOTICE
 spike/IkvmSpike/            Standalone feasibility spike (kept for reference)
@@ -53,6 +55,23 @@ dotnet publish src\VeraPdfTool.Gui\VeraPdfTool.Gui.csproj -c Release -r win-x64 
 
 The published output bundles IKVM's translated JRE (`IKVM.Java.dll`), so
 the app runs standalone with no external Java installation.
+
+## Windows installer (MSI)
+
+`installer/VeraPdfTool.Gui.Installer` builds a WiX v6 MSI (`VeraPdfToolSetup.msi`)
+that installs the self-contained GUI to `Program Files\Ekon Benefits\veraPDF Tool`,
+with Start Menu and Desktop shortcuts. It publishes the GUI itself as part of
+the build (no separate publish step needed):
+
+```powershell
+dotnet build installer\VeraPdfTool.Gui.Installer\VeraPdfTool.Gui.Installer.wixproj -c Release
+```
+
+The MSI is written to `artifacts\msi\en-US\VeraPdfToolSetup.msi`. Installing
+to `Program Files` requires administrator privileges (standard per-machine
+MSI behavior). The installer also bundles the `LICENSE`/`licenses/` files
+so the license texts and third-party attribution are available on the
+installed machine, not just in this source repository.
 
 ## Supported profiles
 
