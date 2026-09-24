@@ -269,6 +269,14 @@ public partial class MainWindow : Window
         {
             FixResult fix = await Task.Run(() => _fixer.Fix(_selectedFilePath, profile, dialog.FileName));
             ShowFixResult(fix);
+
+            if (fix.WasFixed)
+            {
+                // Switch the workspace over to the repaired copy and re-validate it, so the
+                // results view reflects what (if anything) actually improved, rather than
+                // leaving the stale original file/report on screen.
+                SetSelectedFile(fix.OutputPath!);
+            }
         }
         catch (VeraPdfValidationException ex)
         {
@@ -302,7 +310,11 @@ public partial class MainWindow : Window
         sb.AppendLine("Note: this only repairs XMP metadata (missing metadata stream, PDF/A|PDF/UA");
         sb.AppendLine("identifier, false conformance claims, Info-dictionary sync). It does not fix");
         sb.AppendLine("structural/tagging issues such as untagged content, missing alt-text, or table");
-        sb.AppendLine("header scope — re-validate the repaired copy to see what (if anything) improved.");
+        sb.AppendLine("header scope.");
+        if (fix.WasFixed)
+        {
+            sb.AppendLine("Switching to the repaired copy and re-validating to show what improved.");
+        }
 
         MessageBox.Show(this, sb.ToString(), "Fix Metadata", MessageBoxButton.OK, MessageBoxImage.Information);
     }
