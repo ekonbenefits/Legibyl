@@ -12,11 +12,13 @@ namespace Legibyl.Validation;
 /// validation are unrelated concerns, and PdfPig already exposes marked-content/MCID
 /// data directly (<see cref="Page.GetMarkedContents"/>) that veraPDF's PD model does not.
 /// </summary>
+internal sealed record MarkedContentInfo(string Text, StructureGeometry? Geometry);
+
 internal static class MarkedContentTextIndex
 {
-    public static Dictionary<(int Page, int Mcid), string> Build(string pdfPath)
+    public static Dictionary<(int Page, int Mcid), MarkedContentInfo> Build(string pdfPath)
     {
-        var index = new Dictionary<(int, int), string>();
+        var index = new Dictionary<(int, int), MarkedContentInfo>();
         using var document = PdfDocument.Open(pdfPath);
         foreach (Page page in document.GetPages())
         {
@@ -26,14 +28,16 @@ internal static class MarkedContentTextIndex
     }
 
     private static void IndexMarkedContent(
-        int pageNumber, IReadOnlyList<MarkedContentElement> elements, Dictionary<(int, int), string> index)
+        int pageNumber, IReadOnlyList<MarkedContentElement> elements, Dictionary<(int, int), MarkedContentInfo> index)
     {
         foreach (var element in elements)
         {
             string text = ConcatenateLetters(element.Letters);
             if (!string.IsNullOrEmpty(text))
             {
-                index[(pageNumber, element.MarkedContentIdentifier)] = text;
+                index[(pageNumber, element.MarkedContentIdentifier)] = new MarkedContentInfo(
+                    text,
+                    GeometryFromLetters(pageNumber, element.Letters));
             }
 
             if (element.Children.Count > 0)
@@ -41,6 +45,20 @@ internal static class MarkedContentTextIndex
                 IndexMarkedContent(pageNumber, element.Children, index);
             }
         }
+    }
+
+    private static StructureGeometry? GeometryFromLetters(int pageNumber, IReadOnlyList<Letter> letters)
+    {
+        if (letters.Count == 0)
+        {
+            return null;
+        }
+
+        double left = letters.Min(l => l.BoundingBox.Left);
+        double right = letters.Max(l => l.BoundingBox.Right);
+        double bottom = letters.Min(l => l.BoundingBox.Bottom);
+        double top = letters.Max(l => l.BoundingBox.Top);
+        return new StructureGeometry(pageNumber, left, bottom, right, top);
     }
 
     /// <summary>

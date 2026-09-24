@@ -25,6 +25,10 @@ public class StructureTreeReaderTests
         Assert.Equal("EN-US", heading.Language);
         Assert.Equal(1, heading.PageNumber);
         Assert.Equal("The graphics objects in a document can be divided into two classes:", heading.Content);
+        Assert.NotNull(heading.Geometry);
+        Assert.Equal(1, heading.Geometry!.PageNumber);
+        Assert.True(heading.Geometry.Right > heading.Geometry.Left);
+        Assert.True(heading.Geometry.Top > heading.Geometry.Bottom);
         Assert.Contains(document.Children, n => n.Tag == "L");
 
         StructureNode note = Assert.Single(document.Children, n => n.Tag == "Note");

@@ -3,7 +3,9 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using Legibyl.Rendering;
 using Legibyl.Validation;
 
 namespace Legibyl.Gui;
@@ -53,11 +55,15 @@ public partial class StructureTreeWindow : Window
 
     private readonly StructureNode _root;
     private readonly string _suggestedFileName;
+    private readonly string _sourceFilePath;
+    private readonly IPdfRegionRenderer _regionRenderer = new PdfRegionRenderer();
+    private Border? _selectedBlock;
 
     public StructureTreeWindow(StructureNode root, string sourceFilePath)
     {
         InitializeComponent();
         _root = root;
+        _sourceFilePath = sourceFilePath;
         _suggestedFileName = Path.GetFileNameWithoutExtension(sourceFilePath) + "-structure.json";
         // The synthetic StructTreeRoot node itself carries no semantic info, so show
         // its children (the actual document hierarchy) as the top level in both views.
@@ -78,7 +84,7 @@ public partial class StructureTreeWindow : Window
     /// boxes indented inside — so nesting depth is visually obvious, matching how a
     /// browser's block-level box model would draw it.
     /// </summary>
-    private static Border BuildElement(StructureNode node)
+    private Border BuildElement(StructureNode node)
     {
         var (borderColor, headerColor) = CategoryColors.TryGetValue(node.Tag, out var colors) ? colors : DefaultCategoryColors;
 
@@ -182,7 +188,7 @@ public partial class StructureTreeWindow : Window
             }
         }
 
-        return new Border
+        var border = new Border
         {
             BorderBrush = new SolidColorBrush(borderColor),
             BorderThickness = new Thickness(1.5),
@@ -191,7 +197,13 @@ public partial class StructureTreeWindow : Window
             Margin = new Thickness(0, 0, 0, 6),
             Background = Brushes.White,
             Child = inner,
+            DataContext = node,
         };
+        border.MouseLeftButtonDown += StructureBlock_MouseLeftButtonDown;
+        border.ToolTip = node.Geometry is null
+            ? "Select: no page geometry is available for this structure node."
+            : $"Select: highlight this node on page {node.Geometry.PageNumber}.";
+        return border;
     }
 
     /// <summary>
@@ -200,7 +212,7 @@ public partial class StructureTreeWindow : Window
     /// the exported/tree semantics unchanged while making the layout tab much closer
     /// to how an HTML table with visible borders would look.
     /// </summary>
-    private static UIElement BuildTableGrid(StructureNode table)
+    private UIElement BuildTableGrid(StructureNode table)
     {
         var rows = table.Children.Where(child => child.Tag == "TR").ToList();
         if (rows.Count == 0)
@@ -262,6 +274,68 @@ public partial class StructureTreeWindow : Window
     {
         var cells = row.Children.Where(child => child.Tag is "TH" or "TD").ToList();
         return cells.Count > 0 ? cells : row.Children.ToList();
+    }
+
+    private async void StructureBlock_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Border border || border.DataContext is not StructureNode node)
+        {
+            return;
+        }
+
+        SelectBlock(border, node);
+        SelectionPreviewImage.Source = null;
+
+        if (node.Geometry is null)
+        {
+            SelectionPreviewNoteText.Text =
+                $"Selected <{node.Tag}>. No same-page geometry is available for this node " +
+                "(it may be a pure container, non-text content without a rectangle, or span multiple pages).";
+            return;
+        }
+
+        SelectionPreviewNoteText.Text = $"Rendering page {node.Geometry.PageNumber} highlight for <{node.Tag}>…";
+        try
+        {
+            HighlightImageResult result = await Task.Run(
+                () => _regionRenderer.RenderPageWithHighlight(_sourceFilePath, node.Geometry));
+
+            SelectionPreviewImage.Source = CreateBitmap(result.PngBytes);
+            SelectionPreviewNoteText.Text = $"{result.Note} Page {result.PageNumber}.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            SelectionPreviewNoteText.Text = $"Could not render highlight for <{node.Tag}>: {ex.Message}";
+        }
+    }
+
+    private void SelectBlock(Border border, StructureNode node)
+    {
+        if (_selectedBlock?.DataContext is StructureNode previousNode)
+        {
+            var (previousBorderColor, _) = CategoryColors.TryGetValue(previousNode.Tag, out var previousColors)
+                ? previousColors
+                : DefaultCategoryColors;
+            _selectedBlock.BorderBrush = new SolidColorBrush(previousBorderColor);
+            _selectedBlock.BorderThickness = new Thickness(1.5);
+        }
+
+        _selectedBlock = border;
+        border.BorderBrush = Brushes.DodgerBlue;
+        border.BorderThickness = new Thickness(3);
+    }
+
+    private static BitmapImage CreateBitmap(byte[] pngBytes)
+    {
+        var image = new BitmapImage();
+        using var stream = new MemoryStream(pngBytes);
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     private void ExportJsonButton_Click(object sender, RoutedEventArgs e)

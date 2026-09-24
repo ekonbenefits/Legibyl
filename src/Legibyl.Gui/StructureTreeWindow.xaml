@@ -24,10 +24,40 @@
 
         <TabControl Grid.Row="1">
             <TabItem Header="Layout">
-                <ScrollViewer x:Name="LayoutScrollViewer" VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Auto" Background="White">
-                    <ContentControl x:Name="LayoutHost" Margin="8" />
-                </ScrollViewer>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3*" MinWidth="320" />
+                        <ColumnDefinition Width="6" />
+                        <ColumnDefinition Width="2*" MinWidth="260" />
+                    </Grid.ColumnDefinitions>
+
+                    <ScrollViewer x:Name="LayoutScrollViewer" Grid.Column="0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Auto" Background="White">
+                        <ContentControl x:Name="LayoutHost" Margin="8" />
+                    </ScrollViewer>
+
+                    <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch"
+                                  Background="#FFE0E0E0" ResizeBehavior="PreviousAndNext" />
+
+                    <Grid Grid.Column="2" Margin="10,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Text="Selected block geometry" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <TextBlock x:Name="SelectionPreviewNoteText" Grid.Row="1" TextWrapping="Wrap"
+                                   Foreground="#FF555555" Margin="0,0,0,8"
+                                   Text="Select a structure block to highlight its best-effort page geometry when available." />
+                        <Border Grid.Row="2" BorderBrush="#FFD0D0D0" BorderThickness="1"
+                                Background="#FFF5F5F5" Padding="6">
+                            <Image x:Name="SelectionPreviewImage" Stretch="Uniform"
+                                   HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                        </Border>
+                    </Grid>
+                </Grid>
             </TabItem>
             <TabItem Header="Tree">
                 <TreeView x:Name="StructureTreeControl"

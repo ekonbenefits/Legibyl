@@ -137,13 +137,17 @@ includes the semantic tag, page, language/role metadata, `Alt` or
 by page + MCID, and for `/Form` elements the referenced widget annotation's
 field name (`/T`), tooltip/user description (`/TU`), field type (`/FT`), and
 current value (`/V`) when present. The **Tree** tab keeps the compact outline
-view. If the file has no structure tree at all (completely untagged), the
-button reports that instead of an empty tree. **Export JSON…** in that window
-saves the whole hierarchy — including each node's `content` text and form
-field metadata — as JSON, the same shape produced by the CLI's `--structure`
-flag. This is intended for AI agents or other tooling that needs to
-understand what text and interactive controls are present under each semantic
-role, not just the raw PDF/UA rule failures.
+view. Layout blocks are selectable; when a selected node has same-page
+geometry (from marked-content text glyph bounds or form widget rectangles),
+the side preview renders that page and highlights the best-effort area the
+node covers. Pure containers, non-text content without a usable rectangle, or
+multi-page nodes show a note instead. If the file has no structure tree at all
+(completely untagged), the button reports that instead of an empty tree.
+**Export JSON…** in that window saves the whole hierarchy — including each
+node's `content` text, geometry, and form field metadata — as JSON, the same
+shape produced by the CLI's `--structure` flag. This is intended for AI agents
+or other tooling that needs to understand what text and interactive controls
+are present under each semantic role, not just the raw PDF/UA rule failures.
 
 ## Command-line tool (for scripts / AI agents)
 
@@ -190,11 +194,12 @@ Options:
   uses) in the output, under a `structure` key. Each node includes a
   `content` property containing the visible text directly owned by that
   semantic element (matched by page + MCID), plus `alt`, `actualText`,
-  language, page, role-map, and children. `/Form` nodes also include widget
-  field metadata (`formFieldName`, `formFieldDescription`, `formFieldType`,
-  `formFieldValue`) resolved from the referenced annotation's `/T`, `/TU`,
-  `/FT`, and `/V`. In `--format text` mode this prints an indented outline
-  with `text="..."`, `field="..."`, and `tooltip="..."` details instead.
+  language, page, role-map, best-effort same-page `geometry`, and children.
+  `/Form` nodes also include widget field metadata (`formFieldName`,
+  `formFieldDescription`, `formFieldType`, `formFieldValue`) resolved from
+  the referenced annotation's `/T`, `/TU`, `/FT`, and `/V`. In `--format text`
+  mode this prints an indented outline with `text="..."`, `field="..."`, and
+  `tooltip="..."` details instead.
   Absent/`null` `structure` with no `structureError` means the file has no
   structure tree at all (it's completely untagged).
 - `--list-profiles` — print supported profile names and exit `0`.

@@ -32,6 +32,11 @@ namespace Legibyl.Validation;
 /// <param name="FormFieldDescription">For /Form structure elements, the referenced widget annotation's tooltip/user description (/TU), if any.</param>
 /// <param name="FormFieldType">For /Form structure elements, the referenced widget annotation's field type (/FT), e.g. "Tx" or "Btn".</param>
 /// <param name="FormFieldValue">For /Form structure elements, the referenced widget annotation's current value (/V), if any.</param>
+/// <param name="Geometry">
+/// Best-effort same-page geometry covered by this node's directly-owned content and
+/// child nodes, if determinable. Null when the node has no geometric content or
+/// spans multiple pages.
+/// </param>
 /// <param name="Language">The element's Lang tag (e.g. "en-US"), if explicitly set on this element.</param>
 /// <param name="PageNumber">
 /// The 1-based page this element's content appears on, if determinable. Null for
@@ -52,6 +57,7 @@ public sealed record StructureNode(
     string? FormFieldDescription,
     string? FormFieldType,
     string? FormFieldValue,
+    StructureGeometry? Geometry,
     string? Language,
     int? PageNumber,
     int ContentLeafCount,

@@ -172,7 +172,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             // remarks. If this fails for any reason (e.g. a PDF quirk PdfPig can't parse
             // that veraPDF tolerates), degrade gracefully: keep the structure tree itself,
             // just without extracted text content, rather than failing the whole read.
-            Dictionary<(int Page, int Mcid), string> textIndex;
+            Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex;
             try
             {
                 textIndex = MarkedContentTextIndex.Build(pdfPath);
@@ -193,6 +193,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                 FormFieldDescription: null,
                 FormFieldType: null,
                 FormFieldValue: null,
+                Geometry: UnionGeometry(children.Select(child => child.Geometry)),
                 Language: null,
                 PageNumber: null,
                 ContentLeafCount: 0,
@@ -243,7 +244,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
     private static IReadOnlyList<StructureNode> WalkStructureChildren(
         org.verapdf.pd.structure.PDStructTreeNode node, Dictionary<string, int> pageNumberByKey,
-        Dictionary<(int Page, int Mcid), string> textIndex, int? inheritedPage, int depth)
+        Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex, int? inheritedPage, int depth)
     {
         if (depth >= MaxStructureDepth)
         {
@@ -269,7 +270,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
     private static StructureNode ToStructureNode(
         org.verapdf.pd.structure.PDStructElem elem, Dictionary<string, int> pageNumberByKey,
-        Dictionary<(int Page, int Mcid), string> textIndex, int? inheritedPage, int depth)
+        Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex, int? inheritedPage, int depth)
     {
         string tag = ResolveStructureTag(elem);
         string? role = elem.getRoleMapToSameNamespaceTag();
@@ -292,6 +293,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
         int contentLeafCount = 0;
         var contentTexts = new List<string>();
+        var directGeometries = new List<StructureGeometry>();
         FormFieldInfo? formField = null;
         var iterator = elem.getChildren().iterator();
         while (iterator.hasNext())
@@ -303,15 +305,22 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             }
 
             contentLeafCount++;
-            if (TryResolveContentText(child, ownPage, pageNumberByKey, textIndex, out string? text))
+            if (TryResolveContentInfo(child, ownPage, pageNumberByKey, textIndex, out MarkedContentInfo? info))
             {
-                contentTexts.Add(text!);
+                contentTexts.Add(info!.Text);
+                if (info.Geometry is not null)
+                {
+                    directGeometries.Add(info.Geometry);
+                }
             }
 
-            formField ??= TryReadFormFieldInfo(child);
+            formField ??= TryReadFormFieldInfo(child, ownPage);
         }
 
         string? content = contentTexts.Count > 0 ? string.Join(" ", contentTexts) : null;
+        IReadOnlyList<StructureNode> children = WalkStructureChildren(elem, pageNumberByKey, textIndex, ownPage, depth + 1);
+        StructureGeometry? geometry = UnionGeometry(directGeometries.Concat(children.Select(child => child.Geometry)));
+        geometry ??= formField?.Geometry;
 
         return new StructureNode(
             Tag: tag,
@@ -323,15 +332,16 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             FormFieldDescription: formField?.Description,
             FormFieldType: formField?.Type,
             FormFieldValue: formField?.Value,
+            Geometry: geometry,
             Language: NullIfEmpty(elem.getLang()?.toString()),
             PageNumber: ownPage,
             ContentLeafCount: contentLeafCount,
-            Children: WalkStructureChildren(elem, pageNumberByKey, textIndex, ownPage, depth + 1));
+            Children: children);
     }
 
-    private sealed record FormFieldInfo(string? Name, string? Description, string? Type, string? Value);
+    private sealed record FormFieldInfo(string? Name, string? Description, string? Type, string? Value, StructureGeometry? Geometry);
 
-    private static FormFieldInfo? TryReadFormFieldInfo(object child)
+    private static FormFieldInfo? TryReadFormFieldInfo(object child, int? ownPage)
     {
         if (child is not org.verapdf.pd.structure.PDOBJRDictionary objr)
         {
@@ -354,7 +364,55 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         string? description = NullIfEmpty(referenced.getStringKey(Atom("TU")));
         string? type = AtomValue(referenced.getNameKey(Atom("FT")));
         string? value = NullIfEmpty(referenced.getStringKey(Atom("V"))) ?? AtomValue(referenced.getNameKey(Atom("V")));
-        return new FormFieldInfo(name, description, type, value);
+        StructureGeometry? geometry = TryReadWidgetGeometry(ownPage, referenced);
+        return new FormFieldInfo(name, description, type, value, geometry);
+    }
+
+    private static StructureGeometry? TryReadWidgetGeometry(int? pageNumber, org.verapdf.cos.COSObject referenced)
+    {
+        var rect = referenced.getKey(Atom("Rect"));
+        if (rect == null || rect.size().intValue() < 4)
+        {
+            return null;
+        }
+
+        double? left = NumberAt(rect, 0);
+        double? bottom = NumberAt(rect, 1);
+        double? right = NumberAt(rect, 2);
+        double? top = NumberAt(rect, 3);
+        if (left is null || bottom is null || right is null || top is null || pageNumber is null)
+        {
+            return null;
+        }
+
+        return new StructureGeometry(
+            pageNumber.Value,
+            Math.Min(left.Value, right.Value),
+            Math.Min(bottom.Value, top.Value),
+            Math.Max(left.Value, right.Value),
+            Math.Max(bottom.Value, top.Value));
+    }
+
+    private static double? NumberAt(org.verapdf.cos.COSObject array, int index)
+    {
+        var item = array.at(index);
+        if (item == null)
+        {
+            return null;
+        }
+
+        if (item.getType()?.isNumber() == true)
+        {
+            var real = item.getReal();
+            if (real != null)
+            {
+                return real.doubleValue();
+            }
+            var integer = item.getInteger();
+            return integer?.doubleValue();
+        }
+
+        return null;
     }
 
     private static org.verapdf.@as.ASAtom Atom(string value) => org.verapdf.@as.ASAtom.getASAtom(value);
@@ -369,11 +427,11 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
     /// Object references (<c>PDOBJRDictionary</c>, e.g. a Link's associated annotation)
     /// have no marked-content text of their own and are skipped.
     /// </summary>
-    private static bool TryResolveContentText(
+    private static bool TryResolveContentInfo(
         object child, int? ownPage, Dictionary<string, int> pageNumberByKey,
-        Dictionary<(int Page, int Mcid), string> textIndex, out string? text)
+        Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex, out MarkedContentInfo? info)
     {
-        text = null;
+        info = null;
 
         if (child is org.verapdf.pd.structure.PDMCRDictionary mcr)
         {
@@ -385,9 +443,9 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             }
 
             var mcid = mcr.getMCID();
-            if (page is not null && mcid is not null && textIndex.TryGetValue((page.Value, (int)mcid.longValue()), out string? resolved))
+            if (page is not null && mcid is not null && textIndex.TryGetValue((page.Value, (int)mcid.longValue()), out MarkedContentInfo? resolved))
             {
-                text = resolved;
+                info = resolved;
                 return true;
             }
             return false;
@@ -396,14 +454,36 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         if (child is org.verapdf.cos.COSObject cos && cos.getType()?.isNumber() == true && ownPage is not null)
         {
             var mcid = cos.getInteger();
-            if (mcid is not null && textIndex.TryGetValue((ownPage.Value, (int)mcid.longValue()), out string? resolved))
+            if (mcid is not null && textIndex.TryGetValue((ownPage.Value, (int)mcid.longValue()), out MarkedContentInfo? resolved))
             {
-                text = resolved;
+                info = resolved;
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static StructureGeometry? UnionGeometry(IEnumerable<StructureGeometry?> geometries)
+    {
+        var list = geometries.Where(geometry => geometry is not null).Cast<StructureGeometry>().ToList();
+        if (list.Count == 0)
+        {
+            return null;
+        }
+
+        int pageNumber = list[0].PageNumber;
+        if (list.Any(geometry => geometry.PageNumber != pageNumber))
+        {
+            return null;
+        }
+
+        return new StructureGeometry(
+            pageNumber,
+            list.Min(geometry => geometry.Left),
+            list.Min(geometry => geometry.Bottom),
+            list.Max(geometry => geometry.Right),
+            list.Max(geometry => geometry.Top));
     }
 
     private static string ResolveStructureTag(org.verapdf.pd.structure.PDStructElem elem)

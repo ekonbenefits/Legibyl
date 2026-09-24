@@ -31,11 +31,40 @@ public interface IPdfRegionRenderer
     /// if <paramref name="location"/> isn't anchored to a page.
     /// </summary>
     HighlightImageResult RenderPageWithHighlight(string pdfPath, PdfLocation location, float scale = 2.0f);
+
+    /// <summary>
+    /// Renders the page containing <paramref name="geometry"/> as a PNG, highlighting
+    /// that semantic structure node's best-effort bounding rectangle.
+    /// </summary>
+    HighlightImageResult RenderPageWithHighlight(string pdfPath, StructureGeometry geometry, float scale = 2.0f);
 }
 
 public sealed class PdfRegionRenderer : IPdfRegionRenderer
 {
     private static readonly SKColor HighlightColor = new(0xE8, 0x1B, 0x23);
+
+    public HighlightImageResult RenderPageWithHighlight(string pdfPath, StructureGeometry geometry, float scale = 2.0f)
+    {
+        using PdfDocument document = PdfDocument.Open(pdfPath, SkiaRenderingParsingOptions.Instance);
+        document.AddSkiaPageFactory();
+
+        if (geometry.PageNumber < 1 || geometry.PageNumber > document.NumberOfPages)
+        {
+            throw new InvalidOperationException($"Page {geometry.PageNumber} is out of range (document has {document.NumberOfPages} pages).");
+        }
+
+        using SKBitmap bitmap = document.GetPageAsSKBitmap(geometry.PageNumber, scale, SKColors.White);
+        var rect = new PdfRectangle(geometry.Left, geometry.Bottom, geometry.Right, geometry.Top);
+        DrawHighlight(bitmap, rect, scale);
+
+        using SKImage image = SKImage.FromBitmap(bitmap);
+        using SKData encoded = image.Encode(SKEncodedImageFormat.Png, 100);
+        return new HighlightImageResult(
+            encoded.ToArray(),
+            geometry.PageNumber,
+            HasPreciseRegion: true,
+            Note: "Highlighted this structure node's best-effort page geometry.");
+    }
 
     public HighlightImageResult RenderPageWithHighlight(string pdfPath, PdfLocation location, float scale = 2.0f)
     {
