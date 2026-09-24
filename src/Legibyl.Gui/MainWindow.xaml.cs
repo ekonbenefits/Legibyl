@@ -313,6 +313,7 @@ public partial class MainWindow : Window
         }
 
         var profile = ((ProfileItem)ProfileComboBox.SelectedItem).Profile;
+        string? repairedPath = null;
 
         SetBusy(true);
         try
@@ -323,10 +324,7 @@ public partial class MainWindow : Window
 
             if (fix.WasFixed)
             {
-                // Switch the workspace over to the repaired copy and re-validate it, so the
-                // results view reflects what (if anything) actually improved, rather than
-                // leaving the stale original file/report on screen.
-                SetSelectedFile(fix.OutputPath!);
+                repairedPath = fix.OutputPath;
             }
         }
         catch (VeraPdfValidationException ex)
@@ -336,6 +334,13 @@ public partial class MainWindow : Window
         finally
         {
             SetBusy(false);
+        }
+
+        if (repairedPath is not null)
+        {
+            // Switch after clearing the busy flag so SetSelectedFile's auto-validation
+            // can actually start instead of being ignored by RunValidationAsync.
+            SetSelectedFile(repairedPath);
         }
     }
 
