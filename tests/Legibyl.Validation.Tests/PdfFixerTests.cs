@@ -155,6 +155,55 @@ public class PdfFixerTests
         }
     }
 
+    [Fact]
+    public void Validate_LikelySplitParagraph_AddsNonFixableWarning()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        try
+        {
+            CreatePdfWithParagraphActualText(input,
+                "This handbook explains your benefits under the plan. The pages",
+                "that follow explain how you become a member.");
+            var validator = new VeraPdfValidator();
+
+            ValidationReport report = validator.Validate(input, PdfProfile.PdfUa1);
+
+            RuleViolation warning = Assert.Single(report.Assertions.Where(a =>
+                a.Severity == FindingSeverity.Warning &&
+                a.Message.Contains("Likely split paragraph", StringComparison.Ordinal)));
+            Assert.True(warning.Passed);
+            Assert.False(warning.IsFixable);
+            Assert.Equal(PdfFixOptions.None, warning.FixOptions);
+        }
+        finally
+        {
+            DeleteIfExists(input);
+        }
+    }
+
+    [Fact]
+    public void Validate_AdjacentCompleteParagraphs_DoesNotAddSplitWarning()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        try
+        {
+            CreatePdfWithParagraphActualText(input,
+                "This is a complete paragraph.",
+                "This is the next complete paragraph.");
+            var validator = new VeraPdfValidator();
+
+            ValidationReport report = validator.Validate(input, PdfProfile.PdfUa1);
+
+            Assert.DoesNotContain(report.Assertions, a =>
+                a.Severity == FindingSeverity.Warning &&
+                a.Message.Contains("Likely split paragraph", StringComparison.Ordinal));
+        }
+        finally
+        {
+            DeleteIfExists(input);
+        }
+    }
+
 
 
     private static void CreatePdfWithAnnotationPageAndEmptyParagraphs(string path)
@@ -226,6 +275,25 @@ public class PdfFixerTests
         var structTreeRoot = new PdfDictionary();
         structTreeRoot.Put(PdfName.Type, PdfName.StructTreeRoot);
         structTreeRoot.Put(PdfName.K, paragraph);
+        document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, structTreeRoot);
+    }
+
+    private static void CreatePdfWithParagraphActualText(string path, params string[] paragraphs)
+    {
+        using var document = new PdfDocument(new PdfWriter(path));
+        document.AddNewPage();
+
+        var kids = new PdfArray();
+        foreach (string paragraphText in paragraphs)
+        {
+            PdfDictionary paragraph = Paragraph();
+            paragraph.Put(PdfName.ActualText, new PdfString(paragraphText));
+            kids.Add(paragraph);
+        }
+
+        var structTreeRoot = new PdfDictionary();
+        structTreeRoot.Put(PdfName.Type, PdfName.StructTreeRoot);
+        structTreeRoot.Put(PdfName.K, kids);
         document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, structTreeRoot);
     }
 

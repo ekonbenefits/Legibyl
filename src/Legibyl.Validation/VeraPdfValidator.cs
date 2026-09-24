@@ -474,6 +474,11 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             return false;
         }
 
+        if (!string.IsNullOrWhiteSpace(dictionary.GetAsString(PdfName.ActualText)?.ToUnicodeString()))
+        {
+            return false;
+        }
+
         int? ownPage = ResolveStructElemPageNumber(dictionary, context, inheritedPage);
         PdfObject? kids = dictionary.Get(PdfName.K);
         return kids is null || IsStructureSubtreeEmpty(kids, context, ownPage);
@@ -1059,11 +1064,11 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             FlavourId = result.getPDFAFlavour().getId(),
             IsCompliant = result.isCompliant(),
             TotalAssertions = result.getTotalAssertions(),
-            Assertions = assertions.Concat(ReadEmptyParagraphWarnings(pdfPath)).ToList(),
+            Assertions = assertions.Concat(ReadStructureWarnings(pdfPath)).ToList(),
         };
     }
 
-    private static IReadOnlyList<RuleViolation> ReadEmptyParagraphWarnings(string pdfPath)
+    private static IReadOnlyList<RuleViolation> ReadStructureWarnings(string pdfPath)
     {
         var warnings = new List<RuleViolation>();
         try
@@ -1081,6 +1086,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             {
                 int? pageNumber = structTreeRoot is null ? null : ResolveStructElemPageNumber(structTreeRoot, context, inheritedPage: null);
                 AddEmptyParagraphWarnings(kids, "StructTreeRoot/K", context, pageNumber, warnings);
+                AddLikelySplitParagraphWarnings(kids, "StructTreeRoot/K", context, pageNumber, warnings);
             }
         }
         catch (iText.Kernel.Exceptions.PdfException ex)
@@ -1088,14 +1094,18 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             warnings.Add(CreateLegibylWarning(
                 "Could not inspect the structure tree for empty paragraph tags.",
                 ex.Message,
-                "StructTreeRoot"));
+                "StructTreeRoot",
+                testNumber: 1,
+                fixOptions: PdfFixOptions.RemoveEmptyParagraphs));
         }
         catch (IOException ex)
         {
             warnings.Add(CreateLegibylWarning(
                 "Could not inspect the structure tree for empty paragraph tags.",
                 ex.Message,
-                "StructTreeRoot"));
+                "StructTreeRoot",
+                testNumber: 1,
+                fixOptions: PdfFixOptions.RemoveEmptyParagraphs));
         }
 
         return warnings;
@@ -1129,7 +1139,9 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             warnings.Add(CreateLegibylWarning(
                 "Empty semantic /P structure element. It can add meaningless stops to the screen-reader structure tree and can be removed by the Fix dialog.",
                 null,
-                path));
+                path,
+                testNumber: 1,
+                fixOptions: PdfFixOptions.RemoveEmptyParagraphs));
         }
 
         PdfObject? kids = dictionary.Get(PdfName.K);
@@ -1139,17 +1151,187 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         }
     }
 
-    private static RuleViolation CreateLegibylWarning(string message, string? errorMessage, string locationContext) =>
+    private static void AddLikelySplitParagraphWarnings(
+        PdfObject obj,
+        string path,
+        StructuralFixContext context,
+        int? inheritedPage,
+        List<RuleViolation> warnings)
+    {
+        PdfObject resolved = Resolve(obj);
+        if (resolved is PdfArray array)
+        {
+            AddLikelySplitParagraphWarningsForArray(array, path, context, inheritedPage, warnings);
+            for (int i = 0; i < array.Size(); i++)
+            {
+                AddLikelySplitParagraphWarnings(array.Get(i), $"{path}[{i}]", context, inheritedPage, warnings);
+            }
+            return;
+        }
+
+        if (resolved is not PdfDictionary dictionary)
+        {
+            return;
+        }
+
+        int? pageNumber = ResolveStructElemPageNumber(dictionary, context, inheritedPage);
+        PdfObject? kids = dictionary.Get(PdfName.K);
+        if (kids is not null)
+        {
+            AddLikelySplitParagraphWarnings(kids, $"{path}/K", context, pageNumber, warnings);
+        }
+    }
+
+    private static void AddLikelySplitParagraphWarningsForArray(
+        PdfArray array,
+        string path,
+        StructuralFixContext context,
+        int? inheritedPage,
+        List<RuleViolation> warnings)
+    {
+        for (int i = 0; i < array.Size() - 1; i++)
+        {
+            if (Resolve(array.Get(i)) is not PdfDictionary current ||
+                Resolve(array.Get(i + 1)) is not PdfDictionary next ||
+                !PdfName.P.Equals(current.GetAsName(PdfName.S)) ||
+                !PdfName.P.Equals(next.GetAsName(PdfName.S)))
+            {
+                continue;
+            }
+
+            int? currentPage = ResolveStructElemPageNumber(current, context, inheritedPage);
+            int? nextPage = ResolveStructElemPageNumber(next, context, inheritedPage);
+            if (currentPage is not null && nextPage is not null && currentPage != nextPage)
+            {
+                continue;
+            }
+
+            string currentText = NormalizeText(ExtractStructureText(current, context, currentPage));
+            string nextText = NormalizeText(ExtractStructureText(next, context, nextPage));
+            if (IsLikelySplitParagraph(currentText, nextText))
+            {
+                warnings.Add(CreateLegibylWarning(
+                    "Likely split paragraph: adjacent /P structure elements look like visual line fragments from the same sentence. This is best fixed in the source document if possible.",
+                    null,
+                    $"{path}[{i}] + {path}[{i + 1}]",
+                    testNumber: 2,
+                    fixOptions: PdfFixOptions.None));
+            }
+        }
+    }
+
+    private static string ExtractStructureText(PdfObject? obj, StructuralFixContext context, int? inheritedPage)
+    {
+        PdfObject? resolved = ResolveOrNull(obj);
+        if (resolved is null)
+        {
+            return string.Empty;
+        }
+
+        if (resolved is PdfArray array)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < array.Size(); i++)
+            {
+                sb.Append(' ');
+                sb.Append(ExtractStructureText(array.Get(i), context, inheritedPage));
+            }
+            return sb.ToString();
+        }
+
+        if (resolved is PdfNumber mcid && inheritedPage is { } pageNumber)
+        {
+            return context.MarkedContent.TryGetValue((pageNumber, mcid.IntValue()), out MarkedContentInfo? info)
+                ? info.Text
+                : string.Empty;
+        }
+
+        if (resolved is not PdfDictionary dictionary)
+        {
+            return string.Empty;
+        }
+
+        string? actualText = dictionary.GetAsString(PdfName.ActualText)?.ToUnicodeString();
+        if (!string.IsNullOrWhiteSpace(actualText))
+        {
+            return actualText;
+        }
+
+        int? ownPage = ResolveStructElemPageNumber(dictionary, context, inheritedPage);
+        return ExtractStructureText(dictionary.Get(PdfName.K), context, ownPage);
+    }
+
+    private static bool IsLikelySplitParagraph(string currentText, string nextText)
+    {
+        if (currentText.Length < 20 || nextText.Length < 10)
+        {
+            return false;
+        }
+
+        if (IsLikelyStandaloneParagraph(currentText) || IsLikelyStandaloneParagraph(nextText))
+        {
+            return false;
+        }
+
+        char last = currentText[^1];
+        if (last is '.' or ':' or ';' or '!' or '?' or '…')
+        {
+            return false;
+        }
+
+        char first = nextText[0];
+        return char.IsLower(first) ||
+            nextText.StartsWith("and ", StringComparison.OrdinalIgnoreCase) ||
+            nextText.StartsWith("or ", StringComparison.OrdinalIgnoreCase) ||
+            nextText.StartsWith("to ", StringComparison.OrdinalIgnoreCase) ||
+            nextText.StartsWith("of ", StringComparison.OrdinalIgnoreCase) ||
+            nextText.StartsWith("the ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLikelyStandaloneParagraph(string text)
+    {
+        if (text.Length <= 3)
+        {
+            return true;
+        }
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^(SECTION|ARTICLE)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^\d+(\.\d+)*\s+\S+"))
+        {
+            return true;
+        }
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^[a-z]\.\s+\S+", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeText(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+
+    private static RuleViolation CreateLegibylWarning(
+        string message,
+        string? errorMessage,
+        string locationContext,
+        int testNumber,
+        PdfFixOptions fixOptions) =>
         new(
             Specification: "Legibyl",
             Clause: "Structure",
-            TestNumber: 1,
+            TestNumber: testNumber,
             Passed: true,
             Message: message,
             ErrorMessage: errorMessage,
             LocationContext: locationContext,
             Severity: FindingSeverity.Warning,
-            FixOptions: PdfFixOptions.RemoveEmptyParagraphs);
+            FixOptions: fixOptions);
 
     private static PdfFixOptions DetermineFixOptions(string clause, string? message)
     {

@@ -108,7 +108,11 @@ both location forms. **Copy Summary** and **Save Report** sit below the
 results list and include the same location information for every finding.
 Legibyl also adds warning rows for fixable cleanup issues that veraPDF does
 not report directly, such as empty semantic `/P` structure elements, and
-marks known repairable rows in the **Fixable** column.
+marks known repairable rows in the **Fixable** column. It also warns about
+adjacent sibling `/P` tags that look like visual line fragments from the same
+sentence; those are intentionally warning-only because the safest repair is
+usually in the source document (for example, the original Word file) rather
+than rewriting paragraph semantics in the PDF after export.
 
 For failures anchored to an annotation (links, form fields — the most
 common failure type with an exact, checkable region), the details panel
