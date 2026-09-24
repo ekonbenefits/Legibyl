@@ -20,6 +20,16 @@ OPTIONS:
                         See --list-profiles for all accepted names.
   --format <json|text> Output format (default: json).
   --output <path>      Write output to a file instead of stdout.
+  --fix                 Also attempt to repair XMP metadata (missing metadata
+                        stream, missing PDF/A|PDF/UA identifier, false
+                        conformance claims, Info-dictionary sync) for each
+                        file, writing a repaired copy next to the original as
+                        "<name>.fixed<ext>". NOTE: this only repairs metadata —
+                        it does not fix structural/tagging issues (untagged
+                        content, missing alt-text, table header scope, etc).
+  --fix-output <path>  Use with --fix and exactly one input file to write the
+                        repaired copy to an exact path instead of the
+                        auto-derived name.
   --list-profiles      Print supported profile names and exit 0.
   --version            Print tool + vendored veraPDF engine version and exit 0.
   --help, -h           Print this help and exit 0.
@@ -34,12 +44,16 @@ EXAMPLES:
   verapdf-tool document.pdf
   verapdf-tool document.pdf --profile pdfa1b --format text
   verapdf-tool *.pdf --output results.json
+  verapdf-tool document.pdf --fix
+  verapdf-tool document.pdf --fix --fix-output document-repaired.pdf
 """;
 
 var files = new List<string>();
 string profileName = ProfileNames.DefaultName;
 string format = "json";
 string? outputPath = null;
+bool doFix = false;
+string? fixOutputPath = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -88,6 +102,17 @@ for (int i = 0; i < args.Length; i++)
             }
             break;
 
+        case "--fix":
+            doFix = true;
+            break;
+
+        case "--fix-output":
+            if (!TryTakeValue(args, ref i, out fixOutputPath!))
+            {
+                return UsageError("--fix-output requires a value.");
+            }
+            break;
+
         default:
             if (arg.StartsWith('-') && arg.Length > 1)
             {
@@ -108,12 +133,22 @@ if (!ProfileNames.TryParse(profileName, out PdfProfile profile))
     return UsageError($"Unknown profile '{profileName}'. Run --list-profiles to see valid names.");
 }
 
+if (fixOutputPath is not null && !doFix)
+{
+    return UsageError("--fix-output requires --fix.");
+}
+
+if (fixOutputPath is not null && files.Count > 1)
+{
+    return UsageError("--fix-output can only be used with a single input file.");
+}
+
 var validator = new VeraPdfValidator();
 var results = new List<FileValidationResult>(files.Count);
 
 foreach (string file in files)
 {
-    results.Add(ValidateOne(validator, file, profileName, profile));
+    results.Add(ValidateOne(validator, validator, file, profileName, profile, doFix, fixOutputPath));
 }
 
 string rendered = format == "json" ? RenderJson(results) : RenderText(results);
@@ -135,29 +170,13 @@ return anyErrors ? ExitCodes.ValidationError
      : ExitCodes.Success;
 
 static FileValidationResult ValidateOne(
-    IPdfValidator validator, string file, string profileName, PdfProfile profile)
+    IPdfValidator validator, IPdfFixer fixer, string file, string profileName, PdfProfile profile,
+    bool doFix, string? fixOutputPath)
 {
+    ValidationReport report;
     try
     {
-        ValidationReport report = validator.Validate(file, profile);
-        return new FileValidationResult
-        {
-            File = file,
-            Profile = profileName,
-            FlavourId = report.FlavourId,
-            IsCompliant = report.IsCompliant,
-            TotalAssertions = report.TotalAssertions,
-            FailedCount = report.FailedCount,
-            Failures = report.FailedAssertions.Select(a => new FailureDetail
-            {
-                Specification = a.Specification,
-                Clause = a.Clause,
-                TestNumber = a.TestNumber,
-                Message = a.Message,
-                ErrorMessage = a.ErrorMessage,
-                LocationContext = a.LocationContext,
-            }).ToList(),
-        };
+        report = validator.Validate(file, profile);
     }
     catch (VeraPdfValidationException ex)
     {
@@ -168,6 +187,59 @@ static FileValidationResult ValidateOne(
             Error = ex.Message,
         };
     }
+
+    string? fixStatus = null;
+    string? fixOutput = null;
+    IReadOnlyList<string>? fixAppliedFixes = null;
+    string? fixError = null;
+
+    if (doFix)
+    {
+        string targetPath = fixOutputPath ?? DeriveFixOutputPath(file);
+        try
+        {
+            FixResult fix = fixer.Fix(file, profile, targetPath);
+            fixStatus = fix.Status.ToString();
+            fixOutput = fix.OutputPath;
+            fixAppliedFixes = fix.AppliedFixes.Count > 0 ? fix.AppliedFixes : null;
+        }
+        catch (VeraPdfValidationException ex)
+        {
+            fixError = ex.Message;
+        }
+    }
+
+    return new FileValidationResult
+    {
+        File = file,
+        Profile = profileName,
+        FlavourId = report.FlavourId,
+        IsCompliant = report.IsCompliant,
+        TotalAssertions = report.TotalAssertions,
+        FailedCount = report.FailedCount,
+        Failures = report.FailedAssertions.Select(a => new FailureDetail
+        {
+            Specification = a.Specification,
+            Clause = a.Clause,
+            TestNumber = a.TestNumber,
+            Message = a.Message,
+            ErrorMessage = a.ErrorMessage,
+            LocationContext = a.LocationContext,
+        }).ToList(),
+        FixStatus = fixStatus,
+        FixOutputPath = fixOutput,
+        FixAppliedFixes = fixAppliedFixes,
+        FixError = fixError,
+    };
+}
+
+static string DeriveFixOutputPath(string file)
+{
+    string? dir = Path.GetDirectoryName(file);
+    string name = Path.GetFileNameWithoutExtension(file);
+    string ext = Path.GetExtension(file);
+    string fixedName = $"{name}.fixed{ext}";
+    return string.IsNullOrEmpty(dir) ? fixedName : Path.Combine(dir, fixedName);
 }
 
 static string RenderJson(List<FileValidationResult> results)
@@ -202,6 +274,22 @@ static string RenderText(List<FileValidationResult> results)
             if (!string.IsNullOrEmpty(f.LocationContext))
             {
                 sb.AppendLine($"    at: {f.LocationContext}");
+            }
+        }
+
+        if (r.FixError is not null)
+        {
+            sb.AppendLine($"  fix: ERROR — {r.FixError}");
+        }
+        else if (r.FixStatus is not null)
+        {
+            sb.AppendLine(r.FixOutputPath is not null
+                ? $"  fix: {r.FixStatus} → {r.FixOutputPath}"
+                : $"  fix: {r.FixStatus} (no output written)");
+
+            foreach (var applied in r.FixAppliedFixes ?? [])
+            {
+                sb.AppendLine($"    - {applied}");
             }
         }
     }

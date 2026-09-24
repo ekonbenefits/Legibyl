@@ -69,6 +69,9 @@
 
         <!-- Bottom action bar -->
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="FixButton" Content="Fix Metadata…" Padding="12,4" Margin="0,0,8,0"
+                    Click="FixButton_Click" IsEnabled="False"
+                    ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues." />
             <Button x:Name="CopySummaryButton" Content="Copy Summary" Padding="12,4" Margin="0,0,8,0"
                     Click="CopySummaryButton_Click" IsEnabled="False" />
             <Button x:Name="SaveReportButton" Content="Save Report…" Padding="12,4"

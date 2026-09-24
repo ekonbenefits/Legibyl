@@ -12,8 +12,12 @@ core) is vendored under `lib/vendor/verapdf-jars/` and referenced from the
 `VeraPdfTool.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
 which translates the Java bytecode into a .NET assembly at build time. The
 `VeraPdfTool.Validation` project exposes a small, plain-C# API
-(`IPdfValidator.Validate(path, profile) -> ValidationReport`) that fully
-isolates all Java/IKVM types from the rest of the app.
+(`IPdfValidator.Validate(path, profile) -> ValidationReport` and
+`IPdfFixer.Fix(path, profile, outputPath) -> FixResult`) that fully
+isolates all Java/IKVM types from the rest of the app. `IPdfFixer` wraps
+veraPDF's metadata fixer, which repairs XMP metadata only (missing
+metadata stream, PDF/A|PDF/UA identifier, false conformance claims,
+Info-dictionary sync) — it does not repair structural/tagging issues.
 
 ## Solution layout
 
@@ -104,6 +108,19 @@ Options:
   `pdfa2u`, `pdfa3b`, `pdfa4`).
 - `--format <json|text>` — output format (default `json`).
 - `--output <path>` — write output to a file instead of stdout.
+- `--fix` — also attempt to repair the file's XMP **metadata** via veraPDF's
+  metadata fixer, writing a repaired copy next to the original as
+  `<name>.fixed<ext>`. Only metadata is repaired (missing metadata stream,
+  missing PDF/A|PDF/UA identifier, false conformance claims, Info-dictionary
+  sync) — it does **not** fix structural/tagging issues (untagged content,
+  missing alt-text, table header scope, etc). Note that veraPDF's fixer only
+  adds a missing identifier/metadata stream when *every* failing check is a
+  metadata-only check per its `PDFUA_1`/`PDFA_*` "processed objects" list; if
+  the file has any structural failures too, it reports `WontFix` and leaves
+  metadata largely untouched (see `fixAppliedFixes`/`fixStatus` in the output
+  to see exactly what happened).
+- `--fix-output <path>` — use with `--fix` and exactly one input file to
+  write the repaired copy to an exact path instead of the auto-derived name.
 - `--list-profiles` — print supported profile names and exit `0`.
 - `--version` — print tool build + vendored veraPDF engine version and exit `0`.
 - `--help` / `-h` — print usage and exit `0`.
