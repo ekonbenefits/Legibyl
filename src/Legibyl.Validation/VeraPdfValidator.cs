@@ -13,7 +13,7 @@ namespace Legibyl.Validation;
 /// are confined to this file; callers only see the plain C# types in this
 /// namespace (<see cref="ValidationReport"/>, <see cref="RuleViolation"/>, etc).
 /// </summary>
-public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer
+public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeReader
 {
     private static readonly object InitLock = new();
     private static bool _initialised;
@@ -141,6 +141,182 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer
             parser?.close();
         }
     }
+
+    /// <summary>
+    /// Reads the structure tree by opening the PDF a second time through veraPDF's
+    /// plain PD model (org.verapdf.pd.PDDocument) — the same model the validator
+    /// itself uses internally. This is intentionally independent of <see cref="Validate"/>
+    /// / <see cref="Fix"/> (no shared parser/session state), since reading the tagged
+    /// structure is a distinct concern from PDF/A|UA rule validation and callers may
+    /// want it without running a full validation pass.
+    /// </summary>
+    public StructureNode? ReadStructureTree(string pdfPath)
+    {
+        if (!File.Exists(pdfPath))
+        {
+            throw new VeraPdfValidationException($"File not found: {pdfPath}");
+        }
+
+        org.verapdf.pd.PDDocument? doc = null;
+        try
+        {
+            doc = new org.verapdf.pd.PDDocument(pdfPath);
+            org.verapdf.pd.structure.PDStructTreeRoot? structTreeRoot = doc.getStructTreeRoot();
+            if (structTreeRoot == null)
+            {
+                return null;
+            }
+
+            var pageNumberByKey = BuildPageNumberIndex(doc);
+            var children = WalkStructureChildren(structTreeRoot, pageNumberByKey, depth: 0);
+            return new StructureNode(
+                Tag: "StructTreeRoot",
+                Role: null,
+                AlternateDescription: null,
+                ActualText: null,
+                Language: null,
+                PageNumber: null,
+                ContentLeafCount: 0,
+                Children: children);
+        }
+        catch (VeraPDFException ex)
+        {
+            throw new VeraPdfValidationException($"veraPDF failed to read the structure tree of '{pdfPath}': {ex.Message}", ex);
+        }
+        catch (java.lang.Exception ex)
+        {
+            throw new VeraPdfValidationException($"veraPDF failed to read the structure tree of '{pdfPath}': {ex.getMessage()}", ex);
+        }
+        finally
+        {
+            doc?.close();
+        }
+    }
+
+    // Guards against pathological/malformed structure trees (shouldn't happen for a
+    // real tree, but a corrupt or maliciously crafted PDF could contain very deep or
+    // cyclic-looking nesting) so a single bad file can't hang or stack-overflow the walk.
+    private const int MaxStructureDepth = 200;
+
+    /// <summary>
+    /// Maps each page's underlying COS object key (e.g. "12 0 obj") to its 1-based
+    /// page number, so structure elements (which only know their owning page via an
+    /// indirect object reference) can be resolved back to a page number.
+    /// </summary>
+    private static Dictionary<string, int> BuildPageNumberIndex(org.verapdf.pd.PDDocument doc)
+    {
+        var index = new Dictionary<string, int>();
+        var pages = doc.getPages();
+        int count = pages.size();
+        for (int i = 0; i < count; i++)
+        {
+            if (pages.get(i) is org.verapdf.pd.PDPage page)
+            {
+                var key = page.getObject()?.getKey();
+                if (key != null)
+                {
+                    index[key.toString()] = i + 1;
+                }
+            }
+        }
+        return index;
+    }
+
+    private static IReadOnlyList<StructureNode> WalkStructureChildren(
+        org.verapdf.pd.structure.PDStructTreeNode node, Dictionary<string, int> pageNumberByKey, int depth)
+    {
+        if (depth >= MaxStructureDepth)
+        {
+            return [];
+        }
+
+        var result = new List<StructureNode>();
+        var iterator = node.getChildren().iterator();
+        while (iterator.hasNext())
+        {
+            // Non-structure-element children are marked-content references and object
+            // references (e.g. to a Link annotation) — the tree's actual leaves, i.e. the
+            // tagged page content itself. They carry no hierarchy/semantic info of their
+            // own, so they aren't represented as nodes; ToStructureNode below counts them
+            // via ContentLeafCount instead.
+            if (iterator.next() is org.verapdf.pd.structure.PDStructElem elem)
+            {
+                result.Add(ToStructureNode(elem, pageNumberByKey, depth));
+            }
+        }
+        return result;
+    }
+
+    private static StructureNode ToStructureNode(
+        org.verapdf.pd.structure.PDStructElem elem, Dictionary<string, int> pageNumberByKey, int depth)
+    {
+        string tag = ResolveStructureTag(elem);
+        string? role = elem.getRoleMapToSameNamespaceTag();
+        if (role == tag)
+        {
+            role = null;
+        }
+
+        int? pageNumber = null;
+        var pageKey = elem.getPageObjectNumber();
+        if (pageKey != null && pageNumberByKey.TryGetValue(pageKey.toString(), out int number))
+        {
+            pageNumber = number;
+        }
+
+        int contentLeafCount = 0;
+        var iterator = elem.getChildren().iterator();
+        while (iterator.hasNext())
+        {
+            if (iterator.next() is not org.verapdf.pd.structure.PDStructElem)
+            {
+                contentLeafCount++;
+            }
+        }
+
+        return new StructureNode(
+            Tag: tag,
+            Role: role,
+            AlternateDescription: NullIfEmpty(elem.getAlternateDescription()),
+            ActualText: NullIfEmpty(ActualTextOf(elem)),
+            Language: NullIfEmpty(elem.getLang()?.toString()),
+            PageNumber: pageNumber,
+            ContentLeafCount: contentLeafCount,
+            Children: WalkStructureChildren(elem, pageNumberByKey, depth + 1));
+    }
+
+    private static string ResolveStructureTag(org.verapdf.pd.structure.PDStructElem elem)
+    {
+        // Prefer the resolved type atom / structure-type / raw COS name, in that order
+        // of preference — for standard tags these all agree, but falling back covers
+        // edge cases (e.g. custom-namespace tags) where the higher-level accessor
+        // returns null. See scratch investigation in this session for how each of
+        // these was found to behave against a real veraPDF-corpus PDF/UA sample.
+        return elem.getType()?.getValue()
+            ?? elem.getStructureType()?.getType()?.getValue()
+            ?? elem.getCOSStructureType()?.getName()?.getValue()
+            ?? "?";
+    }
+
+    private static string? ActualTextOf(org.verapdf.pd.structure.PDStructElem elem)
+    {
+        var actualText = elem.getActualText();
+        if (actualText == null || actualText.empty())
+        {
+            return null;
+        }
+
+        try
+        {
+            return actualText.getString();
+        }
+        catch (java.lang.Exception)
+        {
+            return null;
+        }
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     private static RepairStatus ToRepairStatus(MetadataFixerResult.RepairStatus status)
     {

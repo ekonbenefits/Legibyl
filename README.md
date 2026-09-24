@@ -13,12 +13,16 @@ core) is vendored under `lib/vendor/verapdf-jars/` and referenced from the
 `Legibyl.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
 which translates the Java bytecode into a .NET assembly at build time. The
 `Legibyl.Validation` project exposes a small, plain-C# API
-(`IPdfValidator.Validate(path, profile) -> ValidationReport` and
-`IPdfFixer.Fix(path, profile, outputPath) -> FixResult`) that fully
+(`IPdfValidator.Validate(path, profile) -> ValidationReport`,
+`IPdfFixer.Fix(path, profile, outputPath) -> FixResult`, and
+`IStructureTreeReader.ReadStructureTree(path) -> StructureNode?`) that fully
 isolates all Java/IKVM types from the rest of the app. `IPdfFixer` wraps
 veraPDF's metadata fixer, which repairs XMP metadata only (missing
 metadata stream, PDF/A|PDF/UA identifier, false conformance claims,
 Info-dictionary sync) — it does not repair structural/tagging issues.
+`IStructureTreeReader` walks veraPDF's PD model's `StructTreeRoot` (the
+tagged logical structure tree) directly, independent of running a
+validation pass.
 
 Each failed check carries a `locationContext` — a slash-separated walk of
 veraPDF's internal object model (e.g.
@@ -116,6 +120,23 @@ table header scope, etc.) aren't attached to page geometry in veraPDF's
 model, so for those the full page is still shown for context, with a
 banner noting the exact region isn't available.
 
+## Document structure (semantic hierarchy)
+
+**View Structure…** shows the PDF's tagged logical structure tree — the
+same heading/paragraph/list/table/link hierarchy and reading order that a
+screen reader uses to present the document (the Catalog's `StructTreeRoot`).
+It's read directly from veraPDF's own PD model (independent of a
+validation pass), so it reflects exactly what the validator itself sees.
+Each node shows its tag (e.g. `H1`, `P`, `L`, `Table`, `TH`, `Link`), a
+role-map target if it's a custom tag mapped to a standard one, the page it
+appears on, its `Lang` tag, and any `Alt`/`ActualText`. If the file has no
+structure tree at all (completely untagged), the button reports that
+instead of an empty tree. **Export JSON…** in that window saves the whole
+hierarchy as JSON — the same shape produced by the CLI's `--structure`
+flag — which is convenient for feeding to an AI agent or other tooling
+that wants to understand the document's semantic structure directly
+rather than re-deriving it from raw PDF/UA rule violations.
+
 ## Command-line tool (for scripts / AI agents)
 
 `Legibyl.Cli` builds a standalone `legibyl` executable intended for
@@ -156,6 +177,12 @@ Options:
   to see exactly what happened).
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
+- `--structure` — include each file's tagged logical structure tree (the
+  semantic heading/paragraph/list/table/link hierarchy a screen reader
+  uses) in the output, under a `structure` key. In `--format text` mode
+  this prints an indented outline instead. Absent/`null` `structure` with
+  no `structureError` means the file has no structure tree at all (it's
+  completely untagged).
 - `--list-profiles` — print supported profile names and exit `0`.
 - `--version` — print tool build + vendored veraPDF engine version and exit `0`.
 - `--help` / `-h` — print usage and exit `0`.

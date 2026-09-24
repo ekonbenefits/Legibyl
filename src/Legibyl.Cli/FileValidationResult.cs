@@ -1,3 +1,5 @@
+using Legibyl.Validation;
+
 namespace Legibyl.Cli;
 
 /// <summary>JSON-serializable result for a single validated file. Field names are camelCased on output.</summary>
@@ -40,6 +42,18 @@ public sealed class FileValidationResult
 
     /// <summary>Non-null only if --fix was requested but the fix attempt itself errored.</summary>
     public string? FixError { get; init; }
+
+    /// <summary>
+    /// The tagged logical structure tree (semantic hierarchy used by screen readers),
+    /// present only when --structure was requested. Null if --structure wasn't
+    /// requested, if the file errored before it could be read, or if the file has no
+    /// structure tree at all (i.e. is completely untagged — see <see cref="StructureError"/>
+    /// vs. simply absent for that distinction).
+    /// </summary>
+    public StructureNode? Structure { get; init; }
+
+    /// <summary>Non-null only if --structure was requested but reading the tree errored.</summary>
+    public string? StructureError { get; init; }
 }
 
 public sealed class FailureDetail

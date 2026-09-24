@@ -1,0 +1,40 @@
+namespace Legibyl.Validation;
+
+/// <summary>
+/// One node of a tagged PDF's logical structure tree (the Catalog's StructTreeRoot) —
+/// the same semantic hierarchy (headings, paragraphs, lists, tables, links, etc.) and
+/// reading order that assistive technology (screen readers) uses to present the
+/// document to a user. Built by walking veraPDF's own PD model, so it reflects
+/// exactly what the validator itself sees.
+/// </summary>
+/// <param name="Tag">
+/// The structure element's type, resolved to its standard/base tag name where possible
+/// (e.g. "H1", "P", "L", "Table", "TH"). This is the value that determines the
+/// element's semantic role to a screen reader.
+/// </param>
+/// <param name="Role">
+/// If this element uses a custom (non-standard) tag that is role-mapped to a
+/// different standard tag within the same namespace, the mapped-to tag name;
+/// otherwise null (no distinct mapping worth reporting).
+/// </param>
+/// <param name="AlternateDescription">The element's Alt text (e.g. image/figure/link alt text), if any.</param>
+/// <param name="ActualText">The element's ActualText (a plain-text substitute for its content), if any.</param>
+/// <param name="Language">The element's Lang tag (e.g. "en-US"), if explicitly set on this element.</param>
+/// <param name="PageNumber">
+/// The 1-based page this element's content appears on, if determinable. Null for
+/// purely structural container elements that don't directly own any page content.
+/// </param>
+/// <param name="ContentLeafCount">
+/// Number of marked-content/annotation references directly under this element (i.e.
+/// actual tagged page content it owns), not counting nested structure elements.
+/// </param>
+/// <param name="Children">Child structure elements, in document (reading) order.</param>
+public sealed record StructureNode(
+    string Tag,
+    string? Role,
+    string? AlternateDescription,
+    string? ActualText,
+    string? Language,
+    int? PageNumber,
+    int ContentLeafCount,
+    IReadOnlyList<StructureNode> Children);

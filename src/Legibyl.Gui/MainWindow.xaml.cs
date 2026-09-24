@@ -20,6 +20,7 @@ public partial class MainWindow : Window
 
     private readonly IPdfValidator _validator = new VeraPdfValidator();
     private readonly IPdfFixer _fixer;
+    private readonly IStructureTreeReader _structureReader;
     private readonly IPdfRegionRenderer _regionRenderer = new PdfRegionRenderer();
     private string? _selectedFilePath;
     private ValidationReport? _lastReport;
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
         ProfileComboBox.ItemsSource = ProfileItem.All;
         ProfileComboBox.SelectedIndex = 0;
         _fixer = (IPdfFixer)_validator;
+        _structureReader = (IStructureTreeReader)_validator;
     }
 
     private void BrowseButton_Click(object sender, RoutedEventArgs e)
@@ -68,6 +70,7 @@ public partial class MainWindow : Window
         _selectedFilePath = path;
         FilePathTextBox.Text = path;
         ValidateButton.IsEnabled = true;
+        ViewStructureButton.IsEnabled = true;
         ClearResults();
         _ = RunValidationAsync(); // Auto-validate as soon as a file is picked/dropped, using the current profile.
     }
@@ -135,6 +138,7 @@ public partial class MainWindow : Window
         BrowseButton.IsEnabled = !busy;
         ProfileComboBox.IsEnabled = !busy;
         FixButton.IsEnabled = !busy && CanAttemptFix;
+        ViewStructureButton.IsEnabled = !busy && _selectedFilePath is not null;
     }
 
     /// <summary>
@@ -254,6 +258,40 @@ public partial class MainWindow : Window
         image.EndInit();
         image.Freeze();
         return image;
+    }
+
+    private async void ViewStructureButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedFilePath is null)
+        {
+            return;
+        }
+
+        string filePath = _selectedFilePath;
+        SetBusy(true);
+        try
+        {
+            StructureNode? structure = await Task.Run(() => _structureReader.ReadStructureTree(filePath));
+            if (structure is null)
+            {
+                MessageBox.Show(this,
+                    "This PDF has no structure tree at all — it is completely untagged, so there is no " +
+                    "semantic hierarchy for a screen reader to use.",
+                    "Document Structure", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var window = new StructureTreeWindow(structure, filePath) { Owner = this };
+            window.Show();
+        }
+        catch (VeraPdfValidationException ex)
+        {
+            MessageBox.Show(this, ex.Message, "Could not read structure", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private async void FixButton_Click(object sender, RoutedEventArgs e)

@@ -30,6 +30,12 @@ OPTIONS:
   --fix-output <path>  Use with --fix and exactly one input file to write the
                         repaired copy to an exact path instead of the
                         auto-derived name.
+  --structure          Include each file's tagged logical structure tree (the
+                        semantic heading/paragraph/list/table/link hierarchy
+                        that screen readers use) in the output. In --format
+                        text mode this prints an indented outline; in JSON
+                        mode (default) it's the full tree, ideal for feeding
+                        to an AI agent or other tooling.
   --list-profiles      Print supported profile names and exit 0.
   --version            Print tool + vendored veraPDF engine version and exit 0.
   --help, -h           Print this help and exit 0.
@@ -46,6 +52,7 @@ EXAMPLES:
   legibyl *.pdf --output results.json
   legibyl document.pdf --fix
   legibyl document.pdf --fix --fix-output document-repaired.pdf
+  legibyl document.pdf --structure --output structure.json
 """;
 
 var files = new List<string>();
@@ -54,6 +61,7 @@ string format = "json";
 string? outputPath = null;
 bool doFix = false;
 string? fixOutputPath = null;
+bool includeStructure = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -113,6 +121,10 @@ for (int i = 0; i < args.Length; i++)
             }
             break;
 
+        case "--structure":
+            includeStructure = true;
+            break;
+
         default:
             if (arg.StartsWith('-') && arg.Length > 1)
             {
@@ -144,11 +156,12 @@ if (fixOutputPath is not null && files.Count > 1)
 }
 
 var validator = new VeraPdfValidator();
+var structureReader = (IStructureTreeReader)validator;
 var results = new List<FileValidationResult>(files.Count);
 
 foreach (string file in files)
 {
-    results.Add(ValidateOne(validator, validator, file, profileName, profile, doFix, fixOutputPath));
+    results.Add(ValidateOne(validator, validator, structureReader, file, profileName, profile, doFix, fixOutputPath, includeStructure));
 }
 
 string rendered = format == "json" ? RenderJson(results) : RenderText(results);
@@ -170,8 +183,8 @@ return anyErrors ? ExitCodes.ValidationError
      : ExitCodes.Success;
 
 static FileValidationResult ValidateOne(
-    IPdfValidator validator, IPdfFixer fixer, string file, string profileName, PdfProfile profile,
-    bool doFix, string? fixOutputPath)
+    IPdfValidator validator, IPdfFixer fixer, IStructureTreeReader structureReader, string file,
+    string profileName, PdfProfile profile, bool doFix, string? fixOutputPath, bool includeStructure)
 {
     ValidationReport report;
     try
@@ -209,6 +222,20 @@ static FileValidationResult ValidateOne(
         }
     }
 
+    StructureNode? structure = null;
+    string? structureError = null;
+    if (includeStructure)
+    {
+        try
+        {
+            structure = structureReader.ReadStructureTree(file);
+        }
+        catch (VeraPdfValidationException ex)
+        {
+            structureError = ex.Message;
+        }
+    }
+
     return new FileValidationResult
     {
         File = file,
@@ -230,6 +257,8 @@ static FileValidationResult ValidateOne(
         FixOutputPath = fixOutput,
         FixAppliedFixes = fixAppliedFixes,
         FixError = fixError,
+        Structure = structure,
+        StructureError = structureError,
     };
 }
 
@@ -292,8 +321,36 @@ static string RenderText(List<FileValidationResult> results)
                 sb.AppendLine($"    - {applied}");
             }
         }
+
+        if (r.StructureError is not null)
+        {
+            sb.AppendLine($"  structure: ERROR — {r.StructureError}");
+        }
+        else if (r.Structure is not null)
+        {
+            sb.AppendLine("  structure:");
+            AppendStructure(sb, r.Structure, indent: 4);
+        }
     }
     return sb.ToString().TrimEnd('\n', '\r');
+}
+
+static void AppendStructure(System.Text.StringBuilder sb, StructureNode node, int indent)
+{
+    string pad = new(' ', indent);
+    var parts = new List<string> { $"<{node.Tag}>" };
+    if (node.Role is not null) parts.Add($"role={node.Role}");
+    if (node.PageNumber is not null) parts.Add($"page={node.PageNumber}");
+    if (node.Language is not null) parts.Add($"lang={node.Language}");
+    if (node.AlternateDescription is not null) parts.Add($"alt=\"{node.AlternateDescription}\"");
+    if (node.ActualText is not null) parts.Add($"actualText=\"{node.ActualText}\"");
+    if (node.ContentLeafCount > 0) parts.Add($"content×{node.ContentLeafCount}");
+    sb.AppendLine(pad + string.Join(' ', parts));
+
+    foreach (var child in node.Children)
+    {
+        AppendStructure(sb, child, indent + 2);
+    }
 }
 
 static bool TryTakeValue(string[] args, ref int i, out string value)
