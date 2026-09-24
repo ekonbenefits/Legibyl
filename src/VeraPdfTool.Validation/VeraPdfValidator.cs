@@ -93,6 +93,10 @@ public sealed class VeraPdfValidator : IPdfValidator
         {
             var assertion = (TestAssertion)iterator.next();
             var ruleId = assertion.getRuleId();
+            // NB: assertion.getLocationContext() is a rarely-populated, model-object-specific
+            // "extra context" field (almost always null). The real per-failure tree-walk
+            // path (e.g. "root/Catalog[0]/StructTreeRoot[0]/.../TH[3]") — the same value
+            // veraPDF's own report writer uses — lives on assertion.getLocation().getContext().
             assertions.Add(new RuleViolation(
                 Specification: ruleId.getSpecification().ToString(),
                 Clause: ruleId.getClause(),
@@ -100,7 +104,7 @@ public sealed class VeraPdfValidator : IPdfValidator
                 Passed: assertion.getStatus() == TestAssertion.Status.PASSED,
                 Message: assertion.getMessage(),
                 ErrorMessage: assertion.getErrorMessage(),
-                LocationContext: assertion.getLocationContext()));
+                LocationContext: assertion.getLocation()?.getContext()));
         }
 
         return new ValidationReport

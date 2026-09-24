@@ -199,6 +199,10 @@ static string RenderText(List<FileValidationResult> results)
         foreach (var f in r.Failures ?? [])
         {
             sb.AppendLine($"  [{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}");
+            if (!string.IsNullOrEmpty(f.LocationContext))
+            {
+                sb.AppendLine($"    at: {f.LocationContext}");
+            }
         }
     }
     return sb.ToString().TrimEnd('\n', '\r');
