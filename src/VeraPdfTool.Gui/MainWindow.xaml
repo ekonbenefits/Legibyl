@@ -39,7 +39,7 @@
             <Button x:Name="BrowseButton" Grid.Column="1" Content="Browse…" Padding="12,4" Margin="0,0,8,0"
                     Click="BrowseButton_Click" />
             <ComboBox x:Name="ProfileComboBox" Grid.Column="2" Width="160" Margin="0,0,8,0"
-                      SelectedIndex="0" />
+                      SelectedIndex="0" SelectionChanged="ProfileComboBox_SelectionChanged" />
             <Button x:Name="ValidateButton" Grid.Column="3" Content="Validate" Padding="16,4"
                     Click="ValidateButton_Click" IsEnabled="False" />
         </Grid>
@@ -84,7 +84,7 @@
                     ToolTip="Renders this page as an image, highlighting the failing region when its exact location can be determined (currently: link/form annotations)." />
             <Button x:Name="FixButton" Content="Fix Metadata…" Padding="12,4" Margin="0,0,8,0"
                     Click="FixButton_Click" IsEnabled="False"
-                    ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues." />
+                    ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues. Disabled once the file is already fully compliant, since there'd be nothing left to fix." />
             <Button x:Name="CopySummaryButton" Content="Copy Summary" Padding="12,4" Margin="0,0,8,0"
                     Click="CopySummaryButton_Click" IsEnabled="False" />
             <Button x:Name="SaveReportButton" Content="Save Report…" Padding="12,4"

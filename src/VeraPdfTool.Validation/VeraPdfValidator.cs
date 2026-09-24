@@ -106,11 +106,15 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer
                 appliedFixes.Add((string)fixIterator.next());
             }
 
-            // The fixer only writes a repaired copy when it actually changed something;
-            // otherwise our freshly-created output file is left empty. Don't report a
-            // 0-byte file as a usable "fixed" output.
-            bool wroteOutput = File.Exists(outputPath) && new FileInfo(outputPath).Length > 0;
-            if (!wroteOutput && File.Exists(outputPath))
+            RepairStatus status = ToRepairStatus(fixResult.getRepairStatus());
+
+            // Only Success/IdRemoved reflect the fixer actually changing something; NoAction,
+            // WontFix and FixError leave a repaired copy that's either empty or just a useless
+            // byte-for-byte (or broken) duplicate of the original. Don't keep a file the user
+            // didn't ask for and can't use — clean it up and report no output path.
+            bool wroteUsableOutput = status is RepairStatus.Success or RepairStatus.IdRemoved
+                && File.Exists(outputPath) && new FileInfo(outputPath).Length > 0;
+            if (!wroteUsableOutput && File.Exists(outputPath))
             {
                 File.Delete(outputPath);
             }
@@ -118,8 +122,8 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer
             return new FixResult(
                 FilePath: pdfPath,
                 Profile: profile,
-                OutputPath: wroteOutput ? outputPath : null,
-                Status: ToRepairStatus(fixResult.getRepairStatus()),
+                OutputPath: wroteUsableOutput ? outputPath : null,
+                Status: status,
                 AppliedFixes: appliedFixes,
                 OriginalReport: originalReport);
         }

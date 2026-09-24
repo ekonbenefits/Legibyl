@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly IPdfRegionRenderer _regionRenderer = new PdfRegionRenderer();
     private string? _selectedFilePath;
     private ValidationReport? _lastReport;
+    private bool _isBusy;
 
     public MainWindow()
     {
@@ -67,6 +68,7 @@ public partial class MainWindow : Window
         FilePathTextBox.Text = path;
         ValidateButton.IsEnabled = true;
         ClearResults();
+        _ = RunValidationAsync(); // Auto-validate as soon as a file is picked/dropped, using the current profile.
     }
 
     private void ClearResults()
@@ -81,9 +83,21 @@ public partial class MainWindow : Window
         ShowRegionButton.IsEnabled = false;
     }
 
-    private async void ValidateButton_Click(object sender, RoutedEventArgs e)
+    private async void ValidateButton_Click(object sender, RoutedEventArgs e) => await RunValidationAsync();
+
+    private async void ProfileComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        if (_selectedFilePath is null)
+        // Re-validate automatically when the profile changes, as long as a file is already selected
+        // and we're not already mid-validation (guards against re-entrancy/startup selection events).
+        if (_selectedFilePath is not null && !_isBusy)
+        {
+            await RunValidationAsync();
+        }
+    }
+
+    private async Task RunValidationAsync()
+    {
+        if (_selectedFilePath is null || _isBusy)
         {
             return;
         }
@@ -110,11 +124,24 @@ public partial class MainWindow : Window
 
     private void SetBusy(bool busy)
     {
+        _isBusy = busy;
         ProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ValidateButton.IsEnabled = !busy && _selectedFilePath is not null;
         BrowseButton.IsEnabled = !busy;
-        FixButton.IsEnabled = !busy && _lastReport is not null;
+        ProfileComboBox.IsEnabled = !busy;
+        FixButton.IsEnabled = !busy && CanAttemptFix;
     }
+
+    /// <summary>
+    /// Whether it's worth offering "Fix Metadata" right now. veraPDF's metadata fixer
+    /// is a no-op (RepairStatus.NoAction, no output written) whenever the file is
+    /// already fully compliant — there's nothing for it to do — so we grey the button
+    /// out in that case rather than let the user run a fix that provably can't change
+    /// anything. It's left enabled whenever there's at least one failing check: the
+    /// fixer can still take useful action then (e.g. stripping a false PDF/A|UA
+    /// conformance claim) even if other, non-metadata issues remain unresolved.
+    /// </summary>
+    private bool CanAttemptFix => _lastReport is { IsCompliant: false };
 
     private void ShowReport(ValidationReport report)
     {
@@ -138,7 +165,7 @@ public partial class MainWindow : Window
 
         CopySummaryButton.IsEnabled = true;
         SaveReportButton.IsEnabled = true;
-        FixButton.IsEnabled = true;
+        FixButton.IsEnabled = CanAttemptFix;
         JumpToPageButton.IsEnabled = false;
         ShowRegionButton.IsEnabled = false;
     }
