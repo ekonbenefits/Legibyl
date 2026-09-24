@@ -31,7 +31,7 @@
     </ComponentGroup>
 
     <!--
-      Our own MPL-2.0 license plus veraPDF's dual GPLv3+/MPLv2+ texts and the
+      Our own AGPL-3.0-or-later license plus veraPDF's dual GPLv3+/MPLv2+ texts and the
       third-party NOTICE (attribution + source pointer for the bundled jar).
       Installed alongside the app so the license.rtf shown during setup isn't
       the only copy a recipient of the installed product has access to.

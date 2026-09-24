@@ -1,7 +1,8 @@
 # Third-Party Notices
 
-**Legibyl's own source code is licensed under the Mozilla Public
-License 2.0 — see the `LICENSE` file at the repository root.**
+**Legibyl's own source code is licensed under the GNU Affero General
+Public License v3.0 or later — see the `LICENSE` file at the repository
+root and `LICENSE.AGPL` in this directory.**
 
 This application also bundles the `greenfield-apps-1.28.1.jar` Java
 archive from the **veraPDF** project (https://verapdf.org /

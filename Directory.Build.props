@@ -12,5 +12,6 @@
     <VersionPrefix>1.28.1</VersionPrefix>
     <VersionBuild>0</VersionBuild>
     <Version>$(VersionPrefix).$(VersionBuild)</Version>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
   </PropertyGroup>
 </Project>

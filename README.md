@@ -46,7 +46,7 @@ tests/
 installer/
   Legibyl.Gui.Installer/      WiX v6 MSI installer for the GUI (LegibylSetup.msi)
 lib/vendor/verapdf-jars/    Vendored veraPDF jar + provenance/checksum README
-licenses/                   GPLv3+/MPLv2+ license texts and third-party NOTICE
+licenses/                   AGPLv3+/GPLv3+/MPLv2+ license texts and third-party NOTICE
 spike/IkvmSpike/            Standalone feasibility spike (kept for reference)
 ```
 
@@ -254,7 +254,8 @@ jar version. Run `legibyl --version` to see both numbers at once
 ## Licensing
 
 This project's own code (everything outside `lib/vendor/`) is licensed
-under the **Mozilla Public License 2.0** — see `LICENSE`.
+under the **GNU Affero General Public License v3.0 or later** — see
+`LICENSE`.
 
 It bundles the veraPDF `greenfield-apps` jar, which is separately
 dual-licensed by the veraPDF Consortium under GPLv3+ / MPLv2+ (see
