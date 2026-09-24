@@ -79,6 +79,8 @@
                     </ListView.ItemContainerStyle>
                     <ListView.View>
                         <GridView>
+                            <GridViewColumn Header="Type" Width="70" DisplayMemberBinding="{Binding Severity}" />
+                            <GridViewColumn Header="Fixable" Width="90" DisplayMemberBinding="{Binding Fixable}" />
                             <GridViewColumn Header="Clause" Width="80" DisplayMemberBinding="{Binding Clause}" />
                             <GridViewColumn Header="Test" Width="48" DisplayMemberBinding="{Binding TestNumber}" />
                             <GridViewColumn Header="Page" Width="62" DisplayMemberBinding="{Binding PageDisplay}" />

@@ -19,7 +19,7 @@ public class PdfFixerTests
                 input,
                 PdfProfile.PdfUa1,
                 output,
-                PdfFixOptions.AnnotationTabs | PdfFixOptions.RemoveEmptyParagraphs);
+                PdfFixOptions.All);
 
             Assert.True(result.WasFixed);
             Assert.Equal(output, result.OutputPath);
@@ -101,6 +101,30 @@ public class PdfFixerTests
             DeleteIfExists(output);
         }
     }
+
+    [Fact]
+    public void Validate_EmptyParagraph_AddsFixableWarning()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        try
+        {
+            CreatePdfWithDirectEmptyParagraphRootKid(input);
+            var validator = new VeraPdfValidator();
+
+            ValidationReport report = validator.Validate(input, PdfProfile.PdfUa1);
+
+            RuleViolation warning = Assert.Single(report.Assertions.Where(a => a.Severity == FindingSeverity.Warning));
+            Assert.True(warning.Passed);
+            Assert.Equal(PdfFixOptions.RemoveEmptyParagraphs, warning.FixOptions);
+            Assert.True(warning.IsFixable);
+            Assert.Contains("Empty semantic /P", warning.Message);
+        }
+        finally
+        {
+            DeleteIfExists(input);
+        }
+    }
+
 
 
     private static void CreatePdfWithAnnotationPageAndEmptyParagraphs(string path)

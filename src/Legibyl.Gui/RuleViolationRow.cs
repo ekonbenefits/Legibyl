@@ -8,6 +8,8 @@ public sealed class RuleViolationRow
     public required RuleViolation Violation { get; init; }
     public required string Clause { get; init; }
     public required int TestNumber { get; init; }
+    public required string Severity { get; init; }
+    public required string Fixable { get; init; }
     public required string Message { get; init; }
     public required string? LocationContext { get; init; }
 
@@ -28,10 +30,31 @@ public sealed class RuleViolationRow
             Violation = violation,
             Clause = violation.Clause,
             TestNumber = violation.TestNumber,
+            Severity = violation.Severity.ToString(),
+            Fixable = violation.IsFixable ? FixOptionsLabel(violation.FixOptions) : string.Empty,
             Message = violation.Message,
             LocationContext = violation.LocationContext,
             PageNumber = location?.PageNumber,
             FriendlyLocation = location?.Breadcrumb ?? violation.LocationContext ?? string.Empty,
         };
+    }
+
+    private static string FixOptionsLabel(PdfFixOptions options)
+    {
+        var labels = new List<string>();
+        if (options.HasFlag(PdfFixOptions.Metadata))
+        {
+            labels.Add("Metadata");
+        }
+        if (options.HasFlag(PdfFixOptions.AnnotationTabs))
+        {
+            labels.Add("Tabs");
+        }
+        if (options.HasFlag(PdfFixOptions.RemoveEmptyParagraphs))
+        {
+            labels.Add("Empty P");
+        }
+
+        return string.Join(", ", labels);
     }
 }

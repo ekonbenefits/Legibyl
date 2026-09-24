@@ -20,6 +20,9 @@ public sealed class FileValidationResult
     /// <summary>Only the failed rule checks; empty (not omitted) when compliant, null when errored.</summary>
     public IReadOnlyList<FailureDetail>? Failures { get; init; }
 
+    /// <summary>Legibyl warnings; empty (not omitted) when none, null when errored.</summary>
+    public IReadOnlyList<FailureDetail>? Warnings { get; init; }
+
     /// <summary>Non-null only if the file could not be validated (missing, corrupt, encrypted, etc).</summary>
     public string? Error { get; init; }
 
@@ -31,9 +34,9 @@ public sealed class FileValidationResult
 
     /// <summary>
     /// Path to the repaired copy, present only if a fix was actually written (the
-    /// fixer only writes an output file when it changes something — metadata only,
-    /// e.g. adding a missing XMP stream or PDF/A|UA identifier; it never repairs
-    /// structural/tagging issues).
+    /// CLI currently requests metadata repair only, and the fixer writes an output
+    /// file only when it changes something, e.g. adding a missing XMP stream or
+    /// PDF/A|UA identifier).
     /// </summary>
     public string? FixOutputPath { get; init; }
 
@@ -64,4 +67,6 @@ public sealed class FailureDetail
     public required string Message { get; init; }
     public string? ErrorMessage { get; init; }
     public string? LocationContext { get; init; }
+    public bool IsFixable { get; init; }
+    public string? FixOptions { get; init; }
 }

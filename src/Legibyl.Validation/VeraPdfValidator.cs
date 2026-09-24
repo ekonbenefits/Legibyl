@@ -96,24 +96,6 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
         try
         {
-            if (options.HasFlag(PdfFixOptions.Metadata))
-            {
-                tempMetadataOutput = CreateTemporaryPdfPath(outputPath);
-                MetadataFixOutcome metadataFix = FixMetadataOnly(currentInput, profile, tempMetadataOutput, originalReport);
-                status = metadataFix.Status;
-                appliedFixes.AddRange(metadataFix.AppliedFixes);
-                if (metadataFix.Changed)
-                {
-                    currentInput = tempMetadataOutput;
-                    changed = true;
-                }
-                else
-                {
-                    DeleteIfExists(tempMetadataOutput);
-                    tempMetadataOutput = null;
-                }
-            }
-
             if (options.HasFlag(PdfFixOptions.AnnotationTabs) || options.HasFlag(PdfFixOptions.RemoveEmptyParagraphs))
             {
                 tempStructuralOutput = CreateTemporaryPdfPath(outputPath);
@@ -148,6 +130,29 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                 }
             }
 
+            if (options.HasFlag(PdfFixOptions.Metadata))
+            {
+                tempMetadataOutput = CreateTemporaryPdfPath(outputPath);
+                MetadataFixOutcome metadataFix = FixMetadataOnly(currentInput, profile, tempMetadataOutput);
+                appliedFixes.AddRange(metadataFix.AppliedFixes);
+                if (metadataFix.Changed)
+                {
+                    currentInput = tempMetadataOutput;
+                    changed = true;
+                    status = metadataFix.Status;
+                }
+                else
+                {
+                    if (!changed)
+                    {
+                        status = metadataFix.Status;
+                    }
+
+                    DeleteIfExists(tempMetadataOutput);
+                    tempMetadataOutput = null;
+                }
+            }
+
             if (!changed)
             {
                 DeleteIfExists(outputPath);
@@ -161,8 +166,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                     OriginalReport: originalReport);
             }
 
-            System.IO.Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
-            File.Copy(currentInput, outputPath, overwrite: true);
+            FinalizeFixedPdf(currentInput, outputPath, profile);
 
             return new FixResult(
                 FilePath: pdfPath,
@@ -194,11 +198,26 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         }
     }
 
+    private void FinalizeFixedPdf(string inputPath, string outputPath, PdfProfile profile)
+    {
+        System.IO.Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
+        RewritePdfWithIText(inputPath, outputPath);
+
+        try
+        {
+            Validate(outputPath, profile);
+        }
+        catch
+        {
+            DeleteIfExists(outputPath);
+            throw;
+        }
+    }
+
     private static MetadataFixOutcome FixMetadataOnly(
         string pdfPath,
         PdfProfile profile,
-        string outputPath,
-        ValidationReport originalReport)
+        string outputPath)
     {
         if (!File.Exists(pdfPath))
         {
@@ -307,6 +326,13 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         }
 
         return changed;
+    }
+
+    private static void RewritePdfWithIText(string inputPath, string outputPath)
+    {
+        using var reader = new PdfReader(inputPath);
+        using var writer = new PdfWriter(outputPath);
+        using var document = new PdfDocument(reader, writer);
     }
 
     private static int RemoveEmptyParagraphsFromStructTreeRoot(PdfDictionary structTreeRoot)
@@ -889,7 +915,8 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                 Passed: assertion.getStatus() == TestAssertion.Status.PASSED,
                 Message: assertion.getMessage(),
                 ErrorMessage: assertion.getErrorMessage(),
-                LocationContext: assertion.getLocation()?.getContext()));
+                LocationContext: assertion.getLocation()?.getContext(),
+                FixOptions: DetermineFixOptions(ruleId.getClause(), assertion.getMessage())));
         }
 
         return new ValidationReport
@@ -899,7 +926,103 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             FlavourId = result.getPDFAFlavour().getId(),
             IsCompliant = result.isCompliant(),
             TotalAssertions = result.getTotalAssertions(),
-            Assertions = assertions,
+            Assertions = assertions.Concat(ReadEmptyParagraphWarnings(pdfPath)).ToList(),
         };
+    }
+
+    private static IReadOnlyList<RuleViolation> ReadEmptyParagraphWarnings(string pdfPath)
+    {
+        var warnings = new List<RuleViolation>();
+        try
+        {
+            using var document = new PdfDocument(new PdfReader(pdfPath));
+            PdfDictionary? structTreeRoot = document.GetCatalog()
+                .GetPdfObject()
+                .GetAsDictionary(PdfName.StructTreeRoot);
+            PdfObject? kids = structTreeRoot?.Get(PdfName.K);
+            if (kids is not null)
+            {
+                AddEmptyParagraphWarnings(kids, "StructTreeRoot/K", warnings);
+            }
+        }
+        catch (iText.Kernel.Exceptions.PdfException ex)
+        {
+            warnings.Add(CreateLegibylWarning(
+                "Could not inspect the structure tree for empty paragraph tags.",
+                ex.Message,
+                "StructTreeRoot"));
+        }
+        catch (IOException ex)
+        {
+            warnings.Add(CreateLegibylWarning(
+                "Could not inspect the structure tree for empty paragraph tags.",
+                ex.Message,
+                "StructTreeRoot"));
+        }
+
+        return warnings;
+    }
+
+    private static void AddEmptyParagraphWarnings(PdfObject obj, string path, List<RuleViolation> warnings)
+    {
+        PdfObject resolved = Resolve(obj);
+        if (resolved is PdfArray array)
+        {
+            for (int i = 0; i < array.Size(); i++)
+            {
+                AddEmptyParagraphWarnings(array.Get(i), $"{path}[{i}]", warnings);
+            }
+            return;
+        }
+
+        if (resolved is not PdfDictionary dictionary)
+        {
+            return;
+        }
+
+        if (PdfName.P.Equals(dictionary.GetAsName(PdfName.S)) && IsStructElemEmpty(dictionary))
+        {
+            warnings.Add(CreateLegibylWarning(
+                "Empty semantic /P structure element. It can add meaningless stops to the screen-reader structure tree and can be removed by the Fix dialog.",
+                null,
+                path));
+        }
+
+        PdfObject? kids = dictionary.Get(PdfName.K);
+        if (kids is not null)
+        {
+            AddEmptyParagraphWarnings(kids, $"{path}/K", warnings);
+        }
+    }
+
+    private static RuleViolation CreateLegibylWarning(string message, string? errorMessage, string locationContext) =>
+        new(
+            Specification: "Legibyl",
+            Clause: "Structure",
+            TestNumber: 1,
+            Passed: true,
+            Message: message,
+            ErrorMessage: errorMessage,
+            LocationContext: locationContext,
+            Severity: FindingSeverity.Warning,
+            FixOptions: PdfFixOptions.RemoveEmptyParagraphs);
+
+    private static PdfFixOptions DetermineFixOptions(string clause, string? message)
+    {
+        string text = message ?? string.Empty;
+        if (text.Contains("Tabs", StringComparison.OrdinalIgnoreCase) &&
+            text.Contains("annotation", StringComparison.OrdinalIgnoreCase) &&
+            text.Contains("S", StringComparison.OrdinalIgnoreCase))
+        {
+            return PdfFixOptions.AnnotationTabs;
+        }
+
+        if (clause == "7.1" &&
+            text.Contains("Metadata", StringComparison.OrdinalIgnoreCase))
+        {
+            return PdfFixOptions.Metadata;
+        }
+
+        return PdfFixOptions.None;
     }
 }

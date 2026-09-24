@@ -106,6 +106,9 @@ in a resizable details panel beside the list. All detail text is selectable,
 and **Copy Finding** copies the selected rule, message, error detail, and
 both location forms. **Copy Summary** and **Save Report** sit below the
 results list and include the same location information for every finding.
+Legibyl also adds warning rows for fixable cleanup issues that veraPDF does
+not report directly, such as empty semantic `/P` structure elements, and
+marks known repairable rows in the **Fixable** column.
 
 For failures anchored to an annotation (links, form fields — the most
 common failure type with an exact, checkable region), the details panel
@@ -183,8 +186,13 @@ Options:
   behavior (missing metadata stream, missing PDF/A|PDF/UA identifier, false
   conformance claims, Info-dictionary sync). The GUI **Fix…** dialog also
   exposes selectable structural cleanup options for page annotation tab order
-  (`/Tabs /S`) and empty semantic `/P` structure elements. Neither path adds
-  missing alt text, retags untagged content, or infers table headers.
+  (`/Tabs /S`) and empty semantic `/P` structure elements; structural fixes
+  run before the veraPDF metadata fixer so metadata is repaired against the
+  already-cleaned copy in the same operation. Fixed copies are finalized with
+  an iText rewrite and parsed again before being returned, so stale
+  cross-reference/startxref offsets from intermediate repair output are not
+  handed to the user. Neither path adds missing alt text, retags untagged
+  content, or infers table headers.
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
 - `--structure` — include each file's tagged logical structure tree (the

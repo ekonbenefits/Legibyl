@@ -252,7 +252,23 @@ static FileValidationResult ValidateOne(
             Message = a.Message,
             ErrorMessage = a.ErrorMessage,
             LocationContext = a.LocationContext,
+            IsFixable = a.IsFixable,
+            FixOptions = a.IsFixable ? a.FixOptions.ToString() : null,
         }).ToList(),
+        Warnings = report.Assertions
+            .Where(a => a.Severity == FindingSeverity.Warning)
+            .Select(a => new FailureDetail
+            {
+                Specification = a.Specification,
+                Clause = a.Clause,
+                TestNumber = a.TestNumber,
+                Message = a.Message,
+                ErrorMessage = a.ErrorMessage,
+                LocationContext = a.LocationContext,
+                IsFixable = a.IsFixable,
+                FixOptions = a.IsFixable ? a.FixOptions.ToString() : null,
+            })
+            .ToList(),
         FixStatus = fixStatus,
         FixOutputPath = fixOutput,
         FixAppliedFixes = fixAppliedFixes,
@@ -299,10 +315,19 @@ static string RenderText(List<FileValidationResult> results)
 
         foreach (var f in r.Failures ?? [])
         {
-            sb.AppendLine($"  [{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}");
+            sb.AppendLine($"  [{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}{FixableSuffix(f)}");
             if (!string.IsNullOrEmpty(f.LocationContext))
             {
                 sb.AppendLine($"    at: {f.LocationContext}");
+            }
+        }
+
+        foreach (var warning in r.Warnings ?? [])
+        {
+            sb.AppendLine($"  WARNING [{warning.Specification} {warning.Clause}-{warning.TestNumber}] {warning.Message}{FixableSuffix(warning)}");
+            if (!string.IsNullOrEmpty(warning.LocationContext))
+            {
+                sb.AppendLine($"    at: {warning.LocationContext}");
             }
         }
 
@@ -333,6 +358,9 @@ static string RenderText(List<FileValidationResult> results)
         }
     }
     return sb.ToString().TrimEnd('\n', '\r');
+
+    static string FixableSuffix(FailureDetail detail) =>
+        detail.IsFixable ? $" (fixable: {detail.FixOptions})" : string.Empty;
 }
 
 static void AppendStructure(System.Text.StringBuilder sb, StructureNode node, int indent)

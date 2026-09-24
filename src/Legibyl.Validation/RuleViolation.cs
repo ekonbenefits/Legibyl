@@ -10,6 +10,8 @@ namespace Legibyl.Validation;
 /// <param name="Message">The human-readable rule description/message.</param>
 /// <param name="ErrorMessage">Additional error detail, if any.</param>
 /// <param name="LocationContext">The context/path within the PDF where the assertion was checked.</param>
+/// <param name="Severity">Whether this is a failing validation assertion or a Legibyl warning.</param>
+/// <param name="FixOptions">Best-effort repair options that can address this finding, if any.</param>
 public sealed record RuleViolation(
     string Specification,
     string Clause,
@@ -17,7 +19,9 @@ public sealed record RuleViolation(
     bool Passed,
     string Message,
     string? ErrorMessage,
-    string? LocationContext)
+    string? LocationContext,
+    FindingSeverity Severity = FindingSeverity.Failure,
+    PdfFixOptions FixOptions = PdfFixOptions.None)
 {
     /// <summary>A short "clause.testNumber" identifier, e.g. "7.1-2".</summary>
     public string RuleId => $"{Clause}-{TestNumber}";
@@ -28,6 +32,10 @@ public sealed record RuleViolation(
     /// to parse. See <see cref="PdfLocationParser"/>.
     /// </summary>
     public PdfLocation? Location => PdfLocationParser.Parse(LocationContext);
+
+    public bool IsFinding => !Passed || Severity == FindingSeverity.Warning;
+
+    public bool IsFixable => FixOptions != PdfFixOptions.None;
 
     public override string ToString() =>
         $"[{Specification} {RuleId}] {Message}";

@@ -13,10 +13,11 @@ public static class ValidationReportTextFormatter
         sb.AppendLine($"Compliant: {report.IsCompliant}");
         sb.AppendLine($"Total checks: {report.TotalAssertions}");
         sb.AppendLine($"Failed checks: {report.FailedCount}");
+        sb.AppendLine($"Warnings: {report.WarningCount}");
         sb.AppendLine();
 
         int findingNumber = 1;
-        foreach (RuleViolation violation in report.FailedAssertions)
+        foreach (RuleViolation violation in report.Findings)
         {
             if (findingNumber > 1)
             {
@@ -40,6 +41,11 @@ public static class ValidationReportTextFormatter
     private static void AppendFinding(StringBuilder sb, RuleViolation violation)
     {
         sb.AppendLine($"Rule: {violation.Specification} {violation.RuleId}");
+        sb.AppendLine($"Type: {violation.Severity}");
+        if (violation.IsFixable)
+        {
+            sb.AppendLine($"Fixable: {violation.FixOptions}");
+        }
         sb.AppendLine($"Message: {violation.Message}");
         if (!string.IsNullOrWhiteSpace(violation.ErrorMessage))
         {

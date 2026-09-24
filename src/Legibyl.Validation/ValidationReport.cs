@@ -23,5 +23,10 @@ public sealed class ValidationReport
     /// <summary>Convenience accessor for only the failed assertions.</summary>
     public IEnumerable<RuleViolation> FailedAssertions => Assertions.Where(a => !a.Passed);
 
+    /// <summary>Failed assertions plus non-failing Legibyl warnings worth showing to the user.</summary>
+    public IEnumerable<RuleViolation> Findings => Assertions.Where(a => a.IsFinding);
+
     public int FailedCount => Assertions.Count(a => !a.Passed);
+
+    public int WarningCount => Assertions.Count(a => a.Severity == FindingSeverity.Warning);
 }

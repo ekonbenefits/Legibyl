@@ -145,7 +145,7 @@ public partial class MainWindow : Window
     /// Whether it's worth offering fixes right now. The current fixers target known
     /// validation failures, so hide them once the file is already compliant.
     /// </summary>
-    private bool CanAttemptFix => _lastReport is { IsCompliant: false };
+    private bool CanAttemptFix => _lastReport is { IsCompliant: false } or { WarningCount: > 0 };
 
     private void ShowReport(ValidationReport report)
     {
@@ -155,11 +155,10 @@ public partial class MainWindow : Window
         StatusBanner.Background = report.IsCompliant ? PassBrush : FailBrush;
         StatusText.Foreground = Brushes.White;
         StatusText.Text = report.IsCompliant
-            ? $"PASS — compliant with {report.FlavourId.ToUpperInvariant()} ({report.TotalAssertions} checks)"
-            : $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {report.FlavourId.ToUpperInvariant()}";
+            ? $"PASS — compliant with {report.FlavourId.ToUpperInvariant()} ({report.TotalAssertions} checks, {report.WarningCount} warnings)"
+            : $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {report.FlavourId.ToUpperInvariant()} ({report.WarningCount} warnings)";
 
-        ResultsListView.ItemsSource = report.Assertions
-            .Where(a => !a.Passed)
+        ResultsListView.ItemsSource = report.Findings
             .Select(RuleViolationRow.FromViolation)
             // Unlocated failures (no page number) sort to the end, after page-anchored ones in page order.
             .OrderBy(row => row.PageNumber ?? int.MaxValue)
@@ -196,7 +195,7 @@ public partial class MainWindow : Window
         }
 
         FindingDetailsPanel.Visibility = Visibility.Visible;
-        FindingHeadingText.Text = $"Clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}";
+        FindingHeadingText.Text = $"{row.Severity}: clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}";
         FindingMessageText.Text = row.Message;
         FindingLocationText.Text = row.FriendlyLocation;
         FindingRawLocationText.Text = row.LocationContext ?? "Not available";
