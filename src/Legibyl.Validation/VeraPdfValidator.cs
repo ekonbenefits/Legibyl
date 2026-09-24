@@ -324,6 +324,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         IReadOnlyList<StructureNode> children = WalkStructureChildren(elem, pageNumberByKey, textIndex, ownPage, depth + 1);
         StructureGeometry? geometry = UnionGeometry(directGeometries.Concat(children.Select(child => child.Geometry)));
         geometry ??= formField?.Geometry;
+        geometry ??= TryReadLayoutBBoxGeometry(elem, ownPage);
 
         return new StructureNode(
             Tag: tag,
@@ -390,6 +391,73 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
         return new StructureGeometry(
             pageNumber.Value,
+            Math.Min(left.Value, right.Value),
+            Math.Min(bottom.Value, top.Value),
+            Math.Max(left.Value, right.Value),
+            Math.Max(bottom.Value, top.Value));
+    }
+
+    private static StructureGeometry? TryReadLayoutBBoxGeometry(org.verapdf.pd.structure.PDStructElem elem, int? pageNumber)
+    {
+        if (pageNumber is null)
+        {
+            return null;
+        }
+
+        var attributes = elem.getKey(Atom("A"));
+        return TryReadBBoxFromAttributes(attributes, pageNumber.Value);
+    }
+
+    private static StructureGeometry? TryReadBBoxFromAttributes(org.verapdf.cos.COSObject? attributes, int pageNumber)
+    {
+        if (attributes == null || attributes.empty())
+        {
+            return null;
+        }
+
+        if (attributes.knownKey(Atom("BBox")).booleanValue())
+        {
+            return GeometryFromArray(pageNumber, attributes.getKey(Atom("BBox")));
+        }
+
+        int size = attributes.size()?.intValue() ?? 0;
+        for (int i = 0; i < size; i++)
+        {
+            try
+            {
+                if (TryReadBBoxFromAttributes(attributes.at(i), pageNumber) is { } geometry)
+                {
+                    return geometry;
+                }
+            }
+            catch (java.lang.Exception)
+            {
+                // Not an array-like attributes object; ignore and leave geometry unavailable.
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static StructureGeometry? GeometryFromArray(int pageNumber, org.verapdf.cos.COSObject? rect)
+    {
+        if (rect == null || rect.size().intValue() < 4)
+        {
+            return null;
+        }
+
+        double? left = NumberAt(rect, 0);
+        double? bottom = NumberAt(rect, 1);
+        double? right = NumberAt(rect, 2);
+        double? top = NumberAt(rect, 3);
+        if (left is null || bottom is null || right is null || top is null)
+        {
+            return null;
+        }
+
+        return new StructureGeometry(
+            pageNumber,
             Math.Min(left.Value, right.Value),
             Math.Min(bottom.Value, top.Value),
             Math.Max(left.Value, right.Value),

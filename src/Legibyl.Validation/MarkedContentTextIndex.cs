@@ -57,12 +57,31 @@ internal static class MarkedContentTextIndex
 
         foreach (var image in element.Images)
         {
+            // PdfPig 0.1.16 marks IPdfImage.Bounds obsolete in favor of BoundingBox, but
+            // the public IPdfImage interface in this version only exposes Bounds. Keep the
+            // warning contained here until the package is upgraded.
+#pragma warning disable CS0618
             geometries.Add(new StructureGeometry(
                 pageNumber,
                 image.Bounds.Left,
                 image.Bounds.Bottom,
                 image.Bounds.Right,
                 image.Bounds.Top));
+#pragma warning restore CS0618
+        }
+
+        foreach (var path in element.Paths)
+        {
+            var bounds = path.GetBoundingRectangle();
+            if (bounds.HasValue)
+            {
+                geometries.Add(new StructureGeometry(
+                    pageNumber,
+                    bounds.Value.Left,
+                    bounds.Value.Bottom,
+                    bounds.Value.Right,
+                    bounds.Value.Top));
+            }
         }
 
         return UnionGeometry(geometries);

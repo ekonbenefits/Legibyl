@@ -138,11 +138,12 @@ by page + MCID, and for `/Form` elements the referenced widget annotation's
 field name (`/T`), tooltip/user description (`/TU`), field type (`/FT`), and
 current value (`/V`) when present. The **Tree** tab keeps the compact outline
 view. Layout blocks are selectable; when a selected node has same-page
-geometry (from marked-content text glyph bounds or form widget rectangles),
-the side preview renders that page and highlights the best-effort area the
-node covers. Pure containers, non-text content without a usable rectangle, or
-multi-page nodes show a note instead. If the file has no structure tree at all
-(completely untagged), the button reports that instead of an empty tree.
+geometry (from marked-content text glyph/image/path bounds, `/A /BBox`
+layout attributes, or form widget rectangles), the side preview renders that
+page and highlights the best-effort area the node covers. Pure containers,
+content without a usable rectangle, or multi-page nodes show a note instead.
+If the file has no structure tree at all (completely untagged), the button
+reports that instead of an empty tree.
 **Export JSON…** in that window saves the whole hierarchy — including each
 node's `content` text, geometry, and form field metadata — as JSON, the same
 shape produced by the CLI's `--structure` flag. This is intended for AI agents
