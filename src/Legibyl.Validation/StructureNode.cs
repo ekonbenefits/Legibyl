@@ -28,6 +28,10 @@ namespace Legibyl.Validation;
 /// non-text content like a raw image). Does not include descendant elements' text,
 /// to avoid duplicating text that already appears under a child node.
 /// </param>
+/// <param name="FormFieldName">For /Form structure elements, the referenced widget annotation's field name (/T), if any.</param>
+/// <param name="FormFieldDescription">For /Form structure elements, the referenced widget annotation's tooltip/user description (/TU), if any.</param>
+/// <param name="FormFieldType">For /Form structure elements, the referenced widget annotation's field type (/FT), e.g. "Tx" or "Btn".</param>
+/// <param name="FormFieldValue">For /Form structure elements, the referenced widget annotation's current value (/V), if any.</param>
 /// <param name="Language">The element's Lang tag (e.g. "en-US"), if explicitly set on this element.</param>
 /// <param name="PageNumber">
 /// The 1-based page this element's content appears on, if determinable. Null for
@@ -44,6 +48,10 @@ public sealed record StructureNode(
     string? AlternateDescription,
     string? ActualText,
     string? Content,
+    string? FormFieldName,
+    string? FormFieldDescription,
+    string? FormFieldType,
+    string? FormFieldValue,
     string? Language,
     int? PageNumber,
     int ContentLeafCount,

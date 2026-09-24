@@ -44,6 +44,7 @@ public partial class StructureTreeWindow : Window
         ["TH"] = (Colors.DarkOrange, Color.FromRgb(0xFD, 0xEA, 0xD3)),
         ["TD"] = (Colors.DarkOrange, Color.FromRgb(0xFD, 0xEA, 0xD3)),
         ["Link"] = (Colors.MediumPurple, Color.FromRgb(0xEB, 0xE3, 0xF7)),
+        ["Form"] = (Colors.MediumPurple, Color.FromRgb(0xEB, 0xE3, 0xF7)),
         ["Figure"] = (Colors.IndianRed, Color.FromRgb(0xFB, 0xE1, 0xE1)),
     };
 
@@ -105,6 +106,8 @@ public partial class StructureTreeWindow : Window
         if (node.Role is not null) attrParts.Add($"role={node.Role}");
         if (node.PageNumber is not null) attrParts.Add($"p.{node.PageNumber}");
         if (node.Language is not null) attrParts.Add($"[{node.Language}]");
+        if (node.FormFieldType is not null) attrParts.Add($"field type: {node.FormFieldType}");
+        if (node.FormFieldName is not null) attrParts.Add($"field: {node.FormFieldName}");
         if (attrParts.Count > 0)
         {
             headerPanel.Children.Add(new TextBlock
@@ -123,6 +126,31 @@ public partial class StructureTreeWindow : Window
             {
                 Text = $"alt: \"{node.AlternateDescription}\"",
                 FontStyle = FontStyles.Italic,
+                FontSize = 11,
+                Foreground = Brushes.DimGray,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+        }
+
+        if (node.FormFieldDescription is not null)
+        {
+            inner.Children.Add(new TextBlock
+            {
+                Text = $"tooltip: \"{node.FormFieldDescription}\"",
+                FontStyle = FontStyles.Italic,
+                FontSize = 11,
+                Foreground = Brushes.DimGray,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+        }
+
+        if (node.FormFieldValue is not null)
+        {
+            inner.Children.Add(new TextBlock
+            {
+                Text = $"value: \"{node.FormFieldValue}\"",
                 FontSize = 11,
                 Foreground = Brushes.DimGray,
                 TextWrapping = TextWrapping.Wrap,

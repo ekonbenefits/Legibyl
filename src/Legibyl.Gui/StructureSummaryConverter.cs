@@ -20,6 +20,9 @@ public sealed class StructureSummaryConverter : IValueConverter
         if (node.Language is not null) parts.Add($"[{node.Language}]");
         if (node.AlternateDescription is not null) parts.Add($"alt: \"{node.AlternateDescription}\"");
         if (node.ActualText is not null) parts.Add($"actualText: \"{node.ActualText}\"");
+        if (node.FormFieldDescription is not null) parts.Add($"tooltip: \"{node.FormFieldDescription}\"");
+        if (node.FormFieldName is not null) parts.Add($"field: {node.FormFieldName}");
+        if (node.FormFieldType is not null) parts.Add($"type: {node.FormFieldType}");
         if (node.ContentLeafCount > 0)
         {
             parts.Add($"({node.ContentLeafCount} content item{(node.ContentLeafCount == 1 ? "" : "s")})");

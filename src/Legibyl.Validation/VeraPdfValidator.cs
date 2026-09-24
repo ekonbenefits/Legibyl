@@ -189,6 +189,10 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                 AlternateDescription: null,
                 ActualText: null,
                 Content: null,
+                FormFieldName: null,
+                FormFieldDescription: null,
+                FormFieldType: null,
+                FormFieldValue: null,
                 Language: null,
                 PageNumber: null,
                 ContentLeafCount: 0,
@@ -288,6 +292,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
         int contentLeafCount = 0;
         var contentTexts = new List<string>();
+        FormFieldInfo? formField = null;
         var iterator = elem.getChildren().iterator();
         while (iterator.hasNext())
         {
@@ -302,6 +307,8 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             {
                 contentTexts.Add(text!);
             }
+
+            formField ??= TryReadFormFieldInfo(child);
         }
 
         string? content = contentTexts.Count > 0 ? string.Join(" ", contentTexts) : null;
@@ -312,11 +319,47 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             AlternateDescription: NullIfEmpty(elem.getAlternateDescription()),
             ActualText: NullIfEmpty(ActualTextOf(elem)),
             Content: content,
+            FormFieldName: formField?.Name,
+            FormFieldDescription: formField?.Description,
+            FormFieldType: formField?.Type,
+            FormFieldValue: formField?.Value,
             Language: NullIfEmpty(elem.getLang()?.toString()),
             PageNumber: ownPage,
             ContentLeafCount: contentLeafCount,
             Children: WalkStructureChildren(elem, pageNumberByKey, textIndex, ownPage, depth + 1));
     }
+
+    private sealed record FormFieldInfo(string? Name, string? Description, string? Type, string? Value);
+
+    private static FormFieldInfo? TryReadFormFieldInfo(object child)
+    {
+        if (child is not org.verapdf.pd.structure.PDOBJRDictionary objr)
+        {
+            return null;
+        }
+
+        var referenced = objr.getReferencedObject();
+        if (referenced == null || referenced.empty())
+        {
+            return null;
+        }
+
+        string? subtype = AtomValue(referenced.getNameKey(Atom("Subtype")));
+        if (subtype != "Widget")
+        {
+            return null;
+        }
+
+        string? name = NullIfEmpty(referenced.getStringKey(Atom("T")));
+        string? description = NullIfEmpty(referenced.getStringKey(Atom("TU")));
+        string? type = AtomValue(referenced.getNameKey(Atom("FT")));
+        string? value = NullIfEmpty(referenced.getStringKey(Atom("V"))) ?? AtomValue(referenced.getNameKey(Atom("V")));
+        return new FormFieldInfo(name, description, type, value);
+    }
+
+    private static org.verapdf.@as.ASAtom Atom(string value) => org.verapdf.@as.ASAtom.getASAtom(value);
+
+    private static string? AtomValue(org.verapdf.@as.ASAtom? atom) => atom?.getValue();
 
     /// <summary>
     /// Resolves one of a structure element's direct (non-structure-element) children —
@@ -365,14 +408,14 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
     private static string ResolveStructureTag(org.verapdf.pd.structure.PDStructElem elem)
     {
-        // Prefer the resolved type atom / structure-type / raw COS name, in that order
-        // of preference — for standard tags these all agree, but falling back covers
-        // edge cases (e.g. custom-namespace tags) where the higher-level accessor
-        // returns null. See scratch investigation in this session for how each of
-        // these was found to behave against a real veraPDF-corpus PDF/UA sample.
-        return elem.getType()?.getValue()
+        // Prefer the semantic structure role (/S), not the object dictionary type
+        // (/Type /StructElem). Some valid tagged PDFs use /S /Form with /Type
+        // /StructElem; if we prefer getType() first, those controls display as the
+        // generic implementation object "StructElem" instead of the screen-reader
+        // role "Form".
+        return elem.getCOSStructureType()?.getName()?.getValue()
             ?? elem.getStructureType()?.getType()?.getValue()
-            ?? elem.getCOSStructureType()?.getName()?.getValue()
+            ?? elem.getType()?.getValue()
             ?? "?";
     }
 

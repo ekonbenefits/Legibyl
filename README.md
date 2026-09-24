@@ -131,14 +131,17 @@ The default **Layout** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
 (headings, lists, tables, links, figures, etc. use different colors). Each
 box includes the semantic tag, page, language/role metadata, `Alt` or
-`ActualText` when present, and the element's own extracted visible text
-matched by page + MCID. The **Tree** tab keeps the compact outline view. If
-the file has no structure tree at all (completely untagged), the button
-reports that instead of an empty tree. **Export JSON…** in that window saves
-the whole hierarchy — including each node's `content` text — as JSON, the
-same shape produced by the CLI's `--structure` flag. This is intended for AI
-agents or other tooling that needs to understand what text is present under
-each semantic role, not just the raw PDF/UA rule failures.
+`ActualText` when present, the element's own extracted visible text matched
+by page + MCID, and for `/Form` elements the referenced widget annotation's
+field name (`/T`), tooltip/user description (`/TU`), field type (`/FT`), and
+current value (`/V`) when present. The **Tree** tab keeps the compact outline
+view. If the file has no structure tree at all (completely untagged), the
+button reports that instead of an empty tree. **Export JSON…** in that window
+saves the whole hierarchy — including each node's `content` text and form
+field metadata — as JSON, the same shape produced by the CLI's `--structure`
+flag. This is intended for AI agents or other tooling that needs to
+understand what text and interactive controls are present under each semantic
+role, not just the raw PDF/UA rule failures.
 
 ## Command-line tool (for scripts / AI agents)
 
@@ -185,10 +188,13 @@ Options:
   uses) in the output, under a `structure` key. Each node includes a
   `content` property containing the visible text directly owned by that
   semantic element (matched by page + MCID), plus `alt`, `actualText`,
-  language, page, role-map, and children. In `--format text` mode this
-  prints an indented outline with `text="..."` lines instead. Absent/`null`
-  `structure` with no `structureError` means the file has no structure tree
-  at all (it's completely untagged).
+  language, page, role-map, and children. `/Form` nodes also include widget
+  field metadata (`formFieldName`, `formFieldDescription`, `formFieldType`,
+  `formFieldValue`) resolved from the referenced annotation's `/T`, `/TU`,
+  `/FT`, and `/V`. In `--format text` mode this prints an indented outline
+  with `text="..."`, `field="..."`, and `tooltip="..."` details instead.
+  Absent/`null` `structure` with no `structureError` means the file has no
+  structure tree at all (it's completely untagged).
 - `--list-profiles` — print supported profile names and exit `0`.
 - `--version` — print tool build + vendored veraPDF engine version and exit `0`.
 - `--help` / `-h` — print usage and exit `0`.
