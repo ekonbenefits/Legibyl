@@ -765,6 +765,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         geometry ??= formField?.Geometry;
         geometry ??= TryReadLayoutBBoxGeometry(elem, ownPage);
         linkTarget ??= tag == "Link" && geometry is not null ? FindLinkTargetByGeometry(geometry, linkAnnotationTargets) : null;
+        linkTarget ??= tag == "TOCI" ? FindFirstDescendantLinkTarget(children) : null;
 
         return new StructureNode(
             Tag: tag,
@@ -791,6 +792,27 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
     private sealed record LinkTargetInfo(string? Uri, int? DestinationPageNumber, string? DestinationDescription);
 
     private sealed record LinkAnnotationTarget(StructureGeometry Geometry, LinkTargetInfo Target);
+
+    private static LinkTargetInfo? FindFirstDescendantLinkTarget(IEnumerable<StructureNode> nodes)
+    {
+        foreach (StructureNode node in nodes)
+        {
+            if (node.LinkUri is not null ||
+                node.LinkDestinationPageNumber is not null ||
+                node.LinkDestinationDescription is not null)
+            {
+                return new LinkTargetInfo(node.LinkUri, node.LinkDestinationPageNumber, node.LinkDestinationDescription);
+            }
+
+            LinkTargetInfo? childTarget = FindFirstDescendantLinkTarget(node.Children);
+            if (childTarget is not null)
+            {
+                return childTarget;
+            }
+        }
+
+        return null;
+    }
 
     private static FormFieldInfo? TryReadFormFieldInfo(object child, int? ownPage)
     {

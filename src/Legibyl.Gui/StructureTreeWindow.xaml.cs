@@ -192,7 +192,11 @@ public partial class StructureTreeWindow : Window
             });
         }
 
-        if (node.Tag == "Table")
+        if (node.Tag == "TOC")
+        {
+            inner.Children.Add(BuildTocGrid(node));
+        }
+        else if (node.Tag == "Table")
         {
             inner.Children.Add(BuildTableGrid(node));
         }
@@ -219,6 +223,104 @@ public partial class StructureTreeWindow : Window
         border.ToolTip = node.Geometry is null
             ? "Select: no page geometry is available for this structure node."
             : $"Select: highlight this node on page {node.Geometry.PageNumber}.";
+        return border;
+    }
+
+    private UIElement BuildTocGrid(StructureNode toc)
+    {
+        var items = toc.Children.Where(child => child.Tag == "TOCI").ToList();
+        if (items.Count == 0)
+        {
+            var fallback = new StackPanel();
+            foreach (var child in toc.Children)
+            {
+                fallback.Children.Add(BuildElement(child));
+            }
+            return fallback;
+        }
+
+        var grid = new Grid
+        {
+            Margin = new Thickness(0, 4, 0, 0),
+            Background = new SolidColorBrush(Color.FromRgb(0xF8, 0xF5, 0xFC)),
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+
+        for (int rowIndex = 0; rowIndex < items.Count; rowIndex++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Border row = BuildTocItemRow(items[rowIndex]);
+            Grid.SetRow(row, rowIndex);
+            Grid.SetColumn(row, 0);
+            Grid.SetColumnSpan(row, 3);
+            grid.Children.Add(row);
+        }
+
+        return grid;
+    }
+
+    private Border BuildTocItemRow(StructureNode item)
+    {
+        var texts = FlattenContent(item)
+            .Select(text => text.Trim())
+            .Where(text => text.Length > 0 && !IsLeaderText(text))
+            .ToList();
+        string? printedPage = texts.LastOrDefault(IsPageNumberText);
+        string label = texts.FirstOrDefault(text => !IsPageNumberText(text)) ?? "(empty TOC item)";
+        string? target = item.LinkUri ?? item.LinkDestinationDescription;
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+
+        grid.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 8, 0),
+        });
+
+        var pageText = new TextBlock
+        {
+            Text = printedPage is null ? string.Empty : $"p. {printedPage}",
+            FontSize = 12,
+            Foreground = Brushes.DimGray,
+            Margin = new Thickness(0, 0, 12, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        Grid.SetColumn(pageText, 1);
+        grid.Children.Add(pageText);
+
+        var targetText = new TextBlock
+        {
+            Text = target is null ? "No link target found" : $"→ {target}",
+            FontSize = 12,
+            Foreground = target is null ? Brushes.DarkGoldenrod : Brushes.DimGray,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        Grid.SetColumn(targetText, 2);
+        grid.Children.Add(targetText);
+
+        var border = new Border
+        {
+            BorderBrush = new SolidColorBrush(CategoryColors["Link"].Border),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(6),
+            Margin = new Thickness(0, 0, 0, 2),
+            Background = Brushes.White,
+            Child = grid,
+            DataContext = item,
+            ToolTip = item.Geometry is null
+                ? "Select: no page geometry is available for this TOC item."
+                : $"Select: highlight this TOC item on page {item.Geometry.PageNumber}.",
+        };
+        border.MouseLeftButtonDown += StructureBlock_MouseLeftButtonDown;
         return border;
     }
 
@@ -291,6 +393,28 @@ public partial class StructureTreeWindow : Window
         var cells = row.Children.Where(child => child.Tag is "TH" or "TD").ToList();
         return cells.Count > 0 ? cells : row.Children.ToList();
     }
+
+    private static IEnumerable<string> FlattenContent(StructureNode node)
+    {
+        if (node.Content is not null)
+        {
+            yield return node.Content;
+        }
+
+        foreach (StructureNode child in node.Children)
+        {
+            foreach (string text in FlattenContent(child))
+            {
+                yield return text;
+            }
+        }
+    }
+
+    private static bool IsLeaderText(string text) =>
+        text.All(ch => ch is '.' or '…' or ' ' or '\t');
+
+    private static bool IsPageNumberText(string text) =>
+        text.All(char.IsDigit);
 
     private async void StructureBlock_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {

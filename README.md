@@ -148,7 +148,9 @@ known targets: external URI actions and internal `/Dest`/GoTo destinations
 such as `Internal destination: page 4 (/XYZ 33 690 0)`. Some PDFs attach the
 destination only to the underlying link annotation, so Legibyl follows tagged
 annotation references and uses a conservative same-page geometry fallback
-when needed. The **Tree** tab keeps the compact outline view. Layout blocks
+when needed. Table-of-contents entries (`TOCI`) render as row-like layout
+items and inherit the first descendant link target when the PDF stores the
+click target on a separate child link fragment. The **Tree** tab keeps the compact outline view. Layout blocks
 are selectable; when a selected node has same-page
 geometry (from marked-content text glyph/image/path bounds, `/A /BBox`
 layout attributes, or form widget rectangles), the side preview renders that
