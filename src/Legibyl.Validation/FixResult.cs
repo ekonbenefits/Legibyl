@@ -1,16 +1,12 @@
 namespace Legibyl.Validation;
 
 /// <summary>
-/// The outcome of running veraPDF's metadata fixer (org.verapdf.pdfa.MetadataFixer)
-/// against a PDF. The fixer only repairs the XMP metadata packet — e.g. adding a
-/// missing metadata stream, writing/removing the PDF/A or PDF/UA identification
-/// schema, and syncing basic Dublin Core / AdobePDF / XMPBasic fields with the
-/// Info dictionary. It does not repair structural/tagging problems (untagged
-/// content, missing alt-text, table header scope, etc).
+/// The outcome of running selected best-effort repairs against a PDF.
 /// </summary>
 public sealed record FixResult(
     string FilePath,
     PdfProfile Profile,
+    PdfFixOptions RequestedOptions,
 
     /// <summary>
     /// Path to the repaired copy, or null if no output file was produced

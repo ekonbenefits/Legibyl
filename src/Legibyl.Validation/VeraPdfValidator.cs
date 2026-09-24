@@ -1,4 +1,5 @@
 using System.IO;
+using iText.Kernel.Pdf;
 using org.verapdf.core;
 using org.verapdf.gf.foundry;
 using org.verapdf.pdfa;
@@ -74,7 +75,130 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         }
     }
 
-    public FixResult Fix(string pdfPath, PdfProfile profile, string outputPath)
+    public FixResult Fix(string pdfPath, PdfProfile profile, string outputPath, PdfFixOptions options = PdfFixOptions.Metadata)
+    {
+        if (!File.Exists(pdfPath))
+        {
+            throw new VeraPdfValidationException($"File not found: {pdfPath}");
+        }
+        if (options == PdfFixOptions.None)
+        {
+            throw new VeraPdfValidationException("At least one fix option must be selected.");
+        }
+
+        ValidationReport originalReport = Validate(pdfPath, profile);
+        var appliedFixes = new List<string>();
+        string currentInput = pdfPath;
+        string? tempMetadataOutput = null;
+        string? tempStructuralOutput = null;
+        bool changed = false;
+        RepairStatus status = RepairStatus.NoAction;
+
+        try
+        {
+            if (options.HasFlag(PdfFixOptions.Metadata))
+            {
+                tempMetadataOutput = CreateTemporaryPdfPath(outputPath);
+                MetadataFixOutcome metadataFix = FixMetadataOnly(currentInput, profile, tempMetadataOutput, originalReport);
+                status = metadataFix.Status;
+                appliedFixes.AddRange(metadataFix.AppliedFixes);
+                if (metadataFix.Changed)
+                {
+                    currentInput = tempMetadataOutput;
+                    changed = true;
+                }
+                else
+                {
+                    DeleteIfExists(tempMetadataOutput);
+                    tempMetadataOutput = null;
+                }
+            }
+
+            if (options.HasFlag(PdfFixOptions.AnnotationTabs) || options.HasFlag(PdfFixOptions.RemoveEmptyParagraphs))
+            {
+                tempStructuralOutput = CreateTemporaryPdfPath(outputPath);
+                int tabsFixed = 0;
+                int emptyParagraphsRemoved = 0;
+                bool structuralChanged = ApplyStructuralFixes(
+                    currentInput,
+                    tempStructuralOutput,
+                    options,
+                    ref tabsFixed,
+                    ref emptyParagraphsRemoved);
+
+                if (structuralChanged)
+                {
+                    if (tabsFixed > 0)
+                    {
+                        appliedFixes.Add($"Set /Tabs /S on {tabsFixed} page(s) containing annotations.");
+                    }
+                    if (emptyParagraphsRemoved > 0)
+                    {
+                        appliedFixes.Add($"Removed {emptyParagraphsRemoved} empty /P structure element(s).");
+                    }
+
+                    currentInput = tempStructuralOutput;
+                    changed = true;
+                    status = RepairStatus.Success;
+                }
+                else
+                {
+                    DeleteIfExists(tempStructuralOutput);
+                    tempStructuralOutput = null;
+                }
+            }
+
+            if (!changed)
+            {
+                DeleteIfExists(outputPath);
+                return new FixResult(
+                    FilePath: pdfPath,
+                    Profile: profile,
+                    RequestedOptions: options,
+                    OutputPath: null,
+                    Status: status,
+                    AppliedFixes: appliedFixes,
+                    OriginalReport: originalReport);
+            }
+
+            System.IO.Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
+            File.Copy(currentInput, outputPath, overwrite: true);
+
+            return new FixResult(
+                FilePath: pdfPath,
+                Profile: profile,
+                RequestedOptions: options,
+                OutputPath: outputPath,
+                Status: status,
+                AppliedFixes: appliedFixes,
+                OriginalReport: originalReport);
+        }
+        catch (iText.Kernel.Exceptions.PdfException ex)
+        {
+            throw new VeraPdfValidationException($"iText failed to fix '{pdfPath}': {ex.Message}", ex);
+        }
+        catch (IOException ex)
+        {
+            throw new VeraPdfValidationException($"Could not write fixed PDF '{outputPath}': {ex.Message}", ex);
+        }
+        finally
+        {
+            if (!string.Equals(tempMetadataOutput, outputPath, StringComparison.OrdinalIgnoreCase))
+            {
+                DeleteIfExists(tempMetadataOutput);
+            }
+            if (!string.Equals(tempStructuralOutput, outputPath, StringComparison.OrdinalIgnoreCase))
+            {
+                DeleteIfExists(tempStructuralOutput);
+            }
+        }
+    }
+
+    private static MetadataFixOutcome FixMetadataOnly(
+        string pdfPath,
+        PdfProfile profile,
+        string outputPath,
+        ValidationReport originalReport)
     {
         if (!File.Exists(pdfPath))
         {
@@ -91,8 +215,6 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             parser = foundry.createParser(new java.io.File(pdfPath), flavour);
             PDFAValidator validator = foundry.createValidator(flavour, false);
             ValidationResult result = validator.validate(parser);
-            ValidationReport originalReport = ToReport(pdfPath, profile, result);
-
             MetadataFixer fixer = foundry.createMetadataFixer();
             outputStream = new java.io.FileOutputStream(outputPath);
             MetadataFixerResult fixResult = fixer.fixMetadata(parser, outputStream, result);
@@ -119,13 +241,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                 File.Delete(outputPath);
             }
 
-            return new FixResult(
-                FilePath: pdfPath,
-                Profile: profile,
-                OutputPath: wroteUsableOutput ? outputPath : null,
-                Status: status,
-                AppliedFixes: appliedFixes,
-                OriginalReport: originalReport);
+            return new MetadataFixOutcome(wroteUsableOutput, status, appliedFixes);
         }
         catch (VeraPDFException ex)
         {
@@ -141,6 +257,149 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             parser?.close();
         }
     }
+
+    private static bool ApplyStructuralFixes(
+        string inputPath,
+        string outputPath,
+        PdfFixOptions options,
+        ref int tabsFixed,
+        ref int emptyParagraphsRemoved)
+    {
+        using var reader = new PdfReader(inputPath);
+        using var writer = new PdfWriter(outputPath);
+        using var document = new PdfDocument(reader, writer);
+
+        if (options.HasFlag(PdfFixOptions.AnnotationTabs))
+        {
+            for (int pageNumber = 1; pageNumber <= document.GetNumberOfPages(); pageNumber++)
+            {
+                PdfDictionary pageDictionary = document.GetPage(pageNumber).GetPdfObject();
+                PdfArray? annotations = pageDictionary.GetAsArray(PdfName.Annots);
+                if (annotations is null || annotations.Size() == 0)
+                {
+                    continue;
+                }
+
+                PdfName? tabs = pageDictionary.GetAsName(PdfName.Tabs);
+                if (!PdfName.S.Equals(tabs))
+                {
+                    pageDictionary.Put(PdfName.Tabs, PdfName.S);
+                    tabsFixed++;
+                }
+            }
+        }
+
+        if (options.HasFlag(PdfFixOptions.RemoveEmptyParagraphs))
+        {
+            PdfDictionary catalog = document.GetCatalog().GetPdfObject();
+            PdfDictionary? structTreeRoot = catalog.GetAsDictionary(PdfName.StructTreeRoot);
+            if (structTreeRoot is not null)
+            {
+                emptyParagraphsRemoved += RemoveEmptyParagraphsFromStructTreeRoot(structTreeRoot);
+            }
+        }
+
+        bool changed = tabsFixed > 0 || emptyParagraphsRemoved > 0;
+        if (!changed)
+        {
+            document.Close();
+            DeleteIfExists(outputPath);
+        }
+
+        return changed;
+    }
+
+    private static int RemoveEmptyParagraphsFromStructTreeRoot(PdfDictionary structTreeRoot)
+    {
+        PdfObject? kids = structTreeRoot.Get(PdfName.K);
+        if (kids is null)
+        {
+            return 0;
+        }
+
+        if (ShouldRemoveEmptyParagraph(kids, out int removedFromChildren))
+        {
+            structTreeRoot.Remove(PdfName.K);
+            return removedFromChildren + 1;
+        }
+
+        return RemoveEmptyParagraphsFromKids(kids);
+    }
+
+    private static int RemoveEmptyParagraphsFromKids(PdfObject kids)
+    {
+        PdfObject resolvedKids = Resolve(kids);
+        if (resolvedKids is PdfArray array)
+        {
+            int removed = 0;
+            for (int i = array.Size() - 1; i >= 0; i--)
+            {
+                PdfObject? child = array.Get(i);
+                if (ShouldRemoveEmptyParagraph(child, out int childRemoved))
+                {
+                    array.Remove(i);
+                    removed++;
+                }
+                removed += childRemoved;
+            }
+            return removed;
+        }
+
+        return resolvedKids is PdfDictionary dict ? RemoveEmptyParagraphsInside(dict) : 0;
+    }
+
+    private static bool ShouldRemoveEmptyParagraph(PdfObject? obj, out int removedFromChildren)
+    {
+        removedFromChildren = 0;
+        PdfObject? resolved = Resolve(obj);
+        if (resolved is not PdfDictionary dictionary)
+        {
+            return false;
+        }
+
+        removedFromChildren = RemoveEmptyParagraphsInside(dictionary);
+        return PdfName.P.Equals(dictionary.GetAsName(PdfName.S)) && IsStructElemEmpty(dictionary);
+    }
+
+    private static int RemoveEmptyParagraphsInside(PdfDictionary dictionary)
+    {
+        PdfObject? kids = dictionary.Get(PdfName.K);
+        return kids is null ? 0 : RemoveEmptyParagraphsFromKids(kids);
+    }
+
+    private static bool IsStructElemEmpty(PdfDictionary dictionary)
+    {
+        PdfObject? kids = dictionary.Get(PdfName.K);
+        if (kids is null)
+        {
+            return true;
+        }
+
+        PdfObject resolvedKids = Resolve(kids);
+        return resolvedKids is PdfArray array && array.Size() == 0;
+    }
+
+    private static PdfObject Resolve(PdfObject? obj)
+    {
+        return obj is PdfIndirectReference reference ? reference.GetRefersTo() : obj!;
+    }
+
+    private static string CreateTemporaryPdfPath(string outputPath)
+    {
+        string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? Path.GetTempPath();
+        System.IO.Directory.CreateDirectory(directory);
+        return Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(outputPath)}.{Guid.NewGuid():N}.tmp.pdf");
+    }
+
+    private static void DeleteIfExists(string? path)
+    {
+        if (path is not null && File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
+
+    private sealed record MetadataFixOutcome(bool Changed, RepairStatus Status, IReadOnlyList<string> AppliedFixes);
 
     /// <summary>
     /// Reads the structure tree by opening the PDF a second time through veraPDF's

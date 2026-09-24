@@ -64,3 +64,14 @@ it. These features use:
 Both are used unmodified via NuGet package references (no vendored/bundled
 source), so no additional source-availability obligations apply beyond the
 license texts themselves.
+
+## iText Core
+
+Legibyl uses [iText Core for .NET](https://github.com/itext/itext-dotnet)
+to write selected best-effort PDF repairs that require mutating existing PDF
+dictionaries or structure-tree arrays, such as setting page `/Tabs /S` on
+pages with annotations and removing empty `/P` structure elements.
+
+iText Core is used via the `itext` NuGet package under the GNU Affero
+General Public License v3.0 or later. This is compatible with Legibyl's own
+AGPL-3.0-or-later license. It is used unmodified.

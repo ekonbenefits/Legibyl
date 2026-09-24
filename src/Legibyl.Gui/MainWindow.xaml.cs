@@ -142,13 +142,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Whether it's worth offering "Fix Metadata" right now. veraPDF's metadata fixer
-    /// is a no-op (RepairStatus.NoAction, no output written) whenever the file is
-    /// already fully compliant — there's nothing for it to do — so we grey the button
-    /// out in that case rather than let the user run a fix that provably can't change
-    /// anything. It's left enabled whenever there's at least one failing check: the
-    /// fixer can still take useful action then (e.g. stripping a false PDF/A|UA
-    /// conformance claim) even if other, non-metadata issues remain unresolved.
+    /// Whether it's worth offering fixes right now. The current fixers target known
+    /// validation failures, so hide them once the file is already compliant.
     /// </summary>
     private bool CanAttemptFix => _lastReport is { IsCompliant: false };
 
@@ -301,6 +296,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        var fixOptionsDialog = new FixOptionsDialog { Owner = this };
+        if (fixOptionsDialog.ShowDialog() != true)
+        {
+            return;
+        }
+
         var dialog = new SaveFileDialog
         {
             Filter = "PDF files (*.pdf)|*.pdf|All files (*.*)|*.*",
@@ -317,7 +318,8 @@ public partial class MainWindow : Window
         SetBusy(true);
         try
         {
-            FixResult fix = await Task.Run(() => _fixer.Fix(_selectedFilePath, profile, dialog.FileName));
+            PdfFixOptions options = fixOptionsDialog.SelectedOptions;
+            FixResult fix = await Task.Run(() => _fixer.Fix(_selectedFilePath, profile, dialog.FileName, options));
             ShowFixResult(fix);
 
             if (fix.WasFixed)
@@ -357,16 +359,14 @@ public partial class MainWindow : Window
         }
 
         sb.AppendLine();
-        sb.AppendLine("Note: this only repairs XMP metadata (missing metadata stream, PDF/A|PDF/UA");
-        sb.AppendLine("identifier, false conformance claims, Info-dictionary sync). It does not fix");
-        sb.AppendLine("structural/tagging issues such as untagged content, missing alt-text, or table");
-        sb.AppendLine("header scope.");
+        sb.AppendLine("Note: fixes are best-effort and limited to the selected repair types.");
+        sb.AppendLine("They do not add missing alt text, retag untagged content, or infer table headers.");
         if (fix.WasFixed)
         {
             sb.AppendLine("Switching to the repaired copy and re-validating to show what improved.");
         }
 
-        MessageBox.Show(this, sb.ToString(), "Fix Metadata", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, sb.ToString(), "Fix PDF", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void CopySummaryButton_Click(object sender, RoutedEventArgs e)

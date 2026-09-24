@@ -1,0 +1,34 @@
+<Window x:Class="Legibyl.Gui.FixOptionsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Fix PDF" Height="260" Width="520"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Choose the repairs to apply to a copy of this PDF:"
+                   TextWrapping="Wrap" Margin="0,0,0,12" />
+
+        <StackPanel Grid.Row="1">
+            <CheckBox x:Name="MetadataCheckBox" Margin="0,0,0,10"
+                      Content="Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)" />
+            <CheckBox x:Name="AnnotationTabsCheckBox" Margin="0,0,0,10"
+                      Content="Set /Tabs /S on pages that contain annotations" />
+            <CheckBox x:Name="EmptyParagraphsCheckBox" Margin="0,0,0,10"
+                      Content="Remove empty semantic /P structure elements" />
+
+            <TextBlock Foreground="#FF555555" TextWrapping="Wrap" Margin="0,8,0,0"
+                       Text="These repairs are best-effort structural cleanup. They do not add missing alt text, retag untagged content, or infer table headers." />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Width="82" Margin="0,0,8,0" IsCancel="True" />
+            <Button Content="Continue…" Width="96" IsDefault="True" Click="ContinueButton_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

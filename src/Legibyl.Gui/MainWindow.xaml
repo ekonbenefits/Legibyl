@@ -163,9 +163,9 @@
             <Button x:Name="ViewStructureButton" Content="View Structure…" Padding="12,4" Margin="0,0,8,0"
                     Click="ViewStructureButton_Click" IsEnabled="False"
                     ToolTip="Shows the tagged logical structure tree (the semantic heading/paragraph/list/table/link hierarchy a screen reader uses) and lets you export it as JSON." />
-            <Button x:Name="FixButton" Content="Fix Metadata…" Padding="12,4" Margin="0,0,8,0"
+            <Button x:Name="FixButton" Content="Fix…" Padding="12,4" Margin="0,0,8,0"
                     Click="FixButton_Click" IsEnabled="False"
-                    ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues. Disabled once the file is already fully compliant, since there'd be nothing left to fix." />
+                    ToolTip="Opens a dialog of selectable best-effort repairs, including XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix." />
         </StackPanel>
     </Grid>
 </Window>

@@ -16,10 +16,10 @@ which translates the Java bytecode into a .NET assembly at build time. The
 (`IPdfValidator.Validate(path, profile) -> ValidationReport`,
 `IPdfFixer.Fix(path, profile, outputPath) -> FixResult`, and
 `IStructureTreeReader.ReadStructureTree(path) -> StructureNode?`) that fully
-isolates all Java/IKVM types from the rest of the app. `IPdfFixer` wraps
-veraPDF's metadata fixer, which repairs XMP metadata only (missing
-metadata stream, PDF/A|PDF/UA identifier, false conformance claims,
-Info-dictionary sync) — it does not repair structural/tagging issues.
+isolates all Java/IKVM types from the rest of the app. `IPdfFixer` combines
+veraPDF's metadata fixer with a small iText-based structural repair pass for
+selected safe object-level fixes, such as setting page `/Tabs /S` when a
+page has annotations and removing empty semantic `/P` structure elements.
 `IStructureTreeReader` walks veraPDF's PD model's `StructTreeRoot` (the
 tagged logical structure tree) directly, independent of running a
 validation pass.
@@ -179,15 +179,12 @@ Options:
 - `--output <path>` — write output to a file instead of stdout.
 - `--fix` — also attempt to repair the file's XMP **metadata** via veraPDF's
   metadata fixer, writing a repaired copy next to the original as
-  `<name>.fixed<ext>`. Only metadata is repaired (missing metadata stream,
-  missing PDF/A|PDF/UA identifier, false conformance claims, Info-dictionary
-  sync) — it does **not** fix structural/tagging issues (untagged content,
-  missing alt-text, table header scope, etc). Note that veraPDF's fixer only
-  adds a missing identifier/metadata stream when *every* failing check is a
-  metadata-only check per its `PDFUA_1`/`PDFA_*` "processed objects" list; if
-  the file has any structural failures too, it reports `WontFix` and leaves
-  metadata largely untouched (see `fixAppliedFixes`/`fixStatus` in the output
-  to see exactly what happened).
+  `<name>.fixed<ext>`. The CLI currently keeps the conservative metadata-only
+  behavior (missing metadata stream, missing PDF/A|PDF/UA identifier, false
+  conformance claims, Info-dictionary sync). The GUI **Fix…** dialog also
+  exposes selectable structural cleanup options for page annotation tab order
+  (`/Tabs /S`) and empty semantic `/P` structure elements. Neither path adds
+  missing alt text, retags untagged content, or infers table headers.
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
 - `--structure` — include each file's tagged logical structure tree (the
