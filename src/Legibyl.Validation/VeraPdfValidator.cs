@@ -125,7 +125,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                 }
                 else
                 {
-                    DeleteIfExists(tempStructuralOutput);
+                    TryDeleteTemporary(tempStructuralOutput);
                     tempStructuralOutput = null;
                 }
             }
@@ -148,7 +148,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                         status = metadataFix.Status;
                     }
 
-                    DeleteIfExists(tempMetadataOutput);
+                    TryDeleteTemporary(tempMetadataOutput);
                     tempMetadataOutput = null;
                 }
             }
@@ -189,11 +189,11 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         {
             if (!string.Equals(tempMetadataOutput, outputPath, StringComparison.OrdinalIgnoreCase))
             {
-                DeleteIfExists(tempMetadataOutput);
+                TryDeleteTemporary(tempMetadataOutput);
             }
             if (!string.Equals(tempStructuralOutput, outputPath, StringComparison.OrdinalIgnoreCase))
             {
-                DeleteIfExists(tempStructuralOutput);
+                TryDeleteTemporary(tempStructuralOutput);
             }
         }
     }
@@ -287,6 +287,10 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         using var reader = new PdfReader(inputPath);
         using var writer = new PdfWriter(outputPath);
         using var document = new PdfDocument(reader, writer);
+        var context = new StructuralFixContext(
+            document,
+            BuildITextPageNumberIndex(document),
+            MarkedContentTextIndex.Build(inputPath));
 
         if (options.HasFlag(PdfFixOptions.AnnotationTabs))
         {
@@ -314,7 +318,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             PdfDictionary? structTreeRoot = catalog.GetAsDictionary(PdfName.StructTreeRoot);
             if (structTreeRoot is not null)
             {
-                emptyParagraphsRemoved += RemoveEmptyParagraphsFromStructTreeRoot(structTreeRoot);
+                emptyParagraphsRemoved += RemoveEmptyParagraphsFromStructTreeRoot(structTreeRoot, context);
             }
         }
 
@@ -322,7 +326,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         if (!changed)
         {
             document.Close();
-            DeleteIfExists(outputPath);
+            TryDeleteTemporary(outputPath);
         }
 
         return changed;
@@ -335,7 +339,22 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         using var document = new PdfDocument(reader, writer);
     }
 
-    private static int RemoveEmptyParagraphsFromStructTreeRoot(PdfDictionary structTreeRoot)
+    private static Dictionary<int, int> BuildITextPageNumberIndex(PdfDocument document)
+    {
+        var pageNumberByObject = new Dictionary<int, int>();
+        for (int pageNumber = 1; pageNumber <= document.GetNumberOfPages(); pageNumber++)
+        {
+            PdfIndirectReference? reference = document.GetPage(pageNumber).GetPdfObject().GetIndirectReference();
+            if (reference is not null)
+            {
+                pageNumberByObject[reference.GetObjNumber()] = pageNumber;
+            }
+        }
+
+        return pageNumberByObject;
+    }
+
+    private static int RemoveEmptyParagraphsFromStructTreeRoot(PdfDictionary structTreeRoot, StructuralFixContext context)
     {
         PdfObject? kids = structTreeRoot.Get(PdfName.K);
         if (kids is null)
@@ -343,16 +362,17 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             return 0;
         }
 
-        if (ShouldRemoveEmptyParagraph(kids, out int removedFromChildren))
+        int? pageNumber = ResolveStructElemPageNumber(structTreeRoot, context, inheritedPage: null);
+        if (ShouldRemoveEmptyParagraph(kids, context, pageNumber, out int removedFromChildren))
         {
             structTreeRoot.Remove(PdfName.K);
             return removedFromChildren + 1;
         }
 
-        return RemoveEmptyParagraphsFromKids(kids);
+        return RemoveEmptyParagraphsFromKids(kids, context, pageNumber);
     }
 
-    private static int RemoveEmptyParagraphsFromKids(PdfObject kids)
+    private static int RemoveEmptyParagraphsFromKids(PdfObject kids, StructuralFixContext context, int? inheritedPage)
     {
         PdfObject resolvedKids = Resolve(kids);
         if (resolvedKids is PdfArray array)
@@ -361,7 +381,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             for (int i = array.Size() - 1; i >= 0; i--)
             {
                 PdfObject? child = array.Get(i);
-                if (ShouldRemoveEmptyParagraph(child, out int childRemoved))
+                if (ShouldRemoveEmptyParagraph(child, context, inheritedPage, out int childRemoved))
                 {
                     array.Remove(i);
                     removed++;
@@ -371,10 +391,10 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             return removed;
         }
 
-        return resolvedKids is PdfDictionary dict ? RemoveEmptyParagraphsInside(dict) : 0;
+        return resolvedKids is PdfDictionary dict ? RemoveEmptyParagraphsInside(dict, context, inheritedPage) : 0;
     }
 
-    private static bool ShouldRemoveEmptyParagraph(PdfObject? obj, out int removedFromChildren)
+    private static bool ShouldRemoveEmptyParagraph(PdfObject? obj, StructuralFixContext context, int? inheritedPage, out int removedFromChildren)
     {
         removedFromChildren = 0;
         PdfObject? resolved = Resolve(obj);
@@ -383,38 +403,113 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             return false;
         }
 
-        removedFromChildren = RemoveEmptyParagraphsInside(dictionary);
-        return PdfName.P.Equals(dictionary.GetAsName(PdfName.S)) && IsStructElemEmpty(dictionary);
+        int? pageNumber = ResolveStructElemPageNumber(dictionary, context, inheritedPage);
+        removedFromChildren = RemoveEmptyParagraphsInside(dictionary, context, pageNumber);
+        return PdfName.P.Equals(dictionary.GetAsName(PdfName.S)) && IsStructElemEmpty(dictionary, context, pageNumber);
     }
 
-    private static int RemoveEmptyParagraphsInside(PdfDictionary dictionary)
-    {
-        PdfObject? kids = dictionary.Get(PdfName.K);
-        return kids is null ? 0 : RemoveEmptyParagraphsFromKids(kids);
-    }
-
-    private static bool IsStructElemEmpty(PdfDictionary dictionary)
+    private static int RemoveEmptyParagraphsInside(PdfDictionary dictionary, StructuralFixContext context, int? inheritedPage)
     {
         PdfObject? kids = dictionary.Get(PdfName.K);
         if (kids is null)
         {
+            return 0;
+        }
+
+        int? pageNumber = ResolveStructElemPageNumber(dictionary, context, inheritedPage);
+        if (ShouldRemoveEmptyParagraph(kids, context, pageNumber, out int removedFromChild))
+        {
+            dictionary.Remove(PdfName.K);
+            return removedFromChild + 1;
+        }
+
+        return RemoveEmptyParagraphsFromKids(kids, context, pageNumber);
+    }
+
+    private static bool IsStructElemEmpty(PdfDictionary dictionary, StructuralFixContext context, int? inheritedPage)
+    {
+        return IsStructureSubtreeEmpty(dictionary, context, inheritedPage);
+    }
+
+    private static bool IsStructureSubtreeEmpty(PdfObject? obj, StructuralFixContext context, int? inheritedPage)
+    {
+        PdfObject? resolved = ResolveOrNull(obj);
+        if (resolved is null)
+        {
             return true;
         }
 
-        PdfObject resolvedKids = Resolve(kids);
-        return resolvedKids is PdfArray array && array.Size() == 0;
+        if (resolved is PdfArray array)
+        {
+            if (array.Size() == 0)
+            {
+                return true;
+            }
+
+            for (int i = 0; i < array.Size(); i++)
+            {
+                if (!IsStructureSubtreeEmpty(array.Get(i), context, inheritedPage))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        if (resolved is not PdfDictionary dictionary)
+        {
+            if (resolved is PdfNumber mcid && inheritedPage is { } pageNumber)
+            {
+                return !context.MarkedContent.TryGetValue((pageNumber, mcid.IntValue()), out MarkedContentInfo? info) ||
+                    string.IsNullOrWhiteSpace(info.Text);
+            }
+
+            return false;
+        }
+
+        if (!PdfName.StructElem.Equals(dictionary.GetAsName(PdfName.Type)) &&
+            dictionary.GetAsName(PdfName.S) is null)
+        {
+            return false;
+        }
+
+        int? ownPage = ResolveStructElemPageNumber(dictionary, context, inheritedPage);
+        PdfObject? kids = dictionary.Get(PdfName.K);
+        return kids is null || IsStructureSubtreeEmpty(kids, context, ownPage);
+    }
+
+    private static int? ResolveStructElemPageNumber(PdfDictionary dictionary, StructuralFixContext context, int? inheritedPage)
+    {
+        PdfDictionary? page = dictionary.GetAsDictionary(PdfName.Pg);
+        PdfIndirectReference? reference = page?.GetIndirectReference();
+        if (reference is not null && context.PageNumberByObject.TryGetValue(reference.GetObjNumber(), out int pageNumber))
+        {
+            return pageNumber;
+        }
+
+        return inheritedPage;
+    }
+
+    private static PdfObject? ResolveOrNull(PdfObject? obj)
+    {
+        return obj is PdfIndirectReference reference ? reference.GetRefersTo() : obj;
     }
 
     private static PdfObject Resolve(PdfObject? obj)
     {
-        return obj is PdfIndirectReference reference ? reference.GetRefersTo() : obj!;
+        return ResolveOrNull(obj)!;
     }
 
     private static string CreateTemporaryPdfPath(string outputPath)
     {
-        string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? Path.GetTempPath();
-        System.IO.Directory.CreateDirectory(directory);
-        return Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(outputPath)}.{Guid.NewGuid():N}.tmp.pdf");
+        string prefix = Path.GetFileNameWithoutExtension(outputPath);
+        if (string.IsNullOrWhiteSpace(prefix))
+        {
+            prefix = "legibyl";
+        }
+
+        return Path.Combine(Path.GetTempPath(), $"{prefix}.{Guid.NewGuid():N}.tmp.pdf");
     }
 
     private static void DeleteIfExists(string? path)
@@ -425,7 +520,45 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         }
     }
 
+    private static void TryDeleteTemporary(string? path)
+    {
+        if (path is null || !File.Exists(path))
+        {
+            return;
+        }
+
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                File.Delete(path);
+                return;
+            }
+            catch (IOException) when (attempt < 4)
+            {
+                Thread.Sleep(100);
+            }
+            catch (UnauthorizedAccessException) when (attempt < 4)
+            {
+                Thread.Sleep(100);
+            }
+            catch (IOException)
+            {
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
+        }
+    }
+
     private sealed record MetadataFixOutcome(bool Changed, RepairStatus Status, IReadOnlyList<string> AppliedFixes);
+
+    private sealed record StructuralFixContext(
+        PdfDocument Document,
+        IReadOnlyDictionary<int, int> PageNumberByObject,
+        IReadOnlyDictionary<(int Page, int Mcid), MarkedContentInfo> MarkedContent);
 
     /// <summary>
     /// Reads the structure tree by opening the PDF a second time through veraPDF's
@@ -936,13 +1069,18 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         try
         {
             using var document = new PdfDocument(new PdfReader(pdfPath));
+            var context = new StructuralFixContext(
+                document,
+                BuildITextPageNumberIndex(document),
+                MarkedContentTextIndex.Build(pdfPath));
             PdfDictionary? structTreeRoot = document.GetCatalog()
                 .GetPdfObject()
                 .GetAsDictionary(PdfName.StructTreeRoot);
             PdfObject? kids = structTreeRoot?.Get(PdfName.K);
             if (kids is not null)
             {
-                AddEmptyParagraphWarnings(kids, "StructTreeRoot/K", warnings);
+                int? pageNumber = structTreeRoot is null ? null : ResolveStructElemPageNumber(structTreeRoot, context, inheritedPage: null);
+                AddEmptyParagraphWarnings(kids, "StructTreeRoot/K", context, pageNumber, warnings);
             }
         }
         catch (iText.Kernel.Exceptions.PdfException ex)
@@ -963,14 +1101,19 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         return warnings;
     }
 
-    private static void AddEmptyParagraphWarnings(PdfObject obj, string path, List<RuleViolation> warnings)
+    private static void AddEmptyParagraphWarnings(
+        PdfObject obj,
+        string path,
+        StructuralFixContext context,
+        int? inheritedPage,
+        List<RuleViolation> warnings)
     {
         PdfObject resolved = Resolve(obj);
         if (resolved is PdfArray array)
         {
             for (int i = 0; i < array.Size(); i++)
             {
-                AddEmptyParagraphWarnings(array.Get(i), $"{path}[{i}]", warnings);
+                AddEmptyParagraphWarnings(array.Get(i), $"{path}[{i}]", context, inheritedPage, warnings);
             }
             return;
         }
@@ -980,7 +1123,8 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             return;
         }
 
-        if (PdfName.P.Equals(dictionary.GetAsName(PdfName.S)) && IsStructElemEmpty(dictionary))
+        int? pageNumber = ResolveStructElemPageNumber(dictionary, context, inheritedPage);
+        if (PdfName.P.Equals(dictionary.GetAsName(PdfName.S)) && IsStructElemEmpty(dictionary, context, pageNumber))
         {
             warnings.Add(CreateLegibylWarning(
                 "Empty semantic /P structure element. It can add meaningless stops to the screen-reader structure tree and can be removed by the Fix dialog.",
@@ -991,7 +1135,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         PdfObject? kids = dictionary.Get(PdfName.K);
         if (kids is not null)
         {
-            AddEmptyParagraphWarnings(kids, $"{path}/K", warnings);
+            AddEmptyParagraphWarnings(kids, $"{path}/K", context, pageNumber, warnings);
         }
     }
 
@@ -1017,8 +1161,11 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             return PdfFixOptions.AnnotationTabs;
         }
 
-        if (clause == "7.1" &&
-            text.Contains("Metadata", StringComparison.OrdinalIgnoreCase))
+        if (text.Contains("metadata", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("PDF/UA Identification", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("PDF/A Identification", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("conformance level", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("XMP", StringComparison.OrdinalIgnoreCase))
         {
             return PdfFixOptions.Metadata;
         }

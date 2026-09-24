@@ -103,6 +103,36 @@ public class PdfFixerTests
     }
 
     [Fact]
+    public void Fix_NestedEmptyParagraph_RemovesParagraph()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        string output = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.fixed.pdf");
+        try
+        {
+            CreatePdfWithNestedEmptyParagraph(input);
+            var fixer = new VeraPdfValidator();
+
+            FixResult result = fixer.Fix(
+                input,
+                PdfProfile.PdfUa1,
+                output,
+                PdfFixOptions.RemoveEmptyParagraphs);
+
+            Assert.True(result.WasFixed);
+            using var document = new PdfDocument(new PdfReader(output));
+            PdfDictionary structTreeRoot = document.GetCatalog()
+                .GetPdfObject()
+                .GetAsDictionary(PdfName.StructTreeRoot)!;
+            Assert.Null(structTreeRoot.Get(PdfName.K));
+        }
+        finally
+        {
+            DeleteIfExists(input);
+            DeleteIfExists(output);
+        }
+    }
+
+    [Fact]
     public void Validate_EmptyParagraph_AddsFixableWarning()
     {
         string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
@@ -177,6 +207,25 @@ public class PdfFixerTests
         var structTreeRoot = new PdfDictionary();
         structTreeRoot.Put(PdfName.Type, PdfName.StructTreeRoot);
         structTreeRoot.Put(PdfName.K, Paragraph());
+        document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, structTreeRoot);
+    }
+
+    private static void CreatePdfWithNestedEmptyParagraph(string path)
+    {
+        using var document = new PdfDocument(new PdfWriter(path));
+        document.AddNewPage();
+
+        PdfDictionary emptySpan = new PdfDictionary();
+        emptySpan.Put(PdfName.Type, PdfName.StructElem);
+        emptySpan.Put(PdfName.S, PdfName.Span);
+        emptySpan.Put(PdfName.K, new PdfArray());
+
+        PdfDictionary paragraph = Paragraph();
+        paragraph.Put(PdfName.K, emptySpan);
+
+        var structTreeRoot = new PdfDictionary();
+        structTreeRoot.Put(PdfName.Type, PdfName.StructTreeRoot);
+        structTreeRoot.Put(PdfName.K, paragraph);
         document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, structTreeRoot);
     }
 

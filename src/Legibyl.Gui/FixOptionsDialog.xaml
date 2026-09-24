@@ -20,7 +20,7 @@
             <CheckBox x:Name="AnnotationTabsCheckBox" Margin="0,0,0,10"
                       Content="Set /Tabs /S on pages that contain annotations" />
             <CheckBox x:Name="EmptyParagraphsCheckBox" Margin="0,0,0,10"
-                      Content="Remove empty semantic /P structure elements" />
+                      Content="Remove empty semantic /P structure elements (optional cleanup)" />
 
             <TextBlock Foreground="#FF555555" TextWrapping="Wrap" Margin="0,8,0,0"
                        Text="These repairs are best-effort structural cleanup. They do not add missing alt text, retag untagged content, or infer table headers." />

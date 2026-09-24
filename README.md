@@ -191,8 +191,12 @@ Options:
   already-cleaned copy in the same operation. Fixed copies are finalized with
   an iText rewrite and parsed again before being returned, so stale
   cross-reference/startxref offsets from intermediate repair output are not
-  handed to the user. Neither path adds missing alt text, retags untagged
-  content, or infers table headers.
+  handed to the user. Intermediate repair files are created under the
+  operating system temp directory, not beside the source PDF or requested
+  output path. Empty `/P` cleanup is visible as a warning and fixable option,
+  but it is unchecked by default in the GUI so users opt into structure-tree
+  deletion. Neither path adds missing alt text, retags untagged content, or
+  infers table headers.
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
 - `--structure` — include each file's tagged logical structure tree (the

@@ -10,10 +10,10 @@ public partial class FixOptionsDialog : Window
         InitializeComponent();
         MetadataCheckBox.IsChecked = true;
         AnnotationTabsCheckBox.IsChecked = true;
-        EmptyParagraphsCheckBox.IsChecked = true;
+        EmptyParagraphsCheckBox.IsChecked = false;
     }
 
-    public PdfFixOptions SelectedOptions { get; private set; } = PdfFixOptions.All;
+    public PdfFixOptions SelectedOptions { get; private set; } = PdfFixOptions.Metadata | PdfFixOptions.AnnotationTabs;
 
     private void ContinueButton_Click(object sender, RoutedEventArgs e)
     {
