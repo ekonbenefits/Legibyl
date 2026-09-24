@@ -41,6 +41,8 @@ public partial class StructureTreeWindow : Window
         ["LI"] = (Colors.SeaGreen, Color.FromRgb(0xDE, 0xF2, 0xE3)),
         ["Lbl"] = (Colors.SeaGreen, Color.FromRgb(0xDE, 0xF2, 0xE3)),
         ["LBody"] = (Colors.SeaGreen, Color.FromRgb(0xDE, 0xF2, 0xE3)),
+        ["TOC"] = (Colors.MediumPurple, Color.FromRgb(0xEB, 0xE3, 0xF7)),
+        ["TOCI"] = (Colors.MediumPurple, Color.FromRgb(0xEB, 0xE3, 0xF7)),
         ["Table"] = (Colors.DarkOrange, Color.FromRgb(0xFD, 0xEA, 0xD3)),
         ["TR"] = (Colors.DarkOrange, Color.FromRgb(0xFD, 0xEA, 0xD3)),
         ["TH"] = (Colors.DarkOrange, Color.FromRgb(0xFD, 0xEA, 0xD3)),
@@ -244,75 +246,101 @@ public partial class StructureTreeWindow : Window
             Margin = new Thickness(0, 4, 0, 0),
             Background = new SolidColorBrush(Color.FromRgb(0xF8, 0xF5, 0xFC)),
         };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+        int columnCount = items
+            .Select(item => item.Children.Count + 1)
+            .DefaultIfEmpty(1)
+            .Max();
+        columnCount = Math.Max(columnCount, 1);
+
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        for (int column = 1; column < columnCount; column++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
 
         for (int rowIndex = 0; rowIndex < items.Count; rowIndex++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            AddTocItemRow(grid, items[rowIndex], rowIndex);
+            AddTocItemRow(grid, items[rowIndex], rowIndex, columnCount);
         }
 
         return grid;
     }
 
-    private void AddTocItemRow(Grid grid, StructureNode item, int rowIndex)
+    private void AddTocItemRow(Grid grid, StructureNode item, int rowIndex, int columnCount)
     {
-        var texts = FlattenContent(item)
-            .Select(text => text.Trim())
-            .Where(text => text.Length > 0 && !IsLeaderText(text))
-            .ToList();
-        string? printedPage = texts.LastOrDefault(IsPageNumberText);
-        string label = texts.FirstOrDefault(text => !IsPageNumberText(text)) ?? "(empty TOC item)";
-        string? target = item.LinkUri ?? item.LinkDestinationDescription;
+        AddTocTagCell(grid, item, rowIndex);
 
-        AddTocCell(grid, item, rowIndex, 0, label, FontWeights.SemiBold, Brushes.Black);
-        AddTocCell(grid, item, rowIndex, 1, printedPage is null ? string.Empty : printedPage, FontWeights.Normal, Brushes.DimGray);
-        AddTocCell(
-            grid,
-            item,
-            rowIndex,
-            2,
-            target is null ? "No link target found" : target,
-            FontWeights.Normal,
-            target is null ? Brushes.DarkGoldenrod : Brushes.DimGray);
+        for (int childIndex = 0; childIndex < item.Children.Count; childIndex++)
+        {
+            AddTocChildCell(grid, item.Children[childIndex], rowIndex, childIndex + 1);
+        }
+
+        if (item.Children.Count + 1 < columnCount)
+        {
+            AddTocSpacerCell(grid, item, rowIndex, item.Children.Count + 1, columnCount - item.Children.Count - 1);
+        }
     }
 
-    private void AddTocCell(
+    private void AddTocTagCell(Grid grid, StructureNode item, int rowIndex)
+    {
+        var border = CreateTocCellBorder(item, rowIndex, 0);
+        border.Background = new SolidColorBrush(CategoryColors["TOCI"].Header);
+        border.Child = new TextBlock
+        {
+            Text = "TOCI",
+            FontFamily = new FontFamily("Consolas"),
+            FontWeight = FontWeights.Bold,
+            FontSize = 12,
+            Foreground = Brushes.Black,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        Grid.SetRow(border, rowIndex);
+        Grid.SetColumn(border, 0);
+        grid.Children.Add(border);
+    }
+
+    private void AddTocChildCell(Grid grid, StructureNode child, int rowIndex, int columnIndex)
+    {
+        Border cell = CreateTocCellBorder(child, rowIndex, columnIndex);
+        Border childElement = BuildElement(child);
+        childElement.Margin = new Thickness(0);
+        cell.Child = childElement;
+        Grid.SetRow(cell, rowIndex);
+        Grid.SetColumn(cell, columnIndex);
+        grid.Children.Add(cell);
+    }
+
+    private void AddTocSpacerCell(
         Grid grid,
         StructureNode item,
         int rowIndex,
         int columnIndex,
-        string text,
-        FontWeight fontWeight,
-        Brush foreground)
+        int columnSpan)
+    {
+        Border border = CreateTocCellBorder(item, rowIndex, columnIndex);
+        Grid.SetRow(border, rowIndex);
+        Grid.SetColumn(border, columnIndex);
+        Grid.SetColumnSpan(border, columnSpan);
+        grid.Children.Add(border);
+    }
+
+    private Border CreateTocCellBorder(StructureNode item, int rowIndex, int columnIndex)
     {
         var border = new Border
         {
-            BorderBrush = new SolidColorBrush(CategoryColors["Link"].Border),
+            BorderBrush = new SolidColorBrush(CategoryColors["TOCI"].Border),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(6, 4, 6, 4),
             Margin = new Thickness(columnIndex == 0 ? 0 : -1, rowIndex == 0 ? 0 : -1, 0, 0),
             Background = Brushes.White,
-            Child = new TextBlock
-            {
-                Text = text,
-                FontSize = columnIndex == 0 ? 13 : 12,
-                FontWeight = fontWeight,
-                Foreground = foreground,
-                TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Top,
-            },
             DataContext = item,
             ToolTip = item.Geometry is null
                 ? "Select: no page geometry is available for this TOC item."
                 : $"Select: highlight this TOC item on page {item.Geometry.PageNumber}.",
         };
         border.MouseLeftButtonDown += StructureBlock_MouseLeftButtonDown;
-        Grid.SetRow(border, rowIndex);
-        Grid.SetColumn(border, columnIndex);
-        grid.Children.Add(border);
+        return border;
     }
 
     /// <summary>
@@ -384,28 +412,6 @@ public partial class StructureTreeWindow : Window
         var cells = row.Children.Where(child => child.Tag is "TH" or "TD").ToList();
         return cells.Count > 0 ? cells : row.Children.ToList();
     }
-
-    private static IEnumerable<string> FlattenContent(StructureNode node)
-    {
-        if (node.Content is not null)
-        {
-            yield return node.Content;
-        }
-
-        foreach (StructureNode child in node.Children)
-        {
-            foreach (string text in FlattenContent(child))
-            {
-                yield return text;
-            }
-        }
-    }
-
-    private static bool IsLeaderText(string text) =>
-        text.All(ch => ch is '.' or '…' or ' ' or '\t');
-
-    private static bool IsPageNumberText(string text) =>
-        text.All(char.IsDigit);
 
     private async void StructureBlock_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
