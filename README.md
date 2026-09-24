@@ -1,7 +1,8 @@
-# veraPDF Tool
+# Legibyl
 
-A .NET (WPF) desktop GUI for PDF/UA (and PDF/A) validation, powered by the
-real [veraPDF](https://verapdf.org/) Java validation engine embedded via
+An easy-to-use wrapper around [veraPDF](https://verapdf.org/): a .NET (WPF)
+desktop GUI plus a scriptable CLI for PDF/UA (and PDF/A) validation, powered
+by the real veraPDF Java validation engine embedded via
 [IKVM.NET](https://ikvm.org/) — no separate JDK/JRE install or external
 process required.
 
@@ -9,9 +10,9 @@ process required.
 
 veraPDF's `greenfield-apps` fat jar (bundling its Greenfield validation
 core) is vendored under `lib/vendor/verapdf-jars/` and referenced from the
-`VeraPdfTool.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
+`Legibyl.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
 which translates the Java bytecode into a .NET assembly at build time. The
-`VeraPdfTool.Validation` project exposes a small, plain-C# API
+`Legibyl.Validation` project exposes a small, plain-C# API
 (`IPdfValidator.Validate(path, profile) -> ValidationReport` and
 `IPdfFixer.Fix(path, profile, outputPath) -> FixResult`) that fully
 isolates all Java/IKVM types from the rest of the app. `IPdfFixer` wraps
@@ -30,16 +31,16 @@ annotation"), used by the GUI's results grid (see below) and available on
 ## Solution layout
 
 ```
-VeraPdfTool.slnx
+Legibyl.slnx
 src/
-  VeraPdfTool.Validation/   C# facade over the veraPDF Java validation core (IKVM)
-  VeraPdfTool.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
-  VeraPdfTool.Gui/          WPF UI: file picker, profile selector, results grid
-  VeraPdfTool.Cli/          Command-line tool (verapdf-tool.exe), JSON-first, agent-friendly
+  Legibyl.Validation/   C# facade over the veraPDF Java validation core (IKVM)
+  Legibyl.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
+  Legibyl.Gui/          WPF UI: file picker, profile selector, results grid
+  Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
 tests/
-  VeraPdfTool.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
+  Legibyl.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
 installer/
-  VeraPdfTool.Gui.Installer/      WiX v6 MSI installer for the GUI (VeraPdfToolSetup.msi)
+  Legibyl.Gui.Installer/      WiX v6 MSI installer for the GUI (LegibylSetup.msi)
 lib/vendor/verapdf-jars/    Vendored veraPDF jar + provenance/checksum README
 licenses/                   GPLv3+/MPLv2+ license texts and third-party NOTICE
 spike/IkvmSpike/            Standalone feasibility spike (kept for reference)
@@ -50,20 +51,20 @@ spike/IkvmSpike/            Standalone feasibility spike (kept for reference)
 Requires the .NET 8 SDK.
 
 ```powershell
-dotnet build VeraPdfTool.slnx
-dotnet run --project src\VeraPdfTool.Gui\VeraPdfTool.Gui.csproj
+dotnet build Legibyl.slnx
+dotnet run --project src\Legibyl.Gui\Legibyl.Gui.csproj
 ```
 
 ## Testing
 
 ```powershell
-dotnet test tests\VeraPdfTool.Validation.Tests\VeraPdfTool.Validation.Tests.csproj
+dotnet test tests\Legibyl.Validation.Tests\Legibyl.Validation.Tests.csproj
 ```
 
 ## Publishing (self-contained)
 
 ```powershell
-dotnet publish src\VeraPdfTool.Gui\VeraPdfTool.Gui.csproj -c Release -r win-x64 --self-contained true -o publish\gui
+dotnet publish src\Legibyl.Gui\Legibyl.Gui.csproj -c Release -r win-x64 --self-contained true -o publish\gui
 ```
 
 The published output bundles IKVM's translated JRE (`IKVM.Java.dll`), so
@@ -71,16 +72,16 @@ the app runs standalone with no external Java installation.
 
 ## Windows installer (MSI)
 
-`installer/VeraPdfTool.Gui.Installer` builds a WiX v6 MSI (`VeraPdfToolSetup.msi`)
-that installs the self-contained GUI to `Program Files\Ekon Benefits\veraPDF Tool`,
+`installer/Legibyl.Gui.Installer` builds a WiX v6 MSI (`LegibylSetup.msi`)
+that installs the self-contained GUI to `Program Files\Ekon Benefits\Legibyl`,
 with Start Menu and Desktop shortcuts. It publishes the GUI itself as part of
 the build (no separate publish step needed):
 
 ```powershell
-dotnet build installer\VeraPdfTool.Gui.Installer\VeraPdfTool.Gui.Installer.wixproj -c Release
+dotnet build installer\Legibyl.Gui.Installer\Legibyl.Gui.Installer.wixproj -c Release
 ```
 
-The MSI is written to `artifacts\msi\en-US\VeraPdfToolSetup.msi`. Installing
+The MSI is written to `artifacts\msi\en-US\LegibylSetup.msi`. Installing
 to `Program Files` requires administrator privileges (standard per-machine
 MSI behavior). The installer also bundles the `LICENSE`/`licenses/` files
 so the license texts and third-party attribution are available on the
@@ -108,7 +109,7 @@ renders that page as an image with a highlight box drawn around the
 failing annotation, using [PdfPig](https://github.com/UglyToad/PdfPig) to
 read its `/Rect` and
 [PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia) +
-SkiaSharp to rasterise the page and draw the box (`VeraPdfTool.Rendering`
+SkiaSharp to rasterise the page and draw the box (`Legibyl.Rendering`
 project). Most structural/tagging failures (untagged paragraphs, missing
 table header scope, etc.) aren't attached to page geometry in veraPDF's
 model, so for those the full page is still shown for context, with a
@@ -116,7 +117,7 @@ banner noting the exact region isn't available.
 
 ## Command-line tool (for scripts / AI agents)
 
-`VeraPdfTool.Cli` builds a standalone `verapdf-tool` executable intended for
+`Legibyl.Cli` builds a standalone `legibyl` executable intended for
 use in scripts or by an AI agent iterating on PDF/UA compatibility fixes.
 Output defaults to structured JSON on stdout, and the **process exit code**
 tells you the outcome without needing to parse output:
@@ -129,11 +130,11 @@ tells you the outcome without needing to parse output:
 | `64` | Invalid command-line usage. |
 
 ```powershell
-dotnet run --project src\VeraPdfTool.Cli\VeraPdfTool.Cli.csproj -- <file.pdf> [<file2.pdf> ...] [options]
+dotnet run --project src\Legibyl.Cli\Legibyl.Cli.csproj -- <file.pdf> [<file2.pdf> ...] [options]
 ```
 
 Or after building, run the exe directly:
-`src\VeraPdfTool.Cli\bin\Debug\net8.0\verapdf-tool.exe <file.pdf>`
+`src\Legibyl.Cli\bin\Debug\net8.0\legibyl.exe <file.pdf>`
 
 Options:
 - `--profile <name>` — profile to validate against (default `pdfua1`). Run
@@ -199,8 +200,8 @@ engine version** (currently `1.28.1`), and the fourth component is a
 build/revision number that increments for tool-only releases (CLI/GUI/facade
 changes that don't touch the vendored jar). When the vendored jar is
 upgraded, the revision resets to `0` and the base is updated to match the new
-jar version. Run `verapdf-tool --version` to see both numbers at once
-(e.g. `verapdf-tool 1.28.1.0 (vendored veraPDF engine 1.28.1)`).
+jar version. Run `legibyl --version` to see both numbers at once
+(e.g. `legibyl 1.28.1.0 (vendored veraPDF engine 1.28.1)`).
 
 ## Licensing
 

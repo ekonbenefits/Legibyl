@@ -60,7 +60,7 @@ To update to a newer veraPDF release:
 3. Re-run the IKVM build (`dotnet build`) and the validation test suite to
    confirm the new jar still loads and validates correctly under IKVM.
 4. Update `VersionPrefix` in `Directory.Build.props` (repo root) and
-   `ProfileNames.VendoredEngineVersion` (`src/VeraPdfTool.Cli/ProfileNames.cs`)
+   `ProfileNames.VendoredEngineVersion` (`src/Legibyl.Cli/ProfileNames.cs`)
    to match the new jar version, and reset `VersionBuild` to `0` — see
    "Versioning" in the root README for why the tool's version is tied to
    this jar's version.

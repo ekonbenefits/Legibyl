@@ -1,0 +1,15 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+    <Fragment>
+        <util:CloseApplication Id="CloseLegibyl"
+                                Target="Legibyl.Gui.exe"
+                                CloseMessage="yes"
+                                RebootPrompt="no"
+                                TerminateProcess="5"/>
+
+        <CustomAction Id="LaunchApplication"
+                      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                      DllEntry="WixShellExec"
+                      Impersonate="yes" />
+    </Fragment>
+</Wix>

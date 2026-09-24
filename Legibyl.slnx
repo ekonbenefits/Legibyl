@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Legibyl.Cli/Legibyl.Cli.csproj" />
+    <Project Path="src/Legibyl.Gui/Legibyl.Gui.csproj" />
+    <Project Path="src/Legibyl.Rendering/Legibyl.Rendering.csproj" />
+    <Project Path="src/Legibyl.Validation/Legibyl.Validation.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Legibyl.Validation.Tests/Legibyl.Validation.Tests.csproj" />
+  </Folder>
+  <Folder Name="/installer/">
+    <Project Path="installer/Legibyl.Gui.Installer/Legibyl.Gui.Installer.wixproj">
+      <Platform Solution="*|Any CPU" Project="x64" />
+      <Build Solution="*|*" />
+    </Project>
+  </Folder>
+</Solution>

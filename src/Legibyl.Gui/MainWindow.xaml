@@ -1,0 +1,94 @@
+﻿<Window x:Class="Legibyl.Gui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Legibyl.Gui"
+        mc:Ignorable="d"
+        Title="Legibyl — PDF/UA Validator" Height="600" Width="900"
+        AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver">
+    <Window.Resources>
+        <Style x:Key="StatusBannerStyle" TargetType="Border">
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- File picker row -->
+        <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="FilePathTextBox" Grid.Column="0" Margin="0,0,8,0"
+                     VerticalContentAlignment="Center"
+                     IsReadOnly="True"
+                     Text="Drop a PDF here or click Browse..." />
+            <Button x:Name="BrowseButton" Grid.Column="1" Content="Browse…" Padding="12,4" Margin="0,0,8,0"
+                    Click="BrowseButton_Click" />
+            <ComboBox x:Name="ProfileComboBox" Grid.Column="2" Width="160" Margin="0,0,8,0"
+                      SelectedIndex="0" SelectionChanged="ProfileComboBox_SelectionChanged" />
+            <Button x:Name="ValidateButton" Grid.Column="3" Content="Validate" Padding="16,4"
+                    Click="ValidateButton_Click" IsEnabled="False" />
+        </Grid>
+
+        <!-- Progress -->
+        <ProgressBar x:Name="ProgressBar" Grid.Row="1" Height="4" Margin="0,0,0,8"
+                     IsIndeterminate="True" Visibility="Collapsed" />
+
+        <!-- Status banner -->
+        <Border x:Name="StatusBanner" Grid.Row="2" Style="{StaticResource StatusBannerStyle}"
+                Visibility="Collapsed">
+            <TextBlock x:Name="StatusText" FontWeight="Bold" TextWrapping="Wrap" />
+        </Border>
+
+        <!-- Results list -->
+        <ListView x:Name="ResultsListView" Grid.Row="3"
+                  SelectionChanged="ResultsListView_SelectionChanged">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="ToolTip" Value="{Binding LocationContext}" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Status" Width="70" DisplayMemberBinding="{Binding StatusLabel}" />
+                    <GridViewColumn Header="Clause" Width="90" DisplayMemberBinding="{Binding Clause}" />
+                    <GridViewColumn Header="Test" Width="50" DisplayMemberBinding="{Binding TestNumber}" />
+                    <GridViewColumn Header="Message" Width="380" DisplayMemberBinding="{Binding Message}" />
+                    <GridViewColumn Header="Page" Width="60" DisplayMemberBinding="{Binding PageDisplay}" />
+                    <GridViewColumn Header="Location" Width="220" DisplayMemberBinding="{Binding FriendlyLocation}" />
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <!-- Bottom action bar -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="JumpToPageButton" Content="Open at Page…" Padding="12,4" Margin="0,0,8,0"
+                    Click="JumpToPageButton_Click" IsEnabled="False"
+                    ToolTip="Best-effort: opens the PDF at this page in your default viewer, using the #page= link fragment. Not all PDF viewers honor it." />
+            <Button x:Name="ShowRegionButton" Content="Show Region…" Padding="12,4" Margin="0,0,8,0"
+                    Click="ShowRegionButton_Click" IsEnabled="False"
+                    ToolTip="Renders this page as an image, highlighting the failing region when its exact location can be determined (currently: link/form annotations)." />
+            <Button x:Name="FixButton" Content="Fix Metadata…" Padding="12,4" Margin="0,0,8,0"
+                    Click="FixButton_Click" IsEnabled="False"
+                    ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues. Disabled once the file is already fully compliant, since there'd be nothing left to fix." />
+            <Button x:Name="CopySummaryButton" Content="Copy Summary" Padding="12,4" Margin="0,0,8,0"
+                    Click="CopySummaryButton_Click" IsEnabled="False" />
+            <Button x:Name="SaveReportButton" Content="Save Report…" Padding="12,4"
+                    Click="SaveReportButton_Click" IsEnabled="False" />
+        </StackPanel>
+    </Grid>
+</Window>

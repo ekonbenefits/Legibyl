@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-**veraPDF-tool's own source code is licensed under the Mozilla Public
+**Legibyl's own source code is licensed under the Mozilla Public
 License 2.0 — see the `LICENSE` file at the repository root.**
 
 This application also bundles the `greenfield-apps-1.28.1.jar` Java
