@@ -596,6 +596,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             // that veraPDF tolerates), degrade gracefully: keep the structure tree itself,
             // just without extracted text content, rather than failing the whole read.
             Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex;
+            IReadOnlyList<LinkAnnotationTarget> linkAnnotationTargets;
             try
             {
                 textIndex = MarkedContentTextIndex.Build(pdfPath);
@@ -604,8 +605,16 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             {
                 textIndex = [];
             }
+            try
+            {
+                linkAnnotationTargets = BuildLinkAnnotationIndex(pdfPath);
+            }
+            catch (Exception)
+            {
+                linkAnnotationTargets = [];
+            }
 
-            var children = WalkStructureChildren(structTreeRoot, pageNumberByKey, textIndex, inheritedPage: null, depth: 0);
+            var children = WalkStructureChildren(structTreeRoot, pageNumberByKey, textIndex, linkAnnotationTargets, inheritedPage: null, depth: 0);
             return new StructureNode(
                 Tag: "StructTreeRoot",
                 Role: null,
@@ -616,6 +625,9 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
                 FormFieldDescription: null,
                 FormFieldType: null,
                 FormFieldValue: null,
+                LinkUri: null,
+                LinkDestinationPageNumber: null,
+                LinkDestinationDescription: null,
                 Geometry: UnionGeometry(children.Select(child => child.Geometry)),
                 Language: null,
                 PageNumber: null,
@@ -667,7 +679,8 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
     private static IReadOnlyList<StructureNode> WalkStructureChildren(
         org.verapdf.pd.structure.PDStructTreeNode node, Dictionary<string, int> pageNumberByKey,
-        Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex, int? inheritedPage, int depth)
+        Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex,
+        IReadOnlyList<LinkAnnotationTarget> linkAnnotationTargets, int? inheritedPage, int depth)
     {
         if (depth >= MaxStructureDepth)
         {
@@ -685,7 +698,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             // to visible text (via textIndex) and counts them via ContentLeafCount.
             if (iterator.next() is org.verapdf.pd.structure.PDStructElem elem)
             {
-                result.Add(ToStructureNode(elem, pageNumberByKey, textIndex, inheritedPage, depth));
+                result.Add(ToStructureNode(elem, pageNumberByKey, textIndex, linkAnnotationTargets, inheritedPage, depth));
             }
         }
         return result;
@@ -693,7 +706,8 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
 
     private static StructureNode ToStructureNode(
         org.verapdf.pd.structure.PDStructElem elem, Dictionary<string, int> pageNumberByKey,
-        Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex, int? inheritedPage, int depth)
+        Dictionary<(int Page, int Mcid), MarkedContentInfo> textIndex,
+        IReadOnlyList<LinkAnnotationTarget> linkAnnotationTargets, int? inheritedPage, int depth)
     {
         string tag = ResolveStructureTag(elem);
         string? role = elem.getRoleMapToSameNamespaceTag();
@@ -718,6 +732,7 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         var contentTexts = new List<string>();
         var directGeometries = new List<StructureGeometry>();
         FormFieldInfo? formField = null;
+        LinkTargetInfo? linkTarget = null;
         var iterator = elem.getChildren().iterator();
         while (iterator.hasNext())
         {
@@ -741,13 +756,15 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             }
 
             formField ??= TryReadFormFieldInfo(child, ownPage);
+            linkTarget ??= TryReadLinkTargetInfo(child, pageNumberByKey);
         }
 
         string? content = contentTexts.Count > 0 ? string.Join(" ", contentTexts) : null;
-        IReadOnlyList<StructureNode> children = WalkStructureChildren(elem, pageNumberByKey, textIndex, ownPage, depth + 1);
+        IReadOnlyList<StructureNode> children = WalkStructureChildren(elem, pageNumberByKey, textIndex, linkAnnotationTargets, ownPage, depth + 1);
         StructureGeometry? geometry = UnionGeometry(directGeometries.Concat(children.Select(child => child.Geometry)));
         geometry ??= formField?.Geometry;
         geometry ??= TryReadLayoutBBoxGeometry(elem, ownPage);
+        linkTarget ??= tag == "Link" && geometry is not null ? FindLinkTargetByGeometry(geometry, linkAnnotationTargets) : null;
 
         return new StructureNode(
             Tag: tag,
@@ -759,6 +776,9 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             FormFieldDescription: formField?.Description,
             FormFieldType: formField?.Type,
             FormFieldValue: formField?.Value,
+            LinkUri: linkTarget?.Uri,
+            LinkDestinationPageNumber: linkTarget?.DestinationPageNumber,
+            LinkDestinationDescription: linkTarget?.DestinationDescription,
             Geometry: geometry,
             Language: NullIfEmpty(elem.getLang()?.toString()),
             PageNumber: ownPage,
@@ -767,6 +787,10 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
     }
 
     private sealed record FormFieldInfo(string? Name, string? Description, string? Type, string? Value, StructureGeometry? Geometry);
+
+    private sealed record LinkTargetInfo(string? Uri, int? DestinationPageNumber, string? DestinationDescription);
+
+    private sealed record LinkAnnotationTarget(StructureGeometry Geometry, LinkTargetInfo Target);
 
     private static FormFieldInfo? TryReadFormFieldInfo(object child, int? ownPage)
     {
@@ -793,6 +817,243 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
         string? value = NullIfEmpty(referenced.getStringKey(Atom("V"))) ?? AtomValue(referenced.getNameKey(Atom("V")));
         StructureGeometry? geometry = TryReadWidgetGeometry(ownPage, referenced);
         return new FormFieldInfo(name, description, type, value, geometry);
+    }
+
+    private static LinkTargetInfo? TryReadLinkTargetInfo(
+        object child,
+        IReadOnlyDictionary<string, int> pageNumberByKey)
+    {
+        if (child is not org.verapdf.pd.structure.PDOBJRDictionary objr)
+        {
+            return null;
+        }
+
+        var referenced = objr.getReferencedObject();
+        if (referenced == null || referenced.empty())
+        {
+            return null;
+        }
+
+        string? subtype = AtomValue(referenced.getNameKey(Atom("Subtype")));
+        if (subtype != "Link")
+        {
+            return null;
+        }
+
+        var action = referenced.getKey(Atom("A"));
+        string? uri = NullIfEmpty(action?.getStringKey(Atom("URI")));
+        if (uri is not null)
+        {
+            return new LinkTargetInfo(uri, null, $"URI: {uri}");
+        }
+
+        var destination = referenced.getKey(Atom("Dest"));
+        if (destination == null || destination.empty())
+        {
+            destination = action?.getKey(Atom("D"));
+        }
+
+        return TryReadDestination(destination, pageNumberByKey);
+    }
+
+    private static IReadOnlyList<LinkAnnotationTarget> BuildLinkAnnotationIndex(string pdfPath)
+    {
+        var targets = new List<LinkAnnotationTarget>();
+        using var document = new PdfDocument(new PdfReader(pdfPath));
+        var pageNumberByObject = BuildITextPageNumberIndex(document);
+        for (int pageNumber = 1; pageNumber <= document.GetNumberOfPages(); pageNumber++)
+        {
+            PdfDictionary page = document.GetPage(pageNumber).GetPdfObject();
+            PdfArray? annotations = page.GetAsArray(PdfName.Annots);
+            if (annotations is null)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < annotations.Size(); i++)
+            {
+                PdfDictionary? annotation = annotations.GetAsDictionary(i);
+                if (annotation is null || !PdfName.Link.Equals(annotation.GetAsName(PdfName.Subtype)))
+                {
+                    continue;
+                }
+
+                StructureGeometry? geometry = GeometryFromRect(pageNumber, annotation.GetAsArray(PdfName.Rect));
+                LinkTargetInfo? target = ReadITextLinkTarget(annotation, pageNumberByObject);
+                if (geometry is not null && target is not null)
+                {
+                    targets.Add(new LinkAnnotationTarget(geometry, target));
+                }
+            }
+        }
+
+        return targets;
+    }
+
+    private static LinkTargetInfo? ReadITextLinkTarget(
+        PdfDictionary annotation,
+        IReadOnlyDictionary<int, int> pageNumberByObject)
+    {
+        PdfDictionary? action = annotation.GetAsDictionary(PdfName.A);
+        string? uri = action?.GetAsString(PdfName.URI)?.ToUnicodeString();
+        if (!string.IsNullOrWhiteSpace(uri))
+        {
+            return new LinkTargetInfo(uri, null, $"URI: {uri}");
+        }
+
+        PdfObject? destination = annotation.Get(PdfName.Dest) ?? action?.Get(PdfName.D);
+        if (destination is null)
+        {
+            return null;
+        }
+
+        int? pageNumber = ResolveITextDestinationPage(destination, pageNumberByObject);
+        string description = pageNumber is null
+            ? $"Internal destination: {destination}"
+            : $"Internal destination: page {pageNumber}{FormatDestinationCoordinates(destination)}";
+        return new LinkTargetInfo(null, pageNumber, description);
+    }
+
+    private static int? ResolveITextDestinationPage(
+        PdfObject destination,
+        IReadOnlyDictionary<int, int> pageNumberByObject)
+    {
+        PdfObject pageObject = destination is PdfArray array && array.Size() > 0 ? array.Get(0) : destination;
+        PdfIndirectReference? reference = pageObject switch
+        {
+            PdfIndirectReference directReference => directReference,
+            PdfDictionary dictionary => dictionary.GetIndirectReference(),
+            _ => null,
+        };
+
+        return reference is not null && pageNumberByObject.TryGetValue(reference.GetObjNumber(), out int pageNumber)
+            ? pageNumber
+            : null;
+    }
+
+    private static string FormatDestinationCoordinates(PdfObject destination)
+    {
+        if (destination is not PdfArray array || array.Size() < 2)
+        {
+            return string.Empty;
+        }
+
+        string mode = array.Get(1)?.ToString() ?? "?";
+        var parts = new List<string> { mode };
+        for (int i = 2; i < array.Size(); i++)
+        {
+            parts.Add(array.Get(i)?.ToString() ?? "?");
+        }
+
+        return $" ({string.Join(' ', parts)})";
+    }
+
+    private static StructureGeometry? GeometryFromRect(int pageNumber, PdfArray? rect)
+    {
+        if (rect is null || rect.Size() < 4)
+        {
+            return null;
+        }
+
+        double left = rect.GetAsNumber(0).DoubleValue();
+        double bottom = rect.GetAsNumber(1).DoubleValue();
+        double right = rect.GetAsNumber(2).DoubleValue();
+        double top = rect.GetAsNumber(3).DoubleValue();
+        return new StructureGeometry(
+            pageNumber,
+            Math.Min(left, right),
+            Math.Min(bottom, top),
+            Math.Max(left, right),
+            Math.Max(bottom, top));
+    }
+
+    private static LinkTargetInfo? FindLinkTargetByGeometry(
+        StructureGeometry geometry,
+        IReadOnlyList<LinkAnnotationTarget> targets)
+    {
+        return targets
+            .Where(target => target.Geometry.PageNumber == geometry.PageNumber)
+            .Select(target => new
+            {
+                target.Target,
+                Score = OverlapRatio(geometry, target.Geometry),
+                AreaRatio = Area(geometry) / Area(target.Geometry),
+            })
+            .Where(candidate => candidate.AreaRatio <= 4)
+            .Where(candidate => candidate.Score >= 0.5)
+            .OrderByDescending(candidate => candidate.Score)
+            .FirstOrDefault()
+            ?.Target;
+    }
+
+    private static double Area(StructureGeometry geometry) =>
+        Math.Max(1, (geometry.Right - geometry.Left) * (geometry.Top - geometry.Bottom));
+
+    private static double OverlapRatio(StructureGeometry content, StructureGeometry annotation)
+    {
+        double left = Math.Max(content.Left, annotation.Left);
+        double right = Math.Min(content.Right, annotation.Right);
+        double bottom = Math.Max(content.Bottom, annotation.Bottom);
+        double top = Math.Min(content.Top, annotation.Top);
+        if (right <= left || top <= bottom)
+        {
+            return 0;
+        }
+
+        double overlap = (right - left) * (top - bottom);
+        double contentArea = Area(content);
+        double annotationArea = Area(annotation);
+        return overlap / Math.Min(contentArea, annotationArea);
+    }
+
+    private static LinkTargetInfo? TryReadDestination(
+        org.verapdf.cos.COSObject? destination,
+        IReadOnlyDictionary<string, int> pageNumberByKey)
+    {
+        if (destination == null || destination.empty())
+        {
+            return null;
+        }
+
+        int? pageNumber = TryResolveDestinationPage(destination, pageNumberByKey);
+        string detail = FormatCosDestinationCoordinates(destination);
+        string description = pageNumber is null
+            ? $"Internal destination: {destination}"
+            : $"Internal destination: page {pageNumber}{detail}";
+        return new LinkTargetInfo(null, pageNumber, description);
+    }
+
+    private static string FormatCosDestinationCoordinates(org.verapdf.cos.COSObject destination)
+    {
+        int size = destination.size()?.intValue() ?? 0;
+        if (size < 2)
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>();
+        for (int i = 1; i < size; i++)
+        {
+            parts.Add(destination.at(i)?.toString() ?? "?");
+        }
+
+        return $" ({string.Join(' ', parts)})";
+    }
+
+    private static int? TryResolveDestinationPage(
+        org.verapdf.cos.COSObject destination,
+        IReadOnlyDictionary<string, int> pageNumberByKey)
+    {
+        org.verapdf.cos.COSObject? pageObject = destination;
+        if (destination.size()?.intValue() > 0)
+        {
+            pageObject = destination.at(0);
+        }
+
+        var key = pageObject?.getKey();
+        return key is not null && pageNumberByKey.TryGetValue(key.toString(), out int pageNumber)
+            ? pageNumber
+            : null;
     }
 
     private static StructureGeometry? TryReadWidgetGeometry(int? pageNumber, org.verapdf.cos.COSObject referenced)

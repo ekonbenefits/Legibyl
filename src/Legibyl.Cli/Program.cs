@@ -376,6 +376,8 @@ static void AppendStructure(System.Text.StringBuilder sb, StructureNode node, in
     if (node.FormFieldType is not null) parts.Add($"fieldType={node.FormFieldType}");
     if (node.FormFieldDescription is not null) parts.Add($"tooltip=\"{node.FormFieldDescription}\"");
     if (node.FormFieldValue is not null) parts.Add($"value=\"{node.FormFieldValue}\"");
+    if (node.LinkUri is not null) parts.Add($"href=\"{node.LinkUri}\"");
+    if (node.LinkDestinationDescription is not null) parts.Add($"dest=\"{node.LinkDestinationDescription}\"");
     if (node.ContentLeafCount > 0) parts.Add($"content×{node.ContentLeafCount}");
     sb.AppendLine(pad + string.Join(' ', parts));
     if (node.Content is not null)

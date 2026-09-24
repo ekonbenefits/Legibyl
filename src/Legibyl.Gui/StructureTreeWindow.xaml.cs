@@ -114,6 +114,7 @@ public partial class StructureTreeWindow : Window
         if (node.Language is not null) attrParts.Add($"[{node.Language}]");
         if (node.FormFieldType is not null) attrParts.Add($"field type: {node.FormFieldType}");
         if (node.FormFieldName is not null) attrParts.Add($"field: {node.FormFieldName}");
+        if (node.LinkDestinationPageNumber is not null) attrParts.Add($"links to p.{node.LinkDestinationPageNumber}");
         if (attrParts.Count > 0)
         {
             headerPanel.Children.Add(new TextBlock
@@ -157,6 +158,21 @@ public partial class StructureTreeWindow : Window
             inner.Children.Add(new TextBlock
             {
                 Text = $"value: \"{node.FormFieldValue}\"",
+                FontSize = 11,
+                Foreground = Brushes.DimGray,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+        }
+
+        string? linkTarget = node.LinkUri is not null
+            ? node.LinkUri
+            : node.LinkDestinationDescription;
+        if (linkTarget is not null)
+        {
+            inner.Children.Add(new TextBlock
+            {
+                Text = $"↳ {linkTarget}",
                 FontSize = 11,
                 Foreground = Brushes.DimGray,
                 TextWrapping = TextWrapping.Wrap,

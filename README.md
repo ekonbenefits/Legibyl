@@ -143,8 +143,13 @@ includes the semantic tag, page, language/role metadata, `Alt` or
 `ActualText` when present, the element's own extracted visible text matched
 by page + MCID, and for `/Form` elements the referenced widget annotation's
 field name (`/T`), tooltip/user description (`/TU`), field type (`/FT`), and
-current value (`/V`) when present. The **Tree** tab keeps the compact outline
-view. Layout blocks are selectable; when a selected node has same-page
+current value (`/V`) when present. For `/Link` elements, Legibyl also reports
+known targets: external URI actions and internal `/Dest`/GoTo destinations
+such as `Internal destination: page 4 (/XYZ 33 690 0)`. Some PDFs attach the
+destination only to the underlying link annotation, so Legibyl follows tagged
+annotation references and uses a conservative same-page geometry fallback
+when needed. The **Tree** tab keeps the compact outline view. Layout blocks
+are selectable; when a selected node has same-page
 geometry (from marked-content text glyph/image/path bounds, `/A /BBox`
 layout attributes, or form widget rectangles), the side preview renders that
 page and highlights the best-effort area the node covers. Pure containers,
@@ -152,8 +157,8 @@ content without a usable rectangle, or multi-page nodes show a note instead.
 If the file has no structure tree at all (completely untagged), the button
 reports that instead of an empty tree.
 **Export JSON…** in that window saves the whole hierarchy — including each
-node's `content` text, geometry, and form field metadata — as JSON, the same
-shape produced by the CLI's `--structure` flag. This is intended for AI agents
+node's `content` text, geometry, link targets, and form field metadata — as
+JSON, the same shape produced by the CLI's `--structure` flag. This is intended for AI agents
 or other tooling that needs to understand what text and interactive controls
 are present under each semantic role, not just the raw PDF/UA rule failures.
 

@@ -23,6 +23,8 @@ public sealed class StructureSummaryConverter : IValueConverter
         if (node.FormFieldDescription is not null) parts.Add($"tooltip: \"{node.FormFieldDescription}\"");
         if (node.FormFieldName is not null) parts.Add($"field: {node.FormFieldName}");
         if (node.FormFieldType is not null) parts.Add($"type: {node.FormFieldType}");
+        if (node.LinkUri is not null) parts.Add($"href: {node.LinkUri}");
+        if (node.LinkDestinationDescription is not null) parts.Add($"dest: {node.LinkDestinationDescription}");
         if (node.ContentLeafCount > 0)
         {
             parts.Add($"({node.ContentLeafCount} content item{(node.ContentLeafCount == 1 ? "" : "s")})");
