@@ -45,13 +45,16 @@ Java bytecode from .NET.
 
 ## PdfPig and PdfPig.Rendering.Skia
 
-The GUI's selected-finding preview (rendering the page containing a
-failure, with a highlight box around it) uses:
+Legibyl uses PdfPig in two places: the validation layer reads each page's
+marked-content text by MCID so the exported semantic structure tree can
+include the visible content under each tag, and the GUI's selected-finding
+preview renders the page containing a failure with a highlight box around
+it. These features use:
 
 - [PdfPig](https://github.com/UglyToad/PdfPig) — a pure managed C# PDF
   parser (no native/JNI dependencies), licensed under the Apache License,
-  Version 2.0. Used here to read annotation geometry (`/Rect`) directly
-  from the PDF's object model.
+  Version 2.0. Used here to read marked-content/MCID text and annotation
+  geometry (`/Rect`) directly from the PDF's object model.
 - [PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia)
   — a PdfPig extension that rasterises pages to
   [SkiaSharp](https://github.com/mono/SkiaSharp) bitmaps, licensed under

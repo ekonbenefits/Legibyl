@@ -22,8 +22,18 @@
         <TextBlock Grid.Row="0" Margin="0,0,0,8" TextWrapping="Wrap" Foreground="#FF555555"
                    Text="This is the tagged logical structure tree — the semantic heading/paragraph/list/table/link hierarchy that determines what content and reading order a screen reader presents to a user. Only elements that directly own page content show a page number." />
 
-        <TreeView x:Name="StructureTreeControl" Grid.Row="1"
-                  ItemTemplate="{StaticResource StructureNodeTemplate}" />
+        <TabControl Grid.Row="1">
+            <TabItem Header="Layout">
+                <ScrollViewer x:Name="LayoutScrollViewer" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Auto" Background="White">
+                    <ContentControl x:Name="LayoutHost" Margin="8" />
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Tree">
+                <TreeView x:Name="StructureTreeControl"
+                          ItemTemplate="{StaticResource StructureNodeTemplate}" />
+            </TabItem>
+        </TabControl>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button x:Name="ExportJsonButton" Content="Export JSON…" Padding="12,4" Margin="0,0,8,0"

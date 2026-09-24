@@ -346,6 +346,10 @@ static void AppendStructure(System.Text.StringBuilder sb, StructureNode node, in
     if (node.ActualText is not null) parts.Add($"actualText=\"{node.ActualText}\"");
     if (node.ContentLeafCount > 0) parts.Add($"content×{node.ContentLeafCount}");
     sb.AppendLine(pad + string.Join(' ', parts));
+    if (node.Content is not null)
+    {
+        sb.AppendLine(pad + $"  text=\"{node.Content}\"");
+    }
 
     foreach (var child in node.Children)
     {

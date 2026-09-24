@@ -25,7 +25,15 @@ public sealed class StructureSummaryConverter : IValueConverter
             parts.Add($"({node.ContentLeafCount} content item{(node.ContentLeafCount == 1 ? "" : "s")})");
         }
 
-        return string.Join("  ", parts);
+        string summary = string.Join("  ", parts);
+        if (node.Content is not null)
+        {
+            const int maxPreview = 60;
+            string preview = node.Content.Length > maxPreview ? node.Content[..maxPreview] + "…" : node.Content;
+            summary += $"  \u2014 \"{preview}\"";
+        }
+
+        return summary;
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

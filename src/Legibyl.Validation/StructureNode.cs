@@ -19,6 +19,15 @@ namespace Legibyl.Validation;
 /// </param>
 /// <param name="AlternateDescription">The element's Alt text (e.g. image/figure/link alt text), if any.</param>
 /// <param name="ActualText">The element's ActualText (a plain-text substitute for its content), if any.</param>
+/// <param name="Content">
+/// The actual visible text drawn under this element's own directly-owned marked
+/// content (extracted from the page's text glyphs, matched to this element by
+/// page + MCID) — the "what does a screen reader actually read here" text. Null if
+/// this element owns no text-bearing marked content directly (e.g. it's a purely
+/// structural container whose text lives entirely in its children, or it owns only
+/// non-text content like a raw image). Does not include descendant elements' text,
+/// to avoid duplicating text that already appears under a child node.
+/// </param>
 /// <param name="Language">The element's Lang tag (e.g. "en-US"), if explicitly set on this element.</param>
 /// <param name="PageNumber">
 /// The 1-based page this element's content appears on, if determinable. Null for
@@ -34,6 +43,7 @@ public sealed record StructureNode(
     string? Role,
     string? AlternateDescription,
     string? ActualText,
+    string? Content,
     string? Language,
     int? PageNumber,
     int ContentLeafCount,

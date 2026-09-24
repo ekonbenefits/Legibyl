@@ -8,6 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="IKVM" Version="8.16.1" />
+    <!-- Used only to read marked-content text runs (by page + MCID) for structure-tree
+         content extraction; pure managed, Apache 2.0, no native/PDFium dependency. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 
   <ItemGroup>

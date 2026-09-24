@@ -21,8 +21,15 @@ public class StructureTreeReaderTests
         Assert.Equal("StructTreeRoot", root!.Tag);
         StructureNode document = Assert.Single(root.Children);
         Assert.Equal("Document", document.Tag);
-        Assert.Contains(document.Children, n => n.Tag == "H1" && n.Language == "EN-US" && n.PageNumber == 1);
+        StructureNode heading = Assert.Single(document.Children, n => n.Tag == "H1");
+        Assert.Equal("EN-US", heading.Language);
+        Assert.Equal(1, heading.PageNumber);
+        Assert.Equal("The graphics objects in a document can be divided into two classes:", heading.Content);
         Assert.Contains(document.Children, n => n.Tag == "L");
+
+        StructureNode note = Assert.Single(document.Children, n => n.Tag == "Note");
+        StructureNode noteText = Assert.Single(note.Children, n => n.Tag == "Span");
+        Assert.StartsWith("Artifacts may also be used to describe areas of the document", noteText.Content);
     }
 
     [Fact]

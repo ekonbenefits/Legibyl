@@ -168,12 +168,27 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             }
 
             var pageNumberByKey = BuildPageNumberIndex(doc);
-            var children = WalkStructureChildren(structTreeRoot, pageNumberByKey, depth: 0);
+            // Built via a second, independent parse (PdfPig) — see MarkedContentTextIndex
+            // remarks. If this fails for any reason (e.g. a PDF quirk PdfPig can't parse
+            // that veraPDF tolerates), degrade gracefully: keep the structure tree itself,
+            // just without extracted text content, rather than failing the whole read.
+            Dictionary<(int Page, int Mcid), string> textIndex;
+            try
+            {
+                textIndex = MarkedContentTextIndex.Build(pdfPath);
+            }
+            catch (Exception)
+            {
+                textIndex = [];
+            }
+
+            var children = WalkStructureChildren(structTreeRoot, pageNumberByKey, textIndex, inheritedPage: null, depth: 0);
             return new StructureNode(
                 Tag: "StructTreeRoot",
                 Role: null,
                 AlternateDescription: null,
                 ActualText: null,
+                Content: null,
                 Language: null,
                 PageNumber: null,
                 ContentLeafCount: 0,
@@ -223,7 +238,8 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
     }
 
     private static IReadOnlyList<StructureNode> WalkStructureChildren(
-        org.verapdf.pd.structure.PDStructTreeNode node, Dictionary<string, int> pageNumberByKey, int depth)
+        org.verapdf.pd.structure.PDStructTreeNode node, Dictionary<string, int> pageNumberByKey,
+        Dictionary<(int Page, int Mcid), string> textIndex, int? inheritedPage, int depth)
     {
         if (depth >= MaxStructureDepth)
         {
@@ -237,18 +253,19 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             // Non-structure-element children are marked-content references and object
             // references (e.g. to a Link annotation) — the tree's actual leaves, i.e. the
             // tagged page content itself. They carry no hierarchy/semantic info of their
-            // own, so they aren't represented as nodes; ToStructureNode below counts them
-            // via ContentLeafCount instead.
+            // own, so they aren't represented as nodes; ToStructureNode below resolves them
+            // to visible text (via textIndex) and counts them via ContentLeafCount.
             if (iterator.next() is org.verapdf.pd.structure.PDStructElem elem)
             {
-                result.Add(ToStructureNode(elem, pageNumberByKey, depth));
+                result.Add(ToStructureNode(elem, pageNumberByKey, textIndex, inheritedPage, depth));
             }
         }
         return result;
     }
 
     private static StructureNode ToStructureNode(
-        org.verapdf.pd.structure.PDStructElem elem, Dictionary<string, int> pageNumberByKey, int depth)
+        org.verapdf.pd.structure.PDStructElem elem, Dictionary<string, int> pageNumberByKey,
+        Dictionary<(int Page, int Mcid), string> textIndex, int? inheritedPage, int depth)
     {
         string tag = ResolveStructureTag(elem);
         string? role = elem.getRoleMapToSameNamespaceTag();
@@ -257,32 +274,93 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             role = null;
         }
 
-        int? pageNumber = null;
+        // A structure element's own page is only explicit via /Pg on itself or an
+        // ancestor; page-less elements (most containers) inherit their nearest
+        // ancestor's page for the purpose of resolving their *own* marked content
+        // (an element's /K array of direct MCID integers is always relative to
+        // whichever page it/its ancestor declared).
+        int? ownPage = inheritedPage;
         var pageKey = elem.getPageObjectNumber();
         if (pageKey != null && pageNumberByKey.TryGetValue(pageKey.toString(), out int number))
         {
-            pageNumber = number;
+            ownPage = number;
         }
 
         int contentLeafCount = 0;
+        var contentTexts = new List<string>();
         var iterator = elem.getChildren().iterator();
         while (iterator.hasNext())
         {
-            if (iterator.next() is not org.verapdf.pd.structure.PDStructElem)
+            var child = iterator.next();
+            if (child is org.verapdf.pd.structure.PDStructElem)
             {
-                contentLeafCount++;
+                continue;
+            }
+
+            contentLeafCount++;
+            if (TryResolveContentText(child, ownPage, pageNumberByKey, textIndex, out string? text))
+            {
+                contentTexts.Add(text!);
             }
         }
+
+        string? content = contentTexts.Count > 0 ? string.Join(" ", contentTexts) : null;
 
         return new StructureNode(
             Tag: tag,
             Role: role,
             AlternateDescription: NullIfEmpty(elem.getAlternateDescription()),
             ActualText: NullIfEmpty(ActualTextOf(elem)),
+            Content: content,
             Language: NullIfEmpty(elem.getLang()?.toString()),
-            PageNumber: pageNumber,
+            PageNumber: ownPage,
             ContentLeafCount: contentLeafCount,
-            Children: WalkStructureChildren(elem, pageNumberByKey, depth + 1));
+            Children: WalkStructureChildren(elem, pageNumberByKey, textIndex, ownPage, depth + 1));
+    }
+
+    /// <summary>
+    /// Resolves one of a structure element's direct (non-structure-element) children —
+    /// either a plain MCID integer (content on the element's own/inherited page) or an
+    /// explicit <c>PDMCRDictionary</c> (content on a different page, e.g. artifacts
+    /// spanning a page boundary) — to its extracted visible text via <paramref name="textIndex"/>.
+    /// Object references (<c>PDOBJRDictionary</c>, e.g. a Link's associated annotation)
+    /// have no marked-content text of their own and are skipped.
+    /// </summary>
+    private static bool TryResolveContentText(
+        object child, int? ownPage, Dictionary<string, int> pageNumberByKey,
+        Dictionary<(int Page, int Mcid), string> textIndex, out string? text)
+    {
+        text = null;
+
+        if (child is org.verapdf.pd.structure.PDMCRDictionary mcr)
+        {
+            int? page = ownPage;
+            var pageKey = mcr.getPageObjectKey();
+            if (pageKey != null && pageNumberByKey.TryGetValue(pageKey.toString(), out int number))
+            {
+                page = number;
+            }
+
+            var mcid = mcr.getMCID();
+            if (page is not null && mcid is not null && textIndex.TryGetValue((page.Value, (int)mcid.longValue()), out string? resolved))
+            {
+                text = resolved;
+                return true;
+            }
+            return false;
+        }
+
+        if (child is org.verapdf.cos.COSObject cos && cos.getType()?.isNumber() == true && ownPage is not null)
+        {
+            var mcid = cos.getInteger();
+            if (mcid is not null && textIndex.TryGetValue((ownPage.Value, (int)mcid.longValue()), out string? resolved))
+            {
+                text = resolved;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string ResolveStructureTag(org.verapdf.pd.structure.PDStructElem elem)
