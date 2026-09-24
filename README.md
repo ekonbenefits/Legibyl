@@ -97,7 +97,11 @@ The results list is sorted by page number by default (unlocated failures —
 those with no `pages[N]` in their context, such as document-level metadata
 checks — sort to the end). It keeps only the short clause, test, page, and
 friendly location columns visible. Selecting a row shows its full, wrapped
-message and page preview in a resizable details panel beside the list.
+message, friendly location, raw veraPDF location context, and page preview
+in a resizable details panel beside the list. All detail text is selectable,
+and **Copy Finding** copies the selected rule, message, error detail, and
+both location forms. **Copy Summary** and **Save Report** sit below the
+results list and include the same location information for every finding.
 
 For failures anchored to an annotation (links, form fields — the most
 common failure type with an exact, checkable region), the details panel

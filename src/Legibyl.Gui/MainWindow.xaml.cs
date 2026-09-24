@@ -82,6 +82,7 @@ public partial class MainWindow : Window
         FixButton.IsEnabled = false;
         FindingDetailsPanel.Visibility = Visibility.Collapsed;
         RegionImage.Source = null;
+        CopyFindingButton.IsEnabled = false;
         PreviewNoteText.Text = string.Empty;
         PreviewProgressBar.Visibility = Visibility.Collapsed;
         _previewRequestVersion++;
@@ -191,6 +192,7 @@ public partial class MainWindow : Window
         if (ResultsListView.SelectedItem is not RuleViolationRow row)
         {
             FindingDetailsPanel.Visibility = Visibility.Collapsed;
+            CopyFindingButton.IsEnabled = false;
             return;
         }
 
@@ -198,6 +200,8 @@ public partial class MainWindow : Window
         FindingHeadingText.Text = $"Clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}";
         FindingMessageText.Text = row.Message;
         FindingLocationText.Text = row.FriendlyLocation;
+        FindingRawLocationText.Text = row.LocationContext ?? "Not available";
+        CopyFindingButton.IsEnabled = true;
         RegionImage.Source = null;
         PreviewNoteText.Text = string.Empty;
 
@@ -334,7 +338,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        Clipboard.SetText(BuildSummaryText(_lastReport));
+        Clipboard.SetText(ValidationReportTextFormatter.BuildReport(_lastReport));
+    }
+
+    private void CopyFindingButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResultsListView.SelectedItem is RuleViolationRow row)
+        {
+            Clipboard.SetText(ValidationReportTextFormatter.BuildFinding(row.Violation));
+        }
     }
 
     private void SaveReportButton_Click(object sender, RoutedEventArgs e)
@@ -352,26 +364,7 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog(this) == true)
         {
-            File.WriteAllText(dialog.FileName, BuildSummaryText(_lastReport));
+            File.WriteAllText(dialog.FileName, ValidationReportTextFormatter.BuildReport(_lastReport));
         }
-    }
-
-    private static string BuildSummaryText(ValidationReport report)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"File: {report.FilePath}");
-        sb.AppendLine($"Profile requested: {report.Profile}");
-        sb.AppendLine($"Flavour validated: {report.FlavourId}");
-        sb.AppendLine($"Compliant: {report.IsCompliant}");
-        sb.AppendLine($"Total checks: {report.TotalAssertions}");
-        sb.AppendLine($"Failed checks: {report.FailedCount}");
-        sb.AppendLine();
-
-        foreach (var violation in report.FailedAssertions)
-        {
-            sb.AppendLine(violation.ToString());
-        }
-
-        return sb.ToString();
     }
 }

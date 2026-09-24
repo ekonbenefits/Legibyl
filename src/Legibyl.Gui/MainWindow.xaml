@@ -63,30 +63,45 @@
                 <ColumnDefinition Width="7*" MinWidth="420" />
             </Grid.ColumnDefinitions>
 
-            <ListView x:Name="ResultsListView" Grid.Column="0"
-                      SelectionChanged="ResultsListView_SelectionChanged">
-                <ListView.ItemContainerStyle>
-                    <Style TargetType="ListViewItem">
-                        <Setter Property="ToolTip" Value="{Binding Message}" />
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    </Style>
-                </ListView.ItemContainerStyle>
-                <ListView.View>
-                    <GridView>
-                        <GridViewColumn Header="Clause" Width="80" DisplayMemberBinding="{Binding Clause}" />
-                        <GridViewColumn Header="Test" Width="48" DisplayMemberBinding="{Binding TestNumber}" />
-                        <GridViewColumn Header="Page" Width="62" DisplayMemberBinding="{Binding PageDisplay}" />
-                        <GridViewColumn Header="Location" Width="260">
-                            <GridViewColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding FriendlyLocation}" TextWrapping="Wrap"
-                                               Margin="0,3" />
-                                </DataTemplate>
-                            </GridViewColumn.CellTemplate>
-                        </GridViewColumn>
-                    </GridView>
-                </ListView.View>
-            </ListView>
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <ListView x:Name="ResultsListView" Grid.Row="0"
+                          SelectionChanged="ResultsListView_SelectionChanged">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="ToolTip" Value="{Binding Message}" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Clause" Width="80" DisplayMemberBinding="{Binding Clause}" />
+                            <GridViewColumn Header="Test" Width="48" DisplayMemberBinding="{Binding TestNumber}" />
+                            <GridViewColumn Header="Page" Width="62" DisplayMemberBinding="{Binding PageDisplay}" />
+                            <GridViewColumn Header="Location" Width="260">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding FriendlyLocation}" TextWrapping="Wrap"
+                                                   Margin="0,3" />
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                            Margin="0,8,0,0">
+                    <Button x:Name="CopySummaryButton" Content="Copy Summary" Padding="12,4"
+                            Margin="0,0,8,0" Click="CopySummaryButton_Click" IsEnabled="False" />
+                    <Button x:Name="SaveReportButton" Content="Save Report…" Padding="12,4"
+                            Click="SaveReportButton_Click" IsEnabled="False" />
+                </StackPanel>
+            </Grid>
 
             <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch"
                           Background="#FFE0E0E0" ResizeBehavior="PreviousAndNext" />
@@ -100,16 +115,34 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Margin="0,0,0,10">
-                    <TextBlock x:Name="FindingHeadingText" FontSize="16" FontWeight="SemiBold"
-                               TextWrapping="Wrap" Margin="0,0,0,4" />
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <TextBlock x:Name="FindingMessageText" TextWrapping="Wrap" />
-                    </ScrollViewer>
-                    <TextBlock x:Name="FindingLocationText" Foreground="#FF666666"
-                               TextWrapping="Wrap" Margin="0,6,0,0" />
-                </StackPanel>
+                <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <TextBlock x:Name="FindingHeadingText" FontSize="16" FontWeight="SemiBold"
+                                   TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <TextBlock Text="Message" FontWeight="SemiBold" />
+                        <TextBox x:Name="FindingMessageText" IsReadOnly="True" TextWrapping="Wrap"
+                                 MaxHeight="130" VerticalScrollBarVisibility="Auto"
+                                 BorderThickness="0" Background="Transparent" Padding="0,2" />
+                        <TextBlock Text="Location" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <TextBox x:Name="FindingLocationText" IsReadOnly="True" TextWrapping="Wrap"
+                                 BorderThickness="0" Background="Transparent" Padding="0,2"
+                                 Foreground="#FF555555" />
+                        <TextBlock Text="Raw location" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <TextBox x:Name="FindingRawLocationText" IsReadOnly="True" TextWrapping="Wrap"
+                                 MaxHeight="90" VerticalScrollBarVisibility="Auto"
+                                 BorderThickness="0" Background="Transparent" Padding="0,2"
+                                 FontFamily="Consolas" FontSize="12" Foreground="#FF555555" />
+                    </StackPanel>
+
+                    <Button x:Name="CopyFindingButton" Grid.Column="1" Content="Copy Finding"
+                            Padding="12,4" Margin="12,0,0,0" VerticalAlignment="Top"
+                            Click="CopyFindingButton_Click" IsEnabled="False" />
+                </Grid>
 
                 <ProgressBar x:Name="PreviewProgressBar" Grid.Row="1" Height="4"
                              IsIndeterminate="True" Visibility="Collapsed" Margin="0,0,0,8" />
@@ -130,10 +163,6 @@
             <Button x:Name="FixButton" Content="Fix Metadata…" Padding="12,4" Margin="0,0,8,0"
                     Click="FixButton_Click" IsEnabled="False"
                     ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues. Disabled once the file is already fully compliant, since there'd be nothing left to fix." />
-            <Button x:Name="CopySummaryButton" Content="Copy Summary" Padding="12,4" Margin="0,0,8,0"
-                    Click="CopySummaryButton_Click" IsEnabled="False" />
-            <Button x:Name="SaveReportButton" Content="Save Report…" Padding="12,4"
-                    Click="SaveReportButton_Click" IsEnabled="False" />
         </StackPanel>
     </Grid>
 </Window>

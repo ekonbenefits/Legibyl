@@ -5,7 +5,7 @@ namespace Legibyl.Gui;
 /// <summary>Flattened, display-friendly view of a <see cref="RuleViolation"/> for the results grid.</summary>
 public sealed class RuleViolationRow
 {
-    public required string StatusLabel { get; init; }
+    public required RuleViolation Violation { get; init; }
     public required string Clause { get; init; }
     public required int TestNumber { get; init; }
     public required string Message { get; init; }
@@ -25,7 +25,7 @@ public sealed class RuleViolationRow
         PdfLocation? location = violation.Location;
         return new RuleViolationRow
         {
-            StatusLabel = violation.Passed ? "Pass" : "Fail",
+            Violation = violation,
             Clause = violation.Clause,
             TestNumber = violation.TestNumber,
             Message = violation.Message,
