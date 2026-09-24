@@ -170,9 +170,16 @@ public partial class StructureTreeWindow : Window
             });
         }
 
-        foreach (var child in node.Children)
+        if (node.Tag == "Table")
         {
-            inner.Children.Add(BuildElement(child));
+            inner.Children.Add(BuildTableGrid(node));
+        }
+        else
+        {
+            foreach (var child in node.Children)
+            {
+                inner.Children.Add(BuildElement(child));
+            }
         }
 
         return new Border
@@ -185,6 +192,76 @@ public partial class StructureTreeWindow : Window
             Background = Brushes.White,
             Child = inner,
         };
+    }
+
+    /// <summary>
+    /// Renders semantic PDF tables as a visual grid instead of a vertical stack:
+    /// Table -> TR elements become rows, and TH/TD children become cells. This keeps
+    /// the exported/tree semantics unchanged while making the layout tab much closer
+    /// to how an HTML table with visible borders would look.
+    /// </summary>
+    private static UIElement BuildTableGrid(StructureNode table)
+    {
+        var rows = table.Children.Where(child => child.Tag == "TR").ToList();
+        if (rows.Count == 0)
+        {
+            var fallback = new StackPanel();
+            foreach (var child in table.Children)
+            {
+                fallback.Children.Add(BuildElement(child));
+            }
+            return fallback;
+        }
+
+        int columnCount = rows
+            .Select(row => TableCells(row).Count)
+            .DefaultIfEmpty(1)
+            .Max();
+        columnCount = Math.Max(columnCount, 1);
+
+        var grid = new Grid
+        {
+            Margin = new Thickness(0, 4, 0, 0),
+            Background = new SolidColorBrush(Color.FromRgb(0xFF, 0xFA, 0xF3)),
+        };
+
+        for (int column = 0; column < columnCount; column++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var cells = TableCells(rows[rowIndex]);
+
+            if (cells.Count == 0)
+            {
+                var rowElement = BuildElement(rows[rowIndex]);
+                Grid.SetRow(rowElement, rowIndex);
+                Grid.SetColumn(rowElement, 0);
+                Grid.SetColumnSpan(rowElement, columnCount);
+                grid.Children.Add(rowElement);
+                continue;
+            }
+
+            for (int columnIndex = 0; columnIndex < cells.Count; columnIndex++)
+            {
+                var cell = BuildElement(cells[columnIndex]);
+                cell.Margin = new Thickness(1);
+                Grid.SetRow(cell, rowIndex);
+                Grid.SetColumn(cell, columnIndex);
+                grid.Children.Add(cell);
+            }
+        }
+
+        return grid;
+    }
+
+    private static List<StructureNode> TableCells(StructureNode row)
+    {
+        var cells = row.Children.Where(child => child.Tag is "TH" or "TD").ToList();
+        return cells.Count > 0 ? cells : row.Children.ToList();
     }
 
     private void ExportJsonButton_Click(object sender, RoutedEventArgs e)

@@ -129,8 +129,10 @@ It's read directly from veraPDF's own PD model (independent of a
 validation pass), so it reflects exactly what the validator itself sees.
 The default **Layout** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
-(headings, lists, tables, links, figures, etc. use different colors). Each
-box includes the semantic tag, page, language/role metadata, `Alt` or
+(headings, lists, tables, links, figures, etc. use different colors).
+Semantic tables are rendered as an actual grid: `Table` contains visual rows
+from `TR`, and each row lays out `TH`/`TD` cells horizontally. Each box/cell
+includes the semantic tag, page, language/role metadata, `Alt` or
 `ActualText` when present, the element's own extracted visible text matched
 by page + MCID, and for `/Form` elements the referenced widget annotation's
 field name (`/T`), tooltip/user description (`/TU`), field type (`/FT`), and
