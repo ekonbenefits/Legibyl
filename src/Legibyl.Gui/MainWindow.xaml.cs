@@ -1,8 +1,8 @@
-using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using Legibyl.Rendering;
 using Legibyl.Validation;
@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private string? _selectedFilePath;
     private ValidationReport? _lastReport;
     private bool _isBusy;
+    private int _previewRequestVersion;
 
     public MainWindow()
     {
@@ -79,8 +80,11 @@ public partial class MainWindow : Window
         CopySummaryButton.IsEnabled = false;
         SaveReportButton.IsEnabled = false;
         FixButton.IsEnabled = false;
-        JumpToPageButton.IsEnabled = false;
-        ShowRegionButton.IsEnabled = false;
+        FindingDetailsPanel.Visibility = Visibility.Collapsed;
+        RegionImage.Source = null;
+        PreviewNoteText.Text = string.Empty;
+        PreviewProgressBar.Visibility = Visibility.Collapsed;
+        _previewRequestVersion++;
     }
 
     private async void ValidateButton_Click(object sender, RoutedEventArgs e) => await RunValidationAsync();
@@ -166,8 +170,11 @@ public partial class MainWindow : Window
         CopySummaryButton.IsEnabled = true;
         SaveReportButton.IsEnabled = true;
         FixButton.IsEnabled = CanAttemptFix;
-        JumpToPageButton.IsEnabled = false;
-        ShowRegionButton.IsEnabled = false;
+
+        if (ResultsListView.Items.Count > 0)
+        {
+            ResultsListView.SelectedIndex = 0;
+        }
     }
 
     private void ShowError(string message)
@@ -178,70 +185,71 @@ public partial class MainWindow : Window
         StatusText.Text = $"Error: {message}";
     }
 
-    private void ResultsListView_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private async void ResultsListView_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        bool hasPage = ResultsListView.SelectedItem is RuleViolationRow { PageNumber: not null };
-        JumpToPageButton.IsEnabled = hasPage;
-        ShowRegionButton.IsEnabled = hasPage;
-    }
-
-    private void JumpToPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_selectedFilePath is null || ResultsListView.SelectedItem is not RuleViolationRow { PageNumber: { } page })
+        int requestVersion = ++_previewRequestVersion;
+        if (ResultsListView.SelectedItem is not RuleViolationRow row)
         {
+            FindingDetailsPanel.Visibility = Visibility.Collapsed;
             return;
         }
 
-        try
-        {
-            string fullPath = Path.GetFullPath(_selectedFilePath);
-            var uri = new Uri(fullPath).AbsoluteUri + $"#page={page}";
-            Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            MessageBox.Show(
-                this,
-                $"Couldn't open the PDF viewer: {ex.Message}\n\nNote: the #page= link works only if your default PDF viewer supports it (e.g. Adobe Reader, Edge, SumatraPDF).",
-                "Open at Page",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
-    }
-
-    private async void ShowRegionButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_selectedFilePath is null || ResultsListView.SelectedItem is not RuleViolationRow row)
-        {
-            return;
-        }
+        FindingDetailsPanel.Visibility = Visibility.Visible;
+        FindingHeadingText.Text = $"Clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}";
+        FindingMessageText.Text = row.Message;
+        FindingLocationText.Text = row.FriendlyLocation;
+        RegionImage.Source = null;
+        PreviewNoteText.Text = string.Empty;
 
         PdfLocation? location = PdfLocationParser.Parse(row.LocationContext);
-        if (location is null)
+        string? filePath = _selectedFilePath;
+        if (filePath is null || location is null)
         {
+            PreviewProgressBar.Visibility = Visibility.Collapsed;
+            PreviewNoteText.Text = "This finding is not associated with a specific PDF page.";
             return;
         }
 
-        SetBusy(true);
+        PreviewProgressBar.Visibility = Visibility.Visible;
         try
         {
             HighlightImageResult result = await Task.Run(
-                () => _regionRenderer.RenderPageWithHighlight(_selectedFilePath, location));
+                () => _regionRenderer.RenderPageWithHighlight(filePath, location));
 
-            var preview = new RegionPreviewWindow(result, $"Page {result.PageNumber} — {row.FriendlyLocation}")
+            if (requestVersion != _previewRequestVersion)
             {
-                Owner = this,
-            };
-            preview.Show();
+                return;
+            }
+
+            RegionImage.Source = CreateBitmap(result.PngBytes);
+            PreviewNoteText.Text = result.HasPreciseRegion ? string.Empty : result.Note;
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException)
         {
-            MessageBox.Show(this, ex.Message, "Show Region", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (requestVersion == _previewRequestVersion)
+            {
+                PreviewNoteText.Text = $"The page preview could not be rendered: {ex.Message}";
+            }
         }
         finally
         {
-            SetBusy(false);
+            if (requestVersion == _previewRequestVersion)
+            {
+                PreviewProgressBar.Visibility = Visibility.Collapsed;
+            }
         }
+    }
+
+    private static BitmapImage CreateBitmap(byte[] pngBytes)
+    {
+        var image = new BitmapImage();
+        using var stream = new MemoryStream(pngBytes);
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     private async void FixButton_Click(object sender, RoutedEventArgs e)

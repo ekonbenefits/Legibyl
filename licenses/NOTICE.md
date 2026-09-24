@@ -45,8 +45,8 @@ Java bytecode from .NET.
 
 ## PdfPig and PdfPig.Rendering.Skia
 
-The GUI's "Show Region…" feature (rendering the page containing a failure,
-with a highlight box around it) uses:
+The GUI's selected-finding preview (rendering the page containing a
+failure, with a highlight box around it) uses:
 
 - [PdfPig](https://github.com/UglyToad/PdfPig) — a pure managed C# PDF
   parser (no native/JNI dependencies), licensed under the Apache License,

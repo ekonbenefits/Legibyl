@@ -93,21 +93,18 @@ PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
 
 ## GUI results view
 
-The results grid is sorted by page number by default (unlocated failures —
+The results list is sorted by page number by default (unlocated failures —
 those with no `pages[N]` in their context, such as document-level metadata
-checks — sort to the end). Each row shows a friendly "Document → Page 2 →
-Link annotation" style location instead of the raw veraPDF context string
-(still available as a tooltip for power users). Selecting a row with a
-known page enables **Open at Page…**, which launches the PDF in your
-default viewer at that page via a `#page=N` link fragment — this is
-best-effort, since not every PDF viewer honors it (Adobe Reader, Edge, and
-SumatraPDF do; some others ignore it and just open at page 1).
+checks — sort to the end). It keeps only the short clause, test, page, and
+friendly location columns visible. Selecting a row shows its full, wrapped
+message and page preview in a resizable details panel beside the list.
 
 For failures anchored to an annotation (links, form fields — the most
-common failure type with an exact, checkable region), **Show Region…**
-renders that page as an image with a highlight box drawn around the
-failing annotation, using [PdfPig](https://github.com/UglyToad/PdfPig) to
-read its `/Rect` and
+common failure type with an exact, checkable region), the details panel
+automatically renders that page with a highlight box around the failing
+annotation. The image scales to the available panel space rather than
+opening at 100% zoom. Rendering uses
+[PdfPig](https://github.com/UglyToad/PdfPig) to read its `/Rect` and
 [PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia) +
 SkiaSharp to rasterise the page and draw the box (`Legibyl.Rendering`
 project). Most structural/tagging failures (untagged paragraphs, missing
