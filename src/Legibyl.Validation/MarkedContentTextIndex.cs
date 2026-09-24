@@ -33,11 +33,10 @@ internal static class MarkedContentTextIndex
         foreach (var element in elements)
         {
             string text = ConcatenateLetters(element.Letters);
-            if (!string.IsNullOrEmpty(text))
+            StructureGeometry? geometry = GeometryFromMarkedContent(pageNumber, element);
+            if (!string.IsNullOrEmpty(text) || geometry is not null)
             {
-                index[(pageNumber, element.MarkedContentIdentifier)] = new MarkedContentInfo(
-                    text,
-                    GeometryFromLetters(pageNumber, element.Letters));
+                index[(pageNumber, element.MarkedContentIdentifier)] = new MarkedContentInfo(text, geometry);
             }
 
             if (element.Children.Count > 0)
@@ -45,6 +44,28 @@ internal static class MarkedContentTextIndex
                 IndexMarkedContent(pageNumber, element.Children, index);
             }
         }
+    }
+
+    private static StructureGeometry? GeometryFromMarkedContent(int pageNumber, MarkedContentElement element)
+    {
+        List<StructureGeometry> geometries = [];
+
+        if (GeometryFromLetters(pageNumber, element.Letters) is { } textGeometry)
+        {
+            geometries.Add(textGeometry);
+        }
+
+        foreach (var image in element.Images)
+        {
+            geometries.Add(new StructureGeometry(
+                pageNumber,
+                image.Bounds.Left,
+                image.Bounds.Bottom,
+                image.Bounds.Right,
+                image.Bounds.Top));
+        }
+
+        return UnionGeometry(geometries);
     }
 
     private static StructureGeometry? GeometryFromLetters(int pageNumber, IReadOnlyList<Letter> letters)
@@ -59,6 +80,22 @@ internal static class MarkedContentTextIndex
         double bottom = letters.Min(l => l.BoundingBox.Bottom);
         double top = letters.Max(l => l.BoundingBox.Top);
         return new StructureGeometry(pageNumber, left, bottom, right, top);
+    }
+
+    private static StructureGeometry? UnionGeometry(IReadOnlyList<StructureGeometry> geometries)
+    {
+        if (geometries.Count == 0)
+        {
+            return null;
+        }
+
+        int pageNumber = geometries[0].PageNumber;
+        return new StructureGeometry(
+            pageNumber,
+            geometries.Min(geometry => geometry.Left),
+            geometries.Min(geometry => geometry.Bottom),
+            geometries.Max(geometry => geometry.Right),
+            geometries.Max(geometry => geometry.Top));
     }
 
     /// <summary>

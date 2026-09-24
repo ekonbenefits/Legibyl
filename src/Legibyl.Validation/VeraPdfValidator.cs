@@ -307,7 +307,10 @@ public sealed class VeraPdfValidator : IPdfValidator, IPdfFixer, IStructureTreeR
             contentLeafCount++;
             if (TryResolveContentInfo(child, ownPage, pageNumberByKey, textIndex, out MarkedContentInfo? info))
             {
-                contentTexts.Add(info!.Text);
+                if (!string.IsNullOrEmpty(info!.Text))
+                {
+                    contentTexts.Add(info.Text);
+                }
                 if (info.Geometry is not null)
                 {
                     directGeometries.Add(info.Geometry);
