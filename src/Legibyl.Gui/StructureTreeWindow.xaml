@@ -33,7 +33,7 @@
 
                     <ScrollViewer x:Name="LayoutScrollViewer" Grid.Column="0"
                                   VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Auto" Background="White">
+                                  HorizontalScrollBarVisibility="Disabled" Background="White">
                         <ContentControl x:Name="LayoutHost" Margin="8" />
                     </ScrollViewer>
 

@@ -251,17 +251,13 @@ public partial class StructureTreeWindow : Window
         for (int rowIndex = 0; rowIndex < items.Count; rowIndex++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            Border row = BuildTocItemRow(items[rowIndex]);
-            Grid.SetRow(row, rowIndex);
-            Grid.SetColumn(row, 0);
-            Grid.SetColumnSpan(row, 3);
-            grid.Children.Add(row);
+            AddTocItemRow(grid, items[rowIndex], rowIndex);
         }
 
         return grid;
     }
 
-    private Border BuildTocItemRow(StructureNode item)
+    private void AddTocItemRow(Grid grid, StructureNode item, int rowIndex)
     {
         var texts = FlattenContent(item)
             .Select(text => text.Trim())
@@ -271,57 +267,52 @@ public partial class StructureTreeWindow : Window
         string label = texts.FirstOrDefault(text => !IsPageNumberText(text)) ?? "(empty TOC item)";
         string? target = item.LinkUri ?? item.LinkDestinationDescription;
 
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        AddTocCell(grid, item, rowIndex, 0, label, FontWeights.SemiBold, Brushes.Black);
+        AddTocCell(grid, item, rowIndex, 1, printedPage is null ? string.Empty : printedPage, FontWeights.Normal, Brushes.DimGray);
+        AddTocCell(
+            grid,
+            item,
+            rowIndex,
+            2,
+            target is null ? "No link target found" : target,
+            FontWeights.Normal,
+            target is null ? Brushes.DarkGoldenrod : Brushes.DimGray);
+    }
 
-        grid.Children.Add(new TextBlock
-        {
-            Text = label,
-            FontSize = 13,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 8, 0),
-        });
-
-        var pageText = new TextBlock
-        {
-            Text = printedPage is null ? string.Empty : $"p. {printedPage}",
-            FontSize = 12,
-            Foreground = Brushes.DimGray,
-            Margin = new Thickness(0, 0, 12, 0),
-            VerticalAlignment = VerticalAlignment.Top,
-        };
-        Grid.SetColumn(pageText, 1);
-        grid.Children.Add(pageText);
-
-        var targetText = new TextBlock
-        {
-            Text = target is null ? "No link target found" : $"→ {target}",
-            FontSize = 12,
-            Foreground = target is null ? Brushes.DarkGoldenrod : Brushes.DimGray,
-            TextWrapping = TextWrapping.Wrap,
-            VerticalAlignment = VerticalAlignment.Top,
-        };
-        Grid.SetColumn(targetText, 2);
-        grid.Children.Add(targetText);
-
+    private void AddTocCell(
+        Grid grid,
+        StructureNode item,
+        int rowIndex,
+        int columnIndex,
+        string text,
+        FontWeight fontWeight,
+        Brush foreground)
+    {
         var border = new Border
         {
             BorderBrush = new SolidColorBrush(CategoryColors["Link"].Border),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(3),
-            Padding = new Thickness(6),
-            Margin = new Thickness(0, 0, 0, 2),
+            Padding = new Thickness(6, 4, 6, 4),
+            Margin = new Thickness(columnIndex == 0 ? 0 : -1, rowIndex == 0 ? 0 : -1, 0, 0),
             Background = Brushes.White,
-            Child = grid,
+            Child = new TextBlock
+            {
+                Text = text,
+                FontSize = columnIndex == 0 ? 13 : 12,
+                FontWeight = fontWeight,
+                Foreground = foreground,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Top,
+            },
             DataContext = item,
             ToolTip = item.Geometry is null
                 ? "Select: no page geometry is available for this TOC item."
                 : $"Select: highlight this TOC item on page {item.Geometry.PageNumber}.",
         };
         border.MouseLeftButtonDown += StructureBlock_MouseLeftButtonDown;
-        return border;
+        Grid.SetRow(border, rowIndex);
+        Grid.SetColumn(border, columnIndex);
+        grid.Children.Add(border);
     }
 
     /// <summary>
