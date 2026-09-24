@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/VeraPdfTool.Cli/VeraPdfTool.Cli.csproj" />
     <Project Path="src/VeraPdfTool.Gui/VeraPdfTool.Gui.csproj" />
+    <Project Path="src/VeraPdfTool.Rendering/VeraPdfTool.Rendering.csproj" />
     <Project Path="src/VeraPdfTool.Validation/VeraPdfTool.Validation.csproj" />
   </Folder>
   <Folder Name="/tests/">

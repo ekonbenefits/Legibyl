@@ -33,6 +33,7 @@ annotation"), used by the GUI's results grid (see below) and available on
 VeraPdfTool.slnx
 src/
   VeraPdfTool.Validation/   C# facade over the veraPDF Java validation core (IKVM)
+  VeraPdfTool.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
   VeraPdfTool.Gui/          WPF UI: file picker, profile selector, results grid
   VeraPdfTool.Cli/          Command-line tool (verapdf-tool.exe), JSON-first, agent-friendly
 tests/
@@ -100,6 +101,18 @@ known page enables **Open at Page…**, which launches the PDF in your
 default viewer at that page via a `#page=N` link fragment — this is
 best-effort, since not every PDF viewer honors it (Adobe Reader, Edge, and
 SumatraPDF do; some others ignore it and just open at page 1).
+
+For failures anchored to an annotation (links, form fields — the most
+common failure type with an exact, checkable region), **Show Region…**
+renders that page as an image with a highlight box drawn around the
+failing annotation, using [PdfPig](https://github.com/UglyToad/PdfPig) to
+read its `/Rect` and
+[PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia) +
+SkiaSharp to rasterise the page and draw the box (`VeraPdfTool.Rendering`
+project). Most structural/tagging failures (untagged paragraphs, missing
+table header scope, etc.) aren't attached to page geometry in veraPDF's
+model, so for those the full page is still shown for context, with a
+banner noting the exact region isn't available.
 
 ## Command-line tool (for scripts / AI agents)
 

@@ -4,6 +4,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+using VeraPdfTool.Rendering;
 using VeraPdfTool.Validation;
 
 namespace VeraPdfTool.Gui;
@@ -19,6 +20,7 @@ public partial class MainWindow : Window
 
     private readonly IPdfValidator _validator = new VeraPdfValidator();
     private readonly IPdfFixer _fixer;
+    private readonly IPdfRegionRenderer _regionRenderer = new PdfRegionRenderer();
     private string? _selectedFilePath;
     private ValidationReport? _lastReport;
 
@@ -76,6 +78,7 @@ public partial class MainWindow : Window
         SaveReportButton.IsEnabled = false;
         FixButton.IsEnabled = false;
         JumpToPageButton.IsEnabled = false;
+        ShowRegionButton.IsEnabled = false;
     }
 
     private async void ValidateButton_Click(object sender, RoutedEventArgs e)
@@ -137,6 +140,7 @@ public partial class MainWindow : Window
         SaveReportButton.IsEnabled = true;
         FixButton.IsEnabled = true;
         JumpToPageButton.IsEnabled = false;
+        ShowRegionButton.IsEnabled = false;
     }
 
     private void ShowError(string message)
@@ -149,7 +153,9 @@ public partial class MainWindow : Window
 
     private void ResultsListView_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        JumpToPageButton.IsEnabled = ResultsListView.SelectedItem is RuleViolationRow { PageNumber: not null };
+        bool hasPage = ResultsListView.SelectedItem is RuleViolationRow { PageNumber: not null };
+        JumpToPageButton.IsEnabled = hasPage;
+        ShowRegionButton.IsEnabled = hasPage;
     }
 
     private void JumpToPageButton_Click(object sender, RoutedEventArgs e)
@@ -173,6 +179,41 @@ public partial class MainWindow : Window
                 "Open at Page",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
+        }
+    }
+
+    private async void ShowRegionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedFilePath is null || ResultsListView.SelectedItem is not RuleViolationRow row)
+        {
+            return;
+        }
+
+        PdfLocation? location = PdfLocationParser.Parse(row.LocationContext);
+        if (location is null)
+        {
+            return;
+        }
+
+        SetBusy(true);
+        try
+        {
+            HighlightImageResult result = await Task.Run(
+                () => _regionRenderer.RenderPageWithHighlight(_selectedFilePath, location));
+
+            var preview = new RegionPreviewWindow(result, $"Page {result.PageNumber} — {row.FriendlyLocation}")
+            {
+                Owner = this,
+            };
+            preview.Show();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            MessageBox.Show(this, ex.Message, "Show Region", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 

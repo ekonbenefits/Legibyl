@@ -82,6 +82,7 @@ public static partial class PdfLocationParser
         int? pageNumber = null;
         string? objectType = null;
         int? objectNumber = null;
+        int? annotationIndex = null;
         var breadcrumb = new List<string>();
 
         foreach (string segment in segments)
@@ -108,6 +109,11 @@ public static partial class PdfLocationParser
                 pageNumber = index.Value + 1; // veraPDF's page index is 0-based.
             }
 
+            if (string.Equals(name, "annots", StringComparison.OrdinalIgnoreCase) && index.HasValue)
+            {
+                annotationIndex = index.Value;
+            }
+
             if (number.HasValue)
             {
                 objectNumber = number.Value;
@@ -122,7 +128,7 @@ public static partial class PdfLocationParser
             breadcrumb.Add(locationContext);
         }
 
-        return new PdfLocation(pageNumber, objectType, objectNumber, string.Join(" → ", breadcrumb));
+        return new PdfLocation(pageNumber, objectType, objectNumber, annotationIndex, string.Join(" → ", breadcrumb));
     }
 
     private static string DescribeSegment(string name, int? index, string? type)

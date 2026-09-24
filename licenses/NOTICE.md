@@ -42,3 +42,21 @@ project pages for full license texts of those transitive dependencies.
 This application also uses [IKVM.NET](https://github.com/ikvmnet/ikvm),
 licensed under the Apache License, Version 2.0, to execute the veraPDF
 Java bytecode from .NET.
+
+## PdfPig and PdfPig.Rendering.Skia
+
+The GUI's "Show Region…" feature (rendering the page containing a failure,
+with a highlight box around it) uses:
+
+- [PdfPig](https://github.com/UglyToad/PdfPig) — a pure managed C# PDF
+  parser (no native/JNI dependencies), licensed under the Apache License,
+  Version 2.0. Used here to read annotation geometry (`/Rect`) directly
+  from the PDF's object model.
+- [PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia)
+  — a PdfPig extension that rasterises pages to
+  [SkiaSharp](https://github.com/mono/SkiaSharp) bitmaps, licensed under
+  the Apache License, Version 2.0. SkiaSharp itself is MIT-licensed.
+
+Both are used unmodified via NuGet package references (no vendored/bundled
+source), so no additional source-availability obligations apply beyond the
+license texts themselves.

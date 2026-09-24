@@ -79,6 +79,9 @@
             <Button x:Name="JumpToPageButton" Content="Open at Page…" Padding="12,4" Margin="0,0,8,0"
                     Click="JumpToPageButton_Click" IsEnabled="False"
                     ToolTip="Best-effort: opens the PDF at this page in your default viewer, using the #page= link fragment. Not all PDF viewers honor it." />
+            <Button x:Name="ShowRegionButton" Content="Show Region…" Padding="12,4" Margin="0,0,8,0"
+                    Click="ShowRegionButton_Click" IsEnabled="False"
+                    ToolTip="Renders this page as an image, highlighting the failing region when its exact location can be determined (currently: link/form annotations)." />
             <Button x:Name="FixButton" Content="Fix Metadata…" Padding="12,4" Margin="0,0,8,0"
                     Click="FixButton_Click" IsEnabled="False"
                     ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues." />

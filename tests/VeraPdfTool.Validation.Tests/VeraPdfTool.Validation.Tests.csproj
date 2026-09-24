@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\VeraPdfTool.Validation\VeraPdfTool.Validation.csproj" />
+    <ProjectReference Include="..\..\src\VeraPdfTool.Rendering\VeraPdfTool.Rendering.csproj" />
   </ItemGroup>
 
   <ItemGroup>
