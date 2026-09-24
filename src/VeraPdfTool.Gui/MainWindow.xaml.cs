@@ -1,4 +1,5 @@
-﻿using System.IO;
+using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Media;
@@ -74,6 +75,7 @@ public partial class MainWindow : Window
         CopySummaryButton.IsEnabled = false;
         SaveReportButton.IsEnabled = false;
         FixButton.IsEnabled = false;
+        JumpToPageButton.IsEnabled = false;
     }
 
     private async void ValidateButton_Click(object sender, RoutedEventArgs e)
@@ -125,11 +127,16 @@ public partial class MainWindow : Window
         ResultsListView.ItemsSource = report.Assertions
             .Where(a => !a.Passed)
             .Select(RuleViolationRow.FromViolation)
+            // Unlocated failures (no page number) sort to the end, after page-anchored ones in page order.
+            .OrderBy(row => row.PageNumber ?? int.MaxValue)
+            .ThenBy(row => row.Clause)
+            .ThenBy(row => row.TestNumber)
             .ToList();
 
         CopySummaryButton.IsEnabled = true;
         SaveReportButton.IsEnabled = true;
         FixButton.IsEnabled = true;
+        JumpToPageButton.IsEnabled = false;
     }
 
     private void ShowError(string message)
@@ -138,6 +145,35 @@ public partial class MainWindow : Window
         StatusBanner.Background = ErrorBrush;
         StatusText.Foreground = Brushes.White;
         StatusText.Text = $"Error: {message}";
+    }
+
+    private void ResultsListView_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        JumpToPageButton.IsEnabled = ResultsListView.SelectedItem is RuleViolationRow { PageNumber: not null };
+    }
+
+    private void JumpToPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedFilePath is null || ResultsListView.SelectedItem is not RuleViolationRow { PageNumber: { } page })
+        {
+            return;
+        }
+
+        try
+        {
+            string fullPath = Path.GetFullPath(_selectedFilePath);
+            var uri = new Uri(fullPath).AbsoluteUri + $"#page={page}";
+            Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            MessageBox.Show(
+                this,
+                $"Couldn't open the PDF viewer: {ex.Message}\n\nNote: the #page= link works only if your default PDF viewer supports it (e.g. Adobe Reader, Edge, SumatraPDF).",
+                "Open at Page",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
     }
 
     private async void FixButton_Click(object sender, RoutedEventArgs e)

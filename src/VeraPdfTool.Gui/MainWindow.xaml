@@ -55,20 +55,30 @@
         </Border>
 
         <!-- Results list -->
-        <ListView x:Name="ResultsListView" Grid.Row="3">
+        <ListView x:Name="ResultsListView" Grid.Row="3"
+                  SelectionChanged="ResultsListView_SelectionChanged">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="ToolTip" Value="{Binding LocationContext}" />
+                </Style>
+            </ListView.ItemContainerStyle>
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Status" Width="70" DisplayMemberBinding="{Binding StatusLabel}" />
                     <GridViewColumn Header="Clause" Width="90" DisplayMemberBinding="{Binding Clause}" />
                     <GridViewColumn Header="Test" Width="50" DisplayMemberBinding="{Binding TestNumber}" />
-                    <GridViewColumn Header="Message" Width="420" DisplayMemberBinding="{Binding Message}" />
-                    <GridViewColumn Header="Location" Width="180" DisplayMemberBinding="{Binding LocationContext}" />
+                    <GridViewColumn Header="Message" Width="380" DisplayMemberBinding="{Binding Message}" />
+                    <GridViewColumn Header="Page" Width="60" DisplayMemberBinding="{Binding PageDisplay}" />
+                    <GridViewColumn Header="Location" Width="220" DisplayMemberBinding="{Binding FriendlyLocation}" />
                 </GridView>
             </ListView.View>
         </ListView>
 
         <!-- Bottom action bar -->
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="JumpToPageButton" Content="Open at Page…" Padding="12,4" Margin="0,0,8,0"
+                    Click="JumpToPageButton_Click" IsEnabled="False"
+                    ToolTip="Best-effort: opens the PDF at this page in your default viewer, using the #page= link fragment. Not all PDF viewers honor it." />
             <Button x:Name="FixButton" Content="Fix Metadata…" Padding="12,4" Margin="0,0,8,0"
                     Click="FixButton_Click" IsEnabled="False"
                     ToolTip="Repairs XMP metadata only (missing metadata stream, PDF/A|UA identifier, Info-dictionary sync). Does not fix structural/tagging issues." />

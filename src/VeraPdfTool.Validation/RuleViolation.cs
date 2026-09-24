@@ -22,6 +22,13 @@ public sealed record RuleViolation(
     /// <summary>A short "clause.testNumber" identifier, e.g. "7.1-2".</summary>
     public string RuleId => $"{Clause}-{TestNumber}";
 
+    /// <summary>
+    /// Best-effort, human-readable interpretation of <see cref="LocationContext"/>
+    /// (page number + plain-English breadcrumb). Null if there's no location context
+    /// to parse. See <see cref="PdfLocationParser"/>.
+    /// </summary>
+    public PdfLocation? Location => PdfLocationParser.Parse(LocationContext);
+
     public override string ToString() =>
         $"[{Specification} {RuleId}] {Message}";
 }

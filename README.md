@@ -19,6 +19,14 @@ veraPDF's metadata fixer, which repairs XMP metadata only (missing
 metadata stream, PDF/A|PDF/UA identifier, false conformance claims,
 Info-dictionary sync) — it does not repair structural/tagging issues.
 
+Each failed check carries a `locationContext` — a slash-separated walk of
+veraPDF's internal object model (e.g.
+`root/document[0]/pages[1](9 0 obj PDLinkAnnot)`) pinpointing exactly where
+in the document the problem is. `PdfLocationParser` turns this into a page
+number and a plain-English breadcrumb (e.g. "Page 2 — Document → Link
+annotation"), used by the GUI's results grid (see below) and available on
+`RuleViolation.Location`/`PageNumber` for any future consumer.
+
 ## Solution layout
 
 ```
@@ -80,6 +88,18 @@ installed machine, not just in this source repository.
 ## Supported profiles
 
 PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
+
+## GUI results view
+
+The results grid is sorted by page number by default (unlocated failures —
+those with no `pages[N]` in their context, such as document-level metadata
+checks — sort to the end). Each row shows a friendly "Document → Page 2 →
+Link annotation" style location instead of the raw veraPDF context string
+(still available as a tooltip for power users). Selecting a row with a
+known page enables **Open at Page…**, which launches the PDF in your
+default viewer at that page via a `#page=N` link fragment — this is
+best-effort, since not every PDF viewer honors it (Adobe Reader, Edge, and
+SumatraPDF do; some others ignore it and just open at page 1).
 
 ## Command-line tool (for scripts / AI agents)
 
