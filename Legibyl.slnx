@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Legibyl.Cli/Legibyl.Cli.fsproj" />
-    <Project Path="src/Legibyl.Gui/Legibyl.Gui.csproj" />
+    <Project Path="src/Legibyl.Gui/Legibyl.Gui.fsproj" />
     <Project Path="src/Legibyl.Rendering/Legibyl.Rendering.fsproj" />
     <Project Path="src/Legibyl.Validation/Legibyl.Validation.fsproj" />
   </Folder>
