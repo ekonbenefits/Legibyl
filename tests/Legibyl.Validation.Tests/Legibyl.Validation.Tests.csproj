@@ -23,7 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Legibyl.Validation\Legibyl.Validation.fsproj" />
-    <ProjectReference Include="..\..\src\Legibyl.Rendering\Legibyl.Rendering.csproj" />
+    <ProjectReference Include="..\..\src\Legibyl.Rendering\Legibyl.Rendering.fsproj" />
   </ItemGroup>
 
   <ItemGroup>

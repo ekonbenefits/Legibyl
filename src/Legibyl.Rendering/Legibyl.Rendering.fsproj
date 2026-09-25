@@ -2,9 +2,13 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="PdfRegionRenderer.fs" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Pure managed PDF parsing/rendering (no native PDFium/etc. binaries) - Apache 2.0. -->

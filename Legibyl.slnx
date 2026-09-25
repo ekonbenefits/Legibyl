@@ -2,7 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Legibyl.Cli/Legibyl.Cli.csproj" />
     <Project Path="src/Legibyl.Gui/Legibyl.Gui.csproj" />
-    <Project Path="src/Legibyl.Rendering/Legibyl.Rendering.csproj" />
+    <Project Path="src/Legibyl.Rendering/Legibyl.Rendering.fsproj" />
     <Project Path="src/Legibyl.Validation/Legibyl.Validation.fsproj" />
   </Folder>
   <Folder Name="/tests/">
