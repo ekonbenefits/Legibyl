@@ -16,7 +16,9 @@ type PdfFixOptions =
     | DocumentTitle = 16
     /// Tags paragraphs the table of contents lists as headings (H1-H6); see TocHeadings.
     | HeadingsFromToc = 32
-    | All = 63
+    /// Tags runs of paragraphs that start with list markers as lists; see ParagraphLists.
+    | ListsFromParagraphs = 64
+    | All = 127
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.

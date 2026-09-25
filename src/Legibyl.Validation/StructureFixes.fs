@@ -200,6 +200,16 @@ let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions)
         else
             0
 
+    // Later runs first: tagging one shortens its parent's /K, which would move the ones after it.
+    let listsTagged =
+        if options.HasFlag PdfFixOptions.ListsFromParagraphs then
+            let runs = ParagraphLists.find document context
+            for run in List.rev runs do
+                ParagraphLists.tagAsList document run
+            runs.Length
+        else
+            0
+
     let emptyParagraphsRemoved =
         match structTreeRoot with
         | NonNull structTreeRoot when options.HasFlag PdfFixOptions.RemoveEmptyParagraphs ->
@@ -218,6 +228,7 @@ let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions)
             None, false
 
     [ if headingsTagged > 0 then $"Tagged {headingsTagged} heading(s) listed in the table of contents."
+      if listsTagged > 0 then $"Tagged {listsTagged} run(s) of marked paragraphs as lists."
       if tabsFixed > 0 then $"Set /Tabs /S on {tabsFixed} page(s) containing annotations."
       if emptyParagraphsRemoved > 0 then $"Removed {emptyParagraphsRemoved} empty /P structure element(s)."
       if linksDescribed > 0 then $"Described {linksDescribed} link annotation(s) from their own text."

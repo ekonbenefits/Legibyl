@@ -189,6 +189,18 @@ matched would start below H1 or skip a level, nothing is recovered and one
 warning says why (Structure-5). The retagging is a separate Fix dialog option,
 off by default.
 
+Lists tagged as plain paragraphs are detected too (`ParagraphLists.fs`,
+Structure-6): two or more sibling paragraphs on one page, at one indent, that
+each start with a list marker — the same bullet (`•`, `◦`, `▪`, or a dash
+followed by a space), or ordinals of one style and punctuation that count up by
+one (`(1)` `(2)`, `a.` `b.`, `(i)` `(ii)`). Paragraphs in a table of contents are
+left alone. The matching Fix dialog option (off by default) wraps each run in
+`L` > `LI` > `LBody` around the original paragraphs and sets `/ListNumbering`
+from the markers. Only the structure tree changes, never the drawn page, so the
+document looks exactly the same; the marker stays part of each item's text
+rather than being split into an `Lbl`, since that would mean editing the page's
+content.
+
 Warnings can be dismissed from a row's right-click menu (or the keyboard's
 context-menu key): they drop out of the list, the banner's warning count, and
 Copy Summary/Save Report, and a **Show N dismissed** button beside those shows
@@ -303,9 +315,9 @@ Options:
   therefore still reports the `dc:title` failure after `--fix`, rather than
   being quietly given a made-up one. The GUI dialog
   exposes the same repairs as individual checkboxes, plus removal of empty
-  semantic `/P` structure elements and retagging headings recovered from the
-  table of contents (both off by default), which the CLI deliberately does not
-  apply.
+  semantic `/P` structure elements, retagging headings recovered from the table
+  of contents, and tagging marked paragraphs as lists (all off by default), which
+  the CLI deliberately does not apply.
   Structural fixes run
   before the veraPDF metadata fixer so metadata is repaired against the
   already-cleaned copy in the same operation. veraPDF saves its metadata
