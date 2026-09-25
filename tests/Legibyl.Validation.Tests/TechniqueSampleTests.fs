@@ -171,3 +171,32 @@ let ``all fixes make a tab order sample compliant`` (id: string) =
     let report = VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1)
     failedRuleIds report |> should be Empty
     report.IsCompliant |> should be True
+
+/// /Tabs of every page that has annotations.
+let private annotatedPageTabs (path: string) =
+    use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(path))
+    [ for pageNumber in 1 .. document.GetNumberOfPages() do
+          let page = document.GetPage(pageNumber).GetPdfObject()
+          match page.GetAsArray iText.Kernel.Pdf.PdfName.Annots with
+          | null -> ()
+          | annotations when annotations.Size() = 0 -> ()
+          | _ -> page.GetAsName iText.Kernel.Pdf.PdfName.Tabs ]
+
+[<Theory>]
+[<InlineData("UA1_Tpdf-G4_F06")>]
+[<InlineData("UA1_Tpdf-G4_F07")>]
+let ``tab order fix sets structure tab order on annotated pages`` (id: string) =
+    let input = samples[id].PdfPath
+    use output = new TempPdf ".fixed"
+    annotatedPageTabs input |> should not' (be Empty)
+    annotatedPageTabs input |> should not' (contain iText.Kernel.Pdf.PdfName.S)
+
+    let result = VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output.Path, PdfFixOptions.AnnotationTabs)
+
+    result.WasFixed |> should be True
+    result.AppliedFixes |> Seq.exists (fun fix -> fix.Contains "/Tabs /S") |> should be True
+    annotatedPageTabs output.Path |> List.forall ((=) iText.Kernel.Pdf.PdfName.S) |> should be True
+    failedRuleIds result.OriginalReport |> should contain "7.18.3-1"
+    // Only the missing PDF/UA identifier is left, which the metadata fix handles.
+    failedRuleIds (VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1))
+    |> should equal (set [ MissingPdfUaIdentifierRule ])
