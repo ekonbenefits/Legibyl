@@ -199,9 +199,9 @@ let private nameDocument (document: PdfDocument) (fromFirstPage: bool) =
 
 /// Points a recovered heading's table-of-contents links at the heading itself: the explicit
 /// destination (/D) at its position on the page, a little above it so it isn't cut off at the
-/// top of the window, rather than wherever the link went before; and a PDF 2.0 structure
-/// destination (/SD) at the heading element, which readers that support it prefer and others
-/// ignore. Returns how many links were changed.
+/// top of the window, rather than wherever the link went before; and, in a PDF 2.0 file, a
+/// structure destination (/SD) at the heading element. /SD is a PDF 2.0 key, so a PDF 1.x file
+/// doesn't get it: its readers would ignore it anyway. Returns how many links were changed.
 let private pointLinksAtHeading (document: PdfDocument) (heading: TocHeadings.Heading) =
     if isNull (heading.Paragraph.GetIndirectReference()) then
         heading.Paragraph.MakeIndirect document |> ignore
@@ -226,7 +226,8 @@ let private pointLinksAtHeading (document: PdfDocument) (heading: TocHeadings.He
                 action.Put(PdfName.S, PdfName.GoTo) |> ignore
                 action
         action.Put(PdfName.D, destination (document.GetPage(heading.Entry.Page).GetPdfObject())) |> ignore
-        action.Put(PdfName "SD", destination heading.Paragraph) |> ignore
+        if document.GetPdfVersion().CompareTo(PdfVersion.PDF_2_0) >= 0 then
+            action.Put(PdfName "SD", destination heading.Paragraph) |> ignore
         annotation.Remove(PdfName.Dest) |> ignore
         annotation.Put(PdfName.A, action) |> ignore
     heading.Entry.Links.Length
