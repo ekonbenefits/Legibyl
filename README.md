@@ -189,7 +189,11 @@ entries that match nothing or several paragraphs are reported (Structure-4);
 and if the indents don't form clear levels, or the headings that could be
 matched would start below H1 or skip a level, nothing is recovered and one
 warning says why (Structure-5). The retagging is a separate Fix dialog option,
-off by default.
+off by default. It also points each recovered heading's table-of-contents links
+at the heading: the page destination goes to the heading's position (just above
+it), rather than wherever the link landed before, and a PDF 2.0 structure
+destination (`/SD`) names the heading element itself for readers that support
+it (others ignore it and use the page destination).
 
 Lists tagged as plain paragraphs are detected too (`ParagraphLists.fs`,
 Structure-6): two or more sibling paragraphs on one page, at one indent, that

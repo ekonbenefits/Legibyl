@@ -255,3 +255,52 @@ let ``the report counts what each repair would address`` () =
     |> Seq.forall (fun a -> a.FixOptions.HasFlag PdfFixOptions.DocumentTitle)
     |> should be True
     report.FixableCount PdfFixOptions.DocumentTitle |> should be (greaterThan 0)
+
+/// The first table-of-contents link annotation's action, and the document it's in.
+let private firstTocLinkAction (document: PdfDocument) =
+    let annotation = document.GetPage(1).GetPdfObject().GetAsArray(PdfName.Annots) |> notNull |> _.GetAsDictionary(0) |> notNull
+    annotation, annotation.GetAsDictionary(PdfName.A)
+
+[<Theory>]
+[<InlineData(false)>]
+[<InlineData(true)>]
+let ``recovered headings' links point at the heading itself`` (namedDestinations: bool) =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // The fixture's links go to the top of the page ([page /XYZ]), not to the heading.
+    createPdfWithToc input.Path namedDestinations threeLevels threeLevelsBody
+
+    let result = fixHeadings input.Path output.Path
+
+    result.AppliedFixes |> should contain "Pointed 4 table-of-contents link(s) at their headings."
+    use document = new PdfDocument(new PdfReader(output.Path))
+    let annotation, action = firstTocLinkAction document
+    annotation.Get(PdfName.Dest) |> should be Null
+    let action = action |> notNull
+    action.GetAsName(PdfName.S) |> should equal PdfName.GoTo
+    // "Introduction", the first heading: page 2, at its left edge, a little above its text.
+    let destination = action.GetAsArray(PdfName.D) |> notNull
+    document.GetPageNumber(destination.GetAsDictionary 0) |> should equal 2
+    destination.GetAsName 1 |> should equal PdfName.XYZ
+    destination.GetAsNumber(2).DoubleValue() |> should be (inRange 71.0 75.0)
+    destination.GetAsNumber(3).DoubleValue() |> should be (inRange 710.0 730.0)
+    let structureDestination = action.GetAsArray(PdfName "SD") |> notNull
+    let heading = structureDestination.GetAsDictionary 0 |> notNull
+    heading.GetAsName(PdfName.S) |> should equal (PdfName "H1")
+    (VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq)
+    - (VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq)
+    |> should be Empty
+
+[<Fact>]
+let ``an unmatched entry's link is left as it was`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // "Glossary" matches nothing on page 3; only "Introduction" is recovered.
+    createPdfWithToc input.Path false [ entry "Glossary" 72f 3; entry "Introduction" 72f 2 ] (paragraphs 2 [ "Introduction" ] @ paragraphs 3 [ "Terms" ])
+
+    fixHeadings input.Path output.Path |> ignore
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    let annotation, action = firstTocLinkAction document
+    action |> should be Null
+    annotation.GetAsArray(PdfName.Dest) |> should not' (be Null)
