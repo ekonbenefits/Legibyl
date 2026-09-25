@@ -17,6 +17,7 @@
     <Compile Include="HeadlessSession.fs" />
     <Compile Include="MainWindowTests.fs" />
     <Compile Include="StructureTreeWindowTests.fs" />
+    <Compile Include="StructureCacheTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

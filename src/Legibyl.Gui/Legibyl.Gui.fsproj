@@ -15,6 +15,7 @@
     <Compile Include="Fonts.fs" />
     <Compile Include="Theme.fs" />
     <Compile Include="Dialogs.fs" />
+    <Compile Include="StructureCache.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="MainWindow.fs" />
     <Compile Include="Program.fs" />
