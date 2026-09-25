@@ -19,11 +19,16 @@ let rec private removeEmptyParagraphsInside (dictionary: PdfDictionary) context 
     | null -> 0
     | kids ->
         let pageNumber = structElemPage dictionary context inheritedPage
-        match shouldRemoveEmptyParagraph kids context pageNumber with
-        | true, removedFromChild ->
-            dictionary.Remove(PdfName.K) |> ignore
-            removedFromChild + 1
-        | false, _ -> removeEmptyParagraphsFromKids kids context pageNumber
+        match resolve kids with
+        // A single child: shouldRemoveEmptyParagraph has already cleaned up inside it, so
+        // keep its count (the array case below counts its own children instead).
+        | :? PdfDictionary ->
+            match shouldRemoveEmptyParagraph kids context pageNumber with
+            | true, removedFromChild ->
+                dictionary.Remove(PdfName.K) |> ignore
+                removedFromChild + 1
+            | false, removedFromChild -> removedFromChild
+        | _ -> removeEmptyParagraphsFromKids kids context pageNumber
 
 and private removeEmptyParagraphsFromKids (kids: PdfObject) context inheritedPage : int =
     match resolve kids with

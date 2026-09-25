@@ -212,6 +212,27 @@ let ``Fix direct empty paragraph root kid removes root kid`` () =
     (structTreeRootOf document).Get(PdfName.K) |> should be Null
 
 [<Fact>]
+let ``Fix removes empty paragraphs under a single Document element`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // StructTreeRoot /K is one Document dictionary rather than an array, as in most real files.
+    (use document = new PdfDocument(new PdfWriter(input.Path))
+     document.AddNewPage() |> ignore
+     let nonEmptyParagraph = paragraph ()
+     nonEmptyParagraph.Put(PdfName.K, PdfNumber 0) |> ignore
+     let documentElement = PdfDictionary()
+     documentElement.Put(PdfName.Type, PdfName.StructElem) |> ignore
+     documentElement.Put(PdfName.S, PdfName.Document) |> ignore
+     documentElement.Put(PdfName.K, arrayOf [ paragraph (); nonEmptyParagraph ]) |> ignore
+     setStructTreeRoot document documentElement)
+    let fixer = VeraPdfValidator()
+
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyParagraphs)
+
+    result.WasFixed |> should be True
+    result.AppliedFixes |> should contain "Removed 1 empty /P structure element(s)."
+
+[<Fact>]
 let ``Fix nested empty paragraph removes paragraph`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
