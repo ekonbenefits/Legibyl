@@ -13,7 +13,7 @@ core) is downloaded from Maven Central on the first build (pinned by version
 and SHA-256 in `Directory.Build.props`, cached under `obj/`) and referenced
 from the `Legibyl.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
 which translates the Java bytecode into a .NET assembly at build time. The
-`Legibyl.Validation` project exposes a small, plain-C# API
+`Legibyl.Validation` project exposes a small, plain .NET API
 (`IPdfValidator.Validate(path, profile) -> ValidationReport`,
 `IPdfFixer.Fix(path, profile, outputPath) -> FixResult`, and
 `IStructureTreeReader.ReadStructureTree(path) -> StructureNode?`) that fully
@@ -183,7 +183,7 @@ tells you the outcome without needing to parse output:
 | `64` | Invalid command-line usage. |
 
 ```powershell
-dotnet run --project src/Legibyl.Cli/Legibyl.Cli.csproj -- <file.pdf> [<file2.pdf> ...] [options]
+dotnet run --project src/Legibyl.Cli/Legibyl.Cli.fsproj -- <file.pdf> [<file2.pdf> ...] [options]
 ```
 
 Or after building, run the exe directly:
