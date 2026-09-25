@@ -4,6 +4,7 @@
 module internal Legibyl.Validation.StructureFixes
 
 open System
+open System.Collections.Generic
 open System.IO
 open System.Text.RegularExpressions
 open iText.IO.Font
@@ -91,21 +92,53 @@ let private ownAnnotations (element: PdfDictionary) =
     | :? PdfDictionary as dictionary -> Option.toList (ofObject dictionary)
     | _ -> []
 
-/// Gives every /Link structure element's annotation a /Contents taken from the link's own
-/// text, so screen readers can announce where the link goes. Returns how many were set.
+/// The /Link elements inside a table of contents: anywhere below a TOC or TOCI, including
+/// a nested entry's links and links wrapped in a Reference or Span. walk visits parents
+/// before children (depth first), and each visit's Path extends its parent's, so the TOC
+/// elements whose subtree we're in are exactly those on a stack of paths that prefix this one.
+let private tocLinks (structTreeRoot: PdfDictionary) context =
+    let openTocs = Stack<string>()
+    [ for visit in walk structTreeRoot context do
+          while openTocs.Count > 0 && not (visit.Path.StartsWith(openTocs.Peek() + "/", StringComparison.Ordinal)) do
+              openTocs.Pop() |> ignore
+          let tag = standardTag visit.Element context
+          if PdfName.TOC.Equals tag || PdfName.TOCI.Equals tag then
+              openTocs.Push visit.Path
+          elif PdfName.Link.Equals tag && openTocs.Count > 0 then
+              yield visit ]
+
+/// Object numbers of the link annotations describeLinks would give a /Contents: those of
+/// links in a table of contents. Lets validation mark only those findings as fixable.
+let tocLinkAnnotationNumbers (document: PdfDocument) context : Set<int> =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
+    | null -> Set.empty
+    | structTreeRoot ->
+        set
+            [ for visit in tocLinks structTreeRoot context do
+                  for annotation in ownAnnotations visit.Element do
+                      match annotation.GetIndirectReference() with
+                      | null -> ()
+                      | reference -> yield reference.GetObjNumber() ]
+
+/// Gives the annotation of each link in a table of contents a /Contents taken from the
+/// link's own text, so screen readers can announce where it goes. Returns how many were set.
+///
+/// Only there is a link's text known to name its destination ("Scope of this document
+/// ..... 3"). Elsewhere it's often "click here" or "read more": writing that into /Contents
+/// would make the failure stop reporting while screen reader users still hear nothing
+/// useful, so links outside a table of contents are left failing for a person to describe.
 let private describeLinks (structTreeRoot: PdfDictionary) context =
     let mutable described = 0
-    for visit in walk structTreeRoot context do
-        if PdfName.Link.Equals(standardTag visit.Element context) then
-            match ownAnnotations visit.Element |> List.filter (fun a -> isBlankString (a.GetAsString PdfName.Contents)) with
-            | [] -> ()
-            | annotations ->
-                match describeLinkText (extractText visit.Element context visit.Page) with
-                | None -> ()
-                | Some description ->
-                    for annotation in annotations do
-                        annotation.Put(PdfName.Contents, textString description) |> ignore
-                        described <- described + 1
+    for visit in tocLinks structTreeRoot context do
+        match ownAnnotations visit.Element |> List.filter (fun a -> isBlankString (a.GetAsString PdfName.Contents)) with
+        | [] -> ()
+        | annotations ->
+            match describeLinkText (extractText visit.Element context visit.Page) with
+            | None -> ()
+            | Some description ->
+                for annotation in annotations do
+                    annotation.Put(PdfName.Contents, textString description) |> ignore
+                    described <- described + 1
     described
 
 // ---- Document title ----

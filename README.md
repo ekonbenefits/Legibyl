@@ -20,8 +20,8 @@ which translates the Java bytecode into a .NET assembly at build time. The
 isolates all Java/IKVM types from the rest of the app. `IPdfFixer` combines
 veraPDF's metadata fixer with a small iText-based structural repair pass for
 selected safe object-level fixes, such as setting page `/Tabs /S` when a
-page has annotations, describing links from their own text, naming the
-document, and removing empty semantic `/P` structure elements.
+page has annotations, describing table-of-contents links from their own
+text, naming the document, and removing empty semantic `/P` structure elements.
 `IStructureTreeReader` walks veraPDF's PD model's `StructTreeRoot` (the
 tagged logical structure tree) directly, independent of running a
 validation pass.
@@ -253,10 +253,15 @@ Options:
   guesswork about what the document means: XMP **metadata** via veraPDF's
   metadata fixer (missing metadata stream, missing PDF/A|PDF/UA identifier,
   false conformance claims, Info-dictionary sync); page annotation tab order
-  (`/Tabs /S`); a **description for links that have none**, taken from the
-  link's own visible text (a table-of-contents entry's dot leaders and printed
-  page number are stripped, so `Scope of this document ..... 3` becomes
-  `Scope of this document`); and a **document title** plus `/DisplayDocTitle`,
+  (`/Tabs /S`); a **description for table-of-contents links that have none**,
+  taken from the entry's own visible text with its dot leaders and printed page
+  number stripped, so `Scope of this document ..... 3` becomes `Scope of this
+  document`. Only a link inside a `TOC`/`TOCI` (at any depth) is described,
+  because only there does its text reliably name where it goes. Elsewhere a
+  link often reads "click here" or "read more"; copying that into `/Contents`
+  would make the failure stop reporting while a screen reader user still hears
+  nothing useful, so other links keep failing for a person to describe (and
+  aren't marked fixable); and a **document title** plus `/DisplayDocTitle`,
   so readers show the title rather than the file name. A title is only ever
   moved from somewhere the author actually put it — the Info dictionary, or
   XMP `dc:title` — and never invented. Guessing one from the **file name**

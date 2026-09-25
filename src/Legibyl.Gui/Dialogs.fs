@@ -117,7 +117,7 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                         StackPanel.children [
                             checkBox metadata (label "Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)")
                             checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations")
-                            checkBox linkContents (label "Describe links that have no description, using the link's own text (/Contents)")
+                            checkBox linkContents (label "Describe table-of-contents links that have no description, using the entry's own text (/Contents)")
                             checkBox documentTitle (label "Give the document a title, and show it in place of the file name (/DisplayDocTitle)")
                             checkBox emptyParagraphs (label "Remove empty semantic /P structure elements (optional cleanup)")
                             TextBlock.create [
