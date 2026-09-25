@@ -188,11 +188,10 @@ module internal VeraPdf =
         finally
             tryDeleteTemporary repairedPath
 
-    let rewritePdfWithIText (inputPath: string) (outputPath: string) =
-        use reader = new iText.Kernel.Pdf.PdfReader(inputPath)
-        use writer = new iText.Kernel.Pdf.PdfWriter(outputPath)
-        use _document = new iText.Kernel.Pdf.PdfDocument(reader, writer)
-        ()
+    /// Moves the last repair step's temporary file to the requested output path.
+    let moveToOutput (temporaryPath: string) (outputPath: string) =
+        Directory.CreateDirectory(nonNull (Path.GetDirectoryName(Path.GetFullPath outputPath))) |> ignore
+        File.Move(temporaryPath, outputPath, true)
 
 open VeraPdf
 
@@ -278,7 +277,7 @@ type VeraPdfValidator() =
                     deleteIfExists outputPath
                     result
                 else
-                    this.FinalizeFixedPdf(currentInput, outputPath, profile)
+                    moveToOutput currentInput outputPath
                     { result with OutputPath = outputPath }
             with
             | :? iText.Kernel.Exceptions.PdfException as ex ->
@@ -289,15 +288,6 @@ type VeraPdfValidator() =
             for tempOutput in [ tempMetadataOutput; tempStructuralOutput ] do
                 if not (String.Equals(tempOutput, outputPath, StringComparison.OrdinalIgnoreCase)) then
                     tryDeleteTemporary tempOutput
-
-    member private this.FinalizeFixedPdf(inputPath: string, outputPath: string, profile: PdfProfile) =
-        Directory.CreateDirectory(nonNull (Path.GetDirectoryName(Path.GetFullPath outputPath))) |> ignore
-        rewritePdfWithIText inputPath outputPath
-        try
-            this.Validate(outputPath, profile) |> ignore
-        with _ ->
-            deleteIfExists outputPath
-            reraise ()
 
     /// Reads the structure tree by opening the PDF a second time through veraPDF's
     /// plain PD model (org.verapdf.pd.PDDocument) — the same model the validator

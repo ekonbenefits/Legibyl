@@ -236,14 +236,12 @@ Options:
   repair as an incremental update that iText can't read reliably (a classic
   xref section chained onto xref streams, with an off-by-one `/Prev`), so
   Legibyl reads the repaired XMP and Info dictionary back with veraPDF's own
-  parser and writes them into the input with iText instead. Fixed copies are
-  finalized with an iText rewrite and parsed again before being returned.
-  Intermediate repair files are created under the
-  operating system temp directory, not beside the source PDF or requested
-  output path. Empty `/P` cleanup is visible as a warning and fixable option,
-  but it is unchecked by default in the GUI so users opt into structure-tree
-  deletion. Neither path adds missing alt text, retags untagged content, or
-  infers table headers.
+  parser and writes them into the input with iText instead. Intermediate
+  repair files are created under the operating system temp directory, not
+  beside the source PDF or requested output path. Empty `/P` cleanup is
+  visible as a warning and fixable option, but it is unchecked by default in
+  the GUI so users opt into structure-tree deletion. Neither path adds
+  missing alt text, retags untagged content, or infers table headers.
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
 - `--structure` — include each file's tagged logical structure tree (the
