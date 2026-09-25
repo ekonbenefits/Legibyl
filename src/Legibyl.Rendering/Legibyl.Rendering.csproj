@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Legibyl.Validation\Legibyl.Validation.csproj" />
+    <ProjectReference Include="..\Legibyl.Validation\Legibyl.Validation.fsproj" />
   </ItemGroup>
 
 </Project>

@@ -38,7 +38,7 @@ annotation"), used by the GUI's results grid (see below) and available on
 ```
 Legibyl.slnx
 src/
-  Legibyl.Validation/   C# facade over the veraPDF Java validation core (IKVM)
+  Legibyl.Validation/   F# facade over the veraPDF Java validation core (IKVM)
   Legibyl.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
   Legibyl.Gui/          Avalonia UI (Windows/macOS/Linux): file picker, profile selector, results grid
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly

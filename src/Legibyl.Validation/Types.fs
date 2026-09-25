@@ -1,0 +1,136 @@
+namespace Legibyl.Validation
+
+open System
+
+type FindingSeverity =
+    | Failure = 0
+    | Warning = 1
+
+[<Flags>]
+type PdfFixOptions =
+    | None = 0
+    | Metadata = 1
+    | AnnotationTabs = 2
+    | RemoveEmptyParagraphs = 4
+    | All = 7
+
+/// The PDF/A or PDF/UA validation flavour to check a document against.
+/// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
+type PdfProfile =
+    /// PDF/UA-1 (ISO 14289-1) — the primary supported profile.
+    | PdfUa1 = 0
+    /// PDF/A-1b (basic conformance).
+    | PdfA1B = 1
+    /// PDF/A-2b (basic conformance).
+    | PdfA2B = 2
+    /// PDF/A-2u (Unicode conformance).
+    | PdfA2U = 3
+    /// PDF/A-3b (basic conformance, embedded files allowed).
+    | PdfA3B = 4
+    /// PDF/A-4.
+    | PdfA4 = 5
+
+/// Mirrors org.verapdf.pdfa.results.MetadataFixerResult.RepairStatus.
+type RepairStatus =
+    /// Metadata repair was carried out successfully.
+    | Success = 0
+    /// Metadata repair was attempted but failed.
+    | FixError = 1
+    /// The fixer could not determine any action that could repair the document.
+    | WontFix = 2
+    /// No action was taken because the file was already valid.
+    | NoAction = 3
+    /// A false PDF/A or PDF/UA conformance claim was removed.
+    | IdRemoved = 4
+
+/// Thrown when the underlying veraPDF (Java, via IKVM) validation engine
+/// fails to open or validate a PDF document. Wraps the original Java
+/// exception's message so callers never need to reference IKVM/Java types.
+type VeraPdfValidationException =
+    inherit Exception
+    new(message: string) = { inherit Exception(message) }
+    new(message: string, innerException: exn) = { inherit Exception(message, innerException) }
+
+/// Best-effort page geometry for a semantic structure node, in PDF user-space
+/// coordinates (origin at the bottom-left of the page).
+type StructureGeometry =
+    { PageNumber: int
+      Left: float
+      Bottom: float
+      Right: float
+      Top: float }
+
+/// A human-friendly interpretation of a veraPDF <c>locationContext</c> string
+/// (e.g. <c>root/document[0]/pages[1](7 0 obj PDPage)/annots[0](9 0 obj PDLinkAnnot)</c>),
+/// which otherwise requires knowledge of veraPDF's internal object model to read.
+type PdfLocation =
+    { /// 1-based page number, if the location is anchored to a page.
+      PageNumber: Nullable<int>
+      /// The raw veraPDF/PDF object type of the deepest object on the path (e.g. "PDLinkAnnot").
+      ObjectType: string | null
+      /// The PDF indirect object number of the deepest object on the path, if any.
+      ObjectNumber: Nullable<int>
+      /// If the deepest object is an annotation, its 0-based position within the page's /Annots array
+      /// (i.e. the index from an "annots[N]" path segment). Used to look up its /Rect for region highlighting.
+      AnnotationIndex: Nullable<int>
+      /// A readable "Document → Page 2 → Link annotation" style path.
+      Breadcrumb: string }
+
+    override this.ToString() =
+        if this.PageNumber.HasValue then $"Page {this.PageNumber.Value} — {this.Breadcrumb}"
+        else this.Breadcrumb
+
+/// One node of a tagged PDF's logical structure tree (the Catalog's StructTreeRoot) —
+/// the same semantic hierarchy (headings, paragraphs, lists, tables, links, etc.) and
+/// reading order that assistive technology (screen readers) uses to present the
+/// document to a user. Built by walking veraPDF's own PD model, so it reflects
+/// exactly what the validator itself sees.
+type StructureNode =
+    { /// The structure element's type, resolved to its standard/base tag name where possible
+      /// (e.g. "H1", "P", "L", "Table", "TH"). This is the value that determines the
+      /// element's semantic role to a screen reader.
+      Tag: string
+      /// If this element uses a custom (non-standard) tag that is role-mapped to a
+      /// different standard tag within the same namespace, the mapped-to tag name;
+      /// otherwise null (no distinct mapping worth reporting).
+      Role: string | null
+      /// The element's Alt text (e.g. image/figure/link alt text), if any.
+      AlternateDescription: string | null
+      /// The element's ActualText (a plain-text substitute for its content), if any.
+      ActualText: string | null
+      /// The actual visible text drawn under this element's own directly-owned marked
+      /// content (extracted from the page's text glyphs, matched to this element by
+      /// page + MCID) — the "what does a screen reader actually read here" text. Null if
+      /// this element owns no text-bearing marked content directly (e.g. it's a purely
+      /// structural container whose text lives entirely in its children, or it owns only
+      /// non-text content like a raw image). Does not include descendant elements' text,
+      /// to avoid duplicating text that already appears under a child node.
+      Content: string | null
+      /// For /Form structure elements, the referenced widget annotation's field name (/T), if any.
+      FormFieldName: string | null
+      /// For /Form structure elements, the referenced widget annotation's tooltip/user description (/TU), if any.
+      FormFieldDescription: string | null
+      /// For /Form structure elements, the referenced widget annotation's field type (/FT), e.g. "Tx" or "Btn".
+      FormFieldType: string | null
+      /// For /Form structure elements, the referenced widget annotation's current value (/V), if any.
+      FormFieldValue: string | null
+      /// For /Link structure elements, the external URI target, if any.
+      LinkUri: string | null
+      /// For /Link structure elements, the target page number for an internal destination, if resolvable.
+      LinkDestinationPageNumber: Nullable<int>
+      /// For /Link structure elements, a human-readable internal destination summary, if any.
+      LinkDestinationDescription: string | null
+      /// Best-effort same-page geometry covered by this node's directly-owned content and
+      /// child nodes, if determinable. Null when the node has no geometric content or
+      /// spans multiple pages.
+      Geometry: StructureGeometry | null
+      /// The element's Lang tag (e.g. "en-US"), if explicitly set on this element.
+      Language: string | null
+      /// The 1-based page this element's content appears on, if determinable. Null for
+      /// purely structural container elements that don't directly own any page content.
+      PageNumber: Nullable<int>
+      /// Number of marked-content/annotation references directly under this element (i.e.
+      /// actual tagged page content it owns), not counting nested structure elements.
+      ContentLeafCount: int
+      /// Child structure elements, in document (reading) order.
+      Children: Collections.Generic.IReadOnlyList<StructureNode> }

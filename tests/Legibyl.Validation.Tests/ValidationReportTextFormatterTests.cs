@@ -24,25 +24,17 @@ public class ValidationReportTextFormatterTests
     [Fact]
     public void BuildReport_IncludesLocationsForEachFailedFinding()
     {
-        var report = new ValidationReport
-        {
-            FilePath = @"C:\documents\sample.pdf",
-            Profile = PdfProfile.PdfUa1,
-            FlavourId = "ua1",
-            IsCompliant = false,
-            TotalAssertions = 2,
-            Assertions =
+        var report = new ValidationReport(
+            filePath: @"C:\documents\sample.pdf",
+            profile: PdfProfile.PdfUa1,
+            flavourId: "ua1",
+            isCompliant: false,
+            totalAssertions: 2,
+            assertions:
             [
                 CreateViolation(),
-                CreateViolation() with
-                {
-                    Clause = "7.2",
-                    TestNumber = 3,
-                    LocationContext = null,
-                    ErrorMessage = null,
-                },
-            ],
-        };
+                CreateViolation(clause: "7.2", testNumber: 3, errorMessage: null, locationContext: null),
+            ]);
 
         string text = ValidationReportTextFormatter.BuildReport(report);
 
@@ -53,12 +45,18 @@ public class ValidationReportTextFormatterTests
         Assert.Contains("Raw location: Not available", text);
     }
 
-    private static RuleViolation CreateViolation() => new(
-        Specification: "ISO 14289-1:2014",
-        Clause: "7.1",
-        TestNumber: 2,
-        Passed: false,
-        Message: "A link annotation needs alternate text.",
-        ErrorMessage: "Missing Contents entry.",
-        LocationContext: RawLocation);
+    private static RuleViolation CreateViolation(
+        string clause = "7.1",
+        int testNumber = 2,
+        string? errorMessage = "Missing Contents entry.",
+        string? locationContext = RawLocation) => new(
+        specification: "ISO 14289-1:2014",
+        clause: clause,
+        testNumber: testNumber,
+        passed: false,
+        message: "A link annotation needs alternate text.",
+        errorMessage: errorMessage,
+        locationContext: locationContext,
+        severity: FindingSeverity.Failure,
+        fixOptions: PdfFixOptions.None);
 }
