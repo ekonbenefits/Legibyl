@@ -40,7 +40,7 @@ Legibyl.slnx
 src/
   Legibyl.Validation/   F# facade over the veraPDF Java validation core (IKVM)
   Legibyl.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
-  Legibyl.Gui/          Avalonia UI (Windows/macOS/Linux): file picker, profile selector, results grid
+  Legibyl.Gui/          Avalonia + FuncUI UI (Windows/macOS/Linux): file picker, profile selector, results grid
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
 tests/
   Legibyl.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
@@ -58,7 +58,7 @@ solution build skips it (build it explicitly, see below).
 
 ```powershell
 dotnet build Legibyl.slnx
-dotnet run --project src/Legibyl.Gui/Legibyl.Gui.csproj
+dotnet run --project src/Legibyl.Gui/Legibyl.Gui.fsproj
 ```
 
 ## Testing
@@ -70,7 +70,7 @@ dotnet test tests/Legibyl.Validation.Tests/Legibyl.Validation.Tests.csproj
 ## Publishing (self-contained)
 
 ```powershell
-dotnet publish src/Legibyl.Gui/Legibyl.Gui.csproj -c Release -r win-x64 --self-contained true -o publish/gui
+dotnet publish src/Legibyl.Gui/Legibyl.Gui.fsproj -c Release -r win-x64 --self-contained true -o publish/gui
 ```
 
 Use `-r osx-arm64`, `-r osx-x64`, or `-r linux-x64` for other platforms.

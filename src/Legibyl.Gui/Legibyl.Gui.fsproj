@@ -9,16 +9,24 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Cross-platform UI (Windows, macOS, Linux) - MIT. -->
+    <Compile Include="Fonts.fs" />
+    <Compile Include="Dialogs.fs" />
+    <Compile Include="StructureTreeWindow.fs" />
+    <Compile Include="MainWindow.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Cross-platform UI (Windows, macOS, Linux) - MIT. Views are written in F# with FuncUI. -->
     <PackageReference Include="Avalonia" Version="12.1.3" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
+    <PackageReference Include="Avalonia.FuncUI" Version="2.0.0" />
+    <PackageReference Include="AvaloniaCommunity.FuncUI.Bindings.DataGrid" Version="12.0.0" />
   </ItemGroup>
 
 </Project>

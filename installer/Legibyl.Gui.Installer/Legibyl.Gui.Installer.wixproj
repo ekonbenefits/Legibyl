@@ -33,6 +33,6 @@
   -->
   <Target Name="PublishGuiPayload" BeforeTargets="BeforeBuild">
     <MakeDir Directories="$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui" />
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\src\Legibyl.Gui\Legibyl.Gui.csproj&quot; -c $(Configuration) -r win-x64 --self-contained true -o &quot;$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\src\Legibyl.Gui\Legibyl.Gui.fsproj&quot; -c $(Configuration) -r win-x64 --self-contained true -o &quot;$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui&quot;" />
   </Target>
 </Project>
