@@ -313,9 +313,27 @@ module internal VeraPdf =
             tryDeleteTemporary repairedPath
 
     /// Moves the last repair step's temporary file to the requested output path.
+    ///
+    /// veraPDF's parser can still be holding the file it read when the metadata fixer
+    /// decided not to change anything: its Java handle is released on its own schedule
+    /// under IKVM, not necessarily by the time we get here. So retry briefly, as
+    /// tryDeleteTemporary does for the same reason, and fall back to copying — the
+    /// source is a temp file the caller deletes afterwards either way.
     let moveToOutput (temporaryPath: string) (outputPath: string) =
         Directory.CreateDirectory(nonNull (Path.GetDirectoryName(Path.GetFullPath outputPath))) |> ignore
-        File.Move(temporaryPath, outputPath, true)
+
+        let rec attempt n =
+            try
+                File.Move(temporaryPath, outputPath, true)
+            with
+            | :? IOException
+            | :? UnauthorizedAccessException when n < 4 ->
+                Thread.Sleep 100
+                attempt (n + 1)
+            | :? IOException
+            | :? UnauthorizedAccessException -> File.Copy(temporaryPath, outputPath, true)
+
+        attempt 0
 
 open VeraPdf
 
@@ -384,6 +402,7 @@ type VeraPdfValidator() =
                     ||| PdfFixOptions.RemoveEmptyParagraphs
                     ||| PdfFixOptions.LinkContents
                     ||| PdfFixOptions.DocumentTitle
+                    ||| PdfFixOptions.TitleFromFileName
 
                 if options &&& structuralOptions <> PdfFixOptions.None then
                     let tempOutput = createTemporaryPdfPath outputPath
@@ -432,7 +451,9 @@ type VeraPdfValidator() =
             | :? iText.Kernel.Exceptions.PdfException as ex ->
                 raise (VeraPdfValidationException($"iText failed to fix '{pdfPath}': {ex.Message}", ex))
             | :? IOException as ex ->
-                raise (VeraPdfValidationException($"Could not write fixed PDF '{outputPath}': {ex.Message}", ex))
+                // The path in ex is the one that was actually locked or unwritable, which
+                // may be a temporary file rather than outputPath; keep both.
+                raise (VeraPdfValidationException($"Could not write fixed PDF for '{outputPath}': {ex.Message}", ex))
         finally
             for tempOutput in [ tempMetadataOutput; tempStructuralOutput ] do
                 if not (String.Equals(tempOutput, outputPath, StringComparison.OrdinalIgnoreCase)) then

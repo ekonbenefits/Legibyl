@@ -48,8 +48,12 @@ let private usageError (message: string) =
     ExitCodes.UsageError
 
 /// The repairs --fix applies: everything that needs no guesswork about the document's
-/// meaning. Removing empty /P elements is deliberately left out — it's optional cleanup
-/// the GUI offers as a choice, not something to do to a file unasked.
+/// meaning. Deliberately left out:
+///   TitleFromFileName — a title guessed from the file name would satisfy dc:title while
+///     possibly misdescribing the document, and nobody is watching a CLI run to catch it.
+///     DocumentTitle still moves across a title the author did write, in Info or in XMP.
+///   RemoveEmptyParagraphs — optional cleanup the GUI offers as a choice, not something
+///     to do to a file unasked.
 let private defaultFixOptions =
     PdfFixOptions.Metadata
     ||| PdfFixOptions.AnnotationTabs
