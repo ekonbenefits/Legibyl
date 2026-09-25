@@ -126,13 +126,28 @@ module internal VeraPdf =
         | CouldNotInspect warning -> assertions @ [ warning ]
         | Analysed(document, context, warnings) ->
             try
+                // The link fix only describes links in a table of contents, so a missing link
+                // description elsewhere isn't fixable (see StructureFixes.describeLinks).
+                let tocLinkAnnotations = lazy (StructureFixes.tocLinkAnnotationNumbers document context)
+                let fixOptionsFor (assertion: RuleViolation) =
+                    let isTocLink () =
+                        match assertion.Location with
+                        | NonNull location when location.ObjectNumber.HasValue ->
+                            tocLinkAnnotations.Value.Contains location.ObjectNumber.Value
+                        | _ -> false
+                    if assertion.FixOptions.HasFlag PdfFixOptions.LinkContents && not (isTocLink ()) then
+                        assertion.FixOptions &&& ~~~PdfFixOptions.LinkContents
+                    else
+                        assertion.FixOptions
                 let located =
                     assertions
                     |> List.map (fun assertion ->
                         if assertion.Passed then
                             assertion
                         else
-                            { assertion with Geometry = FindingGeometry.locate context document assertion |> Option.toObj })
+                            { assertion with
+                                Geometry = FindingGeometry.locate context document assertion |> Option.toObj
+                                FixOptions = fixOptionsFor assertion })
                 located @ warnings
             with
             | :? iText.Kernel.Exceptions.PdfException

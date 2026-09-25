@@ -327,9 +327,27 @@ let ``Validate adjacent complete paragraphs does not add split warning`` () =
 
     report.Assertions |> Seq.exists isSplitParagraphWarning |> should be False
 
+/// Where createPdfWithLinks puts the tagged links in the structure tree.
+type private LinkContainer =
+    /// Straight under the structure tree root, as links in body text are.
+    | Body
+    /// Each link in its own TOCI inside a TOC.
+    | TableOfContents
+    /// Each link wrapped in a Span inside its TOCI.
+    | TableOfContentsWrapped
+    /// Each link in a sub-entry: TOC > TOCI > TOCI > Link.
+    | TableOfContentsNested
+
+let private structElement (tag: PdfName) (kids: PdfObject list) : PdfObject =
+    let element = PdfDictionary()
+    element.Put(PdfName.Type, PdfName.StructElem) |> ignore
+    element.Put(PdfName.S, tag) |> ignore
+    element.Put(PdfName.K, arrayOf kids) |> ignore
+    element
+
 /// Draws each link's text inside its own marked content and tags it as a /Link that owns
 /// both that marked content and a link annotation, the way a real tagged link is built.
-let private createPdfWithLinks (path: string) (links: (string * string option) list) =
+let private createPdfWithLinks (path: string) (container: LinkContainer) (links: (string * string option) list) =
     use document = new PdfDocument(new PdfWriter(path))
     let page = document.AddNewPage()
     let canvas = PdfCanvas(page)
@@ -375,7 +393,14 @@ let private createPdfWithLinks (path: string) (links: (string * string option) l
             link :> PdfObject)
 
     page.GetPdfObject().Put(PdfName.Annots, annotations) |> ignore
-    setStructTreeRoot document (arrayOf kids)
+    let entry (link: PdfObject) =
+        match container with
+        | Body -> link
+        | TableOfContents -> structElement PdfName.TOCI [ link ]
+        | TableOfContentsWrapped -> structElement PdfName.TOCI [ structElement PdfName.Span [ link ] ]
+        | TableOfContentsNested -> structElement PdfName.TOCI [ structElement PdfName.TOCI [ link ] ]
+    let entries = kids |> List.map entry
+    setStructTreeRoot document (if container = Body then arrayOf entries :> PdfObject else structElement PdfName.TOC entries)
 
 /// The /Contents of every link annotation on the first page, in order.
 let private linkContentsOf (path: string) =
@@ -397,11 +422,14 @@ let private setXmpTitle (path: string) (title: string) =
     xmp.SetLocalizedText(XMPConst.NS_DC, "title", null, XMPConst.X_DEFAULT, title)
     document.SetXmpMetadata xmp
 
+let private describedLinkCount (result: FixResult) =
+    result.AppliedFixes |> Seq.exists (fun fix -> fix.Contains("Described", StringComparison.Ordinal))
+
 [<Fact>]
-let ``Fix link contents describes an undescribed link from its own text`` () =
+let ``Fix link contents describes an undescribed table-of-contents link from its own text`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    createPdfWithLinks input.Path [ "Our privacy policy", None ]
+    createPdfWithLinks input.Path TableOfContents [ "Our privacy policy", None ]
     let fixer = VeraPdfValidator()
 
     let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents)
@@ -414,7 +442,7 @@ let ``Fix link contents describes an undescribed link from its own text`` () =
 let ``Fix link contents strips dot leaders and the printed page number from a contents entry`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    createPdfWithLinks input.Path [ "Scope of this document ......... 3", None ]
+    createPdfWithLinks input.Path TableOfContents [ "Scope of this document ......... 3", None ]
     let fixer = VeraPdfValidator()
 
     fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents) |> ignore
@@ -426,7 +454,7 @@ let ``Fix link contents keeps a trailing number that is part of the link's own t
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
     // Without leaders running up to it, a trailing number is text, not a page number.
-    createPdfWithLinks input.Path [ "Appendix 2", None ]
+    createPdfWithLinks input.Path TableOfContents [ "Appendix 2", None ]
     let fixer = VeraPdfValidator()
 
     fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents) |> ignore
@@ -434,10 +462,54 @@ let ``Fix link contents keeps a trailing number that is part of the link's own t
     linkContentsOf output.Path |> should equal [ Some "Appendix 2" ]
 
 [<Fact>]
-let ``Fix link contents leaves a link that already has a description alone`` () =
+let ``Fix link contents describes a table-of-contents link wrapped in another element`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    createPdfWithLinks input.Path [ "Read more", Some "Hand-written description" ]
+    createPdfWithLinks input.Path TableOfContentsWrapped [ "Eligibility ..... 4", None ]
+    let fixer = VeraPdfValidator()
+
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents) |> ignore
+
+    linkContentsOf output.Path |> should equal [ Some "Eligibility" ]
+
+[<Fact>]
+let ``Fix link contents describes a link in a nested table-of-contents entry`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path TableOfContentsNested [ "Who can join ..... 5", None ]
+    let fixer = VeraPdfValidator()
+
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents) |> ignore
+
+    linkContentsOf output.Path |> should equal [ Some "Who can join" ]
+
+[<Theory>]
+[<InlineData("Our privacy policy")>]
+[<InlineData("click here")>]
+let ``Fix link contents leaves a link outside a table of contents failing`` (text: string) =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // Even text that would make a fine description isn't used: outside a table of contents
+    // there's no telling, and a guess would silence a failure a person should look at.
+    createPdfWithLinks input.Path Body [ text, None ]
+    let fixer = VeraPdfValidator()
+
+    // Tab order is fixed too, so there's an output file to validate.
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents ||| PdfFixOptions.AnnotationTabs)
+
+    describedLinkCount result |> should be False
+    linkContentsOf output.Path |> should equal [ (None: string option) ]
+    let failedRules = VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    failedRules |> should contain "7.18.1-2"
+    failedRules |> should contain "7.18.5-2"
+
+[<Theory>]
+[<InlineData(true)>]
+[<InlineData(false)>]
+let ``Fix link contents leaves a link that already has a description alone`` (insideTableOfContents: bool) =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path (if insideTableOfContents then TableOfContents else Body) [ "Read more", Some "Hand-written description" ]
     let fixer = VeraPdfValidator()
 
     let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents)
@@ -446,10 +518,26 @@ let ``Fix link contents leaves a link that already has a description alone`` () 
     linkContentsOf input.Path |> should equal [ Some "Hand-written description" ]
 
 [<Fact>]
+let ``Validate marks a missing link description fixable only in a table of contents`` () =
+    use body = new TempPdf()
+    use toc = new TempPdf()
+    createPdfWithLinks body.Path Body [ "Our privacy policy", None ]
+    createPdfWithLinks toc.Path TableOfContents [ "Our privacy policy", None ]
+    let validator = VeraPdfValidator()
+    let linkFixOptions (path: string) =
+        validator.Validate(path, PdfProfile.PdfUa1).FailedAssertions
+        |> Seq.filter (fun a -> a.RuleId = "7.18.5-2")
+        |> Seq.map (fun a -> a.FixOptions.HasFlag PdfFixOptions.LinkContents)
+        |> List.ofSeq
+
+    linkFixOptions body.Path |> should equal [ false ]
+    linkFixOptions toc.Path |> should equal [ true ]
+
+[<Fact>]
 let ``Fix document title moves a title the document carries in XMP into the Info dictionary`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    createPdfWithLinks input.Path [ "Read more", None ]
+    createPdfWithLinks input.Path Body [ "Read more", None ]
     setXmpTitle input.Path "Retirement Plan Summary"
     let fixer = VeraPdfValidator()
 
@@ -465,7 +553,7 @@ let ``Fix document title moves a title the document carries in XMP into the Info
 let ``Fix document title never invents a title for a document that carries none`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    createPdfWithLinks input.Path [ "Read more", None ]
+    createPdfWithLinks input.Path Body [ "Read more", None ]
     let fixer = VeraPdfValidator()
 
     // /DisplayDocTitle is still worth setting, so the file does change — but a title the
@@ -482,7 +570,7 @@ let ``Fix writes output when a structural fix applies but the metadata fixer cha
     // No title anywhere, so veraPDF's metadata fixer won't repair dc:title and reports
     // WontFix. The structural repair still has to reach outputPath — the file it moves
     // there is the one veraPDF's parser just had open.
-    createPdfWithLinks input.Path [ "Our privacy policy", None ]
+    createPdfWithLinks input.Path TableOfContents [ "Our privacy policy", None ]
     let fixer = VeraPdfValidator()
 
     let result =
@@ -496,7 +584,7 @@ let ``Fix writes output when a structural fix applies but the metadata fixer cha
 let ``Fix document title keeps a title the document already has`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    createPdfWithLinks input.Path [ "Read more", None ]
+    createPdfWithLinks input.Path Body [ "Read more", None ]
     (use document = new PdfDocument(new PdfReader(input.Path), new PdfWriter(output.Path))
      document.GetDocumentInfo().SetTitle "The Real Title" |> ignore)
     File.Copy(output.Path, input.Path, true)
