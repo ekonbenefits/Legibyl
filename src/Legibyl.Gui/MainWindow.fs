@@ -568,6 +568,13 @@ module private MainView =
                                         ]
                                         TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
                                         detailText row.Message false [ TextBox.maxHeight 130.0 ]
+                                        if row.Violation.IsFixable then
+                                            TextBlock.create [
+                                                TextBlock.text "Fixable"
+                                                TextBlock.fontWeight FontWeight.SemiBold
+                                                TextBlock.margin (0.0, 8.0, 0.0, 0.0)
+                                            ]
+                                            detailText $"{row.Fixable}. Use Fix… to repair a copy of this PDF." false []
                                         TextBlock.create [
                                             TextBlock.text "Location"
                                             TextBlock.fontWeight FontWeight.SemiBold
