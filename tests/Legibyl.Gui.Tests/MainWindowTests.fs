@@ -12,13 +12,7 @@ open Avalonia.VisualTree
 open Xunit
 open FsUnit.Xunit
 open Legibyl.Screenshots
-
-// One headless Avalonia session (and UI thread) for the whole test run.
-let private session =
-    lazy (Avalonia.Headless.HeadlessUnitTestSession.StartNew(typeof<HeadlessWindow.HeadlessApp>))
-
-let private onUiThread (test: unit -> unit) =
-    session.Value.Dispatch(Action test, CancellationToken.None).GetAwaiter().GetResult()
+open Legibyl.Gui.Tests.HeadlessSession
 
 let private corpusFile name =
     Path.Combine(AppContext.BaseDirectory, "SampleCorpus", name)
