@@ -190,6 +190,23 @@ module private MainView =
             yield! attrs
         ]
 
+    /// e.g. "Validating… 394,185 checks on 640,196 objects, 1 rule failed so far · 0:07".
+    /// veraPDF keeps finding objects as it goes, so there's no percentage to show.
+    let private describeProgress (progress: ValidationProgress) =
+        let elapsed =
+            if progress.Elapsed.TotalHours >= 1.0 then progress.Elapsed.ToString(@"h\:mm\:ss")
+            else progress.Elapsed.ToString(@"m\:ss")
+        if progress.Checks = 0 && progress.ProcessedObjects = 0 then
+            // veraPDF spends the first moments reading the file before it counts anything.
+            $"Reading the PDF… · {elapsed}"
+        else
+            let failed =
+                match progress.FailedRules with
+                | 0 -> "no rules failed so far"
+                | 1 -> "1 rule failed so far"
+                | n -> $"{n:N0} rules failed so far"
+            $"Validating… {progress.Checks:N0} checks on {progress.ProcessedObjects:N0} objects, {failed} · {elapsed}"
+
     let view (window: Window) (openRequests: IReadable<string option>) =
         Component(fun ctx ->
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
@@ -197,6 +214,7 @@ module private MainView =
             let selectedFile = ctx.useState (None: string option)
             let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
+            let validationProgress = ctx.useState (None: ValidationProgress option)
             let outcome = ctx.useState NotValidated
             let selectedRow = ctx.useState (None: RuleViolationRow option)
             let preview = ctx.useState noPreview
@@ -262,9 +280,12 @@ module private MainView =
                         let profile = currentProfile ()
                         isBusy.Set true
                         clearResults ()
+                        validationProgress.Set None
+                        // Created on the UI thread, so its reports arrive there too.
+                        let progress = Progress<ValidationProgress>(fun p -> validationProgress.Set(Some p))
                         try
                             try
-                                let! report = Task.Run(fun () -> validator.Validate(filePath, profile))
+                                let! report = Task.Run(fun () -> validator.Validate(filePath, profile, progress))
                                 let rows =
                                     report.Findings
                                     |> Seq.map RuleViolationRow.Of
@@ -677,13 +698,26 @@ module private MainView =
                 Grid.rowDefinitions "Auto,Auto,Auto,*,Auto"
                 Grid.children [
                     fileRow
-                    ProgressBar.create [
+                    StackPanel.create [
                         Grid.row 1
-                        ProgressBar.height 4.0
-                        ProgressBar.minHeight 4.0
-                        ProgressBar.margin (0.0, 0.0, 0.0, 8.0)
-                        ProgressBar.isIndeterminate true
-                        ProgressBar.isVisible busy
+                        StackPanel.isVisible busy
+                        StackPanel.margin (0.0, 0.0, 0.0, 8.0)
+                        StackPanel.children [
+                            ProgressBar.create [
+                                ProgressBar.height 4.0
+                                ProgressBar.minHeight 4.0
+                                ProgressBar.isIndeterminate true
+                            ]
+                            match validationProgress.Current with
+                            | Some progress when busy ->
+                                TextBlock.create [
+                                    TextBlock.margin (0.0, 4.0, 0.0, 0.0)
+                                    TextBlock.text (describeProgress progress)
+                                    TextBlock.textWrapping TextWrapping.Wrap
+                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                ]
+                            | _ -> ()
+                        ]
                     ]
                     match statusBanner with
                     | Some banner -> banner

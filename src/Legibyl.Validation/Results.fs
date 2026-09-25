@@ -97,13 +97,32 @@ type FixResult =
         not (isNull this.OutputPath)
         && (this.Status = RepairStatus.Success || this.Status = RepairStatus.IdRemoved)
 
+/// How far a running validation has got. veraPDF finds objects to check as it goes, so
+/// there's no fixed total to measure against: QueuedObjects can grow as well as shrink.
+type ValidationProgress =
+    { /// Rule checks run so far.
+      Checks: int
+      /// Distinct rules that have failed at least once so far.
+      FailedRules: int
+      /// PDF objects checked so far.
+      ProcessedObjects: int
+      /// Objects found but not checked yet.
+      QueuedObjects: int
+      /// Time since validation started.
+      Elapsed: TimeSpan }
+
 /// Validates PDF documents against PDF/A or PDF/UA profiles. Implementations
 /// wrap the veraPDF Java validation engine (loaded via IKVM); callers never
 /// need to reference IKVM or Java types directly.
 type IPdfValidator =
-    /// Validates the PDF at pdfPath against profile. Throws VeraPdfValidationException
-    /// if the file cannot be parsed (corrupt/invalid PDF, encrypted, IO error, etc).
-    abstract Validate: pdfPath: string * profile: PdfProfile -> ValidationReport
+    /// Validates the PDF at pdfPath against profile, reporting to progress (if given)
+    /// several times a second while it runs. Throws VeraPdfValidationException if the
+    /// file cannot be parsed (corrupt/invalid PDF, encrypted, IO error, etc).
+    abstract Validate:
+        pdfPath: string *
+        profile: PdfProfile *
+        [<Optional; DefaultParameterValue(null: IProgress<ValidationProgress> | null)>] progress: IProgress<ValidationProgress> | null ->
+            ValidationReport
 
 /// Repairs selected PDF/A or PDF/UA issues. Implementations keep veraPDF/IKVM
 /// and PDF writer details behind this façade.
