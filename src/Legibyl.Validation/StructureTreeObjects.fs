@@ -6,6 +6,7 @@ module internal Legibyl.Validation.StructureTreeObjects
 open System
 open System.Collections.Generic
 open System.Text
+open System.Text.RegularExpressions
 open iText.Kernel.Pdf
 open Legibyl.Validation.Interop
 
@@ -168,6 +169,50 @@ let rec private collectGeometries (obj: PdfObject | null) context (inheritedPage
 /// Best-effort bounding box of everything drawn under obj, if it's all on one page.
 let subtreeGeometry (obj: PdfObject | null) context (inheritedPage: int option) =
     collectGeometries obj context inheritedPage |> unionGeometry
+
+let rec private collectTextGeometries (obj: PdfObject | null) context (inheritedPage: int option) : StructureGeometry list =
+    match resolve obj with
+    | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do yield! collectTextGeometries (array.Get i) context inheritedPage ]
+    | :? PdfNumber as mcid when inheritedPage.IsSome ->
+        markedContent context mcid inheritedPage.Value |> Option.bind _.Geometry |> Option.toList
+    | :? PdfDictionary as dictionary when isNull (dictionary.GetAsDictionary(PdfName.Obj)) ->
+        collectTextGeometries (dictionary.Get(PdfName.K)) context (structElemPage dictionary context inheritedPage)
+    | _ -> []
+
+/// Like subtreeGeometry, but only what's drawn: annotation rectangles (/OBJR) are left out,
+/// since a link's rectangle often spans the whole line whatever its text's indent.
+let textGeometry (obj: PdfObject | null) context (inheritedPage: int option) =
+    collectTextGeometries obj context inheritedPage |> unionGeometry
+
+/// A table-of-contents entry's own text without its dot leaders and printed page number:
+/// "Scope of this document ..... 3" becomes "Scope of this document". Text without leaders
+/// is kept as-is. Returns None when nothing usable is left.
+let tocEntryText (text: string) =
+    let collapsed = Regex.Replace(text, @"\s+", " ").Trim()
+    // Dot/underscore/middle-dot leaders, whether or not they're spaced out.
+    let leaders = Regex(@"[\s]*(?:[.\u00B7_]\s?){3,}[\s]*")
+    // A trailing number is only a printed page number if leaders ran up to it. Without
+    // that evidence it's part of the link's own text, as in "Appendix 2" or "Form 5500".
+    let described =
+        if leaders.IsMatch collapsed then
+            Regex.Replace(leaders.Replace(collapsed, " "), @"\s+\d{1,4}$", "")
+        else
+            collapsed
+    let description = described.Trim([| ' '; '.'; '\u00B7'; '_'; '-'; '\u2013'; '\u2014' |]).Trim()
+    if String.IsNullOrWhiteSpace description then None else Some description
+
+/// The annotations a structure element points at through its own /OBJR children. Nested
+/// structure elements are left alone — they describe themselves.
+let ownAnnotations (element: PdfDictionary) =
+    let ofObject (obj: PdfObject | null) =
+        match resolve obj with
+        | :? PdfDictionary as dictionary -> dictionary.GetAsDictionary(PdfName.Obj) |> Option.ofObj
+        | _ -> None
+
+    match resolve (element.Get(PdfName.K)) with
+    | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do yield! Option.toList (ofObject (array.Get i)) ]
+    | :? PdfDictionary as dictionary -> Option.toList (ofObject dictionary)
+    | _ -> []
 
 /// One dictionary in the structure tree, as seen while walking it in reading order.
 type StructElemVisit =

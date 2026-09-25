@@ -152,9 +152,22 @@ adjacent sibling `/P` tags that look like visual line fragments from the same
 sentence; those are intentionally warning-only because the safest repair is
 usually in the source document (for example, the original Word file) rather
 than rewriting paragraph semantics in the PDF after export. These warnings
-(reported as `Legibyl` / `Structure-N`) are all defined in one list in
+(reported as `Legibyl` / `Structure-N`) are all defined in
 `src/Legibyl.Validation/LegibylChecks.fs`; its header explains how to add a
 new one.
+
+For documents that tag no headings at all but carry a linked table of
+contents, Legibyl also recovers the heading hierarchy from it
+(`TocHeadings.fs`): each entry gives a heading's text, the page it's on (its
+link's destination), and its level (its indent, grouped into clearly
+separated tiers, H1 for the least indented). A body paragraph is only taken
+to be that heading when both its text and its page match, and only one
+paragraph does. Each such paragraph gets a fixable warning (Structure-3);
+entries that match nothing or several paragraphs are reported (Structure-4);
+and if the indents don't form clear levels, or the headings that could be
+matched would start below H1 or skip a level, nothing is recovered and one
+warning says why (Structure-5). The retagging is a separate Fix dialog option,
+off by default.
 
 Warnings can be dismissed from a row's right-click menu (or the keyboard's
 context-menu key): they drop out of the list, the banner's warning count, and
@@ -270,7 +283,9 @@ Options:
   therefore still reports the `dc:title` failure after `--fix`, rather than
   being quietly given a made-up one. The GUI dialog
   exposes the same repairs as individual checkboxes, plus removal of empty
-  semantic `/P` structure elements, which the CLI deliberately does not apply.
+  semantic `/P` structure elements and retagging headings recovered from the
+  table of contents (both off by default), which the CLI deliberately does not
+  apply.
   Structural fixes run
   before the veraPDF metadata fixer so metadata is repaired against the
   already-cleaned copy in the same operation. veraPDF saves its metadata
