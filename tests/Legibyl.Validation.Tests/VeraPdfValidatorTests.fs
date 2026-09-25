@@ -1,6 +1,10 @@
 module Legibyl.Validation.Tests.VeraPdfValidatorTests
 
 open System
+open iText.IO.Image
+open iText.Kernel.Pdf
+open iText.Layout
+open iText.Layout.Element
 open Xunit
 open FsUnit.Xunit
 open Legibyl.Validation
@@ -51,3 +55,35 @@ let ``Validate clipping path inside marked content does not inflate region`` () 
     let geometry = firstParagraph.Geometry |> notNull
     geometry.Top - geometry.Bottom |> should be (inRange 5.0 20.0)
     geometry.Bottom |> should be (inRange 700.0 720.0)
+
+/// A tagged PDF with `figures` sections, each a page or more of text followed by a figure
+/// that has no alt text.
+let private createPdfWithUntitledFigures (path: string) (figures: int) =
+    use pdf = new PdfDocument(new PdfWriter(path))
+    pdf.SetTagged() |> ignore
+    use document = new Document(pdf)
+    let pixel = ImageDataFactory.Create(2, 2, 3, 8, Array.create 12 128uy, null)
+    for section in 1 .. figures do
+        for line in 1 .. 12 do
+            document.Add(Paragraph(String.replicate 6 $"Section {section}, paragraph {line}: text for veraPDF to check. ")) |> ignore
+        document.Add(Image(pixel).SetWidth(20f)) |> ignore
+        if section < figures then
+            document.Add(AreaBreak()) |> ignore
+
+[<Fact>]
+let ``Validate reports every occurrence of a repeated failure`` () =
+    // veraPDF keeps only the first failure of each rule once it has recorded 10,000 results,
+    // which logging passed checks reached within a few pages.
+    use input = new TempPdf()
+    createPdfWithUntitledFigures input.Path 4
+
+    let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1)
+
+    report.TotalAssertions |> should be (greaterThan 10000)
+    // One missing-alt-text failure per figure, each placed on its own page.
+    report.FailedAssertions
+    |> Seq.filter (fun a -> a.RuleId = "7.3-1")
+    |> Seq.map (fun a -> (a.Geometry |> notNull).PageNumber)
+    |> Seq.distinct
+    |> Seq.length
+    |> should equal 4

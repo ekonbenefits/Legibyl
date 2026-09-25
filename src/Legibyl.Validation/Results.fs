@@ -65,7 +65,8 @@ type ValidationReport =
       IsCompliant: bool
       /// Total number of individual rule checks performed.
       TotalAssertions: int
-      /// All recorded rule assertions (both passed and failed).
+      /// veraPDF's failed checks, followed by Legibyl's own warnings. Passed veraPDF checks
+      /// are only counted (TotalAssertions), not recorded.
       Assertions: IReadOnlyList<RuleViolation> }
 
     /// Convenience accessor for only the failed assertions.
