@@ -176,7 +176,8 @@ screen reader uses to present the document (the Catalog's `StructTreeRoot`).
 It's read directly from veraPDF's own PD model (independent of a
 validation pass), so it reflects exactly what the validator itself sees.
 Reading it is mostly extracting each page's tagged text, so the progress bar
-fills page by page while it loads.
+fills page by page while it loads. The last structure read is kept, so
+reopening the window for the same, unchanged file is immediate.
 The default **Layout** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
 (headings, lists, tables, links, figures, etc. use different colors).

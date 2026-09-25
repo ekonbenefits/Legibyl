@@ -273,6 +273,7 @@ module private MainView =
         Component(fun ctx ->
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
             let renderer = ctx.useStateLazy(fun () -> new PdfRegionRenderer()).Current
+            let structureCache = ctx.useStateLazy(fun () -> StructureCache()).Current
             let selectedFile = ctx.useState (None: string option)
             let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
@@ -413,27 +414,39 @@ module private MainView =
 
             let viewStructure _ =
                 task {
+                    let show (structure: StructureNode | null) (filePath: string) =
+                        task {
+                            match structure with
+                            | null ->
+                                do!
+                                    Dialogs.showMessage
+                                        window
+                                        ("This PDF has no structure tree at all — it is completely untagged, so there is no "
+                                         + "semantic hierarchy for a screen reader to use.")
+                                        "Document Structure"
+                            | structure -> StructureTreeWindow(structure, filePath).Show window
+                        }
+
                     match selectedFile.Current with
                     | Some filePath ->
-                        isBusy.Set true
-                        busyProgress.Set None
-                        // Created on the UI thread, so its reports arrive there too.
-                        let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
-                        try
+                        match structureCache.TryFind filePath with
+                        | Some structure -> do! show structure filePath
+                        | None ->
+                            isBusy.Set true
+                            busyProgress.Set None
+                            // Created on the UI thread, so its reports arrive there too.
+                            let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
+                            let stamp = structureCache.Stamp filePath
                             try
-                                match! Task.Run(fun () -> validator.ReadStructureTree(filePath, progress)) with
-                                | null ->
-                                    do!
-                                        Dialogs.showMessage
-                                            window
-                                            ("This PDF has no structure tree at all — it is completely untagged, so there is no "
-                                             + "semantic hierarchy for a screen reader to use.")
-                                            "Document Structure"
-                                | structure -> StructureTreeWindow(structure, filePath).Show window
-                            with :? VeraPdfValidationException as ex ->
-                                do! Dialogs.showMessage window ex.Message "Could not read structure"
-                        finally
-                            isBusy.Set false
+                                try
+                                    let! structure = Task.Run(fun () -> validator.ReadStructureTree(filePath, progress))
+                                    structureCache.Remember(stamp, structure)
+                                    isBusy.Set false
+                                    do! show structure filePath
+                                with :? VeraPdfValidationException as ex ->
+                                    do! Dialogs.showMessage window ex.Message "Could not read structure"
+                            finally
+                                isBusy.Set false
                     | None -> ()
                 }
                 |> ignore
