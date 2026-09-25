@@ -18,6 +18,8 @@
     <Compile Include="MainWindowTests.fs" />
     <Compile Include="StructureTreeWindowTests.fs" />
     <Compile Include="StructureCacheTests.fs" />
+    <Compile Include="DismissalsTests.fs" />
+    <Compile Include="DismissWarningsTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
