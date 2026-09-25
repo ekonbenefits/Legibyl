@@ -402,7 +402,6 @@ type VeraPdfValidator() =
                     ||| PdfFixOptions.RemoveEmptyParagraphs
                     ||| PdfFixOptions.LinkContents
                     ||| PdfFixOptions.DocumentTitle
-                    ||| PdfFixOptions.TitleFromFileName
 
                 if options &&& structuralOptions <> PdfFixOptions.None then
                     let tempOutput = createTemporaryPdfPath outputPath

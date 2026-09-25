@@ -74,7 +74,6 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
             let emptyParagraphs = ctx.useState false
             let linkContents = ctx.useState true
             let documentTitle = ctx.useState true
-            let titleFromFileName = ctx.useState true
 
             let checkBox (state: IWritable<bool>) (content: IView) =
                 CheckBox.create [
@@ -90,27 +89,13 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
             let label (text: string) =
                 TextBlock.create [ TextBlock.text text; TextBlock.textWrapping TextWrapping.Wrap ]
 
-            /// A checkbox for an option that only applies when the one above it is on.
-            let subCheckBox (state: IWritable<bool>) (enabledBy: IWritable<bool>) (content: IView) =
-                CheckBox.create [
-                    CheckBox.margin (22.0, -4.0, 0.0, 10.0)
-                    CheckBox.isChecked state.Current
-                    CheckBox.isEnabled enabledBy.Current
-                    CheckBox.onIsCheckedChanged (fun e ->
-                        match e.Source with
-                        | :? CheckBox as checkBox -> state.Set(checkBox.IsChecked.GetValueOrDefault())
-                        | _ -> ())
-                    CheckBox.content content
-                ]
-
             let onContinue _ =
                 let options =
                     [ metadata.Current, PdfFixOptions.Metadata
                       annotationTabs.Current, PdfFixOptions.AnnotationTabs
                       emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
                       linkContents.Current, PdfFixOptions.LinkContents
-                      documentTitle.Current, PdfFixOptions.DocumentTitle
-                      titleFromFileName.Current && documentTitle.Current, PdfFixOptions.TitleFromFileName ]
+                      documentTitle.Current, PdfFixOptions.DocumentTitle ]
                     |> List.fold (fun all (isChecked, option) -> if isChecked then all ||| option else all) PdfFixOptions.None
 
                 if options = PdfFixOptions.None then
@@ -134,7 +119,6 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                             checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations")
                             checkBox linkContents (label "Describe links that have no description, using the link's own text (/Contents)")
                             checkBox documentTitle (label "Give the document a title, and show it in place of the file name (/DisplayDocTitle)")
-                            subCheckBox titleFromFileName documentTitle (label "If it has no title at all, derive one from the file name (a guess — check the result)")
                             checkBox emptyParagraphs (label "Remove empty semantic /P structure elements (optional cleanup)")
                             TextBlock.create [
                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]

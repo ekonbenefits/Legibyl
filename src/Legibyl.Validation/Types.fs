@@ -14,10 +14,7 @@ type PdfFixOptions =
     | RemoveEmptyParagraphs = 4
     | LinkContents = 8
     | DocumentTitle = 16
-    /// Only meaningful with DocumentTitle. Lets a document that carries no title anywhere
-    /// take one derived from its file name — a guess, so it's opt-in rather than implied.
-    | TitleFromFileName = 32
-    | All = 63
+    | All = 31
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
