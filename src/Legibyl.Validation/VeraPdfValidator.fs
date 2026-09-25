@@ -155,29 +155,38 @@ module internal VeraPdf =
         ensureExists pdfPath
         let flavour = toJavaFlavour profile
         let foundry = Foundries.defaultInstance ()
-        wrapErrors $"veraPDF failed to fix '{pdfPath}'" (fun () ->
-            use parser = foundry.createParser (java.io.File pdfPath, flavour)
-            let result = foundry.createValidator(flavour, false).validate parser
-            let fixResult =
-                use outputStream = new java.io.FileOutputStream(outputPath)
-                foundry.createMetadataFixer().fixMetadata (parser, outputStream, result)
+        // veraPDF's own output is an incremental update iText can't read reliably, so it only
+        // goes to a scratch file; MetadataTransfer copies the repair into outputPath.
+        let repairedPath = createTemporaryPdfPath outputPath
+        try
+            let status, appliedFixes =
+                wrapErrors $"veraPDF failed to fix '{pdfPath}'" (fun () ->
+                    use parser = foundry.createParser (java.io.File pdfPath, flavour)
+                    let result = foundry.createValidator(flavour, false).validate parser
+                    let fixResult =
+                        use outputStream = new java.io.FileOutputStream(repairedPath)
+                        foundry.createMetadataFixer().fixMetadata (parser, outputStream, result)
 
-            let status = toRepairStatus (fixResult.getRepairStatus ())
+                    toRepairStatus (fixResult.getRepairStatus ()),
+                    [ for fix in javaSeq (fixResult.getAppliedFixes ()) -> fix :?> string ])
 
             // Only Success/IdRemoved reflect the fixer actually changing something; NoAction,
             // WontFix and FixError leave a repaired copy that's either empty or just a useless
-            // byte-for-byte (or broken) duplicate of the original. Don't keep a file the user
-            // didn't ask for and can't use — clean it up and report no output path.
-            let wroteUsableOutput =
+            // byte-for-byte (or broken) duplicate of the original. Don't produce a file the user
+            // didn't ask for and can't use.
+            let changed =
                 (status = RepairStatus.Success || status = RepairStatus.IdRemoved)
-                && File.Exists outputPath
-                && FileInfo(outputPath).Length > 0L
-            if not wroteUsableOutput && File.Exists outputPath then
-                File.Delete outputPath
+                && File.Exists repairedPath
+                && FileInfo(repairedPath).Length > 0L
+            if changed then
+                wrapErrors $"veraPDF failed to read its repaired copy of '{pdfPath}'" (fun () ->
+                    MetadataTransfer.apply pdfPath repairedPath outputPath)
 
-            { Changed = wroteUsableOutput
+            { Changed = changed
               Status = status
-              AppliedFixes = [ for fix in javaSeq (fixResult.getAppliedFixes ()) -> fix :?> string ] })
+              AppliedFixes = appliedFixes }
+        finally
+            tryDeleteTemporary repairedPath
 
     let rewritePdfWithIText (inputPath: string) (outputPath: string) =
         use reader = new iText.Kernel.Pdf.PdfReader(inputPath)
