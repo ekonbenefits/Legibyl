@@ -175,6 +175,8 @@ same heading/paragraph/list/table/link hierarchy and reading order that a
 screen reader uses to present the document (the Catalog's `StructTreeRoot`).
 It's read directly from veraPDF's own PD model (independent of a
 validation pass), so it reflects exactly what the validator itself sees.
+Reading it is mostly extracting each page's tagged text, so the progress bar
+fills page by page while it loads.
 The default **Layout** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
 (headings, lists, tables, links, figures, etc. use different colors).
@@ -191,8 +193,11 @@ destination only to the underlying link annotation, so Legibyl follows tagged
 annotation references and uses a conservative same-page geometry fallback
 when needed. Table-of-contents entries (`TOCI`) render as row-like layout
 items and inherit the first descendant link target when the PDF stores the
-click target on a separate child link fragment. The **Tree** tab keeps the compact outline view. Layout blocks
-are selectable; when a selected node has same-page
+click target on a separate child link fragment. The **Tree** tab keeps the compact outline view. So large documents open
+quickly, the Layout tab draws about 2,000 blocks up front: it shows whole
+levels while they fit and collapses the rest behind "▸ N child elements"
+buttons that expand on click (most documents fit and show in full). Layout
+blocks are selectable; when a selected node has same-page
 geometry (from marked-content text glyph/image/path bounds, `/A /BBox`
 layout attributes, or form widget rectangles), the side preview renders that
 page and highlights the best-effort area the node covers. Pure containers,

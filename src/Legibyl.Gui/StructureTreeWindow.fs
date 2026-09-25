@@ -151,12 +151,31 @@ module private StructureView =
         | null -> $"Select: no page geometry is available for this {noun}."
         | geometry -> $"Select: highlight this {what} on page {geometry.PageNumber}."
 
+    /// Blocks the Layout view draws up front. Big documents' deeper levels start collapsed
+    /// (click to expand) so the window opens quickly; most documents fit and show in full.
+    let private layoutBudget = 2000
+
+    /// How many levels of nodes, starting with `nodes` themselves, fit in the budget. Whole
+    /// levels only, so siblings are always shown or collapsed together. At least 1.
+    let levelsWithinBudget (nodes: StructureNode seq) =
+        let rec fit levels (level: StructureNode list) total =
+            let next = level |> List.collect (fun node -> List.ofSeq node.Children)
+            if next.IsEmpty || total + next.Length > layoutBudget then levels
+            else fit (levels + 1) next (total + next.Length)
+        let first = List.ofSeq nodes
+        fit 1 first first.Length
+
+    let rec private descendantCount (node: StructureNode) : int =
+        node.Children |> Seq.sumBy (fun child -> 1 + descendantCount child)
+
     /// Recursively renders one structure node as an HTML-like bordered block: a colored
     /// tag "chip" header (color = semantic category), an attributes line, optional
     /// alt-text, the element's own extracted content text (if any), and nested child
     /// boxes indented inside — so nesting depth is visually obvious, matching how a
     /// browser's block-level box model would draw it.
-    let rec element (selection: Selection) (margin: Thickness) (node: StructureNode) : IView =
+    /// childLevels is how many levels of descendants to draw; below that, children start
+    /// collapsed behind a button.
+    let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (node: StructureNode) : IView =
         let borderColor, headerColor = colorsFor node.Tag
 
         let attributes =
@@ -188,10 +207,13 @@ module private StructureView =
             | Null -> node.LinkDestinationDescription
 
         let children: IView list =
-            match node.Tag with
-            | "TOC" -> [ tocGrid selection node ]
-            | "Table" -> [ tableGrid selection node ]
-            | _ -> [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) child ]
+            if node.Children.Count = 0 then []
+            elif childLevels <= 0 then [ collapsedChildren selection node ]
+            else
+                match node.Tag with
+                | "TOC" -> [ tocGrid selection node ]
+                | "Table" -> [ tableGrid selection node ]
+                | _ -> [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child ]
 
         let inner =
             StackPanel.create [
@@ -226,9 +248,33 @@ module private StructureView =
               Border.child inner ]
             (geometryTip node "node" "structure node")
 
+    /// A node's children, drawn only once asked for: "▸ 31 child elements (824 in all)".
+    /// Its own component, so expanding re-renders just this block, not the whole layout.
+    and collapsedChildren (selection: Selection) (node: StructureNode) : IView =
+        Component.create("collapsed-children", fun ctx ->
+            let expanded = ctx.useState false
+            if expanded.Current then
+                let levels = levelsWithinBudget node.Children
+                StackPanel.create [
+                    StackPanel.children [
+                        for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
+                    ]
+                ]
+            else
+                let count = node.Children.Count
+                let total = descendantCount node
+                let label = if count = 1 then "▸ 1 child element" else $"▸ {count:N0} child elements"
+                Button.create [
+                    Button.content (if total > count then $"{label} ({total:N0} in all)" else label)
+                    Button.fontSize 12.0
+                    Button.padding (8.0, 2.0)
+                    Button.margin (0.0, 2.0, 0.0, 2.0)
+                    Button.onClick (fun _ -> expanded.Set true)
+                ])
+
     and fallbackStack (selection: Selection) (node: StructureNode) : IView =
         StackPanel.create [
-            StackPanel.children [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) child ]
+            StackPanel.children [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) Int32.MaxValue child ]
         ]
 
     and tocCell (selection: Selection) (item: StructureNode) row column (background: IBrush option) (attrs: IAttr<Border> list) : IView =
@@ -279,7 +325,7 @@ module private StructureView =
 
                         for index, child in Seq.indexed item.Children do
                             tocCell selection child row (index + 1) None [
-                                Border.child (element selection (Thickness 0.0) child)
+                                Border.child (element selection (Thickness 0.0) Int32.MaxValue child)
                             ]
 
                         if item.Children.Count + 1 < columnCount then
@@ -316,14 +362,14 @@ module private StructureView =
                             ContentControl.create [
                                 Grid.row rowIndex
                                 Grid.columnSpan columnCount
-                                ContentControl.content (element selection (Thickness(0.0, 0.0, 0.0, 6.0)) row)
+                                ContentControl.content (element selection (Thickness(0.0, 0.0, 0.0, 6.0)) Int32.MaxValue row)
                             ]
                         | cells ->
                             for columnIndex, cell in List.indexed cells do
                                 ContentControl.create [
                                     Grid.row rowIndex
                                     Grid.column columnIndex
-                                    ContentControl.content (element selection (Thickness 1.0) cell)
+                                    ContentControl.content (element selection (Thickness 1.0) Int32.MaxValue cell)
                                 ]
                 ]
             ]
@@ -420,7 +466,8 @@ module private StructureView =
                                 StackPanel.create [
                                     StackPanel.margin 8.0
                                     StackPanel.children [
-                                        for child in root.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) child
+                                        let levels = levelsWithinBudget root.Children
+                                        for child in root.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
                                     ]
                                 ]
                             )
