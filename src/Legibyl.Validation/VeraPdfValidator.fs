@@ -78,6 +78,8 @@ module internal VeraPdf =
             PdfFixOptions.LinkContents
         elif contains "dc:title" then
             PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle
+        elif contains "DisplayDocTitle" then
+            PdfFixOptions.DocumentTitle
         elif
             contains "metadata"
             || contains "PDF/UA Identification"
