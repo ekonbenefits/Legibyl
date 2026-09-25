@@ -18,6 +18,7 @@ open Avalonia.Layout
 open Avalonia.Media
 open Avalonia.Media.Imaging
 open Avalonia.Platform.Storage
+open Avalonia.Styling
 open Legibyl.Rendering
 open Legibyl.Validation
 
@@ -105,8 +106,10 @@ module private MainView =
     let gridLinesVisibility (value: DataGridGridLinesVisibility) : IAttr<DataGrid> =
         AttrBuilder<DataGrid>.CreateProperty<DataGridGridLinesVisibility>(DataGrid.GridLinesVisibilityProperty, value, ValueNone)
 
-    let detailText (text: string) (attrs: IAttr<TextBox> list) =
+    let detailText (text: string) (secondary: bool) (attrs: IAttr<TextBox> list) =
         TextBox.create [
+            if secondary then
+                Theme.resources [ TextBox.ForegroundProperty, Theme.Tokens.SecondaryText ]
             TextBox.text text
             TextBox.isReadOnly true
             TextBox.textWrapping TextWrapping.Wrap
@@ -402,13 +405,13 @@ module private MainView =
                 ]
 
             let statusBanner =
-                let banner (background: string) (text: string) =
+                let banner (backgroundToken: string) (text: string) =
                     Border.create [
                         Grid.row 2
                         Border.padding (12.0, 8.0)
                         Border.cornerRadius 4.0
                         Border.margin (0.0, 0.0, 0.0, 8.0)
-                        Border.background background
+                        Theme.resources [ Border.BackgroundProperty, backgroundToken ]
                         Border.child (
                             TextBlock.create [
                                 TextBlock.text text
@@ -422,15 +425,15 @@ module private MainView =
 
                 match outcome.Current with
                 | NotValidated -> None
-                | ValidationFailed message -> Some(banner "#996600" $"Error: {message}")
+                | ValidationFailed message -> Some(banner Theme.Tokens.Warning $"Error: {message}")
                 | Validated(report, _) ->
                     let flavour = report.FlavourId.ToUpperInvariant()
                     Some(
                         if report.IsCompliant then
-                            banner "#1E7E34" $"PASS — compliant with {flavour} ({report.TotalAssertions} checks, {report.WarningCount} warnings)"
+                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({report.TotalAssertions} checks, {report.WarningCount} warnings)"
                         else
                             banner
-                                "#B02A37"
+                                Theme.Tokens.Danger
                                 $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({report.WarningCount} warnings)"
                     )
 
@@ -447,7 +450,7 @@ module private MainView =
                     DataGrid.canUserResizeColumns true
                     DataGrid.canUserSortColumns false
                     gridLinesVisibility DataGridGridLinesVisibility.Horizontal
-                    DataGrid.borderBrush "#FFD0D0D0"
+                    Theme.resources [ DataGrid.BorderBrushProperty, Theme.Tokens.Border ]
                     DataGrid.borderThickness 1.0
                     DataGrid.onSelectedItemChanged (fun item ->
                         match item with
@@ -466,8 +469,8 @@ module private MainView =
                             ]
                         textColumn "Type" "Severity" 72.0
                         textColumn "Fixable" "Fixable" 72.0
-                        textColumn "Clause" "Clause" 64.0
-                        textColumn "Test" "TestNumber" 48.0
+                        textColumn "Clause" "Clause" 72.0
+                        textColumn "Test" "TestNumber" 60.0
                         textColumn "Page" "PageDisplay" 72.0
                         DataGridTemplateColumn.create [
                             DataGridTemplateColumn.header "Location"
@@ -514,13 +517,13 @@ module private MainView =
                                             TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                         ]
                                         TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
-                                        detailText row.Message [ TextBox.maxHeight 130.0 ]
+                                        detailText row.Message false [ TextBox.maxHeight 130.0 ]
                                         TextBlock.create [
                                             TextBlock.text "Location"
                                             TextBlock.fontWeight FontWeight.SemiBold
                                             TextBlock.margin (0.0, 8.0, 0.0, 0.0)
                                         ]
-                                        detailText row.FriendlyLocation [ TextBox.foreground "#FF555555" ]
+                                        detailText row.FriendlyLocation true []
                                         TextBlock.create [
                                             TextBlock.text "Raw location"
                                             TextBlock.fontWeight FontWeight.SemiBold
@@ -528,10 +531,10 @@ module private MainView =
                                         ]
                                         detailText
                                             (row.LocationContext |> Option.ofObj |> Option.defaultValue "Not available")
+                                            true
                                             [ TextBox.maxHeight 90.0
                                               TextBox.fontFamily Fonts.Monospace
-                                              TextBox.fontSize 12.0
-                                              TextBox.foreground "#FF555555" ]
+                                              TextBox.fontSize 12.0 ]
                                     ]
                                 ]
                                 Button.create [
@@ -557,13 +560,14 @@ module private MainView =
                             TextBlock.text preview.Current.Note
                             TextBlock.textWrapping TextWrapping.Wrap
                             TextBlock.margin (0.0, 0.0, 0.0, 8.0)
-                            TextBlock.foreground "#FF555555"
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                         ]
                         Border.create [
                             Grid.row 3
-                            Border.borderBrush "#FFD0D0D0"
+                            Theme.resources
+                                [ Border.BorderBrushProperty, Theme.Tokens.Border
+                                  Border.BackgroundProperty, Theme.Tokens.Fill ]
                             Border.borderThickness 1.0
-                            Border.background "#FFF5F5F5"
                             Border.padding 6.0
                             Border.child (
                                 Image.create [
@@ -640,7 +644,7 @@ module private MainView =
                                 Grid.column 1
                                 GridSplitter.width 6.0
                                 GridSplitter.horizontalAlignment HorizontalAlignment.Stretch
-                                GridSplitter.background "#FFE0E0E0"
+                                Theme.resources [ GridSplitter.BackgroundProperty, Theme.Tokens.Border ]
                                 GridSplitter.resizeDirection GridResizeDirection.Columns
                             ]
                             match selectedRow.Current with
@@ -685,9 +689,11 @@ type MainWindow() as this =
     let openRequests: IWritable<string option> = new State<_>(None)
 
     do
-        // Sorting is off, so don't reserve header space for the sort glyph; otherwise
-        // short headers get clipped in the narrow results pane.
-        this.Resources["DataGridSortIconMinWidth"] <- 0.0
+        // Semi's column headers are larger than the 12pt cells; match them so short
+        // headers aren't clipped in the narrow results pane.
+        let headerStyle = Style(fun selector -> selector.OfType<DataGridColumnHeader>())
+        headerStyle.Setters.Add(Setter(DataGridColumnHeader.FontSizeProperty, 12.0))
+        this.Styles.Add headerStyle
         this.Content <- view this openRequests
 
     /// Opens and validates a PDF, as if it had been picked or dropped.

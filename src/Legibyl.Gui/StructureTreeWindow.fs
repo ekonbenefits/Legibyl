@@ -85,7 +85,7 @@ module private StructureView =
             TextBlock.text text
             TextBlock.fontSize 11.0
             if italic then TextBlock.fontStyle FontStyle.Italic
-            TextBlock.foreground Brushes.DimGray
+            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
             TextBlock.textWrapping TextWrapping.Wrap
             TextBlock.margin (0.0, 0.0, 0.0, 4.0)
         ]
@@ -105,6 +105,8 @@ module private StructureView =
                     TextBlock.fontFamily Fonts.Monospace
                     TextBlock.fontWeight FontWeight.Bold
                     TextBlock.fontSize 12.0
+                    // The chip's pastel background is the same in light and dark mode.
+                    TextBlock.foreground Brushes.Black
                 ]
             )
         ]
@@ -174,7 +176,7 @@ module private StructureView =
                         TextBlock.create [
                             TextBlock.text (String.Join("  ", attributes))
                             TextBlock.fontSize 11.0
-                            TextBlock.foreground Brushes.DimGray
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                             TextBlock.verticalAlignment VerticalAlignment.Center
                         ]
                 ]
@@ -220,7 +222,7 @@ module private StructureView =
             [ Border.cornerRadius 4.0
               Border.padding 8.0
               Border.margin margin
-              Border.background Brushes.White
+              Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Background ]
               Border.child inner ]
             (geometryTip node "node" "structure node")
 
@@ -229,7 +231,7 @@ module private StructureView =
             StackPanel.children [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) child ]
         ]
 
-    and tocCell (selection: Selection) (item: StructureNode) row column (attrs: IAttr<Border> list) : IView =
+    and tocCell (selection: Selection) (item: StructureNode) row column (background: IBrush option) (attrs: IAttr<Border> list) : IView =
         let borderColor, _ = colorsFor "TOCI"
         selectableBorder
             selection
@@ -238,7 +240,9 @@ module private StructureView =
             1.0
             [ Border.padding (6.0, 4.0, 6.0, 4.0)
               Border.margin ((if column = 0 then 0.0 else -1.0), (if row = 0 then 0.0 else -1.0), 0.0, 0.0)
-              Border.background Brushes.White
+              match background with
+              | Some background -> Border.background background
+              | None -> Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Background ]
               Grid.row row
               Grid.column column
               yield! attrs ]
@@ -254,14 +258,13 @@ module private StructureView =
             let columnCount = items |> List.map (fun item -> item.Children.Count + 1) |> List.max
             Grid.create [
                 Grid.margin (0.0, 4.0, 0.0, 0.0)
-                Grid.background (brush (Color.FromRgb(0xF8uy, 0xF5uy, 0xFCuy)))
+                Theme.resources [ Grid.BackgroundProperty, Theme.Tokens.Fill ]
                 Grid.columnDefinitions (String.Join(",", "Auto" :: List.replicate (columnCount - 1) "*"))
                 Grid.rowDefinitions (String.Join(",", List.replicate items.Length "Auto"))
                 Grid.children [
                     for row, item in List.indexed items do
                         let _, headerColor = colorsFor "TOCI"
-                        tocCell selection item row 0 [
-                            Border.background (brush headerColor)
+                        tocCell selection item row 0 (Some(brush headerColor)) [
                             Border.child (
                                 TextBlock.create [
                                     TextBlock.text "TOCI"
@@ -275,12 +278,12 @@ module private StructureView =
                         ]
 
                         for index, child in Seq.indexed item.Children do
-                            tocCell selection child row (index + 1) [
+                            tocCell selection child row (index + 1) None [
                                 Border.child (element selection (Thickness 0.0) child)
                             ]
 
                         if item.Children.Count + 1 < columnCount then
-                            tocCell selection item row (item.Children.Count + 1) [
+                            tocCell selection item row (item.Children.Count + 1) None [
                                 Grid.columnSpan (columnCount - item.Children.Count - 1)
                             ]
                 ]
@@ -303,7 +306,7 @@ module private StructureView =
             let columnCount = max 1 (rows |> List.map (tableCells >> List.length) |> List.max)
             Grid.create [
                 Grid.margin (0.0, 4.0, 0.0, 0.0)
-                Grid.background (brush (Color.FromRgb(0xFFuy, 0xFAuy, 0xF3uy)))
+                Theme.resources [ Grid.BackgroundProperty, Theme.Tokens.Fill ]
                 Grid.columnDefinitions (String.Join(",", List.replicate columnCount "*"))
                 Grid.rowDefinitions (String.Join(",", List.replicate rows.Length "Auto"))
                 Grid.children [
@@ -401,7 +404,7 @@ module private StructureView =
                         ScrollViewer.create [
                             ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
                             ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
-                            ScrollViewer.background Brushes.White
+                            Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
                             ScrollViewer.content (
                                 StackPanel.create [
                                     StackPanel.margin 8.0
@@ -415,7 +418,7 @@ module private StructureView =
                             Grid.column 1
                             GridSplitter.width 6.0
                             GridSplitter.horizontalAlignment HorizontalAlignment.Stretch
-                            GridSplitter.background "#FFE0E0E0"
+                            Theme.resources [ GridSplitter.BackgroundProperty, Theme.Tokens.Border ]
                             GridSplitter.resizeDirection GridResizeDirection.Columns
                         ]
                         Grid.create [
@@ -432,14 +435,15 @@ module private StructureView =
                                     Grid.row 1
                                     TextBlock.text previewNote.Current
                                     TextBlock.textWrapping TextWrapping.Wrap
-                                    TextBlock.foreground "#FF555555"
+                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                     TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                 ]
                                 Border.create [
                                     Grid.row 2
-                                    Border.borderBrush "#FFD0D0D0"
+                                    Theme.resources
+                                        [ Border.BorderBrushProperty, Theme.Tokens.Border
+                                          Border.BackgroundProperty, Theme.Tokens.Fill ]
                                     Border.borderThickness 1.0
-                                    Border.background "#FFF5F5F5"
                                     Border.padding 6.0
                                     Border.child (
                                         Image.create [
@@ -478,7 +482,7 @@ module private StructureView =
                     TextBlock.create [
                         TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                         TextBlock.textWrapping TextWrapping.Wrap
-                        TextBlock.foreground "#FF555555"
+                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                         TextBlock.text
                             "This is the tagged logical structure tree — the semantic heading/paragraph/list/table/link hierarchy that determines what content and reading order a screen reader presents to a user. Only elements that directly own page content show a page number."
                     ]

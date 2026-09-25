@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Compile Include="Fonts.fs" />
+    <Compile Include="Theme.fs" />
     <Compile Include="Dialogs.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="MainWindow.fs" />
@@ -23,7 +24,9 @@
     <!-- Cross-platform UI (Windows, macOS, Linux) - MIT. Views are written in F# with FuncUI. -->
     <PackageReference Include="Avalonia" Version="12.1.3" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <!-- Semi Design theme (light and dark) - MIT. -->
+    <PackageReference Include="Semi.Avalonia" Version="12.1.0.1" />
+    <PackageReference Include="Semi.Avalonia.DataGrid" Version="12.1.0.1" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
     <PackageReference Include="Avalonia.FuncUI" Version="2.0.0" />
     <PackageReference Include="AvaloniaCommunity.FuncUI.Bindings.DataGrid" Version="12.0.0" />

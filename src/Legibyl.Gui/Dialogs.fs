@@ -115,7 +115,7 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                             checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations")
                             checkBox emptyParagraphs (label "Remove empty semantic /P structure elements (optional cleanup)")
                             TextBlock.create [
-                                TextBlock.foreground "#FF555555"
+                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                 TextBlock.textWrapping TextWrapping.Wrap
                                 TextBlock.margin (0.0, 8.0, 0.0, 16.0)
                                 TextBlock.text
