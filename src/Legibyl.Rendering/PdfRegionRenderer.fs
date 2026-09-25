@@ -1,6 +1,8 @@
 namespace Legibyl.Rendering
 
 open System
+open System.Collections.Generic
+open System.IO
 open System.Runtime.InteropServices
 open SkiaSharp
 open UglyToad.PdfPig
@@ -103,22 +105,91 @@ module private Rendering =
 
 open Rendering
 
+/// Keeps the last PDF open and its last few rendered pages, since previews are usually
+/// requested one after another for the same file (and often the same page). Reopens the
+/// file if it changes on disk. PdfPig documents aren't thread-safe, so all use is locked.
+type private PageCache() =
+    let gate = obj ()
+    let capacity = 6
+    let mutable current: (string * DateTime * PdfDocument) option = None
+    // Most recently used last.
+    let pages = List<struct (int * float32 * SKBitmap)>()
+
+    let clearPages () =
+        for struct (_, _, bitmap) in pages do
+            bitmap.Dispose()
+        pages.Clear()
+
+    let close () =
+        clearPages ()
+        match current with
+        | Some(_, _, document) -> document.Dispose()
+        | None -> ()
+        current <- None
+
+    let documentFor (pdfPath: string) =
+        let fullPath = Path.GetFullPath pdfPath
+        let modified = File.GetLastWriteTimeUtc fullPath
+        match current with
+        | Some(path, stamp, document) when path = fullPath && stamp = modified -> document
+        | _ ->
+            close ()
+            let document = openDocument fullPath
+            current <- Some(fullPath, modified, document)
+            document
+
+    /// A copy of the page's rendering (from the cache if possible), for the caller to draw on and dispose.
+    let pageCopy (document: PdfDocument) pageNumber scale =
+        let cached =
+            match pages |> Seq.tryFindIndex (fun struct (page, pageScale, _) -> page = pageNumber && pageScale = scale) with
+            | Some index ->
+                let entry = pages[index]
+                pages.RemoveAt index
+                pages.Add entry
+                let struct (_, _, bitmap) = entry
+                bitmap
+            | None ->
+                let bitmap = renderPage document pageNumber scale
+                pages.Add(struct (pageNumber, scale, bitmap))
+                if pages.Count > capacity then
+                    let struct (_, _, oldest) = pages[0]
+                    oldest.Dispose()
+                    pages.RemoveAt 0
+                bitmap
+        cached.Copy()
+
+    /// Runs f with the open document and a fresh copy of the page to draw on.
+    member _.WithPage(pdfPath: string, pageNumber: int, scale: float32, f: PdfDocument -> SKBitmap -> 'T) : 'T =
+        lock gate (fun () ->
+            let document = documentFor pdfPath
+            use bitmap = pageCopy document pageNumber scale
+            f document bitmap)
+
+    interface IDisposable with
+        member _.Dispose() = lock gate close
+
 [<Sealed>]
 type PdfRegionRenderer() =
+    let cache = new PageCache()
+
     member _.RenderPageWithHighlight
         (
             pdfPath: string,
             geometry: StructureGeometry,
             [<Optional; DefaultParameterValue(2.0f)>] scale: float32
         ) : HighlightImageResult =
-        use document = openDocument pdfPath
-        use bitmap = renderPage document geometry.PageNumber scale
-        drawHighlight bitmap (PdfRectangle(geometry.Left, geometry.Bottom, geometry.Right, geometry.Top)) scale
+        cache.WithPage(
+            pdfPath,
+            geometry.PageNumber,
+            scale,
+            fun _ bitmap ->
+                drawHighlight bitmap (PdfRectangle(geometry.Left, geometry.Bottom, geometry.Right, geometry.Top)) scale
 
-        { PngBytes = encodePng bitmap
-          PageNumber = geometry.PageNumber
-          HasPreciseRegion = true
-          Note = "Highlighted this structure node's best-effort page geometry." }
+                { PngBytes = encodePng bitmap
+                  PageNumber = geometry.PageNumber
+                  HasPreciseRegion = true
+                  Note = "Highlighted this structure node's best-effort page geometry." }
+        )
 
     member _.RenderPageWithHighlight
         (
@@ -130,22 +201,31 @@ type PdfRegionRenderer() =
             raise (InvalidOperationException "This failure isn't anchored to a specific page, so no page image can be rendered.")
         let pageNumber = location.PageNumber.Value
 
-        use document = openDocument pdfPath
-        use bitmap = renderPage document pageNumber scale
+        cache.WithPage(
+            pdfPath,
+            pageNumber,
+            scale,
+            fun document bitmap ->
+                let hasPreciseRegion, note =
+                    match tryFindAnnotationRect document pageNumber location with
+                    | Some(rect, note) ->
+                        drawHighlight bitmap rect scale
+                        true, note
+                    | None ->
+                        false,
+                        "Exact region unavailable for this finding — showing the full page for context."
 
-        let hasPreciseRegion, note =
-            match tryFindAnnotationRect document pageNumber location with
-            | Some(rect, note) ->
-                drawHighlight bitmap rect scale
-                true, note
-            | None ->
-                false,
-                "Exact region unavailable for this finding — showing the full page for context."
+                { PngBytes = encodePng bitmap
+                  PageNumber = pageNumber
+                  HasPreciseRegion = hasPreciseRegion
+                  Note = note }
+        )
 
-        { PngBytes = encodePng bitmap
-          PageNumber = pageNumber
-          HasPreciseRegion = hasPreciseRegion
-          Note = note }
+    /// Closes the cached document and frees the cached pages.
+    member _.Dispose() = (cache :> IDisposable).Dispose()
+
+    interface IDisposable with
+        member this.Dispose() = this.Dispose()
 
     interface IPdfRegionRenderer with
         member this.RenderPageWithHighlight(pdfPath: string, location: PdfLocation, scale) =
