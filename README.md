@@ -122,6 +122,26 @@ MSI behavior). The installer also bundles the `LICENSE`/`licenses/` files
 so the license texts and third-party attribution are available on the
 installed machine, not just in this source repository.
 
+## macOS app
+
+The GUI project builds a self-contained `Legibyl.app` with
+[Dotnet.Bundle](https://github.com/egramtel/dotnet-bundle) (Info.plist values
+are in `Legibyl.Gui.fsproj`, icon in `assets/Legibyl.icns`). Run it on a Mac:
+
+```sh
+dotnet msbuild src/Legibyl.Gui/Legibyl.Gui.fsproj -t:BundleApp -restore -p:Configuration=Release -p:RuntimeIdentifier=osx-arm64 -p:SelfContained=true -p:PublishDir=../../artifacts/macos/osx-arm64/
+```
+
+The app is written to `artifacts/macos/osx-arm64/Legibyl.app`; use
+`osx-x64` for Intel Macs. It isn't signed or notarized yet, so macOS blocks
+the first launch of a downloaded copy: allow it under System Settings >
+Privacy & Security > **Open Anyway**, or run
+`xattr -dr com.apple.quarantine Legibyl.app`. To share it as a disk image:
+
+```sh
+hdiutil create -volname Legibyl -srcfolder artifacts/macos/osx-arm64/Legibyl.app -ov -format UDZO artifacts/macos/Legibyl-osx-arm64.dmg
+```
+
 ## Supported profiles
 
 PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.

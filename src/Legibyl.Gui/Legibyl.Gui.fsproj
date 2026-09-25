@@ -32,6 +32,26 @@
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
     <PackageReference Include="Avalonia.FuncUI" Version="2.0.0" />
     <PackageReference Include="AvaloniaCommunity.FuncUI.Bindings.DataGrid" Version="12.0.0" />
+    <!-- Builds Legibyl.app on `dotnet msbuild -t:BundleApp` (see README "macOS app") - MIT. Build-time only. -->
+    <PackageReference Include="Dotnet.Bundle" Version="0.9.13" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- macOS .app bundle (Info.plist values for Dotnet.Bundle). Unsigned for now. -->
+  <PropertyGroup>
+    <CFBundleName>Legibyl</CFBundleName>
+    <CFBundleDisplayName>Legibyl</CFBundleDisplayName>
+    <CFBundleIdentifier>com.ekonbenefits.legibyl</CFBundleIdentifier>
+    <CFBundleVersion>$(Version)</CFBundleVersion>
+    <CFBundleShortVersionString>$(VersionPrefix)</CFBundleShortVersionString>
+    <!-- Dotnet.Bundle's default is the typo "AAPL". -->
+    <CFBundlePackageType>APPL</CFBundlePackageType>
+    <CFBundleExecutable>$(AssemblyName)</CFBundleExecutable>
+    <CFBundleIconFile>Legibyl.icns</CFBundleIconFile>
+    <NSHighResolutionCapable>true</NSHighResolutionCapable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <None Include="..\..\assets\Legibyl.icns" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
