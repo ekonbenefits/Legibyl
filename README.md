@@ -47,7 +47,7 @@ tests/
 installer/
   Legibyl.Gui.Installer/      WiX v6 MSI installer for the GUI (LegibylSetup.msi)
 lib/vendor/verapdf-jars/    veraPDF jar provenance/upgrade README (jar is fetched at build time)
-licenses/                   AGPLv3+/GPLv3+/MPLv2+/MIT license texts and third-party NOTICE
+licenses/                   AGPLv3+/GPLv3+/MPLv2+/Apache-2.0/MIT license texts and third-party NOTICE
 ```
 
 ## Building & running

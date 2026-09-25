@@ -42,8 +42,9 @@ project pages for full license texts of those transitive dependencies.
 ## IKVM.NET
 
 This application also uses [IKVM.NET](https://github.com/ikvmnet/ikvm),
-licensed under the Apache License, Version 2.0, to execute the veraPDF
-Java bytecode from .NET.
+licensed under the Apache License, Version 2.0 (full text in
+`LICENSE.Apache` in this directory), to execute the veraPDF Java bytecode
+from .NET.
 
 ## PdfPig and PdfPig.Rendering.Skia
 
@@ -65,7 +66,36 @@ it. These features use:
 
 Both are used unmodified via NuGet package references (no vendored/bundled
 source), so no additional source-availability obligations apply beyond the
-license texts themselves.
+license texts themselves. The full Apache License 2.0 text is in
+`LICENSE.Apache` in this directory.
+
+PdfPig.Rendering.Skia ships the following NOTICE, reproduced unmodified as
+the Apache License requires:
+
+```text
+Apache PDFBox
+Copyright 2014 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+Based on source code originally developed in the PDFBox and 
+FontBox projects.
+
+Copyright (c) 2002-2007, www.pdfbox.org
+
+Based on source code originally developed in the PaDaF project.
+Copyright (c) 2010 Atos Worldline SAS
+
+Includes the Adobe Glyph List
+Copyright 1997, 1998, 2002, 2007, 2010 Adobe Systems Incorporated.
+
+Includes the Zapf Dingbats Glyph List
+Copyright 2002, 2010 Adobe Systems Incorporated.
+
+Includes OSXAdapter
+Copyright (C) 2003-2007 Apple, Inc., All Rights Reserved
+```
 
 ## iText Core
 
