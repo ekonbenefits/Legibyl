@@ -12,6 +12,7 @@ open System.Collections.Generic
 open System.Text
 open UglyToad.PdfPig
 open UglyToad.PdfPig.Content
+open UglyToad.PdfPig.Core
 
 // PdfPig 0.1.16 marks IPdfImage.Bounds obsolete in favor of BoundingBox, but the
 // public IPdfImage interface in this version only exposes Bounds.
@@ -35,17 +36,37 @@ let private unionGeometry (geometries: StructureGeometry list) =
               Right = geometries |> List.map _.Right |> List.max
               Top = geometries |> List.map _.Top |> List.max }
 
+let private hasArea (rect: PdfRectangle) = rect.Width > 0.01 && rect.Height > 0.01
+
+/// A box for a glyph whose tight box is empty (whitespace, e.g. the lone space Word writes
+/// for an empty paragraph): the font's line-height box, or failing that a one-character
+/// box synthesized from the baseline and point size.
+let private whitespaceRectangle (letter: Letter) =
+    if hasArea letter.GlyphRectangleLoose then
+        letter.GlyphRectangleLoose
+    else
+        let size = if letter.PointSize > 0.0 then letter.PointSize else 12.0
+        let x = letter.StartBaseLine.X
+        let y = letter.StartBaseLine.Y
+        PdfRectangle(x, y - 0.2 * size, x + max letter.Width (0.5 * size), y + 0.8 * size)
+
 let private geometryFromLetters pageNumber (letters: IReadOnlyList<Letter>) =
     if letters.Count = 0 then
         None
     else
+        // Only fall back to whitespace boxes when nothing visible was drawn, so ordinary
+        // text keeps its tight box.
+        let rects =
+            match letters |> Seq.map _.BoundingBox |> Seq.filter hasArea |> List.ofSeq with
+            | [] -> letters |> Seq.map whitespaceRectangle |> List.ofSeq
+            | visible -> visible
         Some(
             geometry
                 pageNumber
-                (letters |> Seq.map _.BoundingBox.Left |> Seq.min)
-                (letters |> Seq.map _.BoundingBox.Bottom |> Seq.min)
-                (letters |> Seq.map _.BoundingBox.Right |> Seq.max)
-                (letters |> Seq.map _.BoundingBox.Top |> Seq.max)
+                (rects |> List.map (fun r -> min r.Left r.Right) |> List.min)
+                (rects |> List.map (fun r -> min r.Bottom r.Top) |> List.min)
+                (rects |> List.map (fun r -> max r.Left r.Right) |> List.max)
+                (rects |> List.map (fun r -> max r.Bottom r.Top) |> List.max)
         )
 
 let private geometryFromMarkedContent pageNumber (element: MarkedContentElement) =

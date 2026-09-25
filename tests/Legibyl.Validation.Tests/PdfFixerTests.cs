@@ -159,6 +159,33 @@ public class PdfFixerTests
     }
 
     [Fact]
+    public void Validate_WhitespaceOnlyParagraph_HasOneCharacterGeometryAtItsLine()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        try
+        {
+            // Word writes an empty paragraph as a lone space glyph, whose own glyph box is empty.
+            CreatePdfWithMarkedContentParagraphs(input, (700, " "));
+            var validator = new VeraPdfValidator();
+
+            ValidationReport report = validator.Validate(input, PdfProfile.PdfUa1);
+
+            RuleViolation warning = Assert.Single(report.Assertions.Where(a => a.Severity == FindingSeverity.Warning));
+            Assert.Contains("Empty semantic /P", warning.Message);
+            StructureGeometry geometry = Assert.IsType<StructureGeometry>(warning.Geometry);
+            Assert.Equal(1, geometry.PageNumber);
+            Assert.InRange(geometry.Left, 71, 73);
+            Assert.InRange(geometry.Right - geometry.Left, 2, 12);
+            Assert.InRange(geometry.Top - geometry.Bottom, 6, 18);
+            Assert.True(geometry.Bottom <= 700 && geometry.Top > 700);
+        }
+        finally
+        {
+            DeleteIfExists(input);
+        }
+    }
+
+    [Fact]
     public void Validate_LikelySplitParagraph_AddsNonFixableWarning()
     {
         string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
