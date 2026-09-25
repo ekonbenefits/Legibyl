@@ -120,17 +120,18 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                     StackPanel.create [
                         Grid.row 1
                         StackPanel.children [
-                            checkBox metadata (label "Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)")
-                            checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations")
-                            checkBox linkContents (label "Describe table-of-contents links that have no description, using the entry's own text (/Contents)")
-                            checkBox documentTitle (label "Give the document a title, and show it in place of the file name (/DisplayDocTitle)")
-                            checkBox emptyParagraphs (label "Remove empty semantic /P structure elements (optional cleanup)")
+                            // In the order the repairs run (StructureFixes.orderedFixes, then veraPDF's metadata fix).
                             checkBox
                                 tocHeadings
                                 (label "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent)")
+                            checkBox emptyParagraphs (label "Remove empty semantic /P structure elements (optional cleanup)")
                             checkBox
                                 paragraphLists
                                 (label "Tag runs of paragraphs that start with list markers (•, (1), a.) as lists (L/LI; the page looks the same)")
+                            checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations")
+                            checkBox linkContents (label "Describe table-of-contents links that have no description, using the entry's own text (/Contents)")
+                            checkBox documentTitle (label "Give the document a title, and show it in place of the file name (/DisplayDocTitle)")
+                            checkBox metadata (label "Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)")
                             TextBlock.create [
                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                 TextBlock.textWrapping TextWrapping.Wrap

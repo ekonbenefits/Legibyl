@@ -33,6 +33,7 @@ type private Container =
     | TableOfContents
 
 /// One page of paragraphs, each drawn at its indent and tagged P, placed as `container` says.
+/// An empty text makes an empty paragraph (a P with no content), as a blank line exports to.
 let private createPdf (path: string) (container: Container) (paragraphs: (float32 * string) list) =
     use document = new PdfDocument(new PdfWriter(path))
     let page = document.AddNewPage()
@@ -41,6 +42,9 @@ let private createPdf (path: string) (container: Container) (paragraphs: (float3
     let tagged =
         paragraphs
         |> List.mapi (fun mcid (indent, text) ->
+          if text = "" then
+            element "P" page [] :> PdfObject
+          else
             let properties = PdfDictionary()
             properties.Put(PdfName.MCID, PdfNumber mcid) |> ignore
             canvas
@@ -207,3 +211,23 @@ let ``two lists under one parent are both tagged, around the text between them``
     shape output.Path
     |> should equal [ "P"; "L(LI(LBody(P)),LI(LBody(P)))"; "P"; "L(LI(LBody(P)),LI(LBody(P)))"; "P" ]
     listNumbering output.Path |> should equal [ PdfName "Decimal"; PdfName "Disc" ]
+
+[<Fact>]
+let ``blank paragraphs between items don't split the list`` () =
+    use input = new TempPdf()
+    use listsOnly = new TempPdf ".lists"
+    use withEmptyRemoval = new TempPdf ".both"
+    createPdf input.Path Body (at72 [ "(1) the first"; ""; "(2) the second"; ""; "(3) the third" ])
+
+    (listWarnings input.Path |> List.exactlyOne).ErrorMessage
+    |> should equal "3 paragraphs on page 1, marked \"(1)\" to \"(3)\"."
+
+    // On its own, each blank paragraph stays in the item before it; nothing is lost or moved on the page.
+    fixLists input.Path listsOnly.Path |> ignore
+    shape listsOnly.Path |> should equal [ "L(LI(LBody(P,P)),LI(LBody(P,P)),LI(LBody(P)))" ]
+
+    // With empty paragraph removal too, the blanks go first and the list comes out clean.
+    let result =
+        VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, withEmptyRemoval.Path, PdfFixOptions.ListsFromParagraphs ||| PdfFixOptions.RemoveEmptyParagraphs)
+    List.ofSeq result.AppliedFixes |> should equal [ "Removed 2 empty /P structure element(s)."; "Tagged 1 run(s) of marked paragraphs as lists." ]
+    shape withEmptyRemoval.Path |> should equal [ "L(LI(LBody(P)),LI(LBody(P)),LI(LBody(P)))" ]

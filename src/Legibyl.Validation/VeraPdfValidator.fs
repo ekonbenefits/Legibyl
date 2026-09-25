@@ -412,13 +412,9 @@ type VeraPdfValidator() =
 
         try
             try
+                // Legibyl's own repairs run first, then veraPDF's metadata fix on their result.
                 let structuralOptions =
-                    PdfFixOptions.AnnotationTabs
-                    ||| PdfFixOptions.RemoveEmptyParagraphs
-                    ||| PdfFixOptions.LinkContents
-                    ||| PdfFixOptions.DocumentTitle
-                    ||| PdfFixOptions.HeadingsFromToc
-                    ||| PdfFixOptions.ListsFromParagraphs
+                    StructureFixes.orderedFixes |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
 
                 if options &&& structuralOptions <> PdfFixOptions.None then
                     let tempOutput = createTemporaryPdfPath outputPath
