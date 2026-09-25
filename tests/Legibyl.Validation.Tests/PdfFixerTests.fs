@@ -440,7 +440,13 @@ let ``Fix document title names an untitled document and shows the title`` () =
     createPdfWithLinks input.Path [ "Read more", None ]
     let fixer = VeraPdfValidator()
 
-    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle)
+    let result =
+        fixer.Fix(
+            input.Path,
+            PdfProfile.PdfUa1,
+            output.Path,
+            PdfFixOptions.DocumentTitle ||| PdfFixOptions.TitleFromFileName
+        )
 
     result.WasFixed |> should be True
     use document = new PdfDocument(new PdfReader(output.Path))
@@ -448,6 +454,37 @@ let ``Fix document title names an untitled document and shows the title`` () =
     |> should equal (Path.GetFileNameWithoutExtension input.Path)
     let preferences = document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.ViewerPreferences) |> notNull
     preferences.Get(PdfName.DisplayDocTitle) |> should equal PdfBoolean.TRUE
+
+[<Fact>]
+let ``Fix document title without the file name fallback leaves an untitled document unnamed`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path [ "Read more", None ]
+    let fixer = VeraPdfValidator()
+
+    // /DisplayDocTitle is still worth setting, so the file does change — but a title must
+    // not be invented from the file name unless the caller asked for that.
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle) |> ignore
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle() |> should be NullOrEmptyString
+
+[<Fact>]
+let ``Fix writes output when a structural fix applies but the metadata fixer changes nothing`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // No title anywhere, so veraPDF's metadata fixer won't repair dc:title and reports
+    // WontFix. The structural repair still has to reach outputPath — the file it moves
+    // there is the one veraPDF's parser just had open.
+    createPdfWithLinks input.Path [ "Our privacy policy", None ]
+    let fixer = VeraPdfValidator()
+
+    let result =
+        fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents ||| PdfFixOptions.Metadata)
+
+    result.WasFixed |> should be True
+    File.Exists output.Path |> should be True
+    linkContentsOf output.Path |> should equal [ Some "Our privacy policy" ]
 
 [<Fact>]
 let ``Fix document title keeps a title the document already has`` () =

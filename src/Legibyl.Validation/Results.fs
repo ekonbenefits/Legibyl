@@ -12,7 +12,8 @@ module PdfFixDescriptions =
           PdfFixOptions.AnnotationTabs, "Set /Tabs /S on pages that contain annotations"
           PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements"
           PdfFixOptions.LinkContents, "Describe links from their own text (/Contents)"
-          PdfFixOptions.DocumentTitle, "Set a document title and show it in the title bar" ]
+          PdfFixOptions.DocumentTitle, "Set a document title and show it in the title bar"
+          PdfFixOptions.TitleFromFileName, "Derive a missing document title from the file name" ]
         |> List.filter (fun (option, _) -> options.HasFlag option)
         |> List.map snd
 

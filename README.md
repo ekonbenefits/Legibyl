@@ -248,11 +248,17 @@ Options:
   link's own visible text (a table-of-contents entry's dot leaders and printed
   page number are stripped, so `Scope of this document ..... 3` becomes
   `Scope of this document`); and a **document title** plus `/DisplayDocTitle`,
-  so readers show the title rather than the file name. A title the document
-  already carries, in the Info dictionary or in XMP, is kept; otherwise it is
-  derived from the file name. The GUI **Fix…** dialog exposes the same repairs
-  as individual checkboxes, plus removal of empty semantic `/P` structure
-  elements, which the CLI deliberately does not apply. Structural fixes run
+  so readers show the title rather than the file name. The title is only ever
+  moved from somewhere the author actually put it — the Info dictionary, or
+  XMP `dc:title`. Deriving a title from the **file name** is a guess, and a
+  wrong one satisfies `dc:title` while misdescribing the document to a screen
+  reader user, so the CLI never does it; it is offered in the GUI **Fix…**
+  dialog as an opt-in sub-option where a human can see the result. A file with
+  no title anywhere therefore still reports the `dc:title` failure after
+  `--fix`, rather than being quietly given a made-up one. The GUI dialog
+  exposes the same repairs as individual checkboxes, plus removal of empty
+  semantic `/P` structure elements, which the CLI deliberately does not apply.
+  Structural fixes run
   before the veraPDF metadata fixer so metadata is repaired against the
   already-cleaned copy in the same operation. veraPDF saves its metadata
   repair as an incremental update that iText can't read reliably (a classic

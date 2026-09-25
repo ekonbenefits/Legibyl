@@ -136,15 +136,20 @@ let private xmpTitle (document: PdfDocument) =
 
 /// Gives the document a /Title and asks readers to show it instead of the file name.
 /// A title the document already carries is kept — in the Info dictionary, or in XMP,
-/// where it only needs copying across. The file name is the last resort.
-let private nameDocument (document: PdfDocument) (inputPath: string) =
+/// where it only needs copying across.
+///
+/// Deriving a title from the file name is a guess, and a wrong one is worse than none:
+/// it satisfies dc:title while telling a screen reader user something untrue about the
+/// document. So it only happens when the caller opts in, which the CLI does not do —
+/// there a title is only ever moved from somewhere the author actually put it.
+let private nameDocument (document: PdfDocument) (inputPath: string) allowFileNameFallback =
     let info = document.GetDocumentInfo()
     let titleSet =
         if not (String.IsNullOrWhiteSpace(info.GetTitle())) then
             None
         else
             xmpTitle document
-            |> Option.orElseWith (fun () -> titleFromFileName inputPath)
+            |> Option.orElseWith (fun () -> if allowFileNameFallback then titleFromFileName inputPath else None)
             |> Option.map (fun title ->
                 info.SetTitle title |> ignore
                 title)
@@ -203,7 +208,10 @@ let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions)
         | _ -> 0
 
     let titleSet, displayDocTitleSet =
-        if options.HasFlag PdfFixOptions.DocumentTitle then nameDocument document inputPath else None, false
+        if options.HasFlag PdfFixOptions.DocumentTitle then
+            nameDocument document inputPath (options.HasFlag PdfFixOptions.TitleFromFileName)
+        else
+            None, false
 
     [ if tabsFixed > 0 then $"Set /Tabs /S on {tabsFixed} page(s) containing annotations."
       if emptyParagraphsRemoved > 0 then $"Removed {emptyParagraphsRemoved} empty /P structure element(s)."
