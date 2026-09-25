@@ -110,25 +110,61 @@ module private MainView =
         Geometry.Parse
             "F1 M10.68,8.56 L17.25,15.13 A1.5,1.5 0 0 1 15.13,17.25 L8.56,10.68 A4,4 0 0 1 3.45,5.15 L5.44,7.14 L7.14,5.44 L5.15,3.45 A4,4 0 0 1 10.68,8.56 Z"
 
-    /// A small results-grid icon, with name as its tooltip and screen-reader text.
-    let private gridIcon (icon: Geometry) (color: string) (name: string) =
+    let private iconPath (icon: Geometry) (color: string) (size: float) (attrs: IAttr<Shapes.Path> list) =
         // Qualified: System.IO also defines Path.
         Avalonia.FuncUI.DSL.Path.create [
             AttrBuilder<Shapes.Path>.CreateProperty<Geometry | null>(Shapes.Path.DataProperty, icon, ValueNone)
             Shapes.Shape.stretch Stretch.Uniform
-            Control.width 14.0
-            Control.height 14.0
-            Control.horizontalAlignment HorizontalAlignment.Center
+            Control.width size
+            Control.height size
             Control.verticalAlignment VerticalAlignment.Center
             Theme.resources [ Shapes.Shape.FillProperty, color ]
+            yield! attrs
+        ]
+
+    /// A small results-grid icon, with name as its tooltip and screen-reader text.
+    let private gridIcon (icon: Geometry) (color: string) (name: string) =
+        iconPath icon color 14.0 [
+            Control.horizontalAlignment HorizontalAlignment.Center
             ToolTip.tip name
             AttrBuilder<Shapes.Path>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, name, ValueNone)
         ]
 
-    let severityIcon (violation: RuleViolation) =
+    /// An icon beside text that already says the same thing, so screen readers skip it.
+    let private decorativeIcon (icon: Geometry) (color: string) (size: float) =
+        iconPath icon color size [
+            Control.margin (0.0, 0.0, 6.0, 0.0)
+            AttrBuilder<Shapes.Path>.CreateProperty<Automation.AccessibilityView>(
+                Automation.AutomationProperties.AccessibilityViewProperty, Automation.AccessibilityView.Raw, ValueNone)
+        ]
+
+    /// Puts a decorative icon in front of content, keeping the content's own wrapping.
+    let private withIcon (icon: IView) (content: IView) =
+        Grid.create [
+            Grid.columnDefinitions "Auto,*"
+            Grid.children [
+                icon
+                Border.create [ Grid.column 1; Border.child content ]
+            ]
+        ]
+
+    let private severityIconAndColor (violation: RuleViolation) =
         match violation.Severity with
-        | FindingSeverity.Warning -> gridIcon warningIcon Theme.Tokens.Warning "Warning"
-        | _ -> gridIcon failureIcon Theme.Tokens.Danger "Failure"
+        | FindingSeverity.Warning -> warningIcon, Theme.Tokens.Warning
+        | _ -> failureIcon, Theme.Tokens.Danger
+
+    let severityIcon (violation: RuleViolation) =
+        let icon, color = severityIconAndColor violation
+        gridIcon icon color (string violation.Severity)
+
+    /// The details pane's title, anchored by the severity icon.
+    let detailTitle (violation: RuleViolation) (title: IView) =
+        let icon, color = severityIconAndColor violation
+        withIcon (decorativeIcon icon color 18.0) title
+
+    /// The details pane's "Fixable" heading, anchored by the wrench.
+    let fixableHeading (heading: IView) =
+        withIcon (decorativeIcon fixIcon Theme.Tokens.Primary 14.0) heading
 
     /// A wrench for findings the Fix dialog can repair; nothing otherwise.
     let fixableIcon (row: RuleViolationRow) : IView =
@@ -551,21 +587,20 @@ module private MainView =
                             Grid.children [
                                 StackPanel.create [
                                     StackPanel.children [
-                                        TextBlock.create [
-                                            TextBlock.text $"{row.Severity}: clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}"
-                                            TextBlock.fontSize 16.0
-                                            TextBlock.fontWeight FontWeight.SemiBold
-                                            TextBlock.textWrapping TextWrapping.Wrap
-                                            TextBlock.margin (0.0, 0.0, 0.0, 8.0)
-                                        ]
+                                        detailTitle
+                                            row.Violation
+                                            (TextBlock.create [
+                                                TextBlock.text $"{row.Severity}: clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}"
+                                                TextBlock.fontSize 16.0
+                                                TextBlock.fontWeight FontWeight.SemiBold
+                                                TextBlock.textWrapping TextWrapping.Wrap
+                                            ])
+                                        |> View.withAttrs [ Control.margin (0.0, 0.0, 0.0, 8.0) ]
                                         TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
                                         detailText row.Message false [ TextBox.maxHeight 130.0 ]
                                         if row.Violation.IsFixable then
-                                            TextBlock.create [
-                                                TextBlock.text "Fixable"
-                                                TextBlock.fontWeight FontWeight.SemiBold
-                                                TextBlock.margin (0.0, 8.0, 0.0, 0.0)
-                                            ]
+                                            fixableHeading (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
+                                            |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
                                             detailText $"{row.Fixable}. Use Fix… to repair a copy of this PDF." false []
                                         TextBlock.create [
                                             TextBlock.text "Location"
