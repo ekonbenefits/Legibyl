@@ -22,6 +22,25 @@ public class ValidationReportTextFormatterTests
     }
 
     [Fact]
+    public void BuildFinding_DescribesAvailableFixesInPlainWords()
+    {
+        RuleViolation violation = CreateViolation(
+            fixOptions: PdfFixOptions.Metadata | PdfFixOptions.RemoveEmptyParagraphs);
+
+        string text = ValidationReportTextFormatter.BuildFinding(violation);
+
+        Assert.Contains("Fixable: Fix XMP metadata; Remove empty /P structure elements", text);
+    }
+
+    [Fact]
+    public void BuildFinding_OmitsFixableWhenNoFixApplies()
+    {
+        string text = ValidationReportTextFormatter.BuildFinding(CreateViolation());
+
+        Assert.DoesNotContain("Fixable:", text);
+    }
+
+    [Fact]
     public void BuildReport_IncludesLocationsForEachFailedFinding()
     {
         var report = new ValidationReport(
@@ -49,7 +68,8 @@ public class ValidationReportTextFormatterTests
         string clause = "7.1",
         int testNumber = 2,
         string? errorMessage = "Missing Contents entry.",
-        string? locationContext = RawLocation) => new(
+        string? locationContext = RawLocation,
+        PdfFixOptions fixOptions = PdfFixOptions.None) => new(
         specification: "ISO 14289-1:2014",
         clause: clause,
         testNumber: testNumber,
@@ -58,6 +78,6 @@ public class ValidationReportTextFormatterTests
         errorMessage: errorMessage,
         locationContext: locationContext,
         severity: FindingSeverity.Failure,
-        fixOptions: PdfFixOptions.None,
+        fixOptions: fixOptions,
         geometry: null);
 }

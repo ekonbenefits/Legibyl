@@ -12,7 +12,7 @@ let private appendFinding (sb: StringBuilder) (violation: RuleViolation) =
       .AppendLine($"Type: {violation.Severity}")
     |> ignore
     if violation.IsFixable then
-        sb.AppendLine($"Fixable: {violation.FixOptions}") |> ignore
+        sb.AppendLine($"Fixable: {violation.FixDescription}") |> ignore
     sb.AppendLine($"Message: {violation.Message}") |> ignore
     if not (String.IsNullOrWhiteSpace violation.ErrorMessage) then
         sb.AppendLine($"Error: {violation.ErrorMessage}") |> ignore

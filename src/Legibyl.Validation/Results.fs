@@ -1,7 +1,18 @@
 namespace Legibyl.Validation
 
+open System
 open System.Collections.Generic
 open System.Runtime.InteropServices
+
+/// Plain-language descriptions of the repairs, worded like the GUI's Fix dialog.
+module PdfFixDescriptions =
+    /// One description per option set in options, e.g. "Remove empty /P structure elements".
+    let Describe (options: PdfFixOptions) : string list =
+        [ PdfFixOptions.Metadata, "Fix XMP metadata"
+          PdfFixOptions.AnnotationTabs, "Set /Tabs /S on pages that contain annotations"
+          PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements" ]
+        |> List.filter (fun (option, _) -> options.HasFlag option)
+        |> List.map snd
 
 /// The outcome of a single validation rule check (org.verapdf.pdfa.results.TestAssertion).
 type RuleViolation =
@@ -38,6 +49,9 @@ type RuleViolation =
     member this.IsFinding = not this.Passed || this.Severity = FindingSeverity.Warning
 
     member this.IsFixable = this.FixOptions <> PdfFixOptions.None
+
+    /// What the available repairs do, e.g. "Remove empty /P structure elements"; empty if none.
+    member this.FixDescription = String.Join("; ", PdfFixDescriptions.Describe this.FixOptions)
 
     override this.ToString() = $"[{this.Specification} {this.RuleId}] {this.Message}"
 
