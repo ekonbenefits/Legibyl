@@ -20,7 +20,8 @@ which translates the Java bytecode into a .NET assembly at build time. The
 isolates all Java/IKVM types from the rest of the app. `IPdfFixer` combines
 veraPDF's metadata fixer with a small iText-based structural repair pass for
 selected safe object-level fixes, such as setting page `/Tabs /S` when a
-page has annotations and removing empty semantic `/P` structure elements.
+page has annotations, describing links from their own text, naming the
+document, and removing empty semantic `/P` structure elements.
 `IStructureTreeReader` walks veraPDF's PD model's `StructTreeRoot` (the
 tagged logical structure tree) directly, independent of running a
 validation pass.
@@ -238,14 +239,21 @@ Options:
   `pdfa2u`, `pdfa3b`, `pdfa4`).
 - `--format <json|text>` — output format (default `json`).
 - `--output <path>` — write output to a file instead of stdout.
-- `--fix` — also attempt to repair the file's XMP **metadata** via veraPDF's
-  metadata fixer, writing a repaired copy next to the original as
-  `<name>.fixed<ext>`. The CLI currently keeps the conservative metadata-only
-  behavior (missing metadata stream, missing PDF/A|PDF/UA identifier, false
-  conformance claims, Info-dictionary sync). The GUI **Fix…** dialog also
-  exposes selectable structural cleanup options for page annotation tab order
-  (`/Tabs /S`) and empty semantic `/P` structure elements; structural fixes
-  run before the veraPDF metadata fixer so metadata is repaired against the
+- `--fix` — also attempt to repair the file, writing a repaired copy next to
+  the original as `<name>.fixed<ext>`. It applies the repairs that need no
+  guesswork about what the document means: XMP **metadata** via veraPDF's
+  metadata fixer (missing metadata stream, missing PDF/A|PDF/UA identifier,
+  false conformance claims, Info-dictionary sync); page annotation tab order
+  (`/Tabs /S`); a **description for links that have none**, taken from the
+  link's own visible text (a table-of-contents entry's dot leaders and printed
+  page number are stripped, so `Scope of this document ..... 3` becomes
+  `Scope of this document`); and a **document title** plus `/DisplayDocTitle`,
+  so readers show the title rather than the file name. A title the document
+  already carries, in the Info dictionary or in XMP, is kept; otherwise it is
+  derived from the file name. The GUI **Fix…** dialog exposes the same repairs
+  as individual checkboxes, plus removal of empty semantic `/P` structure
+  elements, which the CLI deliberately does not apply. Structural fixes run
+  before the veraPDF metadata fixer so metadata is repaired against the
   already-cleaned copy in the same operation. veraPDF saves its metadata
   repair as an incremental update that iText can't read reliably (a classic
   xref section chained onto xref streams, with an off-by-one `/Prev`), so
@@ -255,7 +263,8 @@ Options:
   beside the source PDF or requested output path. Empty `/P` cleanup is
   visible as a warning and fixable option, but it is unchecked by default in
   the GUI so users opt into structure-tree deletion. Neither path adds
-  missing alt text, retags untagged content, or infers table headers.
+  missing alt text, retags untagged content, infers headings, or infers table
+  headers.
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
 - `--structure` — include each file's tagged logical structure tree (the

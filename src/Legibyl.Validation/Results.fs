@@ -10,7 +10,9 @@ module PdfFixDescriptions =
     let Describe (options: PdfFixOptions) : string list =
         [ PdfFixOptions.Metadata, "Fix XMP metadata"
           PdfFixOptions.AnnotationTabs, "Set /Tabs /S on pages that contain annotations"
-          PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements" ]
+          PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements"
+          PdfFixOptions.LinkContents, "Describe links from their own text (/Contents)"
+          PdfFixOptions.DocumentTitle, "Set a document title and show it in the title bar" ]
         |> List.filter (fun (option, _) -> options.HasFlag option)
         |> List.map snd
 
