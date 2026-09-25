@@ -25,6 +25,16 @@ let private corpusFile name =
 let private descendants<'T when 'T :> Visual> (root: Visual) : 'T list =
     root.GetVisualDescendants() |> Seq.choose (fun v -> match box v with :? 'T as c -> Some c | _ -> None) |> List.ofSeq
 
+/// Icons in the finding details (the block that holds the Copy Finding button).
+let private detailIcons (window: Window) =
+    let copyFinding = descendants<Button> window |> List.find (fun button -> string button.Content = "Copy Finding")
+    match copyFinding.GetVisualParent() with
+    | null -> []
+    | details -> descendants<Path> details
+
+let private isHiddenFromScreenReaders (icon: Path) =
+    AutomationProperties.GetAccessibilityView icon = AccessibilityView.Raw
+
 let private openSample name =
     let window = HeadlessWindow.show 1200.0 720.0
     HeadlessWindow.openPdf window (corpusFile name)
@@ -61,6 +71,12 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
         Assert.Equal<string list>(expected, icons |> List.map (fun icon -> string (ToolTip.GetTip icon)))
         Assert.Contains("Page 1", descendants<TextBlock> firstRow |> List.map _.Text)
 
+        // Warning icon by the title and a wrench by "Fixable"; the text says the same,
+        // so screen readers skip them.
+        let anchors = detailIcons window
+        Assert.Equal(2, anchors.Length)
+        Assert.All(anchors, fun icon -> Assert.True(isHiddenFromScreenReaders icon))
+
         let details = descendants<TextBox> window |> List.map _.Text
         Assert.Contains("Remove empty /P structure elements. Use Fix… to repair a copy of this PDF.", details)
 
@@ -77,6 +93,8 @@ let ``findings that can't be fixed show no fix icon or details`` () =
         let firstRow = rows |> List.find (fun row -> row.GetIndex() = 0)
         let icons = descendants<Path> firstRow |> List.map AutomationProperties.GetName
         let detailHeadings = descendants<TextBlock> window |> List.map _.Text
+        let anchors = detailIcons window
         window.Close()
+        Assert.Equal(1, anchors.Length)
         Assert.Equal<string list>([ "Failure" ], icons)
         Assert.DoesNotContain("Fixable", detailHeadings))
