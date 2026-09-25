@@ -46,8 +46,8 @@ src/
   Legibyl.Gui/          Avalonia + FuncUI UI (Windows/macOS/Linux): file picker, profile selector, results grid
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
 tests/
-  Legibyl.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
-  Legibyl.Gui.Tests/          xUnit tests of the GUI on Avalonia's headless platform
+  Legibyl.Validation.Tests/   xUnit v3 + FsUnit tests using real PDF/UA-1 corpus samples
+  Legibyl.Gui.Tests/          xUnit v3 + FsUnit tests of the GUI on Avalonia's headless platform
 tools/
   Legibyl.Screenshots/        Dev-only: saves GUI screenshots without a display (headless)
 installer/
