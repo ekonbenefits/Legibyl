@@ -28,8 +28,14 @@ let private structElement (tag: string) (page: PdfPage) (kids: PdfObject list) =
 /// tagged TOC > TOCI > Link, with a link annotation to page N whose rectangle spans the whole
 /// line (as generated ones often do). The body's paragraphs, tagged `bodyTag` (P unless a
 /// test wants a heading), follow on the later pages.
-let private createPdfWithToc (path: string) (namedDestinations: bool) (entries: TocEntry list) (body: (int * string * string) list) =
-    use document = new PdfDocument(new PdfWriter(path))
+let private createPdfWithTocVersion
+    (version: PdfVersion)
+    (path: string)
+    (namedDestinations: bool)
+    (entries: TocEntry list)
+    (body: (int * string * string) list)
+    =
+    use document = new PdfDocument(new PdfWriter(path, WriterProperties().SetPdfVersion version))
     let pageCount = List.max ((entries |> List.map _.Page) @ (body |> List.map (fun (page, _, _) -> page)))
     let pages = [ for _ in 1 .. pageCount -> document.AddNewPage() ]
     let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA)
@@ -91,6 +97,9 @@ let private createPdfWithToc (path: string) (namedDestinations: bool) (entries: 
     root.Put(PdfName.Type, PdfName.StructTreeRoot) |> ignore
     root.Put(PdfName.K, structElement "Document" tocPage (structElement "TOC" tocPage tocEntries :: bodyElements)) |> ignore
     document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, root) |> ignore
+
+let private createPdfWithToc path namedDestinations entries body =
+    createPdfWithTocVersion PdfVersion.PDF_1_7 path namedDestinations entries body
 
 let private paragraphs page texts = [ for text in texts -> page, "P", text ]
 
@@ -284,9 +293,8 @@ let ``recovered headings' links point at the heading itself`` (namedDestinations
     destination.GetAsName 1 |> should equal PdfName.XYZ
     destination.GetAsNumber(2).DoubleValue() |> should be (inRange 71.0 75.0)
     destination.GetAsNumber(3).DoubleValue() |> should be (inRange 710.0 730.0)
-    let structureDestination = action.GetAsArray(PdfName "SD") |> notNull
-    let heading = structureDestination.GetAsDictionary 0 |> notNull
-    heading.GetAsName(PdfName.S) |> should equal (PdfName "H1")
+    // A PDF 1.7 file: no /SD, a PDF 2.0 key its readers would ignore.
+    action.Get(PdfName "SD") |> should be Null
     (VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq)
     - (VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq)
     |> should be Empty
@@ -304,3 +312,17 @@ let ``an unmatched entry's link is left as it was`` () =
     let annotation, action = firstTocLinkAction document
     action |> should be Null
     annotation.GetAsArray(PdfName.Dest) |> should not' (be Null)
+
+[<Fact>]
+let ``in a PDF 2.0 file the link also names the heading element`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithTocVersion PdfVersion.PDF_2_0 input.Path false threeLevels threeLevelsBody
+
+    fixHeadings input.Path output.Path |> ignore
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    let _, action = firstTocLinkAction document
+    let structureDestination = (action |> notNull).GetAsArray(PdfName "SD") |> notNull
+    let heading = structureDestination.GetAsDictionary 0 |> notNull
+    heading.GetAsName(PdfName.S) |> should equal (PdfName "H1")
