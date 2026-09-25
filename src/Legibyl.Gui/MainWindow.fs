@@ -36,7 +36,9 @@ type RuleViolationRow =
       /// "Page 3" or "—" if no page is known — bound directly to the grid's Page column.
       PageDisplay: string
       /// Plain-English breadcrumb, e.g. "Document → Page 2 → Link annotation". Falls back to the raw context.
-      FriendlyLocation: string }
+      FriendlyLocation: string
+      /// A warning the user has dismissed (see Dismissals).
+      Dismissed: bool }
 
     static member Of(violation: RuleViolation) =
         let location = violation.Location
@@ -62,7 +64,8 @@ type RuleViolationRow =
             match location, violation.LocationContext with
             | NonNull location, _ -> location.Breadcrumb
             | Null, NonNull context -> context
-            | Null, Null -> "" }
+            | Null, Null -> ""
+          Dismissed = false }
 
 module private MainView =
     let profiles =
@@ -284,6 +287,11 @@ module private MainView =
             // Bumped on every selection change so a slow page render for an earlier
             // selection can't overwrite the preview for the current one.
             let previewVersion = ctx.useState (0, false)
+            // Warnings dismissed for the selected file, whether they're saved next to it, and
+            // whether the results list shows them.
+            let dismissed = ctx.useState (Map.empty: Dismissals.Dismissed)
+            let rememberDismissals = ctx.useState false
+            let showDismissed = ctx.useState false
 
             let currentProfile () = snd profiles[profileIndex.Current]
 
@@ -357,9 +365,10 @@ module private MainView =
                                     |> Seq.map RuleViolationRow.Of
                                     // Unlocated failures (no page number) sort to the end, after page-anchored ones in page order.
                                     |> Seq.sortBy (fun row -> row.PageNumber |> Option.defaultValue Int32.MaxValue, row.Clause, row.TestNumber)
+                                    |> Seq.map (fun row -> { row with Dismissed = Dismissals.isDismissed dismissed.Current row.Violation })
                                     |> List.ofSeq
                                 outcome.Set(Validated(report, rows))
-                                selectRow (List.tryHead rows)
+                                selectRow (rows |> List.tryFind (fun row -> showDismissed.Current || not row.Dismissed))
                                 return Some report
                             with :? VeraPdfValidationException as ex ->
                                 outcome.Set(ValidationFailed ex.Message)
@@ -373,6 +382,14 @@ module private MainView =
             let openFile (path: string) =
                 selectedFile.Set(Some path)
                 clearResults ()
+                match Dismissals.load path with
+                | Some saved ->
+                    dismissed.Set saved
+                    rememberDismissals.Set true
+                | None ->
+                    dismissed.Set Map.empty
+                    rememberDismissals.Set false
+                showDismissed.Set false
                 runValidation ()
 
             // Auto-validate as soon as a file is picked/dropped.
@@ -507,6 +524,66 @@ module private MainView =
                 | NonNull clipboard -> clipboard.SetTextAsync text |> ignore
                 | Null -> ()
 
+            /// Writes the dismissals next to the PDF when the user has asked to remember them.
+            /// If that fails, stops remembering and says why.
+            let saveDismissals (next: Dismissals.Dismissed) =
+                task {
+                    match selectedFile.Current with
+                    | Some filePath when rememberDismissals.Current ->
+                        try
+                            Dismissals.save filePath next
+                        with :? IOException | :? UnauthorizedAccessException as ex ->
+                            rememberDismissals.Set false
+                            do! Dialogs.showMessage window $"Couldn't save dismissals next to the PDF: {ex.Message}" "Dismissed warnings"
+                    | _ -> ()
+                }
+
+            /// Dismisses or restores a warning, keeping the selection on it, or moving it on to
+            /// the next shown finding if it's now hidden.
+            let setDismissed (row: RuleViolationRow) (isDismissed: bool) =
+                let next =
+                    if isDismissed then dismissed.Current.Add(Dismissals.keyOf row.Violation, row.Message)
+                    else dismissed.Current.Remove(Dismissals.keyOf row.Violation)
+                dismissed.Set next
+                match outcome.Current with
+                | Validated(report, rows) ->
+                    let updated = rows |> List.map (fun r -> { r with Dismissed = Dismissals.isDismissed next r.Violation })
+                    outcome.Set(Validated(report, updated))
+                    let index = rows |> List.findIndex (fun r -> obj.ReferenceEquals(r, row))
+                    let same = updated[index]
+                    if showDismissed.Current || not same.Dismissed then
+                        selectedRow.Set(Some same)
+                    else
+                        updated
+                        |> List.indexed
+                        |> List.tryFind (fun (i, r) -> i > index && not r.Dismissed)
+                        |> Option.orElse (updated |> List.indexed |> List.rev |> List.tryFind (fun (i, r) -> i < index && not r.Dismissed))
+                        |> Option.map snd
+                        |> selectRow
+                | _ -> ()
+                saveDismissals next |> ignore
+
+            /// Starts or stops keeping this PDF's dismissals in a file next to it.
+            let toggleRememberDismissals () =
+                task {
+                    match selectedFile.Current with
+                    | Some filePath when rememberDismissals.Current ->
+                        try
+                            Dismissals.forget filePath
+                            rememberDismissals.Set false
+                        with :? IOException | :? UnauthorizedAccessException as ex ->
+                            do! Dialogs.showMessage window $"Couldn't delete {Dismissals.filePath filePath}: {ex.Message}" "Dismissed warnings"
+                    | Some _ ->
+                        rememberDismissals.Set true
+                        do! saveDismissals dismissed.Current
+                    | None -> ()
+                }
+                |> ignore
+
+            /// The report without the warnings the user dismissed, for the banner and reports.
+            let withoutDismissed (report: ValidationReport) =
+                { report with Assertions = report.Assertions |> Seq.filter (not << Dismissals.isDismissed dismissed.Current) |> Array.ofSeq }
+
             let saveReport _ =
                 task {
                     match report with
@@ -523,7 +600,7 @@ module private MainView =
                                           FilePickerFileTypes.All ]
                                 ))
                                 report.FilePath
-                        path |> Option.iter (fun path -> File.WriteAllText(path, ValidationReportTextFormatter.BuildReport report))
+                        path |> Option.iter (fun path -> File.WriteAllText(path, ValidationReportTextFormatter.BuildReport(withoutDismissed report)))
                     | None -> ()
                 }
                 |> ignore
@@ -596,19 +673,63 @@ module private MainView =
                 | ValidationFailed message -> Some(banner Theme.Tokens.Warning $"Error: {message}")
                 | Validated(report, _) ->
                     let flavour = report.FlavourId.ToUpperInvariant()
+                    let shownWarnings = (withoutDismissed report).WarningCount
+                    let warnings =
+                        match report.WarningCount - shownWarnings with
+                        | 0 -> $"{shownWarnings} warnings"
+                        | hidden -> $"{shownWarnings} warnings, {hidden} dismissed"
                     Some(
                         if report.IsCompliant then
-                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({report.TotalAssertions} checks, {report.WarningCount} warnings)"
+                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({report.TotalAssertions} checks, {warnings})"
                         else
                             banner
                                 Theme.Tokens.Danger
-                                $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({report.WarningCount} warnings)"
+                                $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({warnings})"
                     )
 
-            let rows =
+            let allRows =
                 match outcome.Current with
                 | Validated(_, rows) -> rows
                 | _ -> []
+
+            let dismissedCount = allRows |> List.filter _.Dismissed |> List.length
+
+            // Dismissed warnings are hidden unless the user asks to see them.
+            let rows = if showDismissed.Current then allRows else allRows |> List.filter (not << _.Dismissed)
+
+            /// Right-click menu for the selected finding (the grid selects a row when it's right-clicked).
+            let findingMenu =
+                let selected = selectedRow.Current
+                let canDismiss = selected |> Option.exists (fun row -> Dismissals.canDismiss row.Violation)
+                ContextMenu.create [
+                    ContextMenu.viewItems [
+                        match selected with
+                        | Some row when row.Dismissed ->
+                            MenuItem.create [
+                                MenuItem.header "Restore warning"
+                                MenuItem.onClick (fun _ -> setDismissed row false)
+                            ]
+                        | _ ->
+                            MenuItem.create [
+                                MenuItem.header (if canDismiss || selected.IsNone then "Dismiss warning" else "Dismiss warning (only warnings can be dismissed)")
+                                MenuItem.isEnabled canDismiss
+                                MenuItem.onClick (fun _ -> selected |> Option.iter (fun row -> setDismissed row true))
+                            ]
+                        Separator.create []
+                        MenuItem.create [
+                            MenuItem.header "Remember dismissals for this PDF"
+                            MenuItem.toggleType MenuItemToggleType.CheckBox
+                            MenuItem.isChecked rememberDismissals.Current
+                            MenuItem.isEnabled selectedFile.Current.IsSome
+                            ToolTip.tip (
+                                match selectedFile.Current with
+                                | Some filePath -> $"Keeps them in {Path.GetFileName(Dismissals.filePath filePath)} next to the PDF."
+                                | None -> "Open a PDF first."
+                            )
+                            MenuItem.onClick (fun _ -> toggleRememberDismissals ())
+                        ]
+                    ]
+                ]
 
             let gridFontSize = 12.0
 
@@ -620,6 +741,14 @@ module private MainView =
                     gridLinesVisibility DataGridGridLinesVisibility.Horizontal
                     Theme.resources [ DataGrid.BorderBrushProperty, Theme.Tokens.Border ]
                     DataGrid.borderThickness 1.0
+                    DataGrid.contextMenu findingMenu
+                    DataGrid.init (fun grid ->
+                        // Shown dismissed warnings are dimmed (rows are rebuilt when that changes).
+                        grid.LoadingRow.Add(fun e ->
+                            e.Row.Opacity <-
+                                match e.Row.DataContext with
+                                | :? RuleViolationRow as row when row.Dismissed -> 0.5
+                                | _ -> 1.0))
                     DataGrid.onSelectedItemChanged (fun item ->
                         match item with
                         | :? RuleViolationRow as row when
@@ -659,7 +788,7 @@ module private MainView =
                             DataGridTemplateColumn.cellTemplate (
                                 DataTemplateView<RuleViolationRow>.create (fun row ->
                                     TextBlock.create [
-                                        TextBlock.text row.FriendlyLocation
+                                        TextBlock.text (if row.Dismissed then $"{row.FriendlyLocation} (dismissed)" else row.FriendlyLocation)
                                         TextBlock.fontSize gridFontSize
                                         TextBlock.textWrapping TextWrapping.Wrap
                                         TextBlock.margin (8.0, 3.0)
@@ -809,11 +938,25 @@ module private MainView =
                                 Grid.rowDefinitions "*,Auto"
                                 Grid.children [
                                     resultsGrid
-                                    StackPanel.create [
-                                        Grid.row 1
+                                    DockPanel.create [
+                                      Grid.row 1
+                                      DockPanel.margin (0.0, 8.0, 0.0, 0.0)
+                                      DockPanel.children [
+                                        if dismissedCount > 0 then
+                                            Button.create [
+                                                DockPanel.dock Dock.Left
+                                                Button.verticalAlignment VerticalAlignment.Center
+                                                Button.padding (8.0, 4.0)
+                                                Button.content (
+                                                    if showDismissed.Current then $"Hide {dismissedCount} dismissed"
+                                                    else $"Show {dismissedCount} dismissed"
+                                                )
+                                                Button.onClick (fun _ -> showDismissed.Set(not showDismissed.Current))
+                                            ]
+                                        StackPanel.create [
+                                        DockPanel.dock Dock.Right
                                         StackPanel.orientation Orientation.Horizontal
                                         StackPanel.horizontalAlignment HorizontalAlignment.Right
-                                        StackPanel.margin (0.0, 8.0, 0.0, 0.0)
                                         StackPanel.children [
                                             Button.create [
                                                 Button.content "Copy Summary"
@@ -821,7 +964,7 @@ module private MainView =
                                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                                 Button.isEnabled report.IsSome
                                                 Button.onClick (fun _ ->
-                                                    report |> Option.iter (ValidationReportTextFormatter.BuildReport >> copyText))
+                                                    report |> Option.iter (withoutDismissed >> ValidationReportTextFormatter.BuildReport >> copyText))
                                             ]
                                             Button.create [
                                                 Button.content "Save Report…"
@@ -830,6 +973,8 @@ module private MainView =
                                                 Button.onClick saveReport
                                             ]
                                         ]
+                                        ]
+                                      ]
                                     ]
                                 ]
                             ]

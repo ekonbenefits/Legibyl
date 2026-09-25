@@ -156,6 +156,15 @@ than rewriting paragraph semantics in the PDF after export. These warnings
 `src/Legibyl.Validation/LegibylChecks.fs`; its header explains how to add a
 new one.
 
+Warnings can be dismissed from a row's right-click menu (or the keyboard's
+context-menu key): they drop out of the list, the banner's warning count, and
+Copy Summary/Save Report, and a **Show N dismissed** button beside those shows
+them again, dimmed, so they can be restored. Dismissals are kept in memory for
+the open PDF; **Remember dismissals for this PDF** in the same menu saves them
+to `<name>.pdf.legibyl.json` next to it, which is loaded automatically when the
+PDF is opened again (turning it off deletes that file). Failures can't be
+dismissed. The CLI doesn't read these files.
+
 When a finding has a known region — its marked content, the structure
 element's content, or an annotation's `/Rect` (see `RuleViolation.Geometry`
 above; Legibyl's own warnings carry one too) — the details panel
