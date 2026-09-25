@@ -64,17 +64,20 @@ let showMessage (owner: Window) (message: string) (title: string) : Task =
             ])
     window.ShowDialog owner
 
-/// Lets the user pick which repairs to run. Returns None if the user cancelled.
-let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
+/// Lets the user pick which repairs to run, showing how many of the report's findings each
+/// one addresses. Returns None if the user cancelled.
+let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOptions option> =
     let window = dialogWindow "Fix PDF" 520.0
+    let found (option: PdfFixOptions) = report.FixableCount option
     window.Content <-
         Component(fun ctx ->
-            let metadata = ctx.useState true
-            let annotationTabs = ctx.useState true
+            // Repairs start ticked only if this PDF has something for them to fix.
+            let metadata = ctx.useState (found PdfFixOptions.Metadata > 0)
+            let annotationTabs = ctx.useState (found PdfFixOptions.AnnotationTabs > 0)
+            let linkContents = ctx.useState (found PdfFixOptions.LinkContents > 0)
+            let documentTitle = ctx.useState (found PdfFixOptions.DocumentTitle > 0)
+            // These change what the document says it is, so they stay opt-in even when found.
             let emptyParagraphs = ctx.useState false
-            let linkContents = ctx.useState true
-            let documentTitle = ctx.useState true
-            // Retagging changes what the document says it is, so it's opt-in for now.
             let tocHeadings = ctx.useState false
             let paragraphLists = ctx.useState false
 
@@ -89,8 +92,23 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                     CheckBox.content content
                 ]
 
-            let label (text: string) =
-                TextBlock.create [ TextBlock.text text; TextBlock.textWrapping TextWrapping.Wrap ]
+            /// The repair's description, with how many findings it addresses beneath it.
+            let label (text: string) (option: PdfFixOptions) =
+                let count =
+                    match found option with
+                    | 0 -> "None found in this PDF"
+                    | 1 -> "1 found"
+                    | n -> $"{n} found"
+                StackPanel.create [
+                    StackPanel.children [
+                        TextBlock.create [ TextBlock.text text; TextBlock.textWrapping TextWrapping.Wrap ]
+                        TextBlock.create [
+                            TextBlock.text count
+                            TextBlock.fontSize 12.0
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                        ]
+                    ]
+                ]
 
             let onContinue _ =
                 let options =
@@ -123,21 +141,37 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                             // In the order the repairs run (StructureFixes.orderedFixes, then veraPDF's metadata fix).
                             checkBox
                                 tocHeadings
-                                (label "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent)")
-                            checkBox emptyParagraphs (label "Remove empty semantic /P structure elements (optional cleanup)")
+                                (label
+                                    "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent)"
+                                    PdfFixOptions.HeadingsFromToc)
+                            checkBox
+                                emptyParagraphs
+                                (label "Remove empty semantic /P structure elements (optional cleanup)" PdfFixOptions.RemoveEmptyParagraphs)
                             checkBox
                                 paragraphLists
-                                (label "Tag runs of paragraphs that start with list markers (•, (1), a.) as lists (L/LI; the page looks the same)")
-                            checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations")
-                            checkBox linkContents (label "Describe table-of-contents links that have no description, using the entry's own text (/Contents)")
-                            checkBox documentTitle (label "Give the document a title, and show it in place of the file name (/DisplayDocTitle)")
-                            checkBox metadata (label "Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)")
+                                (label
+                                    "Tag runs of paragraphs that start with list markers (•, (1), a.) as lists (L/LI; the page looks the same)"
+                                    PdfFixOptions.ListsFromParagraphs)
+                            checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations" PdfFixOptions.AnnotationTabs)
+                            checkBox
+                                linkContents
+                                (label
+                                    "Describe table-of-contents links that have no description, using the entry's own text (/Contents)"
+                                    PdfFixOptions.LinkContents)
+                            checkBox
+                                documentTitle
+                                (label
+                                    "Give the document a title, and show it in place of the file name (/DisplayDocTitle)"
+                                    PdfFixOptions.DocumentTitle)
+                            checkBox
+                                metadata
+                                (label "Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)" PdfFixOptions.Metadata)
                             TextBlock.create [
                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                 TextBlock.textWrapping TextWrapping.Wrap
                                 TextBlock.margin (0.0, 8.0, 0.0, 16.0)
                                 TextBlock.text
-                                    "These repairs are best-effort structural cleanup. They do not add missing alt text, retag untagged content, or infer table headers."
+                                    "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't add missing alt text, tag content that isn't tagged at all, or infer tables."
                             ]
                         ]
                     ]

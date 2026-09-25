@@ -81,6 +81,10 @@ type ValidationReport =
 
     member this.FailedCount = this.Assertions |> Seq.filter (fun a -> not a.Passed) |> Seq.length
 
+    /// How many findings (failures and warnings) a repair addresses.
+    member this.FixableCount(option: PdfFixOptions) =
+        this.Findings |> Seq.filter (fun a -> a.FixOptions.HasFlag option) |> Seq.length
+
     member this.WarningCount =
         this.Assertions |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning) |> Seq.length
 

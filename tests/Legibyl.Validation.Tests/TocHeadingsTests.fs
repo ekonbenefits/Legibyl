@@ -239,3 +239,19 @@ let ``numbered headings become headings, not a list, when both repairs run`` () 
     |> ignore
 
     bodyTags output.Path |> should equal [ "H1"; "H1" ]
+
+[<Fact>]
+let ``the report counts what each repair would address`` () =
+    use input = new TempPdf()
+    createPdfWithToc input.Path false threeLevels threeLevelsBody
+
+    let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1)
+
+    report.FixableCount PdfFixOptions.HeadingsFromToc |> should equal 4
+    report.FixableCount PdfFixOptions.ListsFromParagraphs |> should equal 0
+    // No /DisplayDocTitle (7.1-10): the title repair sets it, so it counts.
+    report.FailedAssertions
+    |> Seq.filter (fun a -> a.RuleId = "7.1-10")
+    |> Seq.forall (fun a -> a.FixOptions.HasFlag PdfFixOptions.DocumentTitle)
+    |> should be True
+    report.FixableCount PdfFixOptions.DocumentTitle |> should be (greaterThan 0)

@@ -471,8 +471,8 @@ module private MainView =
             let fix _ =
                 task {
                     match selectedFile.Current, report with
-                    | Some sourcePath, Some _ ->
-                        match! Dialogs.chooseFixOptions window with
+                    | Some sourcePath, Some report ->
+                        match! Dialogs.chooseFixOptions window report with
                         | None -> ()
                         | Some options ->
                             let! outputPath =
