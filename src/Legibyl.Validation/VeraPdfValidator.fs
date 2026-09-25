@@ -219,7 +219,12 @@ type VeraPdfValidator() =
         let foundry = Foundries.defaultInstance ()
         wrapErrors $"veraPDF failed to validate '{pdfPath}'" (fun () ->
             use parser = foundry.createParser (java.io.File pdfPath, flavour)
-            let result = foundry.createValidator(flavour, true).validate parser
+            // Report every failure (-1: no per-rule limit) and don't log passed checks.
+            // Once veraPDF has recorded 10,000 results it keeps only the first failure of
+            // each rule, so logging passed checks hides repeated failures on any document
+            // of more than a few pages.
+            let validator = foundry.createValidator (flavour, -1, false, false, false)
+            let result = validator.validate parser
             toReport pdfPath profile result)
 
     member this.Fix
