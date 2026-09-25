@@ -76,7 +76,9 @@ let private geometryFromMarkedContent pageNumber (element: MarkedContentElement)
 
     let paths =
         [ for path in element.Paths do
-              let bounds = path.GetBoundingRectangle()
+              // Clipping paths (e.g. "re W n") and unpainted paths aren't visible content.
+              let painted = (path.IsFilled || path.IsStroked) && not path.IsClipping
+              let bounds = if painted then path.GetBoundingRectangle() else Nullable()
               if bounds.HasValue then
                   let b = bounds.Value
                   geometry pageNumber b.Left b.Bottom b.Right b.Top ]
