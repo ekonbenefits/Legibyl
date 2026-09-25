@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Runtime.InteropServices
 open System.Threading
+open System.Threading.Tasks
 open org.verapdf.core
 open org.verapdf.gf.foundry
 open org.verapdf.pdfa
@@ -82,25 +83,56 @@ module internal VeraPdf =
         else
             PdfFixOptions.None
 
-    /// Adds page regions to veraPDF's failures and appends Legibyl's own warnings, sharing
-    /// one iText/PdfPig read of the file.
-    let withLegibylAnalysis (pdfPath: string) (assertions: RuleViolation list) =
-        try
-            use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(pdfPath))
-            let context = StructureTreeObjects.createContext document pdfPath
-            let located =
-                assertions
-                |> List.map (fun assertion ->
-                    if assertion.Passed then
-                        assertion
-                    else
-                        { assertion with Geometry = FindingGeometry.locate context document assertion |> Option.toObj })
-            located @ LegibylChecks.run document context
-        with
-        | :? iText.Kernel.Exceptions.PdfException
-        | :? IOException as ex -> assertions @ [ LegibylChecks.couldNotInspect ex.Message ]
+    /// Legibyl's own read of the file (iText and PdfPig): its structure-tree warnings, plus
+    /// the open document and context needed to place veraPDF's findings on the page.
+    type LegibylAnalysis =
+        | Analysed of document: iText.Kernel.Pdf.PdfDocument * context: StructureTreeObjects.Context * warnings: RuleViolation list
+        | CouldNotInspect of warning: RuleViolation
 
-    let toReport (pdfPath: string) profile (result: ValidationResult) : ValidationReport =
+    /// Starts Legibyl's analysis on a background thread. It doesn't need veraPDF's results,
+    /// so Validate runs it alongside veraPDF's validation rather than after it.
+    let startLegibylAnalysis (pdfPath: string) : Task<LegibylAnalysis> =
+        Task.Run(fun () ->
+            try
+                let document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(pdfPath))
+                try
+                    let context = StructureTreeObjects.createContext document pdfPath
+                    Analysed(document, context, LegibylChecks.run document context)
+                with _ ->
+                    document.Close()
+                    reraise ()
+            with
+            | :? iText.Kernel.Exceptions.PdfException
+            | :? IOException as ex -> CouldNotInspect(LegibylChecks.couldNotInspect ex.Message))
+
+    /// Waits for the analysis to finish and closes its document, whatever happened to it.
+    let closeLegibylAnalysis (analysis: Task<LegibylAnalysis>) =
+        try
+            match analysis.GetAwaiter().GetResult() with
+            | Analysed(document, _, _) -> document.Close()
+            | CouldNotInspect _ -> ()
+        with _ ->
+            ()
+
+    /// Adds page regions to veraPDF's failures and appends Legibyl's own warnings.
+    let withLegibylAnalysis (analysis: LegibylAnalysis) (assertions: RuleViolation list) =
+        match analysis with
+        | CouldNotInspect warning -> assertions @ [ warning ]
+        | Analysed(document, context, warnings) ->
+            try
+                let located =
+                    assertions
+                    |> List.map (fun assertion ->
+                        if assertion.Passed then
+                            assertion
+                        else
+                            { assertion with Geometry = FindingGeometry.locate context document assertion |> Option.toObj })
+                located @ warnings
+            with
+            | :? iText.Kernel.Exceptions.PdfException
+            | :? IOException as ex -> assertions @ [ LegibylChecks.couldNotInspect ex.Message ]
+
+    let toReport (pdfPath: string) profile (result: ValidationResult) (analysis: LegibylAnalysis) : ValidationReport =
         let assertions =
             [ for item in javaSeq (result.getTestAssertions ()) do
                   let assertion = item :?> TestAssertion
@@ -125,7 +157,7 @@ module internal VeraPdf =
           FlavourId = result.getPDFAFlavour().getId()
           IsCompliant = result.isCompliant ()
           TotalAssertions = result.getTotalAssertions ()
-          Assertions = List.toArray (withLegibylAnalysis pdfPath assertions) }
+          Assertions = List.toArray (withLegibylAnalysis analysis assertions) }
 
     let createTemporaryPdfPath (outputPath: string) =
         let prefix =
@@ -217,15 +249,19 @@ type VeraPdfValidator() =
         ensureExists pdfPath
         let flavour = toJavaFlavour profile
         let foundry = Foundries.defaultInstance ()
-        wrapErrors $"veraPDF failed to validate '{pdfPath}'" (fun () ->
-            use parser = foundry.createParser (java.io.File pdfPath, flavour)
-            // Report every failure (-1: no per-rule limit) and don't log passed checks.
-            // Once veraPDF has recorded 10,000 results it keeps only the first failure of
-            // each rule, so logging passed checks hides repeated failures on any document
-            // of more than a few pages.
-            let validator = foundry.createValidator (flavour, -1, false, false, false)
-            let result = validator.validate parser
-            toReport pdfPath profile result)
+        let analysis = startLegibylAnalysis pdfPath
+        try
+            wrapErrors $"veraPDF failed to validate '{pdfPath}'" (fun () ->
+                use parser = foundry.createParser (java.io.File pdfPath, flavour)
+                // Report every failure (-1: no per-rule limit) and don't log passed checks.
+                // Once veraPDF has recorded 10,000 results it keeps only the first failure of
+                // each rule, so logging passed checks hides repeated failures on any document
+                // of more than a few pages.
+                let validator = foundry.createValidator (flavour, -1, false, false, false)
+                let result = validator.validate parser
+                toReport pdfPath profile result (analysis.GetAwaiter().GetResult()))
+        finally
+            closeLegibylAnalysis analysis
 
     member this.Fix
         (
