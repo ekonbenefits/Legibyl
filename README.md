@@ -47,6 +47,9 @@ src/
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
 tests/
   Legibyl.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
+  Legibyl.Gui.Tests/          xUnit tests of the GUI on Avalonia's headless platform
+tools/
+  Legibyl.Screenshots/        Dev-only: saves GUI screenshots without a display (headless)
 installer/
   Legibyl.Gui.Installer/      WiX v6 MSI installer for the GUI (LegibylSetup.msi)
 lib/vendor/verapdf-jars/    veraPDF jar provenance/upgrade README (jar is fetched at build time)
@@ -67,8 +70,26 @@ dotnet run --project src/Legibyl.Gui/Legibyl.Gui.fsproj
 ## Testing
 
 ```powershell
-dotnet test tests/Legibyl.Validation.Tests/Legibyl.Validation.Tests.csproj
+dotnet test Legibyl.slnx
 ```
+
+`Legibyl.Validation.Tests` covers validation, fixes, and rendering.
+`Legibyl.Gui.Tests` opens sample PDFs in the real `MainWindow` on Avalonia's
+headless platform (rendered with Skia, no display needed) and checks what's
+on screen, e.g. that no results-grid column header is clipped.
+
+## Screenshots
+
+`tools/Legibyl.Screenshots` saves a PNG of the GUI with a PDF open, using the
+same headless setup as the GUI tests, so it works over SSH or with the
+display asleep. It shares `HeadlessWindow.fs` with `Legibyl.Gui.Tests`.
+
+```powershell
+dotnet run --project tools/Legibyl.Screenshots -- <pdf> <out.png> [--theme light|dark] [--select <row>] [--size 1200x720]
+```
+
+`--select` picks the results row (0-based) whose details and page preview
+are shown; by default it's the first. Screenshots are 1× scale.
 
 ## Publishing (self-contained)
 
