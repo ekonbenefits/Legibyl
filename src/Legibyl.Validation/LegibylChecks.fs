@@ -10,7 +10,10 @@
 ///      users as "Structure-N", so never reuse or renumber one).
 ///   3. If the Fix dialog can repair it, set FixOptions and implement the repair in
 ///      StructureFixes.
-///   4. Cover it in tests/Legibyl.Validation.Tests/PdfFixerTests.cs.
+///   4. Cover it in tests/Legibyl.Validation.Tests/PdfFixerTests.fs.
+///
+/// Checks that look at the document as a whole rather than one element at a time (like
+/// the table-of-contents heading checks, Structure-3 to 5) are added in `run` directly.
 module internal Legibyl.Validation.LegibylChecks
 
 open System
@@ -110,7 +113,46 @@ let private warning message (errorMessage: string | null) location testNumber fi
       FixOptions = fixOptions
       Geometry = geometry }
 
-/// Runs every check in `all` over the document's structure tree.
+// ---- Structure-3 to 5: headings from the table of contents (see TocHeadings) ----
+
+[<Literal>]
+let private TocHeadingMessage =
+    "Paragraph that the table of contents lists as a heading. Tagged as a heading, screen reader users could jump to it; the Fix dialog can retag it."
+
+[<Literal>]
+let private TocEntryUnmatchedMessage =
+    "Table-of-contents entry that couldn't be matched to exactly one paragraph on its page, so its heading wasn't recovered."
+
+[<Literal>]
+let private TocHeadingsUnrecoverableMessage = "Headings weren't recovered from the table of contents."
+
+let private tocHeadingFindings (document: PdfDocument) context =
+    let unmatchedWarning (unmatched: TocHeadings.Unmatched) =
+        let found = if unmatched.Matches = 0 then "no matching paragraph" else $"{unmatched.Matches} matching paragraphs"
+        warning
+            TocEntryUnmatchedMessage
+            $"\"{unmatched.Entry.Label}\" goes to page {unmatched.Entry.Page}, which has {found}."
+            unmatched.Entry.Path
+            4
+            PdfFixOptions.None
+            (Option.toObj unmatched.Entry.Geometry)
+    match TocHeadings.analyse document context with
+    | TocHeadings.NotApplicable -> []
+    | TocHeadings.Recoverable(headings, unmatched) ->
+        [ for heading in headings ->
+              warning
+                  TocHeadingMessage
+                  $"\"{heading.Entry.Label}\" is a level-{heading.Level} entry, so this would become H{heading.Level}."
+                  heading.ParagraphPath
+                  3
+                  PdfFixOptions.HeadingsFromToc
+                  (Option.toObj heading.Geometry)
+          yield! List.map unmatchedWarning unmatched ]
+    | TocHeadings.Unrecoverable(tocPath, tocGeometry, reason, unmatched) ->
+        [ warning TocHeadingsUnrecoverableMessage $"Not recovered because {reason}." tocPath 5 PdfFixOptions.None (Option.toObj tocGeometry)
+          yield! List.map unmatchedWarning unmatched ]
+
+/// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
@@ -121,7 +163,8 @@ let run (document: PdfDocument) context : RuleViolation list =
                   match check.Inspect context visit with
                   | Some finding ->
                       warning check.Message null finding.Location check.TestNumber check.FixOptions (Option.toObj finding.Geometry)
-                  | None -> () ]
+                  | None -> ()
+          yield! tocHeadingFindings document context ]
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
 let couldNotInspect (errorMessage: string) =

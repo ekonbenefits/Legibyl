@@ -74,6 +74,8 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
             let emptyParagraphs = ctx.useState false
             let linkContents = ctx.useState true
             let documentTitle = ctx.useState true
+            // Retagging changes what the document says it is, so it's opt-in for now.
+            let tocHeadings = ctx.useState false
 
             let checkBox (state: IWritable<bool>) (content: IView) =
                 CheckBox.create [
@@ -95,7 +97,8 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                       annotationTabs.Current, PdfFixOptions.AnnotationTabs
                       emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
                       linkContents.Current, PdfFixOptions.LinkContents
-                      documentTitle.Current, PdfFixOptions.DocumentTitle ]
+                      documentTitle.Current, PdfFixOptions.DocumentTitle
+                      tocHeadings.Current, PdfFixOptions.HeadingsFromToc ]
                     |> List.fold (fun all (isChecked, option) -> if isChecked then all ||| option else all) PdfFixOptions.None
 
                 if options = PdfFixOptions.None then
@@ -120,6 +123,9 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                             checkBox linkContents (label "Describe table-of-contents links that have no description, using the entry's own text (/Contents)")
                             checkBox documentTitle (label "Give the document a title, and show it in place of the file name (/DisplayDocTitle)")
                             checkBox emptyParagraphs (label "Remove empty semantic /P structure elements (optional cleanup)")
+                            checkBox
+                                tocHeadings
+                                (label "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent)")
                             TextBlock.create [
                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                 TextBlock.textWrapping TextWrapping.Wrap

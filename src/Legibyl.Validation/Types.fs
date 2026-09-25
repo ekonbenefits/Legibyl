@@ -14,7 +14,9 @@ type PdfFixOptions =
     | RemoveEmptyParagraphs = 4
     | LinkContents = 8
     | DocumentTitle = 16
-    | All = 31
+    /// Tags paragraphs the table of contents lists as headings (H1-H6); see TocHeadings.
+    | HeadingsFromToc = 32
+    | All = 63
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.

@@ -61,37 +61,6 @@ let private isBlankString (value: PdfString | null) =
     | null -> true
     | value -> String.IsNullOrWhiteSpace(value.ToUnicodeString())
 
-/// Turns a link's own visible text into an alternate description. Ordinary links keep
-/// their text as-is; a table-of-contents entry ("Scope of this document ..... 3") loses
-/// its dot leaders and printed page number to become "Scope of this document".
-/// Returns None when nothing usable is left.
-let private describeLinkText (text: string) =
-    let collapsed = Regex.Replace(text, @"\s+", " ").Trim()
-    // Dot/underscore/middle-dot leaders, whether or not they're spaced out.
-    let leaders = Regex(@"[\s]*(?:[.\u00B7_]\s?){3,}[\s]*")
-    // A trailing number is only a printed page number if leaders ran up to it. Without
-    // that evidence it's part of the link's own text, as in "Appendix 2" or "Form 5500".
-    let described =
-        if leaders.IsMatch collapsed then
-            Regex.Replace(leaders.Replace(collapsed, " "), @"\s+\d{1,4}$", "")
-        else
-            collapsed
-    let description = described.Trim([| ' '; '.'; '\u00B7'; '_'; '-'; '\u2013'; '\u2014' |]).Trim()
-    if String.IsNullOrWhiteSpace description then None else Some description
-
-/// The annotations a structure element points at through its own /OBJR children. Nested
-/// structure elements are left alone — they describe themselves.
-let private ownAnnotations (element: PdfDictionary) =
-    let ofObject (obj: PdfObject | null) =
-        match resolve obj with
-        | :? PdfDictionary as dictionary -> dictionary.GetAsDictionary(PdfName.Obj) |> Option.ofObj
-        | _ -> None
-
-    match resolve (element.Get(PdfName.K)) with
-    | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do yield! Option.toList (ofObject (array.Get i)) ]
-    | :? PdfDictionary as dictionary -> Option.toList (ofObject dictionary)
-    | _ -> []
-
 /// The /Link elements inside a table of contents: anywhere below a TOC or TOCI, including
 /// a nested entry's links and links wrapped in a Reference or Span. walk visits parents
 /// before children (depth first), and each visit's Path extends its parent's, so the TOC
@@ -133,7 +102,7 @@ let private describeLinks (structTreeRoot: PdfDictionary) context =
         match ownAnnotations visit.Element |> List.filter (fun a -> isBlankString (a.GetAsString PdfName.Contents)) with
         | [] -> ()
         | annotations ->
-            match describeLinkText (extractText visit.Element context visit.Page) with
+            match tocEntryText (extractText visit.Element context visit.Page) with
             | None -> ()
             | Some description ->
                 for annotation in annotations do
@@ -219,6 +188,18 @@ let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions)
                     page.Put(PdfName.Tabs, PdfName.S) |> ignore
                     tabsFixed <- tabsFixed + 1
 
+    // Before any other structural change, so the analysis sees the tree as validated.
+    let headingsTagged =
+        if options.HasFlag PdfFixOptions.HeadingsFromToc then
+            match TocHeadings.analyse document context with
+            | TocHeadings.Recoverable(headings, _) ->
+                for heading in headings do
+                    heading.Paragraph.Put(PdfName.S, PdfName $"H{heading.Level}") |> ignore
+                headings.Length
+            | _ -> 0
+        else
+            0
+
     let emptyParagraphsRemoved =
         match structTreeRoot with
         | NonNull structTreeRoot when options.HasFlag PdfFixOptions.RemoveEmptyParagraphs ->
@@ -236,7 +217,8 @@ let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions)
         else
             None, false
 
-    [ if tabsFixed > 0 then $"Set /Tabs /S on {tabsFixed} page(s) containing annotations."
+    [ if headingsTagged > 0 then $"Tagged {headingsTagged} heading(s) listed in the table of contents."
+      if tabsFixed > 0 then $"Set /Tabs /S on {tabsFixed} page(s) containing annotations."
       if emptyParagraphsRemoved > 0 then $"Removed {emptyParagraphsRemoved} empty /P structure element(s)."
       if linksDescribed > 0 then $"Described {linksDescribed} link annotation(s) from their own text."
       match titleSet with
