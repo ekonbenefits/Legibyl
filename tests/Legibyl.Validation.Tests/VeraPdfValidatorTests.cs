@@ -42,4 +42,20 @@ public class VeraPdfValidatorTests
         Assert.Throws<VeraPdfValidationException>(
             () => validator.Validate(CorpusFile("does-not-exist.pdf"), PdfProfile.PdfUa1));
     }
+
+    [Fact]
+    public void Validate_ClippingPathInsideMarkedContent_DoesNotInflateRegion()
+    {
+        var validator = new VeraPdfValidator();
+
+        ValidationReport report = validator.Validate(CorpusFile("pages-clipped-paragraphs.pdf"), PdfProfile.PdfUa1);
+
+        // The first paragraph (MCID 1) is a single line near the top of the page, drawn
+        // inside a page-sized clipping rectangle.
+        RuleViolation firstParagraph = report.FailedAssertions.First(a =>
+            a.LocationContext?.Contains("{mcid:1}", StringComparison.Ordinal) == true);
+        StructureGeometry geometry = Assert.IsType<StructureGeometry>(firstParagraph.Geometry);
+        Assert.InRange(geometry.Top - geometry.Bottom, 5, 20);
+        Assert.InRange(geometry.Bottom, 700, 720);
+    }
 }

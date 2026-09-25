@@ -10,3 +10,10 @@ test corpus:
 
 Used here, unmodified, to assert expected pass/fail PDF/UA-1 validation
 outcomes in `VeraPdfValidatorTests`.
+
+`pages-clipped-paragraphs.pdf` was made for this project by exporting a
+three-paragraph document from Apple Pages (with blank lines between
+paragraphs, which Pages drops rather than tagging as empty `/P`s). Its first
+paragraph's marked content also contains a page-sized clipping rectangle
+(`re W n`), which `VeraPdfValidatorTests` uses to check that clipping paths
+don't inflate a finding's region.
