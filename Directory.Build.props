@@ -1,7 +1,7 @@
 <Project>
   <!--
     veraPDF engine: the greenfield-apps fat jar is downloaded from Maven Central
-    at build time (see src/Legibyl.Validation/Legibyl.Validation.csproj) and
+    at build time (see src/Legibyl.Validation/Legibyl.Validation.fsproj) and
     verified against VeraPdfSha256. To upgrade, change these two values, then
     reset VersionBuild to 0.
 

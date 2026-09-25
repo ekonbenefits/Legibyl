@@ -1,10 +1,22 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Types.fs" />
+    <Compile Include="PdfLocationParser.fs" />
+    <Compile Include="Results.fs" />
+    <Compile Include="ValidationReportTextFormatter.fs" />
+    <Compile Include="Interop.fs" />
+    <Compile Include="MarkedContentTextIndex.fs" />
+    <Compile Include="StructureChecks.fs" />
+    <Compile Include="StructureTreeWalk.fs" />
+    <Compile Include="VeraPdfValidator.fs" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="IKVM" Version="8.16.1" />

@@ -2,7 +2,7 @@
 
 The veraPDF "greenfield-apps" fat jar is the Java validation engine loaded
 into the .NET process via [IKVM.NET](https://ikvm.org/). It is **not**
-committed to this repo: `src/Legibyl.Validation/Legibyl.Validation.csproj`
+committed to this repo: `src/Legibyl.Validation/Legibyl.Validation.fsproj`
 downloads it from Maven Central on the first build, verifies it against
 `VeraPdfSha256` in `Directory.Build.props`, and caches it at
 `src/Legibyl.Validation/obj/verapdf/`. The build fails on a checksum mismatch.
