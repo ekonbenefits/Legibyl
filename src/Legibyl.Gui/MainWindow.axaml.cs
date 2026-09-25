@@ -1,22 +1,32 @@
 using System.IO;
 using System.Text;
-using System.Windows;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using Microsoft.Win32;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 using Legibyl.Rendering;
 using Legibyl.Validation;
 
 namespace Legibyl.Gui;
 
 /// <summary>
-/// Interaction logic for MainWindow.xaml
+/// Interaction logic for MainWindow.axaml
 /// </summary>
 public partial class MainWindow : Window
 {
-    private static readonly Brush PassBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x7E, 0x34));
-    private static readonly Brush FailBrush = new SolidColorBrush(Color.FromRgb(0xB0, 0x2A, 0x37));
-    private static readonly Brush ErrorBrush = new SolidColorBrush(Color.FromRgb(0x99, 0x66, 0x00));
+    private static readonly IBrush PassBrush = new SolidColorBrush(Color.FromRgb(0x1E, 0x7E, 0x34));
+    private static readonly IBrush FailBrush = new SolidColorBrush(Color.FromRgb(0xB0, 0x2A, 0x37));
+    private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.FromRgb(0x99, 0x66, 0x00));
+
+    internal static readonly FilePickerFileType PdfFileType = new("PDF files")
+    {
+        Patterns = ["*.pdf"],
+        MimeTypes = ["application/pdf"],
+        AppleUniformTypeIdentifiers = ["com.adobe.pdf"],
+    };
 
     private readonly IPdfValidator _validator = new VeraPdfValidator();
     private readonly IPdfFixer _fixer;
@@ -34,34 +44,38 @@ public partial class MainWindow : Window
         ProfileComboBox.SelectedIndex = 0;
         _fixer = (IPdfFixer)_validator;
         _structureReader = (IStructureTreeReader)_validator;
+
+        AddHandler(DragDrop.DragOverEvent, Window_DragOver);
+        AddHandler(DragDrop.DropEvent, Window_Drop);
     }
 
-    private void BrowseButton_Click(object sender, RoutedEventArgs e)
+    private async void BrowseButton_Click(object? sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Filter = "PDF files (*.pdf)|*.pdf|All files (*.*)|*.*",
             Title = "Select a PDF to validate",
-        };
+            AllowMultiple = false,
+            FileTypeFilter = [PdfFileType, FilePickerFileTypes.All],
+        });
 
-        if (dialog.ShowDialog(this) == true)
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
         {
-            SetSelectedFile(dialog.FileName);
+            SetSelectedFile(path);
         }
     }
 
-    private void Window_DragOver(object sender, DragEventArgs e)
+    private void Window_DragOver(object? sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
-    private void Window_Drop(object sender, DragEventArgs e)
+    private void Window_Drop(object? sender, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent(DataFormats.FileDrop) &&
-            e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
+        if (e.DataTransfer.TryGetFiles() is { Length: > 0 } files &&
+            files[0].TryGetLocalPath() is { } path)
         {
-            SetSelectedFile(files[0]);
+            SetSelectedFile(path);
         }
     }
 
@@ -78,22 +92,22 @@ public partial class MainWindow : Window
     private void ClearResults()
     {
         _lastReport = null;
-        ResultsListView.ItemsSource = null;
-        StatusBanner.Visibility = Visibility.Collapsed;
+        ResultsGrid.ItemsSource = null;
+        StatusBanner.IsVisible = false;
         CopySummaryButton.IsEnabled = false;
         SaveReportButton.IsEnabled = false;
         FixButton.IsEnabled = false;
-        FindingDetailsPanel.Visibility = Visibility.Collapsed;
+        FindingDetailsPanel.IsVisible = false;
         RegionImage.Source = null;
         CopyFindingButton.IsEnabled = false;
         PreviewNoteText.Text = string.Empty;
-        PreviewProgressBar.Visibility = Visibility.Collapsed;
+        PreviewProgressBar.IsVisible = false;
         _previewRequestVersion++;
     }
 
-    private async void ValidateButton_Click(object sender, RoutedEventArgs e) => await RunValidationAsync();
+    private async void ValidateButton_Click(object? sender, RoutedEventArgs e) => await RunValidationAsync();
 
-    private async void ProfileComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private async void ProfileComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         // Re-validate automatically when the profile changes, as long as a file is already selected
         // and we're not already mid-validation (guards against re-entrancy/startup selection events).
@@ -110,14 +124,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        var profile = ((ProfileItem)ProfileComboBox.SelectedItem).Profile;
+        var profile = ((ProfileItem)ProfileComboBox.SelectedItem!).Profile;
+        string filePath = _selectedFilePath;
 
         SetBusy(true);
         ClearResults();
 
         try
         {
-            ValidationReport report = await Task.Run(() => _validator.Validate(_selectedFilePath, profile));
+            ValidationReport report = await Task.Run(() => _validator.Validate(filePath, profile));
             ShowReport(report);
         }
         catch (VeraPdfValidationException ex)
@@ -133,7 +148,7 @@ public partial class MainWindow : Window
     private void SetBusy(bool busy)
     {
         _isBusy = busy;
-        ProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        ProgressBar.IsVisible = busy;
         ValidateButton.IsEnabled = !busy && _selectedFilePath is not null;
         BrowseButton.IsEnabled = !busy;
         ProfileComboBox.IsEnabled = !busy;
@@ -151,50 +166,51 @@ public partial class MainWindow : Window
     {
         _lastReport = report;
 
-        StatusBanner.Visibility = Visibility.Visible;
+        StatusBanner.IsVisible = true;
         StatusBanner.Background = report.IsCompliant ? PassBrush : FailBrush;
         StatusText.Foreground = Brushes.White;
         StatusText.Text = report.IsCompliant
             ? $"PASS — compliant with {report.FlavourId.ToUpperInvariant()} ({report.TotalAssertions} checks, {report.WarningCount} warnings)"
             : $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {report.FlavourId.ToUpperInvariant()} ({report.WarningCount} warnings)";
 
-        ResultsListView.ItemsSource = report.Findings
+        List<RuleViolationRow> rows = report.Findings
             .Select(RuleViolationRow.FromViolation)
             // Unlocated failures (no page number) sort to the end, after page-anchored ones in page order.
             .OrderBy(row => row.PageNumber ?? int.MaxValue)
             .ThenBy(row => row.Clause)
             .ThenBy(row => row.TestNumber)
             .ToList();
+        ResultsGrid.ItemsSource = rows;
 
         CopySummaryButton.IsEnabled = true;
         SaveReportButton.IsEnabled = true;
         FixButton.IsEnabled = CanAttemptFix;
 
-        if (ResultsListView.Items.Count > 0)
+        if (rows.Count > 0)
         {
-            ResultsListView.SelectedIndex = 0;
+            ResultsGrid.SelectedIndex = 0;
         }
     }
 
     private void ShowError(string message)
     {
-        StatusBanner.Visibility = Visibility.Visible;
+        StatusBanner.IsVisible = true;
         StatusBanner.Background = ErrorBrush;
         StatusText.Foreground = Brushes.White;
         StatusText.Text = $"Error: {message}";
     }
 
-    private async void ResultsListView_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private async void ResultsGrid_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         int requestVersion = ++_previewRequestVersion;
-        if (ResultsListView.SelectedItem is not RuleViolationRow row)
+        if (ResultsGrid.SelectedItem is not RuleViolationRow row)
         {
-            FindingDetailsPanel.Visibility = Visibility.Collapsed;
+            FindingDetailsPanel.IsVisible = false;
             CopyFindingButton.IsEnabled = false;
             return;
         }
 
-        FindingDetailsPanel.Visibility = Visibility.Visible;
+        FindingDetailsPanel.IsVisible = true;
         FindingHeadingText.Text = $"{row.Severity}: clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}";
         FindingMessageText.Text = row.Message;
         FindingLocationText.Text = row.FriendlyLocation;
@@ -207,12 +223,12 @@ public partial class MainWindow : Window
         string? filePath = _selectedFilePath;
         if (filePath is null || location is null)
         {
-            PreviewProgressBar.Visibility = Visibility.Collapsed;
+            PreviewProgressBar.IsVisible = false;
             PreviewNoteText.Text = "This finding is not associated with a specific PDF page.";
             return;
         }
 
-        PreviewProgressBar.Visibility = Visibility.Visible;
+        PreviewProgressBar.IsVisible = true;
         try
         {
             HighlightImageResult result = await Task.Run(
@@ -237,24 +253,18 @@ public partial class MainWindow : Window
         {
             if (requestVersion == _previewRequestVersion)
             {
-                PreviewProgressBar.Visibility = Visibility.Collapsed;
+                PreviewProgressBar.IsVisible = false;
             }
         }
     }
 
-    private static BitmapImage CreateBitmap(byte[] pngBytes)
+    internal static Bitmap CreateBitmap(byte[] pngBytes)
     {
-        var image = new BitmapImage();
         using var stream = new MemoryStream(pngBytes);
-        image.BeginInit();
-        image.CacheOption = BitmapCacheOption.OnLoad;
-        image.StreamSource = stream;
-        image.EndInit();
-        image.Freeze();
-        return image;
+        return new Bitmap(stream);
     }
 
-    private async void ViewStructureButton_Click(object sender, RoutedEventArgs e)
+    private async void ViewStructureButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_selectedFilePath is null)
         {
@@ -268,19 +278,19 @@ public partial class MainWindow : Window
             StructureNode? structure = await Task.Run(() => _structureReader.ReadStructureTree(filePath));
             if (structure is null)
             {
-                MessageBox.Show(this,
+                await MessageDialog.ShowAsync(this,
                     "This PDF has no structure tree at all — it is completely untagged, so there is no " +
                     "semantic hierarchy for a screen reader to use.",
-                    "Document Structure", MessageBoxButton.OK, MessageBoxImage.Information);
+                    "Document Structure");
                 return;
             }
 
-            var window = new StructureTreeWindow(structure, filePath) { Owner = this };
-            window.Show();
+            var window = new StructureTreeWindow(structure, filePath);
+            window.Show(this);
         }
         catch (VeraPdfValidationException ex)
         {
-            MessageBox.Show(this, ex.Message, "Could not read structure", MessageBoxButton.OK, MessageBoxImage.Error);
+            await MessageDialog.ShowAsync(this, ex.Message, "Could not read structure");
         }
         finally
         {
@@ -288,39 +298,42 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void FixButton_Click(object sender, RoutedEventArgs e)
+    private async void FixButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_lastReport is null || _selectedFilePath is null)
         {
             return;
         }
 
-        var fixOptionsDialog = new FixOptionsDialog { Owner = this };
-        if (fixOptionsDialog.ShowDialog() != true)
+        string sourcePath = _selectedFilePath;
+        var fixOptionsDialog = new FixOptionsDialog();
+        if (!await fixOptionsDialog.ShowDialog<bool>(this))
         {
             return;
         }
 
-        var dialog = new SaveFileDialog
+        string? outputPath = await PickSavePathAsync(this, new FilePickerSaveOptions
         {
-            Filter = "PDF files (*.pdf)|*.pdf|All files (*.*)|*.*",
-            FileName = Path.GetFileNameWithoutExtension(_selectedFilePath) + ".fixed" + Path.GetExtension(_selectedFilePath),
-        };
+            Title = "Save repaired PDF",
+            SuggestedFileName = Path.GetFileNameWithoutExtension(sourcePath) + ".fixed" + Path.GetExtension(sourcePath),
+            DefaultExtension = "pdf",
+            FileTypeChoices = [PdfFileType, FilePickerFileTypes.All],
+        }, sourcePath);
 
-        if (dialog.ShowDialog(this) != true)
+        if (outputPath is null)
         {
             return;
         }
 
-        var profile = ((ProfileItem)ProfileComboBox.SelectedItem).Profile;
+        var profile = ((ProfileItem)ProfileComboBox.SelectedItem!).Profile;
         string? repairedPath = null;
 
         SetBusy(true);
         try
         {
             PdfFixOptions options = fixOptionsDialog.SelectedOptions;
-            FixResult fix = await Task.Run(() => _fixer.Fix(_selectedFilePath, profile, dialog.FileName, options));
-            ShowFixResult(fix);
+            FixResult fix = await Task.Run(() => _fixer.Fix(sourcePath, profile, outputPath, options));
+            await ShowFixResultAsync(fix);
 
             if (fix.WasFixed)
             {
@@ -329,7 +342,7 @@ public partial class MainWindow : Window
         }
         catch (VeraPdfValidationException ex)
         {
-            MessageBox.Show(this, ex.Message, "Fix failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            await MessageDialog.ShowAsync(this, ex.Message, "Fix failed");
         }
         finally
         {
@@ -344,7 +357,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowFixResult(FixResult fix)
+    /// <summary>
+    /// Shows a save dialog starting in the source file's folder and returns the chosen
+    /// local path, or null if the user cancelled.
+    /// </summary>
+    internal static async Task<string?> PickSavePathAsync(TopLevel topLevel, FilePickerSaveOptions options, string? nearPath)
+    {
+        string? folder = nearPath is null ? null : Path.GetDirectoryName(nearPath);
+        if (!string.IsNullOrEmpty(folder))
+        {
+            options.SuggestedStartLocation = await topLevel.StorageProvider.TryGetFolderFromPathAsync(folder);
+        }
+
+        IStorageFile? file = await topLevel.StorageProvider.SaveFilePickerAsync(options);
+        return file?.TryGetLocalPath();
+    }
+
+    private Task ShowFixResultAsync(FixResult fix)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Repair status: {fix.Status}");
@@ -370,43 +399,46 @@ public partial class MainWindow : Window
             sb.AppendLine("Switching to the repaired copy and re-validating to show what improved.");
         }
 
-        MessageBox.Show(this, sb.ToString(), "Fix PDF", MessageBoxButton.OK, MessageBoxImage.Information);
+        return MessageDialog.ShowAsync(this, sb.ToString(), "Fix PDF");
     }
 
-    private void CopySummaryButton_Click(object sender, RoutedEventArgs e)
+    private async void CopySummaryButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_lastReport is null || Clipboard is null)
+        {
+            return;
+        }
+
+        await Clipboard.SetTextAsync(ValidationReportTextFormatter.BuildReport(_lastReport));
+    }
+
+    private async void CopyFindingButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ResultsGrid.SelectedItem is RuleViolationRow row && Clipboard is not null)
+        {
+            await Clipboard.SetTextAsync(ValidationReportTextFormatter.BuildFinding(row.Violation));
+        }
+    }
+
+    private async void SaveReportButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_lastReport is null)
         {
             return;
         }
 
-        Clipboard.SetText(ValidationReportTextFormatter.BuildReport(_lastReport));
-    }
-
-    private void CopyFindingButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (ResultsListView.SelectedItem is RuleViolationRow row)
+        ValidationReport report = _lastReport;
+        string? path = await PickSavePathAsync(this, new FilePickerSaveOptions
         {
-            Clipboard.SetText(ValidationReportTextFormatter.BuildFinding(row.Violation));
-        }
-    }
+            Title = "Save validation report",
+            SuggestedFileName = Path.GetFileNameWithoutExtension(report.FilePath) + "-validation-report.txt",
+            DefaultExtension = "txt",
+            FileTypeChoices = [new FilePickerFileType("Text report") { Patterns = ["*.txt"], MimeTypes = ["text/plain"] }, FilePickerFileTypes.All],
+        }, report.FilePath);
 
-    private void SaveReportButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_lastReport is null)
+        if (path is not null)
         {
-            return;
-        }
-
-        var dialog = new SaveFileDialog
-        {
-            Filter = "Text report (*.txt)|*.txt|All files (*.*)|*.*",
-            FileName = Path.GetFileNameWithoutExtension(_lastReport.FilePath) + "-validation-report.txt",
-        };
-
-        if (dialog.ShowDialog(this) == true)
-        {
-            File.WriteAllText(dialog.FileName, ValidationReportTextFormatter.BuildReport(_lastReport));
+            File.WriteAllText(path, ValidationReportTextFormatter.BuildReport(report));
         }
     }
 }

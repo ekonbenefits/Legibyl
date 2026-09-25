@@ -11,7 +11,8 @@
   <Folder Name="/installer/">
     <Project Path="installer/Legibyl.Gui.Installer/Legibyl.Gui.Installer.wixproj">
       <Platform Solution="*|Any CPU" Project="x64" />
-      <Build Solution="*|*" />
+      <!-- Windows-only (WiX): build it explicitly, see README "Windows installer (MSI)". -->
+      <Build Project="false" />
     </Project>
   </Folder>
 </Solution>

@@ -1,8 +1,13 @@
-using System.Windows;
+using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Legibyl.Validation;
 
 namespace Legibyl.Gui;
 
+/// <summary>
+/// Lets the user pick which repairs to run. Show with <c>ShowDialog&lt;bool&gt;</c>;
+/// the result is true when the user continued with at least one fix selected.
+/// </summary>
 public partial class FixOptionsDialog : Window
 {
     public FixOptionsDialog()
@@ -15,7 +20,7 @@ public partial class FixOptionsDialog : Window
 
     public PdfFixOptions SelectedOptions { get; private set; } = PdfFixOptions.Metadata | PdfFixOptions.AnnotationTabs;
 
-    private void ContinueButton_Click(object sender, RoutedEventArgs e)
+    private async void ContinueButton_Click(object? sender, RoutedEventArgs e)
     {
         PdfFixOptions options = PdfFixOptions.None;
         if (MetadataCheckBox.IsChecked == true)
@@ -33,12 +38,13 @@ public partial class FixOptionsDialog : Window
 
         if (options == PdfFixOptions.None)
         {
-            MessageBox.Show(this, "Select at least one fix to apply.", "Fix PDF",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            await MessageDialog.ShowAsync(this, "Select at least one fix to apply.", "Fix PDF");
             return;
         }
 
         SelectedOptions = options;
-        DialogResult = true;
+        Close(true);
     }
+
+    private void CancelButton_Click(object? sender, RoutedEventArgs e) => Close(false);
 }

@@ -1,6 +1,6 @@
 # Legibyl
 
-An easy-to-use wrapper around [veraPDF](https://verapdf.org/): a .NET (WPF)
+An easy-to-use wrapper around [veraPDF](https://verapdf.org/): a .NET (Avalonia)
 desktop GUI plus a scriptable CLI for PDF/UA (and PDF/A) validation, powered
 by the real veraPDF Java validation engine embedded via
 [IKVM.NET](https://ikvm.org/) — no separate JDK/JRE install or external
@@ -39,7 +39,7 @@ Legibyl.slnx
 src/
   Legibyl.Validation/   C# facade over the veraPDF Java validation core (IKVM)
   Legibyl.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
-  Legibyl.Gui/          WPF UI: file picker, profile selector, results grid
+  Legibyl.Gui/          Avalonia UI (Windows/macOS/Linux): file picker, profile selector, results grid
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
 tests/
   Legibyl.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
@@ -52,24 +52,28 @@ spike/IkvmSpike/            Standalone feasibility spike (kept for reference)
 
 ## Building & running
 
-Requires the .NET 8 SDK.
+Requires the .NET 8 SDK. The GUI, CLI, and tests build and run on Windows,
+macOS, and Linux; only the MSI installer project is Windows-only, so the
+solution build skips it (build it explicitly, see below).
 
 ```powershell
 dotnet build Legibyl.slnx
-dotnet run --project src\Legibyl.Gui\Legibyl.Gui.csproj
+dotnet run --project src/Legibyl.Gui/Legibyl.Gui.csproj
 ```
 
 ## Testing
 
 ```powershell
-dotnet test tests\Legibyl.Validation.Tests\Legibyl.Validation.Tests.csproj
+dotnet test tests/Legibyl.Validation.Tests/Legibyl.Validation.Tests.csproj
 ```
 
 ## Publishing (self-contained)
 
 ```powershell
-dotnet publish src\Legibyl.Gui\Legibyl.Gui.csproj -c Release -r win-x64 --self-contained true -o publish\gui
+dotnet publish src/Legibyl.Gui/Legibyl.Gui.csproj -c Release -r win-x64 --self-contained true -o publish/gui
 ```
+
+Use `-r osx-arm64`, `-r osx-x64`, or `-r linux-x64` for other platforms.
 
 The published output bundles IKVM's translated JRE (`IKVM.Java.dll`), so
 the app runs standalone with no external Java installation.
@@ -179,7 +183,7 @@ tells you the outcome without needing to parse output:
 | `64` | Invalid command-line usage. |
 
 ```powershell
-dotnet run --project src\Legibyl.Cli\Legibyl.Cli.csproj -- <file.pdf> [<file2.pdf> ...] [options]
+dotnet run --project src/Legibyl.Cli/Legibyl.Cli.csproj -- <file.pdf> [<file2.pdf> ...] [options]
 ```
 
 Or after building, run the exe directly:

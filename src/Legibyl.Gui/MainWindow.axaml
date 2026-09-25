@@ -1,0 +1,149 @@
+<Window x:Class="Legibyl.Gui.MainWindow"
+        xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Legibyl.Gui"
+        Title="Legibyl — PDF/UA Validator" Height="720" Width="1200"
+        MinHeight="560" MinWidth="900"
+        DragDrop.AllowDrop="True">
+    <Window.Styles>
+        <Style Selector="Border.statusBanner">
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+        <Style Selector="TextBox.readOnlyDetail">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0,2" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+    </Window.Styles>
+    <Window.Resources>
+        <!-- Sorting is off, so don't reserve header space for the sort glyph; otherwise
+             short headers get clipped in the narrow results pane. -->
+        <x:Double x:Key="DataGridSortIconMinWidth">0</x:Double>
+    </Window.Resources>
+
+    <Grid Margin="12" RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+        <!-- File picker row -->
+        <Grid Grid.Row="0" Margin="0,0,0,8" ColumnDefinitions="*,Auto,Auto,Auto">
+            <TextBox x:Name="FilePathTextBox" Grid.Column="0" Margin="0,0,8,0"
+                     VerticalContentAlignment="Center"
+                     IsReadOnly="True"
+                     Text="Drop a PDF here or click Browse..." />
+            <Button x:Name="BrowseButton" Grid.Column="1" Content="Browse…" Padding="12,4" Margin="0,0,8,0"
+                    Click="BrowseButton_Click" />
+            <ComboBox x:Name="ProfileComboBox" Grid.Column="2" Width="160" Margin="0,0,8,0"
+                      SelectionChanged="ProfileComboBox_SelectionChanged" />
+            <Button x:Name="ValidateButton" Grid.Column="3" Content="Validate" Padding="16,4"
+                    Click="ValidateButton_Click" IsEnabled="False" />
+        </Grid>
+
+        <!-- Progress -->
+        <ProgressBar x:Name="ProgressBar" Grid.Row="1" Height="4" MinHeight="4" Margin="0,0,0,8"
+                     IsIndeterminate="True" IsVisible="False" />
+
+        <!-- Status banner -->
+        <Border x:Name="StatusBanner" Grid.Row="2" Classes="statusBanner" IsVisible="False">
+            <TextBlock x:Name="StatusText" FontWeight="Bold" TextWrapping="Wrap" />
+        </Border>
+
+        <!-- Results and selected-finding details -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="5*" MinWidth="360" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="7*" MinWidth="420" />
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0" RowDefinitions="*,Auto">
+                <DataGrid x:Name="ResultsGrid" Grid.Row="0"
+                          x:DataType="local:RuleViolationRow"
+                          IsReadOnly="True" SelectionMode="Single"
+                          CanUserResizeColumns="True" CanUserSortColumns="False"
+                          GridLinesVisibility="Horizontal"
+                          BorderBrush="#FFD0D0D0" BorderThickness="1"
+                          SelectionChanged="ResultsGrid_SelectionChanged">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Type" Width="Auto" Binding="{Binding Severity}" />
+                        <DataGridTextColumn Header="Fixable" Width="Auto" Binding="{Binding Fixable}" />
+                        <DataGridTextColumn Header="Clause" Width="Auto" Binding="{Binding Clause}" />
+                        <DataGridTextColumn Header="Test" Width="Auto" Binding="{Binding TestNumber}" />
+                        <DataGridTextColumn Header="Page" Width="72" Binding="{Binding PageDisplay}" />
+                        <DataGridTemplateColumn Header="Location" Width="*" MinWidth="140">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="local:RuleViolationRow">
+                                    <TextBlock Text="{Binding FriendlyLocation}" TextWrapping="Wrap"
+                                               Margin="8,3" VerticalAlignment="Center"
+                                               ToolTip.Tip="{Binding Message}" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                            Margin="0,8,0,0">
+                    <Button x:Name="CopySummaryButton" Content="Copy Summary" Padding="12,4"
+                            Margin="0,0,8,0" Click="CopySummaryButton_Click" IsEnabled="False" />
+                    <Button x:Name="SaveReportButton" Content="Save Report…" Padding="12,4"
+                            Click="SaveReportButton_Click" IsEnabled="False" />
+                </StackPanel>
+            </Grid>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch"
+                          Background="#FFE0E0E0" ResizeDirection="Columns" />
+
+            <Grid x:Name="FindingDetailsPanel" Grid.Column="2" Margin="12,0,0,0"
+                  IsVisible="False" RowDefinitions="Auto,Auto,Auto,*">
+
+                <Grid Grid.Row="0" Margin="0,0,0,10" ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0">
+                        <TextBlock x:Name="FindingHeadingText" FontSize="16" FontWeight="SemiBold"
+                                   TextWrapping="Wrap" Margin="0,0,0,8" />
+                        <TextBlock Text="Message" FontWeight="SemiBold" />
+                        <TextBox x:Name="FindingMessageText" Classes="readOnlyDetail" IsReadOnly="True"
+                                 TextWrapping="Wrap" MaxHeight="130"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                        <TextBlock Text="Location" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <TextBox x:Name="FindingLocationText" Classes="readOnlyDetail" IsReadOnly="True"
+                                 TextWrapping="Wrap" Foreground="#FF555555" />
+                        <TextBlock Text="Raw location" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <TextBox x:Name="FindingRawLocationText" Classes="readOnlyDetail" IsReadOnly="True"
+                                 TextWrapping="Wrap" MaxHeight="90"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 FontFamily="{x:Static local:Fonts.Monospace}" FontSize="12"
+                                 Foreground="#FF555555" />
+                    </StackPanel>
+
+                    <Button x:Name="CopyFindingButton" Grid.Column="1" Content="Copy Finding"
+                            Padding="12,4" Margin="12,0,0,0" VerticalAlignment="Top"
+                            Click="CopyFindingButton_Click" IsEnabled="False" />
+                </Grid>
+
+                <ProgressBar x:Name="PreviewProgressBar" Grid.Row="1" Height="4" MinHeight="4"
+                             IsIndeterminate="True" IsVisible="False" Margin="0,0,0,8" />
+
+                <TextBlock x:Name="PreviewNoteText" Grid.Row="2" TextWrapping="Wrap"
+                           Margin="0,0,0,8" Foreground="#FF555555" />
+
+                <Border Grid.Row="3" BorderBrush="#FFD0D0D0" BorderThickness="1"
+                        Background="#FFF5F5F5" Padding="6">
+                    <Image x:Name="RegionImage" Stretch="Uniform"
+                           HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- Bottom action bar -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button x:Name="ViewStructureButton" Content="View Structure…" Padding="12,4" Margin="0,0,8,0"
+                    Click="ViewStructureButton_Click" IsEnabled="False"
+                    ToolTip.Tip="Shows the tagged logical structure tree (the semantic heading/paragraph/list/table/link hierarchy a screen reader uses) and lets you export it as JSON." />
+            <Button x:Name="FixButton" Content="Fix…" Padding="12,4" Margin="0,0,8,0"
+                    Click="FixButton_Click" IsEnabled="False"
+                    ToolTip.Tip="Opens a dialog of selectable best-effort repairs, including XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix." />
+        </StackPanel>
+    </Grid>
+</Window>

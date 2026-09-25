@@ -1,10 +1,12 @@
 using System.IO;
 using System.Text.Json;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using Microsoft.Win32;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Legibyl.Rendering;
 using Legibyl.Validation;
 
@@ -104,8 +106,8 @@ public partial class StructureTreeWindow : Window
             Child = new TextBlock
             {
                 Text = node.Tag,
-                FontFamily = new FontFamily("Consolas"),
-                FontWeight = FontWeights.Bold,
+                FontFamily = Fonts.Monospace,
+                FontWeight = FontWeight.Bold,
                 FontSize = 12,
             },
         });
@@ -134,7 +136,7 @@ public partial class StructureTreeWindow : Window
             inner.Children.Add(new TextBlock
             {
                 Text = $"alt: \"{node.AlternateDescription}\"",
-                FontStyle = FontStyles.Italic,
+                FontStyle = FontStyle.Italic,
                 FontSize = 11,
                 Foreground = Brushes.DimGray,
                 TextWrapping = TextWrapping.Wrap,
@@ -147,7 +149,7 @@ public partial class StructureTreeWindow : Window
             inner.Children.Add(new TextBlock
             {
                 Text = $"tooltip: \"{node.FormFieldDescription}\"",
-                FontStyle = FontStyles.Italic,
+                FontStyle = FontStyle.Italic,
                 FontSize = 11,
                 Foreground = Brushes.DimGray,
                 TextWrapping = TextWrapping.Wrap,
@@ -221,14 +223,14 @@ public partial class StructureTreeWindow : Window
             Child = inner,
             DataContext = node,
         };
-        border.MouseLeftButtonDown += StructureBlock_MouseLeftButtonDown;
-        border.ToolTip = node.Geometry is null
+        border.PointerPressed += StructureBlock_PointerPressed;
+        ToolTip.SetTip(border, node.Geometry is null
             ? "Select: no page geometry is available for this structure node."
-            : $"Select: highlight this node on page {node.Geometry.PageNumber}.";
+            : $"Select: highlight this node on page {node.Geometry.PageNumber}.");
         return border;
     }
 
-    private UIElement BuildTocGrid(StructureNode toc)
+    private Control BuildTocGrid(StructureNode toc)
     {
         var items = toc.Children.Where(child => child.Tag == "TOCI").ToList();
         if (items.Count == 0)
@@ -289,8 +291,8 @@ public partial class StructureTreeWindow : Window
         border.Child = new TextBlock
         {
             Text = "TOCI",
-            FontFamily = new FontFamily("Consolas"),
-            FontWeight = FontWeights.Bold,
+            FontFamily = Fonts.Monospace,
+            FontWeight = FontWeight.Bold,
             FontSize = 12,
             Foreground = Brushes.Black,
             VerticalAlignment = VerticalAlignment.Top,
@@ -335,11 +337,11 @@ public partial class StructureTreeWindow : Window
             Margin = new Thickness(columnIndex == 0 ? 0 : -1, rowIndex == 0 ? 0 : -1, 0, 0),
             Background = Brushes.White,
             DataContext = item,
-            ToolTip = item.Geometry is null
-                ? "Select: no page geometry is available for this TOC item."
-                : $"Select: highlight this TOC item on page {item.Geometry.PageNumber}.",
         };
-        border.MouseLeftButtonDown += StructureBlock_MouseLeftButtonDown;
+        ToolTip.SetTip(border, item.Geometry is null
+            ? "Select: no page geometry is available for this TOC item."
+            : $"Select: highlight this TOC item on page {item.Geometry.PageNumber}.");
+        border.PointerPressed += StructureBlock_PointerPressed;
         return border;
     }
 
@@ -349,7 +351,7 @@ public partial class StructureTreeWindow : Window
     /// the exported/tree semantics unchanged while making the layout tab much closer
     /// to how an HTML table with visible borders would look.
     /// </summary>
-    private UIElement BuildTableGrid(StructureNode table)
+    private Control BuildTableGrid(StructureNode table)
     {
         var rows = table.Children.Where(child => child.Tag == "TR").ToList();
         if (rows.Count == 0)
@@ -413,10 +415,15 @@ public partial class StructureTreeWindow : Window
         return cells.Count > 0 ? cells : row.Children.ToList();
     }
 
-    private async void StructureBlock_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private async void StructureBlock_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (sender is not Border border || !e.GetCurrentPoint(border).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
         e.Handled = true;
-        if (sender is not Border border || border.DataContext is not StructureNode node)
+        if (border.DataContext is not StructureNode node)
         {
             return;
         }
@@ -438,7 +445,7 @@ public partial class StructureTreeWindow : Window
             HighlightImageResult result = await Task.Run(
                 () => _regionRenderer.RenderPageWithHighlight(_sourceFilePath, node.Geometry));
 
-            SelectionPreviewImage.Source = CreateBitmap(result.PngBytes);
+            SelectionPreviewImage.Source = MainWindow.CreateBitmap(result.PngBytes);
             SelectionPreviewNoteText.Text = $"{result.Note} Page {result.PageNumber}.";
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException)
@@ -463,31 +470,21 @@ public partial class StructureTreeWindow : Window
         border.BorderThickness = new Thickness(3);
     }
 
-    private static BitmapImage CreateBitmap(byte[] pngBytes)
+    private async void ExportJsonButton_Click(object? sender, RoutedEventArgs e)
     {
-        var image = new BitmapImage();
-        using var stream = new MemoryStream(pngBytes);
-        image.BeginInit();
-        image.CacheOption = BitmapCacheOption.OnLoad;
-        image.StreamSource = stream;
-        image.EndInit();
-        image.Freeze();
-        return image;
-    }
-
-    private void ExportJsonButton_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new SaveFileDialog
+        string? path = await MainWindow.PickSavePathAsync(this, new FilePickerSaveOptions
         {
-            Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
-            FileName = _suggestedFileName,
-        };
+            Title = "Export structure as JSON",
+            SuggestedFileName = _suggestedFileName,
+            DefaultExtension = "json",
+            FileTypeChoices = [FilePickerFileTypes.Json, FilePickerFileTypes.All],
+        }, _sourceFilePath);
 
-        if (dialog.ShowDialog(this) == true)
+        if (path is not null)
         {
-            File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(_root, JsonOptions));
+            File.WriteAllText(path, JsonSerializer.Serialize(_root, JsonOptions));
         }
     }
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+    private void CloseButton_Click(object? sender, RoutedEventArgs e) => Close();
 }
