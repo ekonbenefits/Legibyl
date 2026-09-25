@@ -201,6 +201,15 @@ document looks exactly the same; the marker stays part of each item's text
 rather than being split into an `Lbl`, since that would mean editing the page's
 content.
 
+A document that tags headings but has no bookmarks (document outline) gets a
+warning (`Bookmarks.fs`, Structure-7): readers can't jump between its sections
+from the navigation pane. The matching fix adds a bookmark for each H1 and H2,
+titled with the heading's text and pointing at it, with each H2 under the H1
+before it. It never touches a document that already has bookmarks, and it
+skips one that doesn't declare its language (`/Lang`), because PDF/UA needs the
+language of bookmark text to be known and Legibyl won't guess it; the warning
+says so instead.
+
 Warnings can be dismissed from a row's right-click menu (or the keyboard's
 context-menu key): they drop out of the list, the banner's warning count, and
 Copy Summary/Save Report, and a **Show N dismissed** button beside those shows
@@ -320,8 +329,9 @@ Options:
   enough to be a title page (at most 30 words and 200 characters). The GUI dialog
   exposes the same repairs as individual checkboxes, plus removal of empty
   semantic `/P` structure elements, retagging headings recovered from the table
-  of contents, and tagging marked paragraphs as lists (all off by default), which
-  the CLI deliberately does not apply.
+  of contents, and tagging marked paragraphs as lists (all off by default), and
+  adding bookmarks for H1 and H2 headings; the CLI deliberately applies none of
+  these.
   Structural fixes run
   before the veraPDF metadata fixer so metadata is repaired against the
   already-cleaned copy in the same operation. veraPDF saves its metadata

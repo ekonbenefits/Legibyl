@@ -23,6 +23,7 @@
     <Compile Include="TechniqueSampleTests.fs" />
     <Compile Include="TocHeadingsTests.fs" />
     <Compile Include="ParagraphListsTests.fs" />
+    <Compile Include="BookmarksTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

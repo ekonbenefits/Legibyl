@@ -76,6 +76,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let annotationTabs = ctx.useState (found PdfFixOptions.AnnotationTabs > 0)
             let linkContents = ctx.useState (found PdfFixOptions.LinkContents > 0)
             let documentTitle = ctx.useState (found PdfFixOptions.DocumentTitle > 0)
+            let bookmarks = ctx.useState (found PdfFixOptions.BookmarksFromHeadings > 0)
             // These change what the document says it is, so they stay opt-in even when found.
             let emptyParagraphs = ctx.useState false
             let tocHeadings = ctx.useState false
@@ -121,7 +122,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                       documentTitle.Current, PdfFixOptions.DocumentTitle
                       tocHeadings.Current, PdfFixOptions.HeadingsFromToc
                       paragraphLists.Current, PdfFixOptions.ListsFromParagraphs
-                      titleFromFirstPage.Current, PdfFixOptions.TitleFromFirstPage ]
+                      titleFromFirstPage.Current, PdfFixOptions.TitleFromFirstPage
+                      bookmarks.Current, PdfFixOptions.BookmarksFromHeadings ]
                     |> List.fold (fun all (isChecked, option) -> if isChecked then all ||| option else all) PdfFixOptions.None
 
                 if options = PdfFixOptions.None then
@@ -155,6 +157,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                                 (label
                                     "Tag runs of paragraphs that start with list markers (•, (1), a.) as lists (L/LI; the page looks the same)"
                                     PdfFixOptions.ListsFromParagraphs)
+                            checkBox
+                                bookmarks
+                                (label
+                                    "Add bookmarks for the H1 and H2 headings, when the document has none"
+                                    PdfFixOptions.BookmarksFromHeadings)
                             checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations" PdfFixOptions.AnnotationTabs)
                             checkBox
                                 linkContents

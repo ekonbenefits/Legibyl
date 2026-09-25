@@ -221,6 +221,12 @@ let private tagParagraphLists (document: PdfDocument) context =
             ParagraphLists.tagAsList document run
         [ $"Tagged {runs.Length} run(s) of marked paragraphs as lists." ]
 
+let private addBookmarks (document: PdfDocument) context =
+    match Bookmarks.find document context with
+    | Some missing when not missing.Bookmarkable.IsEmpty && missing.LanguageDeclared ->
+        [ $"Added {Bookmarks.add document missing.Bookmarkable} bookmark(s) for the H1 and H2 headings." ]
+    | _ -> []
+
 let private setAnnotationTabOrder (document: PdfDocument) _ =
     let mutable fixedPages = 0
     for pageNumber in 1 .. document.GetNumberOfPages() do
@@ -258,7 +264,8 @@ let private setDocumentTitle fromFirstPage (document: PdfDocument) _ =
 ///   2. Empty paragraphs next, so blank lines between list items are gone before lists are
 ///      tagged. (The list repair copes with them either way, keeping them in the item.)
 ///   3. Lists.
-///   4. The rest touch pages, annotations and the Info dictionary rather than paragraphs, so
+///   4. Bookmarks, after headings are recovered, so those get bookmarks too.
+///   5. The rest touch pages, annotations and the Info dictionary rather than paragraphs, so
 ///      their order among themselves doesn't matter.
 ///
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
@@ -267,6 +274,7 @@ let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list
     [ PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
+      PdfFixOptions.BookmarksFromHeadings, addBookmarks
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
       PdfFixOptions.DocumentTitle, setDocumentTitle false
