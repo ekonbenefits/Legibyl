@@ -328,14 +328,15 @@ module private StructureView =
                 ]
             ]
 
-    let view (window: Window) (root: StructureNode) (sourceFilePath: string) =
+    let view (window: Window) (renderer: PdfRegionRenderer) (root: StructureNode) (sourceFilePath: string) =
         Component(fun ctx ->
             // The highlighted border and the style to restore when the selection moves.
             let highlighted = ctx.useState ((None: (Border * (IBrush | null) * Thickness) option), false)
             let previewImage = ctx.useState (None: Bitmap option)
             let previewNote =
                 ctx.useState "Select a structure block to highlight its best-effort page geometry when available."
-            let renderer = PdfRegionRenderer()
+            // Bumped on every selection so a slower preview for an earlier one can't overwrite it.
+            let previewVersion = ctx.useState (0, false)
 
             let select (node: StructureNode) (border: Border) =
                 // Restyle just the two affected borders; re-rendering the layout would
@@ -350,6 +351,8 @@ module private StructureView =
                 border.BorderThickness <- Thickness 3.0
 
                 task {
+                    previewVersion.Set(previewVersion.Current + 1)
+                    let version = previewVersion.Current
                     previewImage.Set None
                     match node.Geometry with
                     | null ->
@@ -360,12 +363,20 @@ module private StructureView =
                     | geometry ->
                         previewNote.Set $"Rendering page {geometry.PageNumber} highlight for <{node.Tag}>…"
                         try
-                            let! result = Task.Run(fun () -> renderer.RenderPageWithHighlight(sourceFilePath, geometry))
-                            use stream = new MemoryStream(result.PngBytes)
-                            previewImage.Set(Some(new Bitmap(stream)))
-                            previewNote.Set $"{result.Note} Page {result.PageNumber}."
+                            // Render and decode off the UI thread; a full page is a large image.
+                            let! result, image =
+                                Task.Run(fun () ->
+                                    let result = renderer.RenderPageWithHighlight(sourceFilePath, geometry)
+                                    use stream = new MemoryStream(result.PngBytes)
+                                    result, new Bitmap(stream))
+                            if version = previewVersion.Current then
+                                previewImage.Set(Some image)
+                                previewNote.Set $"{result.Note} Page {result.PageNumber}."
+                            else
+                                image.Dispose()
                         with :? InvalidOperationException | :? IOException as ex ->
-                            previewNote.Set $"Could not render highlight for <{node.Tag}>: {ex.Message}"
+                            if version = previewVersion.Current then
+                                previewNote.Set $"Could not render highlight for <{node.Tag}>: {ex.Message}"
                 }
                 |> ignore
 
@@ -521,4 +532,10 @@ open StructureView
 
 type StructureTreeWindow(root: StructureNode, sourceFilePath: string) as this =
     inherit HostWindow(Title = "Document Structure", Width = 820.0, Height = 700.0, MinWidth = 500.0, MinHeight = 400.0)
-    do this.Content <- view this root sourceFilePath
+    // Keeps the PDF open and recent pages rendered while the window is open.
+    let renderer = new PdfRegionRenderer()
+    do this.Content <- view this renderer root sourceFilePath
+
+    override _.OnClosed(e) =
+        base.OnClosed e
+        renderer.Dispose()

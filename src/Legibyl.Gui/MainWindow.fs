@@ -250,7 +250,7 @@ module private MainView =
     let view (window: Window) (openRequests: IReadable<string option>) =
         Component(fun ctx ->
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
-            let renderer = ctx.useStateLazy(fun () -> PdfRegionRenderer()).Current
+            let renderer = ctx.useStateLazy(fun () -> new PdfRegionRenderer()).Current
             let selectedFile = ctx.useState (None: string option)
             let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
@@ -299,12 +299,15 @@ module private MainView =
                         | Some render, Some filePath ->
                             preview.Set { noPreview with Loading = true }
                             try
-                                let! result = Task.Run(fun () -> render filePath)
+                                // Decode the PNG off the UI thread too; a full page is a large image.
+                                let! result, image = Task.Run(fun () -> let result = render filePath in result, createBitmap result.PngBytes)
                                 if version = previewVersion.Current then
                                     preview.Set
-                                        { Image = Some(createBitmap result.PngBytes)
+                                        { Image = Some image
                                           Note = if result.HasPreciseRegion then "" else result.Note
                                           Loading = false }
+                                else
+                                    image.Dispose()
                             with :? InvalidOperationException | :? IOException as ex ->
                                 if version = previewVersion.Current then
                                     preview.Set { noPreview with Note = $"The page preview could not be rendered: {ex.Message}" }
