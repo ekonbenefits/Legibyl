@@ -23,7 +23,9 @@ type PdfFixOptions =
     | TitleFromFirstPage = 128
     /// Adds bookmarks for the H1 and H2 headings when there are none; see Bookmarks.
     | BookmarksFromHeadings = 256
-    | All = 511
+    /// Removes table-of-contents entries (TOCI) with nothing in them, like RemoveEmptyParagraphs.
+    | RemoveEmptyTocEntries = 512
+    | All = 1023
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
