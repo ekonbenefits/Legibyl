@@ -97,10 +97,24 @@ type FixResult =
         not (isNull this.OutputPath)
         && (this.Status = RepairStatus.Success || this.Status = RepairStatus.IdRemoved)
 
-/// How far a running validation has got. veraPDF finds objects to check as it goes, so
-/// there's no fixed total to measure against: QueuedObjects can grow as well as shrink.
+/// Which part of the document a running validation is working through.
+type ValidationStage =
+    /// Reading the file and preparing, before the first page.
+    | Preparing = 0
+    /// Checking the pages, in order: see ValidationProgress.Page and PageCount.
+    | CheckingPages = 1
+    /// Past the pages: the structure tree and other document-wide objects.
+    | Finishing = 2
+
+/// How far a running validation has got. veraPDF checks the pages in order, which is
+/// where nearly all the time goes, so Page of PageCount is a fair measure of progress.
+/// It finds the other objects it checks as it goes, so QueuedObjects isn't a total.
 type ValidationProgress =
-    { /// Rule checks run so far.
+    { Stage: ValidationStage
+      /// The 1-based page being checked; 0 before the first page.
+      Page: int
+      PageCount: int
+      /// Rule checks run so far.
       Checks: int
       /// Distinct rules that have failed at least once so far.
       FailedRules: int

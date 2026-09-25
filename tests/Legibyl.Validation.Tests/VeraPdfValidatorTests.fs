@@ -91,7 +91,7 @@ let ``Validate reports every occurrence of a repeated failure`` () =
 [<Fact>]
 let ``Validate reports progress, ending with the final counts`` () =
     use input = new TempPdf()
-    createPdfWithUntitledFigures input.Path 4
+    createPdfWithUntitledFigures input.Path 10
     let reports = Collections.Concurrent.ConcurrentQueue<ValidationProgress>()
     let progress = { new IProgress<ValidationProgress> with member _.Report value = reports.Enqueue value }
 
@@ -103,3 +103,12 @@ let ``Validate reports progress, ending with the final counts`` () =
     last.FailedRules |> should equal (report.FailedAssertions |> Seq.distinctBy _.RuleId |> Seq.length)
     last.ProcessedObjects |> should be (greaterThan 0)
     last.QueuedObjects |> should equal 0
+    last.Stage |> should equal ValidationStage.Finishing
+    last.PageCount |> should be (greaterThanOrEqualTo 10)
+    last.Page |> should equal last.PageCount
+    // Seeing a page mid-run shows Legibyl can still read where veraPDF is (a private field).
+    reports |> Seq.exists (fun r -> r.Stage = ValidationStage.CheckingPages && r.Page > 0) |> should be True
+    // Pages are checked in order, so neither the page nor the stage ever goes backwards.
+    let inOrder (values: int list) = values |> List.pairwise |> List.forall (fun (a, b) -> a <= b)
+    reports |> Seq.map _.Page |> List.ofSeq |> inOrder |> should be True
+    reports |> Seq.map (_.Stage >> int) |> List.ofSeq |> inOrder |> should be True
