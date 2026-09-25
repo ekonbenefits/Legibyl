@@ -131,16 +131,24 @@ module internal VeraPdf =
                 // The link fix only describes links in a table of contents, so a missing link
                 // description elsewhere isn't fixable (see StructureFixes.describeLinks).
                 let tocLinkAnnotations = lazy (StructureFixes.tocLinkAnnotationNumbers document context)
+                let hasTitlePage = lazy (StructureFixes.titlePageText document |> Option.isSome)
                 let fixOptionsFor (assertion: RuleViolation) =
                     let isTocLink () =
                         match assertion.Location with
                         | NonNull location when location.ObjectNumber.HasValue ->
                             tocLinkAnnotations.Value.Contains location.ObjectNumber.Value
                         | _ -> false
-                    if assertion.FixOptions.HasFlag PdfFixOptions.LinkContents && not (isTocLink ()) then
-                        assertion.FixOptions &&& ~~~PdfFixOptions.LinkContents
+                    let options =
+                        if assertion.FixOptions.HasFlag PdfFixOptions.LinkContents && not (isTocLink ()) then
+                            assertion.FixOptions &&& ~~~PdfFixOptions.LinkContents
+                        else
+                            assertion.FixOptions
+                    // Titling from the first page does what DocumentTitle does, and can only
+                    // add a title where the document has a title page to take it from.
+                    if options.HasFlag PdfFixOptions.DocumentTitle && hasTitlePage.Value then
+                        options ||| PdfFixOptions.TitleFromFirstPage
                     else
-                        assertion.FixOptions
+                        options
                 let located =
                     assertions
                     |> List.map (fun assertion ->

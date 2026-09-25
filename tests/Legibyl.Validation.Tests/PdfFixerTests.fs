@@ -601,6 +601,77 @@ let ``Fix writes output when a structural fix applies but the metadata fixer cha
     File.Exists output.Path |> should be True
     linkContentsOf output.Path |> should equal [ Some "Our privacy policy" ]
 
+/// A document whose first page draws lines, one under another, followed by
+/// extraPages blank pages.
+let private createPdfWithFirstPage (path: string) (lines: string list) (extraPages: int) =
+    use document = new PdfDocument(new PdfWriter(path))
+    let page = document.AddNewPage()
+    let canvas = PdfCanvas(page)
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    lines
+    |> List.iteri (fun i text ->
+        canvas.BeginText().SetFontAndSize(font, 12.0f).MoveText(72.0, 700.0 - 20.0 * float i).ShowText(text).EndText()
+        |> ignore)
+    for _ in 1 .. extraPages do
+        document.AddNewPage() |> ignore
+
+let private fixedTitle (options: PdfFixOptions) (input: TempPdf) =
+    use output = new TempPdf ".fixed"
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, options) |> ignore
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle()
+
+[<Fact>]
+let ``Fix title from first page titles an untitled document from its title page`` () =
+    use input = new TempPdf()
+    createPdfWithFirstPage input.Path [ "Retirement Plan"; "Summary of Benefits"; "2026" ] 1
+
+    fixedTitle PdfFixOptions.TitleFromFirstPage input |> should equal "Retirement Plan Summary of Benefits 2026"
+
+[<Fact>]
+let ``Fix document title alone does not take a title from the first page`` () =
+    use input = new TempPdf()
+    createPdfWithFirstPage input.Path [ "Retirement Plan" ] 1
+
+    fixedTitle PdfFixOptions.DocumentTitle input |> should be NullOrEmptyString
+
+[<Fact>]
+let ``Fix title from first page prefers a title the document carries in XMP`` () =
+    use input = new TempPdf()
+    createPdfWithFirstPage input.Path [ "Cover" ] 1
+    setXmpTitle input.Path "Retirement Plan Summary"
+
+    fixedTitle PdfFixOptions.TitleFromFirstPage input |> should equal "Retirement Plan Summary"
+
+[<Fact>]
+let ``Fix title from first page leaves a first page too long to be a title page`` () =
+    use input = new TempPdf()
+    let body = [ for i in 1 .. 8 -> $"Line {i} of body text that runs on for a while." ]
+    createPdfWithFirstPage input.Path body 1
+
+    fixedTitle PdfFixOptions.TitleFromFirstPage input |> should be NullOrEmptyString
+
+[<Fact>]
+let ``Fix title from first page leaves a one-page document untitled`` () =
+    use input = new TempPdf()
+    createPdfWithFirstPage input.Path [ "Retirement Plan" ] 0
+
+    fixedTitle PdfFixOptions.TitleFromFirstPage input |> should be NullOrEmptyString
+
+[<Fact>]
+let ``Title findings are fixable from the first page only when there is a title page`` () =
+    let titleFromFirstPageFixable extraPages =
+        use input = new TempPdf()
+        createPdfWithFirstPage input.Path [ "Retirement Plan" ] extraPages
+        VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).Findings
+        |> Seq.filter (fun a -> a.FixOptions.HasFlag PdfFixOptions.DocumentTitle)
+        |> Seq.map (fun a -> a.FixOptions.HasFlag PdfFixOptions.TitleFromFirstPage)
+        |> Seq.distinct
+        |> List.ofSeq
+
+    titleFromFirstPageFixable 1 |> should equal [ true ]
+    titleFromFirstPageFixable 0 |> should equal [ false ]
+
 [<Fact>]
 let ``Fix document title keeps a title the document already has`` () =
     use input = new TempPdf()

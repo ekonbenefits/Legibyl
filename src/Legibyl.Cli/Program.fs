@@ -39,6 +39,7 @@ type Args =
       Format: string
       OutputPath: string option
       Fix: bool
+      TitleFromFirstPage: bool
       FixOutputPath: string option
       IncludeStructure: bool }
 
@@ -88,7 +89,10 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
             else
                 let targetPath = args.FixOutputPath |> Option.defaultWith (fun () -> deriveFixOutputPath file)
                 try
-                    let fix = validator.Fix(file, profile, targetPath, defaultFixOptions)
+                    let options =
+                        if args.TitleFromFirstPage then defaultFixOptions ||| PdfFixOptions.TitleFromFirstPage
+                        else defaultFixOptions
+                    let fix = validator.Fix(file, profile, targetPath, options)
                     { result with
                         FixStatus = fix.Status.ToString()
                         FixOutputPath = fix.OutputPath
@@ -190,6 +194,8 @@ let private run (args: Args) =
         usageError "No input PDF files given."
     elif args.FixOutputPath.IsSome && not args.Fix then
         usageError "--fix-output requires --fix."
+    elif args.TitleFromFirstPage && not args.Fix then
+        usageError "--title-from-first-page requires --fix."
     elif args.FixOutputPath.IsSome && args.Files.Length > 1 then
         usageError "--fix-output can only be used with a single input file."
     else
@@ -298,6 +304,13 @@ let main argv =
                          not retag content (untagged content, missing alt-text, headings, table header scope, \
                          etc)."
 
+                and! titleFromFirstPage =
+                    option<bool> "--title-from-first-page"
+                    |> desc
+                        "Use with --fix. When a file carries no title in Info or XMP, title it from the text \
+                         of its first page, if that page is short enough to be a title page (at most 30 words) \
+                         and more pages follow."
+
                 and! fixOutputPath =
                     optionMaybe "--fix-output"
                     |> desc
@@ -324,6 +337,7 @@ let main argv =
                       Format = format
                       OutputPath = outputPath
                       Fix = fix
+                      TitleFromFirstPage = titleFromFirstPage
                       FixOutputPath = fixOutputPath
                       IncludeStructure = includeStructure }
             }

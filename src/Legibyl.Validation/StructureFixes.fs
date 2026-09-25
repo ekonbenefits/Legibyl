@@ -133,20 +133,45 @@ let private xmpTitle (document: PdfDocument) =
     with _ ->
         None
 
+/// The most a first page can hold and still read as a title page rather than content.
+let private titlePageMaxWords = 30
+let private titlePageMaxLength = 200
+
+/// The first page's text on one line, if the document has more pages than that and the
+/// first is short enough to be a title page: a title, and perhaps a subtitle, author and
+/// date. A one-page document's only page is its content, not a title page.
+let titlePageText (document: PdfDocument) =
+    if document.GetNumberOfPages() < 2 then
+        None
+    else
+        let text =
+            try
+                iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(document.GetPage 1)
+            with _ ->
+                ""
+        let words = text.Split((null: char array | null), StringSplitOptions.RemoveEmptyEntries)
+        let title = String.Join(' ', words)
+        if words.Length = 0 || words.Length > titlePageMaxWords || title.Length > titlePageMaxLength then
+            None
+        else
+            Some title
+
 /// Gives the document a /Title and asks readers to show it instead of the file name.
 /// A title the document already carries is kept — in the Info dictionary, or in XMP,
 /// where it only needs copying across.
 ///
-/// A title is never invented. Guessing one from the file name would satisfy dc:title
-/// while telling a screen reader user something untrue about the document, so a
-/// document that carries no title anywhere keeps reporting that as a failure.
-let private nameDocument (document: PdfDocument) =
+/// Otherwise a title is only taken from the page when fromFirstPage asks for it, and
+/// then only from a short first page (titlePageText). It is never guessed from the file
+/// name, which would satisfy dc:title while telling a screen reader user something
+/// untrue about the document, so a document with no title keeps reporting that failure.
+let private nameDocument (document: PdfDocument) (fromFirstPage: bool) =
     let info = document.GetDocumentInfo()
     let titleSet =
         if not (String.IsNullOrWhiteSpace(info.GetTitle())) then
             None
         else
             xmpTitle document
+            |> Option.orElseWith (fun () -> if fromFirstPage then titlePageText document else None)
             |> Option.map (fun title ->
                 info.SetTitle title |> ignore
                 title)
@@ -217,8 +242,8 @@ let private describeTocLinks (document: PdfDocument) context =
         | 0 -> []
         | described -> [ $"Described {described} link annotation(s) from their own text." ]
 
-let private setDocumentTitle (document: PdfDocument) _ =
-    let titleSet, displayDocTitleSet = nameDocument document
+let private setDocumentTitle fromFirstPage (document: PdfDocument) _ =
+    let titleSet, displayDocTitleSet = nameDocument document fromFirstPage
     [ match titleSet with
       | Some title -> $"Set the document title to \"{title}\"."
       | None -> ()
@@ -244,7 +269,8 @@ let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
-      PdfFixOptions.DocumentTitle, setDocumentTitle ]
+      PdfFixOptions.DocumentTitle, setDocumentTitle false
+      PdfFixOptions.TitleFromFirstPage, setDocumentTitle true ]
 
 /// The structural repairs Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per repair that actually changed something, so a

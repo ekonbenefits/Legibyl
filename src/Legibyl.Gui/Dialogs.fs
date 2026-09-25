@@ -80,6 +80,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let emptyParagraphs = ctx.useState false
             let tocHeadings = ctx.useState false
             let paragraphLists = ctx.useState false
+            // The page's text may not be the title an author would give it.
+            let titleFromFirstPage = ctx.useState false
 
             let checkBox (state: IWritable<bool>) (content: IView) =
                 CheckBox.create [
@@ -118,7 +120,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                       linkContents.Current, PdfFixOptions.LinkContents
                       documentTitle.Current, PdfFixOptions.DocumentTitle
                       tocHeadings.Current, PdfFixOptions.HeadingsFromToc
-                      paragraphLists.Current, PdfFixOptions.ListsFromParagraphs ]
+                      paragraphLists.Current, PdfFixOptions.ListsFromParagraphs
+                      titleFromFirstPage.Current, PdfFixOptions.TitleFromFirstPage ]
                     |> List.fold (fun all (isChecked, option) -> if isChecked then all ||| option else all) PdfFixOptions.None
 
                 if options = PdfFixOptions.None then
@@ -163,6 +166,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                                 (label
                                     "Give the document a title, and show it in place of the file name (/DisplayDocTitle)"
                                     PdfFixOptions.DocumentTitle)
+                            checkBox
+                                titleFromFirstPage
+                                (label
+                                    "If the document has no title anywhere, use the text of a short first page (a title page) as its title"
+                                    PdfFixOptions.TitleFromFirstPage)
                             checkBox
                                 metadata
                                 (label "Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)" PdfFixOptions.Metadata)
