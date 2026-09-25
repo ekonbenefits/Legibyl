@@ -2,7 +2,6 @@ namespace Legibyl.Gui
 
 open System
 open System.IO
-open System.Text
 open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
@@ -120,29 +119,6 @@ module private MainView =
             yield! attrs
         ]
 
-    let fixSummary (fix: FixResult) =
-        let sb = StringBuilder()
-        let line (text: string) = sb.AppendLine text |> ignore
-        line $"Repair status: {fix.Status}"
-        line (
-            match fix.OutputPath with
-            | NonNull path -> $"Repaired copy written to: {path}"
-            | Null -> "No output file written (nothing the fixer could repair, or the file was already valid)."
-        )
-
-        if fix.AppliedFixes.Count > 0 then
-            line ""
-            line "Fixes applied:"
-            for applied in fix.AppliedFixes do
-                line $"  - {applied}"
-
-        line ""
-        line "Note: fixes are best-effort and limited to the selected repair types."
-        line "They do not add missing alt text, retag untagged content, or infer table headers."
-        if fix.WasFixed then
-            line "Switching to the repaired copy and re-validating to show what improved."
-        sb.ToString()
-
     let view (window: Window) (openRequests: IReadable<string option>) =
         Component(fun ctx ->
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
@@ -201,7 +177,8 @@ module private MainView =
                 }
                 |> ignore
 
-            let runValidation () =
+            /// Validates the selected file, returning its report (None if it couldn't be validated).
+            let runValidation () : Task<ValidationReport option> =
                 task {
                     match selectedFile.Current with
                     | Some filePath when not isBusy.Current ->
@@ -219,18 +196,23 @@ module private MainView =
                                     |> List.ofSeq
                                 outcome.Set(Validated(report, rows))
                                 selectRow (List.tryHead rows)
+                                return Some report
                             with :? VeraPdfValidationException as ex ->
                                 outcome.Set(ValidationFailed ex.Message)
+                                return None
                         finally
                             isBusy.Set false
-                    | _ -> ()
+                    | _ -> return None
                 }
 
-            let setSelectedFile (path: string) =
+            /// Opens a file and validates it with the current profile.
+            let openFile (path: string) =
                 selectedFile.Set(Some path)
                 clearResults ()
-                // Auto-validate as soon as a file is picked/dropped, using the current profile.
-                runValidation () |> ignore
+                runValidation ()
+
+            // Auto-validate as soon as a file is picked/dropped.
+            let setSelectedFile (path: string) = openFile path |> ignore
 
             // Files opened from outside the view (e.g. by the headless screenshot harness).
             ctx.useEffect (
@@ -314,22 +296,29 @@ module private MainView =
                             | Some outputPath ->
                                 let profile = currentProfile ()
                                 isBusy.Set true
-                                let! repairedPath =
+                                let! fixOutcome =
                                     task {
                                         try
                                             try
                                                 let! fix = Task.Run(fun () -> validator.Fix(sourcePath, profile, outputPath, options))
-                                                do! Dialogs.showMessage window (fixSummary fix) "Fix PDF"
-                                                return if fix.WasFixed then Option.ofObj fix.OutputPath else None
+                                                return Ok fix
                                             with :? VeraPdfValidationException as ex ->
-                                                do! Dialogs.showMessage window ex.Message "Fix failed"
-                                                return None
+                                                return Error ex.Message
                                         finally
                                             isBusy.Set false
                                     }
 
-                                // Switch after clearing the busy flag so the auto-validation can actually start.
-                                repairedPath |> Option.iter setSelectedFile
+                                // Switch to the repaired copy and validate it (after clearing the busy
+                                // flag, so the validation can start) to show what improved.
+                                let! repairedReport =
+                                    match fixOutcome with
+                                    | Ok fix when fix.WasFixed ->
+                                        match fix.OutputPath with
+                                        | NonNull path -> openFile path
+                                        | Null -> Task.FromResult None
+                                    | _ -> Task.FromResult None
+
+                                do! Dialogs.showFixResult window fixOutcome repairedReport
                     | _ -> ()
                 }
                 |> ignore
