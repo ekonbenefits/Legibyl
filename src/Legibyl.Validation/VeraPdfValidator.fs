@@ -74,6 +74,10 @@ module internal VeraPdf =
         let contains (value: string) = text.Contains(value, StringComparison.OrdinalIgnoreCase)
         if contains "Tabs" && contains "annotation" && contains "S" then
             PdfFixOptions.AnnotationTabs
+        elif contains "Contents key" then
+            PdfFixOptions.LinkContents
+        elif contains "dc:title" then
+            PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle
         elif
             contains "metadata"
             || contains "PDF/UA Identification"
@@ -375,18 +379,21 @@ type VeraPdfValidator() =
 
         try
             try
-                if options.HasFlag PdfFixOptions.AnnotationTabs || options.HasFlag PdfFixOptions.RemoveEmptyParagraphs then
+                let structuralOptions =
+                    PdfFixOptions.AnnotationTabs
+                    ||| PdfFixOptions.RemoveEmptyParagraphs
+                    ||| PdfFixOptions.LinkContents
+                    ||| PdfFixOptions.DocumentTitle
+
+                if options &&& structuralOptions <> PdfFixOptions.None then
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempStructuralOutput <- tempOutput
                     match StructureFixes.applyFixes currentInput tempOutput options with
-                    | 0, 0 ->
+                    | [] ->
                         tryDeleteTemporary tempOutput
                         tempStructuralOutput <- null
-                    | tabsFixed, emptyParagraphsRemoved ->
-                        if tabsFixed > 0 then
-                            appliedFixes.Add $"Set /Tabs /S on {tabsFixed} page(s) containing annotations."
-                        if emptyParagraphsRemoved > 0 then
-                            appliedFixes.Add $"Removed {emptyParagraphsRemoved} empty /P structure element(s)."
+                    | structuralFixes ->
+                        appliedFixes.AddRange structuralFixes
                         currentInput <- tempOutput
                         changed <- true
                         status <- RepairStatus.Success

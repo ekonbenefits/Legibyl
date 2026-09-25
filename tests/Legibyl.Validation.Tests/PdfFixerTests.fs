@@ -325,3 +325,141 @@ let ``Validate adjacent complete paragraphs does not add split warning`` () =
     let report = validator.Validate(input.Path, PdfProfile.PdfUa1)
 
     report.Assertions |> Seq.exists isSplitParagraphWarning |> should be False
+
+/// Draws each link's text inside its own marked content and tags it as a /Link that owns
+/// both that marked content and a link annotation, the way a real tagged link is built.
+let private createPdfWithLinks (path: string) (links: (string * string option) list) =
+    use document = new PdfDocument(new PdfWriter(path))
+    let page = document.AddNewPage()
+    let canvas = PdfCanvas(page)
+    let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA)
+
+    let annotations = PdfArray()
+
+    let kids =
+        links
+        |> List.mapi (fun mcid (text, contents) ->
+            let y = 700.0 - float mcid * 20.0
+
+            let properties = PdfDictionary()
+            properties.Put(PdfName.MCID, PdfNumber mcid) |> ignore
+            canvas
+                .BeginMarkedContent(PdfName.Link, properties)
+                .BeginText()
+                .SetFontAndSize(font, 12f)
+                .MoveText(72.0, y)
+                .ShowText(text)
+                .EndText()
+                .EndMarkedContent()
+            |> ignore
+
+            let annotation = PdfDictionary()
+            annotation.Put(PdfName.Type, PdfName.Annot) |> ignore
+            annotation.Put(PdfName.Subtype, PdfName.Link) |> ignore
+            annotation.Put(PdfName.Rect, PdfArray([| 72f; float32 y; 400f; float32 y + 12f |])) |> ignore
+            contents |> Option.iter (fun c -> annotation.Put(PdfName.Contents, PdfString c) |> ignore)
+            annotation.MakeIndirect document |> ignore
+            annotations.Add annotation
+
+            let objectReference = PdfDictionary()
+            objectReference.Put(PdfName.Type, PdfName.OBJR) |> ignore
+            objectReference.Put(PdfName.Obj, annotation) |> ignore
+
+            let link = PdfDictionary()
+            link.Put(PdfName.Type, PdfName.StructElem) |> ignore
+            link.Put(PdfName.S, PdfName.Link) |> ignore
+            link.Put(PdfName.Pg, page.GetPdfObject()) |> ignore
+            link.Put(PdfName.K, arrayOf [ PdfNumber mcid; objectReference ]) |> ignore
+            link.MakeIndirect document |> ignore
+            link :> PdfObject)
+
+    page.GetPdfObject().Put(PdfName.Annots, annotations) |> ignore
+    setStructTreeRoot document (arrayOf kids)
+
+/// The /Contents of every link annotation on the first page, in order.
+let private linkContentsOf (path: string) =
+    use document = new PdfDocument(new PdfReader(path))
+    let annotations = document.GetPage(1).GetPdfObject().GetAsArray(PdfName.Annots) |> notNull
+    [ for i in 0 .. annotations.Size() - 1 ->
+        annotations.GetAsDictionary i
+        |> notNull
+        |> fun annotation -> annotation.GetAsString(PdfName.Contents) |> Option.ofObj |> Option.map _.ToUnicodeString() ]
+
+[<Fact>]
+let ``Fix link contents describes an undescribed link from its own text`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path [ "Our privacy policy", None ]
+    let fixer = VeraPdfValidator()
+
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents)
+
+    result.WasFixed |> should be True
+    result.AppliedFixes |> Seq.exists (fun fix -> fix.Contains("Described 1 link", StringComparison.Ordinal)) |> should be True
+    linkContentsOf output.Path |> should equal [ Some "Our privacy policy" ]
+
+[<Fact>]
+let ``Fix link contents strips dot leaders and the printed page number from a contents entry`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path [ "Scope of this document ......... 3", None ]
+    let fixer = VeraPdfValidator()
+
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents) |> ignore
+
+    linkContentsOf output.Path |> should equal [ Some "Scope of this document" ]
+
+[<Fact>]
+let ``Fix link contents keeps a trailing number that is part of the link's own text`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // Without leaders running up to it, a trailing number is text, not a page number.
+    createPdfWithLinks input.Path [ "Appendix 2", None ]
+    let fixer = VeraPdfValidator()
+
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents) |> ignore
+
+    linkContentsOf output.Path |> should equal [ Some "Appendix 2" ]
+
+[<Fact>]
+let ``Fix link contents leaves a link that already has a description alone`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path [ "Read more", Some "Hand-written description" ]
+    let fixer = VeraPdfValidator()
+
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents)
+
+    result.WasFixed |> should be False
+    linkContentsOf input.Path |> should equal [ Some "Hand-written description" ]
+
+[<Fact>]
+let ``Fix document title names an untitled document and shows the title`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path [ "Read more", None ]
+    let fixer = VeraPdfValidator()
+
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle)
+
+    result.WasFixed |> should be True
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle()
+    |> should equal (Path.GetFileNameWithoutExtension input.Path)
+    let preferences = document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.ViewerPreferences) |> notNull
+    preferences.Get(PdfName.DisplayDocTitle) |> should equal PdfBoolean.TRUE
+
+[<Fact>]
+let ``Fix document title keeps a title the document already has`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path [ "Read more", None ]
+    (use document = new PdfDocument(new PdfReader(input.Path), new PdfWriter(output.Path))
+     document.GetDocumentInfo().SetTitle "The Real Title" |> ignore)
+    File.Copy(output.Path, input.Path, true)
+    let fixer = VeraPdfValidator()
+
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle) |> ignore
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle() |> should equal "The Real Title"

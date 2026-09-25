@@ -47,6 +47,15 @@ let private usageError (message: string) =
     eprintfn "Run with --help for usage."
     ExitCodes.UsageError
 
+/// The repairs --fix applies: everything that needs no guesswork about the document's
+/// meaning. Removing empty /P elements is deliberately left out — it's optional cleanup
+/// the GUI offers as a choice, not something to do to a file unasked.
+let private defaultFixOptions =
+    PdfFixOptions.Metadata
+    ||| PdfFixOptions.AnnotationTabs
+    ||| PdfFixOptions.LinkContents
+    ||| PdfFixOptions.DocumentTitle
+
 let private deriveFixOutputPath (file: string) =
     let fixedName = $"{Path.GetFileNameWithoutExtension file}.fixed{Path.GetExtension file}"
     match Path.GetDirectoryName file with
@@ -77,7 +86,7 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
             else
                 let targetPath = args.FixOutputPath |> Option.defaultWith (fun () -> deriveFixOutputPath file)
                 try
-                    let fix = validator.Fix(file, profile, targetPath)
+                    let fix = validator.Fix(file, profile, targetPath, defaultFixOptions)
                     { result with
                         FixStatus = fix.Status.ToString()
                         FixOutputPath = fix.OutputPath
@@ -279,11 +288,13 @@ let main argv =
                 and! fix =
                     option<bool> "--fix"
                     |> desc
-                        "Also attempt to repair XMP metadata (missing metadata stream, missing PDF/A|PDF/UA \
-                         identifier, false conformance claims, Info-dictionary sync) for each file, writing a \
-                         repaired copy next to the original as \"<name>.fixed<ext>\". NOTE: this only repairs \
-                         metadata — it does not fix structural/tagging issues (untagged content, missing \
-                         alt-text, table header scope, etc)."
+                        "Also attempt to repair each file, writing a repaired copy next to the original as \
+                         \"<name>.fixed<ext>\". Applies: XMP metadata (missing metadata stream, missing \
+                         PDF/A|PDF/UA identifier, false conformance claims, Info-dictionary sync); /Tabs /S on \
+                         pages containing annotations; a description for links that have none, taken from the \
+                         link's own text; and a document title shown in place of the file name. NOTE: it does \
+                         not retag content (untagged content, missing alt-text, headings, table header scope, \
+                         etc)."
 
                 and! fixOutputPath =
                     optionMaybe "--fix-output"

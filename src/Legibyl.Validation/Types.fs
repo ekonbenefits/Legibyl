@@ -12,7 +12,9 @@ type PdfFixOptions =
     | Metadata = 1
     | AnnotationTabs = 2
     | RemoveEmptyParagraphs = 4
-    | All = 7
+    | LinkContents = 8
+    | DocumentTitle = 16
+    | All = 31
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
