@@ -103,6 +103,35 @@ module private MainView =
         use stream = new MemoryStream(pngBytes)
         new Bitmap(stream)
 
+    // 16x16 icons; the even-odd fill cuts the "!" and "×" out of the shapes.
+    let private warningIcon =
+        Geometry.Parse "F0 M8,1 L15.5,14.5 L0.5,14.5 Z M7.2,5.5 L8.8,5.5 L8.6,10 L7.4,10 Z M7.1,11.2 L8.9,11.2 L8.9,13 L7.1,13 Z"
+
+    let private failureIcon =
+        Geometry.Parse
+            "F0 M8,0.5 A7.5,7.5 0 1 1 7.99,0.5 Z M4.9,5.9 L5.9,4.9 L8,7 L10.1,4.9 L11.1,5.9 L9,8 L11.1,10.1 L10.1,11.1 L8,9 L5.9,11.1 L4.9,10.1 L7,8 Z"
+
+    /// The finding's severity as an icon, with its name as tooltip and screen-reader text.
+    let severityIcon (violation: RuleViolation) =
+        let icon, color =
+            match violation.Severity with
+            | FindingSeverity.Warning -> warningIcon, Theme.Tokens.Warning
+            | _ -> failureIcon, Theme.Tokens.Danger
+
+        let name = string violation.Severity
+        // Qualified: System.IO also defines Path.
+        Avalonia.FuncUI.DSL.Path.create [
+            AttrBuilder<Shapes.Path>.CreateProperty<Geometry | null>(Shapes.Path.DataProperty, icon, ValueNone)
+            Shapes.Shape.stretch Stretch.Uniform
+            Control.width 14.0
+            Control.height 14.0
+            Control.horizontalAlignment HorizontalAlignment.Center
+            Control.verticalAlignment VerticalAlignment.Center
+            Theme.resources [ Shapes.Shape.FillProperty, color ]
+            ToolTip.tip name
+            AttrBuilder<Shapes.Path>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, name, ValueNone)
+        ]
+
     let gridLinesVisibility (value: DataGridGridLinesVisibility) : IAttr<DataGrid> =
         AttrBuilder<DataGrid>.CreateProperty<DataGridGridLinesVisibility>(DataGrid.GridLinesVisibilityProperty, value, ValueNone)
 
@@ -463,7 +492,14 @@ module private MainView =
                                 DataGridTextColumn.width (DataGridLength width)
                                 DataGridTextColumn.fontSize gridFontSize
                             ]
-                        textColumn "Type" "Severity" 72.0
+                        DataGridTemplateColumn.create [
+                            DataGridTemplateColumn.header "Type"
+                            // Set directly: the width attribute isn't applied to this template column.
+                            DataGridTemplateColumn.init (fun column -> column.Width <- DataGridLength 60.0)
+                            DataGridTemplateColumn.cellTemplate (
+                                DataTemplateView<RuleViolationRow>.create (fun row -> severityIcon row.Violation)
+                            )
+                        ]
                         textColumn "Fixable" "Fixable" 72.0
                         textColumn "Clause" "Clause" 72.0
                         textColumn "Test" "TestNumber" 60.0
