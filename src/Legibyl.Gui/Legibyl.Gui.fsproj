@@ -9,6 +9,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <!-- The .exe's icon (Explorer, taskbar, and the MSI's shortcuts). -->
+    <ApplicationIcon>..\..\assets\Legibyl.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

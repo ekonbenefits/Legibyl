@@ -12,12 +12,14 @@
                     Directory="InstallProgramMenuFolder"
                     Name="Legibyl"
                     WorkingDirectory="INSTALLFOLDER"
+                    Icon="LegibylIcon"
                     Advertise="yes" />
 
           <Shortcut Id="DesktopShortcut"
                     Directory="DesktopFolder"
                     Name="Legibyl"
                     WorkingDirectory="INSTALLFOLDER"
+                    Icon="LegibylIcon"
                     Advertise="yes" />
         </File>
 
