@@ -197,12 +197,49 @@ let private nameDocument (document: PdfDocument) (fromFirstPage: bool) =
 
 // ---- Running the fixes ----
 
+/// Points a recovered heading's table-of-contents links at the heading itself: the explicit
+/// destination (/D) at its position on the page, a little above it so it isn't cut off at the
+/// top of the window, rather than wherever the link went before; and a PDF 2.0 structure
+/// destination (/SD) at the heading element, which readers that support it prefer and others
+/// ignore. Returns how many links were changed.
+let private pointLinksAtHeading (document: PdfDocument) (heading: TocHeadings.Heading) =
+    if isNull (heading.Paragraph.GetIndirectReference()) then
+        heading.Paragraph.MakeIndirect document |> ignore
+    let position: PdfObject list =
+        match heading.Geometry with
+        | Some geometry -> [ PdfNumber geometry.Left; PdfNumber(geometry.Top + 12.0) ]
+        | None -> [ PdfNull.PDF_NULL; PdfNull.PDF_NULL ]
+    let destination (target: PdfObject) =
+        let array = PdfArray()
+        array.Add target
+        array.Add PdfName.XYZ
+        position |> List.iter array.Add
+        // A null zoom keeps the reader's current zoom.
+        array.Add PdfNull.PDF_NULL
+        array
+    for annotation in heading.Entry.Links do
+        let action =
+            match annotation.GetAsDictionary(PdfName.A) with
+            | NonNull action when PdfName.GoTo.Equals(action.GetAsName(PdfName.S)) -> action
+            | _ ->
+                let action = PdfDictionary()
+                action.Put(PdfName.S, PdfName.GoTo) |> ignore
+                action
+        action.Put(PdfName.D, destination (document.GetPage(heading.Entry.Page).GetPdfObject())) |> ignore
+        action.Put(PdfName "SD", destination heading.Paragraph) |> ignore
+        annotation.Remove(PdfName.Dest) |> ignore
+        annotation.Put(PdfName.A, action) |> ignore
+    heading.Entry.Links.Length
+
 let private tagHeadingsFromToc (document: PdfDocument) context =
     match TocHeadings.analyse document context with
     | TocHeadings.Recoverable(headings, _) ->
+        let mutable links = 0
         for heading in headings do
             heading.Paragraph.Put(PdfName.S, PdfName $"H{heading.Level}") |> ignore
-        [ $"Tagged {headings.Length} heading(s) listed in the table of contents." ]
+            links <- links + pointLinksAtHeading document heading
+        [ $"Tagged {headings.Length} heading(s) listed in the table of contents."
+          if links > 0 then $"Pointed {links} table-of-contents link(s) at their headings." ]
     | _ -> []
 
 let private removeEmpty isTarget (describe: int -> string) (document: PdfDocument) context =

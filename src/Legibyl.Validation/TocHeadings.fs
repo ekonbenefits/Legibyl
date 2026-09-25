@@ -19,7 +19,9 @@ type Entry =
       Label: string
       Page: int
       Left: float
-      Geometry: StructureGeometry option }
+      Geometry: StructureGeometry option
+      /// The entry's link annotations that go to Page.
+      Links: PdfDictionary list }
 
 /// A paragraph the table of contents lists as a heading of this level.
 type Heading =
@@ -151,9 +153,9 @@ let private entryAt (document: PdfDocument) context destinationPageOf (visit: St
     let label =
         parts |> List.map (fun part -> extractText part context visit.Page) |> String.concat " " |> tocEntryText
     let geometry = parts |> List.choose (fun part -> textGeometry part context visit.Page) |> unionGeometry
-    let page =
+    let annotations =
         ownAnnotations visit.Element @ (parts |> List.collect (fun part -> linksIn part context) |> List.collect ownAnnotations)
-        |> List.tryPick destinationPageOf
+    let page = annotations |> List.tryPick destinationPageOf
     match label, page, geometry with
     | Some label, Some page, Some geometry ->
         Some
@@ -161,7 +163,8 @@ let private entryAt (document: PdfDocument) context destinationPageOf (visit: St
               Label = normalize label
               Page = page
               Left = geometry.Left
-              Geometry = Some geometry }
+              Geometry = Some geometry
+              Links = annotations |> List.filter (fun annotation -> destinationPageOf annotation = Some page) }
     | _ -> None
 
 /// What recovering headings from the document's (first) table of contents would do.

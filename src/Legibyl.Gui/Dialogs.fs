@@ -149,7 +149,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                             checkBox
                                 tocHeadings
                                 (label
-                                    "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent)"
+                                    "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent), and point its links at them"
                                     PdfFixOptions.HeadingsFromToc)
                             checkBox
                                 emptyParagraphs
