@@ -9,8 +9,9 @@ process required.
 ## How it works
 
 veraPDF's `greenfield-apps` fat jar (bundling its Greenfield validation
-core) is vendored under `lib/vendor/verapdf-jars/` and referenced from the
-`Legibyl.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
+core) is downloaded from Maven Central on the first build (pinned by version
+and SHA-256 in `Directory.Build.props`, cached under `obj/`) and referenced
+from the `Legibyl.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
 which translates the Java bytecode into a .NET assembly at build time. The
 `Legibyl.Validation` project exposes a small, plain-C# API
 (`IPdfValidator.Validate(path, profile) -> ValidationReport`,
@@ -45,7 +46,7 @@ tests/
   Legibyl.Validation.Tests/   xUnit tests using real PDF/UA-1 corpus samples
 installer/
   Legibyl.Gui.Installer/      WiX v6 MSI installer for the GUI (LegibylSetup.msi)
-lib/vendor/verapdf-jars/    Vendored veraPDF jar + provenance/checksum README
+lib/vendor/verapdf-jars/    veraPDF jar provenance/upgrade README (jar is fetched at build time)
 licenses/                   AGPLv3+/GPLv3+/MPLv2+ license texts and third-party NOTICE
 ```
 
@@ -269,9 +270,9 @@ All projects share a single version, set centrally in `Directory.Build.props`:
 the first three components (`Major.Minor.Patch`) track the **vendored veraPDF
 engine version** (currently `1.28.1`), and the fourth component is a
 build/revision number that increments for tool-only releases (CLI/GUI/facade
-changes that don't touch the vendored jar). When the vendored jar is
-upgraded, the revision resets to `0` and the base is updated to match the new
-jar version. Run `legibyl --version` to see both numbers at once
+changes that don't touch the vendored jar). `VersionPrefix` is derived from
+`VeraPdfVersion`, so upgrading the jar updates the base automatically; reset
+`VersionBuild` to `0` when you do. Run `legibyl --version` to see both numbers at once
 (e.g. `legibyl 1.28.1.0 (vendored veraPDF engine 1.28.1)`).
 
 ## Licensing

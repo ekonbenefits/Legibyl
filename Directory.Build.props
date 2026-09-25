@@ -1,15 +1,21 @@
 <Project>
   <!--
-    Versioning convention for this repo: the first three components track the
-    vendored veraPDF engine version (see lib/vendor/verapdf-jars/README.md),
-    and the fourth component is a build/revision number for this tool that
-    increments independently of the vendored engine.
+    veraPDF engine: the greenfield-apps fat jar is downloaded from Maven Central
+    at build time (see src/Legibyl.Validation/Legibyl.Validation.csproj) and
+    verified against VeraPdfSha256. To upgrade, change these two values, then
+    reset VersionBuild to 0.
 
-    When the vendored jar is upgraded, reset VersionBuild to 0 and update
-    VersionPrefix to match the new jar version.
+    Versioning convention for this repo: the first three components track the
+    veraPDF engine version, and the fourth component is a build/revision number
+    for this tool that increments independently of the engine.
   -->
   <PropertyGroup>
-    <VersionPrefix>1.28.1</VersionPrefix>
+    <VeraPdfVersion>1.28.1</VeraPdfVersion>
+    <VeraPdfSha256>916049DB6C6335A4A4C624E098499CFF152EF523F65693A0D835AEC635B6DCBC</VeraPdfSha256>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <VersionPrefix>$(VeraPdfVersion)</VersionPrefix>
     <VersionBuild>0</VersionBuild>
     <Version>$(VersionPrefix).$(VersionBuild)</Version>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>

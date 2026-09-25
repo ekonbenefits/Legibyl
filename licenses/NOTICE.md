@@ -29,8 +29,9 @@ available, unmodified from upstream, at:
 <https://github.com/veraPDF/veraPDF-apps/tree/v1.28.1> (and the
 `greenfield-apps` module's dependencies are likewise all public open-source
 projects resolvable from that tag's Maven POMs). This repository does not
-modify the vendored jar in any way (see the SHA-256 checksum in
-`lib/vendor/verapdf-jars/README.md`).
+modify the vendored jar in any way: the build downloads it unmodified from
+Maven Central and verifies its SHA-256 checksum (`VeraPdfSha256` in
+`Directory.Build.props`).
 
 veraPDF's bundled fat jar in turn includes third-party dependencies
 (Jackson databind/core/annotations, JAXB API/Core/Runtime
