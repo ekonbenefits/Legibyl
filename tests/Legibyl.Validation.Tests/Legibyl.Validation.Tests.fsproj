@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <!-- Run under the VSTest adapter so plain `dotnet test` works on the .NET 10 SDK. -->
+    <UseMicrosoftTestingPlatformRunner>false</UseMicrosoftTestingPlatformRunner>
+    <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="TestSupport.fs" />
+    <Compile Include="VeraPdfValidatorTests.fs" />
+    <Compile Include="PdfLocationParserTests.fs" />
+    <Compile Include="ValidationReportTextFormatterTests.fs" />
+    <Compile Include="StructureTreeReaderTests.fs" />
+    <Compile Include="PdfFixerTests.fs" />
+    <Compile Include="PdfRegionRendererTests.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
+    <PackageReference Include="FsUnit.xUnit" Version="7.1.1" />
+    <PackageReference Include="itext" Version="9.7.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Legibyl.Validation\Legibyl.Validation.fsproj" />
+    <ProjectReference Include="..\..\src\Legibyl.Rendering\Legibyl.Rendering.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="SampleCorpus\*.pdf" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

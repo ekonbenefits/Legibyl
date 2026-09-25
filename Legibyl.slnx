@@ -7,7 +7,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Legibyl.Gui.Tests/Legibyl.Gui.Tests.fsproj" />
-    <Project Path="tests/Legibyl.Validation.Tests/Legibyl.Validation.Tests.csproj" />
+    <Project Path="tests/Legibyl.Validation.Tests/Legibyl.Validation.Tests.fsproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Legibyl.Screenshots/Legibyl.Screenshots.fsproj" />

@@ -10,6 +10,7 @@ open Avalonia.Controls.Primitives
 open Avalonia.Controls.Shapes
 open Avalonia.VisualTree
 open Xunit
+open FsUnit.Xunit
 open Legibyl.Screenshots
 
 // One headless Avalonia session (and UI thread) for the whole test run.
@@ -48,7 +49,7 @@ let ``results grid column headers are not clipped`` () =
         let headers =
             descendants<DataGridColumnHeader> (HeadlessWindow.resultsGrid window)
             |> List.filter (fun header -> not (String.IsNullOrEmpty(string header.Content)))
-        Assert.NotEmpty headers
+        headers |> should not' (be Empty)
         let clipped =
             [ for header in headers do
                   let available = header.Bounds.Width
@@ -56,7 +57,7 @@ let ``results grid column headers are not clipped`` () =
                   if header.DesiredSize.Width > available + 0.5 then
                       $"'{header.Content}' needs {header.DesiredSize.Width:F1}px but has {available:F1}px" ]
         window.Close()
-        Assert.True(clipped.IsEmpty, String.Join("; ", clipped)))
+        clipped |> should be Empty)
 
 [<Fact>]
 let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
@@ -67,21 +68,22 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
 
         let icons = descendants<Path> firstRow
         let expected = [ "Warning"; "Fixable: Remove empty /P structure elements" ]
-        Assert.Equal<string list>(expected, icons |> List.map AutomationProperties.GetName)
-        Assert.Equal<string list>(expected, icons |> List.map (fun icon -> string (ToolTip.GetTip icon)))
-        Assert.Contains("Page 1", descendants<TextBlock> firstRow |> List.map _.Text)
+        icons |> List.map AutomationProperties.GetName |> should equal expected
+        icons |> List.map (fun icon -> string (ToolTip.GetTip icon)) |> should equal expected
+        descendants<TextBlock> firstRow |> List.map _.Text |> should contain "Page 1"
 
         // Warning icon by the title and a wrench by "Fixable"; the text says the same,
         // so screen readers skip them.
         let anchors = detailIcons window
-        Assert.Equal(2, anchors.Length)
-        Assert.All(anchors, fun icon -> Assert.True(isHiddenFromScreenReaders icon))
+        anchors |> should haveLength 2
+        anchors |> List.filter (not << isHiddenFromScreenReaders) |> should be Empty
 
         let details = descendants<TextBox> window |> List.map _.Text
-        Assert.Contains("Remove empty /P structure elements. Use Fix… to repair a copy of this PDF.", details)
+        details |> should contain "Remove empty /P structure elements. Use Fix… to repair a copy of this PDF."
 
         let preview = descendants<Image> window |> List.tryFind (fun image -> not (isNull image.Source))
-        Assert.True(preview.IsSome, "The selected warning's page preview wasn't shown.")
+        // The selected warning's page preview is shown.
+        preview |> should not' (equal None)
         window.Close())
 
 [<Fact>]
@@ -95,6 +97,6 @@ let ``findings that can't be fixed show no fix icon or details`` () =
         let detailHeadings = descendants<TextBlock> window |> List.map _.Text
         let anchors = detailIcons window
         window.Close()
-        Assert.Equal(1, anchors.Length)
-        Assert.Equal<string list>([ "Failure" ], icons)
-        Assert.DoesNotContain("Fixable", detailHeadings))
+        anchors |> should haveLength 1
+        icons |> should equal [ "Failure" ]
+        detailHeadings |> should not' (contain "Fixable"))
