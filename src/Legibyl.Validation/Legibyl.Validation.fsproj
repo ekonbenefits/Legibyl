@@ -19,6 +19,7 @@
     <Compile Include="LegibylChecks.fs" />
     <Compile Include="FindingGeometry.fs" />
     <Compile Include="StructureTreeWalk.fs" />
+    <Compile Include="MetadataTransfer.fs" />
     <Compile Include="VeraPdfValidator.fs" />
   </ItemGroup>
 

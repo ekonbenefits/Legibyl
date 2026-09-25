@@ -232,10 +232,13 @@ Options:
   exposes selectable structural cleanup options for page annotation tab order
   (`/Tabs /S`) and empty semantic `/P` structure elements; structural fixes
   run before the veraPDF metadata fixer so metadata is repaired against the
-  already-cleaned copy in the same operation. Fixed copies are finalized with
-  an iText rewrite and parsed again before being returned, so stale
-  cross-reference/startxref offsets from intermediate repair output are not
-  handed to the user. Intermediate repair files are created under the
+  already-cleaned copy in the same operation. veraPDF saves its metadata
+  repair as an incremental update that iText can't read reliably (a classic
+  xref section chained onto xref streams, with an off-by-one `/Prev`), so
+  Legibyl reads the repaired XMP and Info dictionary back with veraPDF's own
+  parser and writes them into the input with iText instead. Fixed copies are
+  finalized with an iText rewrite and parsed again before being returned.
+  Intermediate repair files are created under the
   operating system temp directory, not beside the source PDF or requested
   output path. Empty `/P` cleanup is visible as a warning and fixable option,
   but it is unchecked by default in the GUI so users opt into structure-tree

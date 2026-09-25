@@ -137,3 +137,37 @@ let ``machine-checkable failing sample is flagged for its defect`` (id: string, 
 let ``human-judged failing sample is flagged for its defect`` (id: string, _title: string) =
     let checkpoints = String.concat ", " samples[id].Checkpoints
     Assert.Skip($"Needs a person: Matterhorn {checkpoints} can only be checked by a human, not veraPDF.")
+
+let failingSamples = theoryData (fun sample -> not sample.Passes)
+
+let private failedRuleIds (report: ValidationReport) =
+    report.FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+
+[<Theory>]
+[<MemberData(nameof failingSamples)>]
+let ``metadata fix clears the missing identifier without adding failures`` (id: string, _title: string) =
+    use output = new TempPdf ".fixed"
+
+    let result = VeraPdfValidator().Fix(samples[id].PdfPath, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Metadata)
+
+    if not result.WasFixed then
+        // veraPDF declines to touch metadata while other rules still fail.
+        result.Status |> should equal RepairStatus.WontFix
+    else
+        let before = failedRuleIds result.OriginalReport
+        let after = failedRuleIds (VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1))
+        after |> should not' (contain MissingPdfUaIdentifierRule)
+        Set.difference after before |> should be Empty
+
+[<Theory>]
+[<InlineData("UA1_Tpdf-G4_F06")>]
+[<InlineData("UA1_Tpdf-G4_F07")>]
+let ``all fixes make a tab order sample compliant`` (id: string) =
+    use output = new TempPdf ".fixed"
+
+    let result = VeraPdfValidator().Fix(samples[id].PdfPath, PdfProfile.PdfUa1, output.Path, PdfFixOptions.All)
+
+    result.WasFixed |> should be True
+    let report = VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1)
+    failedRuleIds report |> should be Empty
+    report.IsCompliant |> should be True
