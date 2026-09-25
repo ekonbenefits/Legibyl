@@ -46,19 +46,11 @@ type RuleViolationRow =
             | _, NonNull geometry -> Some geometry.PageNumber
             | _ -> None
 
-        // Worded like the Fix dialog's options.
-        let fixOptions =
-            [ PdfFixOptions.Metadata, "Fix XMP metadata"
-              PdfFixOptions.AnnotationTabs, "Set /Tabs /S on pages that contain annotations"
-              PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements" ]
-            |> List.filter (fun (option, _) -> violation.FixOptions.HasFlag option)
-            |> List.map snd
-
         { Violation = violation
           Clause = violation.Clause
           TestNumber = violation.TestNumber
           Severity = violation.Severity.ToString()
-          Fixable = String.Join("; ", fixOptions)
+          Fixable = violation.FixDescription
           Message = violation.Message
           LocationContext = violation.LocationContext
           PageNumber = pageNumber
