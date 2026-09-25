@@ -58,5 +58,6 @@ public class ValidationReportTextFormatterTests
         errorMessage: errorMessage,
         locationContext: locationContext,
         severity: FindingSeverity.Failure,
-        fixOptions: PdfFixOptions.None);
+        fixOptions: PdfFixOptions.None,
+        geometry: null);
 }

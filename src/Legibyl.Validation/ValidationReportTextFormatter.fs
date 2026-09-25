@@ -3,6 +3,10 @@ module Legibyl.Validation.ValidationReportTextFormatter
 open System
 open System.Text
 
+/// "page 2, x 72–540, y 698–732" (PDF points, origin at the bottom-left of the page).
+let FormatRegion (geometry: StructureGeometry) : string =
+    $"page {geometry.PageNumber}, x {geometry.Left:F0}–{geometry.Right:F0}, y {geometry.Bottom:F0}–{geometry.Top:F0}"
+
 let private appendFinding (sb: StringBuilder) (violation: RuleViolation) =
     sb.AppendLine($"Rule: {violation.Specification} {violation.RuleId}")
       .AppendLine($"Type: {violation.Severity}")
@@ -24,6 +28,9 @@ let private appendFinding (sb: StringBuilder) (violation: RuleViolation) =
         | context -> context
 
     sb.AppendLine($"Location: {breadcrumb}").AppendLine($"Raw location: {rawLocation}") |> ignore
+    match violation.Geometry with
+    | NonNull geometry -> sb.AppendLine($"Region: {FormatRegion geometry}") |> ignore
+    | Null -> ()
 
 let BuildReport (report: ValidationReport) : string =
     let sb = StringBuilder()

@@ -13,7 +13,11 @@
     <Compile Include="ValidationReportTextFormatter.fs" />
     <Compile Include="Interop.fs" />
     <Compile Include="MarkedContentTextIndex.fs" />
-    <Compile Include="StructureChecks.fs" />
+    <Compile Include="StructureTreeObjects.fs" />
+    <Compile Include="StructureFixes.fs" />
+    <!-- Legibyl's own warnings; see the header of LegibylChecks.fs to add one. -->
+    <Compile Include="LegibylChecks.fs" />
+    <Compile Include="FindingGeometry.fs" />
     <Compile Include="StructureTreeWalk.fs" />
     <Compile Include="VeraPdfValidator.fs" />
   </ItemGroup>

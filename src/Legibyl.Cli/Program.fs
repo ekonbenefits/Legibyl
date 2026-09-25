@@ -150,6 +150,9 @@ let private renderText (results: FileValidationResult list) =
                     line $"  {prefix}[{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}{fixableSuffix f}"
                     if not (String.IsNullOrEmpty f.LocationContext) then
                         line $"    at: {f.LocationContext}"
+                    match f.Region with
+                    | NonNull region -> line $"    region: {ValidationReportTextFormatter.FormatRegion region}"
+                    | Null -> ()
 
             match r.FixError, r.FixStatus with
             | NonNull error, _ -> line $"  fix: ERROR — {error}"

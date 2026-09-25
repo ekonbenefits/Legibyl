@@ -1,4 +1,7 @@
+using iText.IO.Font.Constants;
+using iText.Kernel.Font;
 using iText.Kernel.Pdf;
+using iText.Kernel.Pdf.Canvas;
 using Legibyl.Validation;
 
 namespace Legibyl.Validation.Tests;
@@ -182,6 +185,63 @@ public class PdfFixerTests
     }
 
     [Fact]
+    public void Validate_LikelySplitParagraph_HasGeometryCoveringBothParagraphs()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        try
+        {
+            CreatePdfWithMarkedContentParagraphs(input,
+                (720, "This handbook explains your benefits under the plan. The pages"),
+                (700, "that follow explain how you become a member."));
+            var validator = new VeraPdfValidator();
+
+            ValidationReport report = validator.Validate(input, PdfProfile.PdfUa1);
+
+            RuleViolation warning = Assert.Single(report.Assertions.Where(a =>
+                a.Severity == FindingSeverity.Warning &&
+                a.Message.Contains("Likely split paragraph", StringComparison.Ordinal)));
+            StructureGeometry geometry = Assert.IsType<StructureGeometry>(warning.Geometry);
+            Assert.Equal(1, geometry.PageNumber);
+            Assert.InRange(geometry.Left, 71, 73);
+            Assert.True(geometry.Bottom < 700 && geometry.Top > 720);
+        }
+        finally
+        {
+            DeleteIfExists(input);
+        }
+    }
+
+    [Fact]
+    public void Validate_VeraPdfFailures_HaveGeometryForStructureElementsAndAnnotations()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        try
+        {
+            CreatePdfWithFigureWithoutAltAndLinkWithoutContents(input);
+            var validator = new VeraPdfValidator();
+
+            ValidationReport report = validator.Validate(input, PdfProfile.PdfUa1);
+
+            RuleViolation figure = Assert.Single(report.FailedAssertions.Where(a =>
+                a.LocationContext?.Contains("SEFigure", StringComparison.Ordinal) == true));
+            StructureGeometry figureGeometry = Assert.IsType<StructureGeometry>(figure.Geometry);
+            Assert.Equal(1, figureGeometry.PageNumber);
+            Assert.InRange(figureGeometry.Left, 71, 73);
+            Assert.InRange(figureGeometry.Bottom, 695, 701);
+
+            RuleViolation link = report.FailedAssertions.First(a =>
+                a.LocationContext?.Contains("PDLinkAnnot", StringComparison.Ordinal) == true);
+            StructureGeometry linkGeometry = Assert.IsType<StructureGeometry>(link.Geometry);
+            Assert.Equal((1, 100.0, 500.0, 200.0, 520.0),
+                (linkGeometry.PageNumber, linkGeometry.Left, linkGeometry.Bottom, linkGeometry.Right, linkGeometry.Top));
+        }
+        finally
+        {
+            DeleteIfExists(input);
+        }
+    }
+
+    [Fact]
     public void Validate_AdjacentCompleteParagraphs_DoesNotAddSplitWarning()
     {
         string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
@@ -291,6 +351,79 @@ public class PdfFixerTests
             kids.Add(paragraph);
         }
 
+        var structTreeRoot = new PdfDictionary();
+        structTreeRoot.Put(PdfName.Type, PdfName.StructTreeRoot);
+        structTreeRoot.Put(PdfName.K, kids);
+        document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, structTreeRoot);
+    }
+
+    /// Draws each paragraph's text at (72, y) inside its own marked content and tags it as a /P.
+    private static void CreatePdfWithMarkedContentParagraphs(string path, params (float Y, string Text)[] paragraphs)
+    {
+        using var document = new PdfDocument(new PdfWriter(path));
+        PdfPage page = document.AddNewPage();
+        var canvas = new PdfCanvas(page);
+        PdfFont font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+
+        var kids = new PdfArray();
+        for (int mcid = 0; mcid < paragraphs.Length; mcid++)
+        {
+            var properties = new PdfDictionary();
+            properties.Put(PdfName.MCID, new PdfNumber(mcid));
+            canvas.BeginMarkedContent(PdfName.P, properties)
+                .BeginText()
+                .SetFontAndSize(font, 12)
+                .MoveText(72, paragraphs[mcid].Y)
+                .ShowText(paragraphs[mcid].Text)
+                .EndText()
+                .EndMarkedContent();
+
+            PdfDictionary paragraph = Paragraph();
+            paragraph.Put(PdfName.Pg, page.GetPdfObject());
+            paragraph.Put(PdfName.K, new PdfNumber(mcid));
+            kids.Add(paragraph);
+        }
+
+        var structTreeRoot = new PdfDictionary();
+        structTreeRoot.Put(PdfName.Type, PdfName.StructTreeRoot);
+        structTreeRoot.Put(PdfName.K, kids);
+        document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, structTreeRoot);
+    }
+
+    private static void CreatePdfWithFigureWithoutAltAndLinkWithoutContents(string path)
+    {
+        using var document = new PdfDocument(new PdfWriter(path));
+        PdfPage page = document.AddNewPage();
+
+        var properties = new PdfDictionary();
+        properties.Put(PdfName.MCID, new PdfNumber(0));
+        new PdfCanvas(page)
+            .BeginMarkedContent(PdfName.Figure, properties)
+            .BeginText()
+            .SetFontAndSize(PdfFontFactory.CreateFont(StandardFonts.HELVETICA), 12)
+            .MoveText(72, 700)
+            .ShowText("A figure drawn as text")
+            .EndText()
+            .EndMarkedContent();
+
+        var link = new PdfDictionary();
+        link.Put(PdfName.Type, PdfName.Annot);
+        link.Put(PdfName.Subtype, PdfName.Link);
+        link.Put(PdfName.Rect, new PdfArray(new float[] { 100, 500, 200, 520 }));
+        link.MakeIndirect(document);
+        var annotations = new PdfArray();
+        annotations.Add(link);
+        page.GetPdfObject().Put(PdfName.Annots, annotations);
+
+        var figure = new PdfDictionary();
+        figure.Put(PdfName.Type, PdfName.StructElem);
+        figure.Put(PdfName.S, PdfName.Figure);
+        figure.Put(PdfName.Pg, page.GetPdfObject());
+        figure.Put(PdfName.K, new PdfNumber(0));
+        figure.MakeIndirect(document);
+
+        var kids = new PdfArray();
+        kids.Add(figure);
         var structTreeRoot = new PdfDictionary();
         structTreeRoot.Put(PdfName.Type, PdfName.StructTreeRoot);
         structTreeRoot.Put(PdfName.K, kids);

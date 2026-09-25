@@ -31,7 +31,10 @@ veraPDF's internal object model (e.g.
 in the document the problem is. `PdfLocationParser` turns this into a page
 number and a plain-English breadcrumb (e.g. "Page 2 — Document → Link
 annotation"), used by the GUI's results grid (see below) and available on
-`RuleViolation.Location`/`PageNumber` for any future consumer.
+`RuleViolation.Location`/`PageNumber` for any future consumer. Where the
+location pins down something drawn on the page — marked content (`{mcid:N}`),
+a structure element, or an annotation — Legibyl also works out its bounding
+box (`RuleViolation.Geometry`, in `FindingGeometry.fs`).
 
 ## Solution layout
 
@@ -116,20 +119,23 @@ marks known repairable rows in the **Fixable** column. It also warns about
 adjacent sibling `/P` tags that look like visual line fragments from the same
 sentence; those are intentionally warning-only because the safest repair is
 usually in the source document (for example, the original Word file) rather
-than rewriting paragraph semantics in the PDF after export.
+than rewriting paragraph semantics in the PDF after export. These warnings
+(reported as `Legibyl` / `Structure-N`) are all defined in one list in
+`src/Legibyl.Validation/LegibylChecks.fs`; its header explains how to add a
+new one.
 
-For failures anchored to an annotation (links, form fields — the most
-common failure type with an exact, checkable region), the details panel
-automatically renders that page with a highlight box around the failing
-annotation. The image scales to the available panel space rather than
-opening at 100% zoom. Rendering uses
-[PdfPig](https://github.com/UglyToad/PdfPig) to read its `/Rect` and
+When a finding has a known region — its marked content, the structure
+element's content, or an annotation's `/Rect` (see `RuleViolation.Geometry`
+above; Legibyl's own warnings carry one too) — the details panel
+automatically renders that page with a highlight box around it. The image
+scales to the available panel space rather than opening at 100% zoom.
+Rendering uses [PdfPig](https://github.com/UglyToad/PdfPig) and
 [PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia) +
 SkiaSharp to rasterise the page and draw the box (`Legibyl.Rendering`
-project). Most structural/tagging failures (untagged paragraphs, missing
-table header scope, etc.) aren't attached to page geometry in veraPDF's
-model, so for those the full page is still shown for context, with a
-banner noting the exact region isn't available.
+project). Findings without a region (document-level metadata, whole-page
+checks, structure elements with no drawn content) show the full page for
+context when a page is known, with a banner noting the exact region isn't
+available.
 
 ## Document structure (semantic hierarchy)
 
@@ -252,7 +258,16 @@ Example JSON output (one non-compliant file):
         "testNumber": 1,
         "message": "Content marked as Artifact should not be present inside tagged content",
         "errorMessage": null,
-        "locationContext": null
+        "locationContext": "root/document[0]/pages[0](11 0 obj PDPage)/contentStream[0](21 0 obj PDSemanticContentStream)/content[10]{mcid:22}/contentItem[0]{mcid:22}",
+        "region": {
+          "pageNumber": 1,
+          "left": 70.96,
+          "bottom": 73.47,
+          "right": 540.56,
+          "top": 104.85
+        },
+        "isFixable": false,
+        "fixOptions": null
       }
     ],
     "error": null

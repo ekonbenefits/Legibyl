@@ -40,9 +40,10 @@ type RuleViolationRow =
     static member Of(violation: RuleViolation) =
         let location = violation.Location
         let pageNumber =
-            match location with
-            | NonNull location -> Option.ofNullable location.PageNumber
-            | Null -> None
+            match location, violation.Geometry with
+            | NonNull location, _ when location.PageNumber.HasValue -> Some location.PageNumber.Value
+            | _, NonNull geometry -> Some geometry.PageNumber
+            | _ -> None
 
         let fixOptions =
             [ PdfFixOptions.Metadata, "Metadata"
@@ -160,11 +161,17 @@ module private MainView =
                     match row with
                     | None -> ()
                     | Some row ->
-                        match PdfLocationParser.Parse row.LocationContext, selectedFile.Current with
-                        | NonNull location, Some filePath ->
+                        let render =
+                            match row.Violation.Geometry, row.Violation.Location with
+                            | NonNull geometry, _ -> Some(fun filePath -> renderer.RenderPageWithHighlight(filePath, geometry))
+                            | Null, NonNull location -> Some(fun filePath -> renderer.RenderPageWithHighlight(filePath, location))
+                            | Null, Null -> None
+
+                        match render, selectedFile.Current with
+                        | Some render, Some filePath ->
                             preview.Set { noPreview with Loading = true }
                             try
-                                let! result = Task.Run(fun () -> renderer.RenderPageWithHighlight(filePath, location))
+                                let! result = Task.Run(fun () -> render filePath)
                                 if version = previewVersion.Current then
                                     preview.Set
                                         { Image = Some(createBitmap result.PngBytes)

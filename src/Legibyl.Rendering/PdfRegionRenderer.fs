@@ -140,8 +140,7 @@ type PdfRegionRenderer() =
                 true, note
             | None ->
                 false,
-                "Exact region unavailable for this failure type (only annotations like links and form "
-                + "fields currently expose page geometry) — showing the full page for context."
+                "Exact region unavailable for this finding — showing the full page for context."
 
         { PngBytes = encodePng bitmap
           PageNumber = pageNumber

@@ -22,7 +22,11 @@ type RuleViolation =
       /// Whether this is a failing validation assertion or a Legibyl warning.
       Severity: FindingSeverity
       /// Best-effort repair options that can address this finding, if any.
-      FixOptions: PdfFixOptions }
+      FixOptions: PdfFixOptions
+      /// The page region to highlight for this finding, if known. veraPDF findings leave
+      /// this null (annotation regions come from Location instead); Legibyl's structure
+      /// warnings set it from the offending element's content.
+      Geometry: StructureGeometry | null }
 
     /// A short "clause.testNumber" identifier, e.g. "7.1-2".
     member this.RuleId = $"{this.Clause}-{this.TestNumber}"

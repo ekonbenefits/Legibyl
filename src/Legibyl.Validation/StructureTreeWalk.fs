@@ -48,19 +48,6 @@ let private normalizedGeometry pageNumber left bottom right top =
       Right = max left right
       Top = max bottom top }
 
-/// Unions geometries that are all on one page; None if there are none or they span pages.
-let private unionGeometry (geometries: StructureGeometry seq) =
-    match List.ofSeq geometries with
-    | [] -> None
-    | first :: _ as list when list |> List.forall (fun g -> g.PageNumber = first.PageNumber) ->
-        Some
-            { PageNumber = first.PageNumber
-              Left = list |> List.map _.Left |> List.min
-              Bottom = list |> List.map _.Bottom |> List.min
-              Right = list |> List.map _.Right |> List.max
-              Top = list |> List.map _.Top |> List.max }
-    | _ -> None
-
 let private area (geometry: StructureGeometry) =
     max 1.0 ((geometry.Right - geometry.Left) * (geometry.Top - geometry.Bottom))
 
@@ -286,7 +273,7 @@ let private readITextLinkTarget (annotation: PdfDictionary) (pageNumberByObject:
 
 let private buildLinkAnnotationIndex (pdfPath: string) =
     use document = new PdfDocument(new PdfReader(pdfPath))
-    let pageNumberByObject = StructureChecks.pageNumberIndex document
+    let pageNumberByObject = StructureTreeObjects.pageNumberIndex document
     [ for pageNumber in 1 .. document.GetNumberOfPages() do
           match document.GetPage(pageNumber).GetPdfObject().GetAsArray(PdfName.Annots) with
           | null -> ()
@@ -383,7 +370,7 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
 
     let geometry =
         (contentInfos |> List.choose _.Geometry) @ (children |> Seq.choose (fun child -> Option.ofObj child.Geometry) |> List.ofSeq)
-        |> unionGeometry
+        |> StructureTreeObjects.unionGeometry
         |> Option.orElse (formField |> Option.bind _.Geometry)
         |> Option.orElseWith (fun () -> layoutBBoxGeometry elem ownPage)
 
@@ -450,7 +437,7 @@ let read (pdfPath: string) : StructureNode | null =
               LinkUri = null
               LinkDestinationPageNumber = Nullable()
               LinkDestinationDescription = null
-              Geometry = children |> Seq.choose (fun child -> Option.ofObj child.Geometry) |> unionGeometry |> Option.toObj
+              Geometry = children |> Seq.choose (fun child -> Option.ofObj child.Geometry) |> StructureTreeObjects.unionGeometry |> Option.toObj
               Language = null
               PageNumber = Nullable()
               ContentLeafCount = 0
