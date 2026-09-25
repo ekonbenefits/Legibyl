@@ -11,6 +11,8 @@ type FailureDetail =
       Message: string
       ErrorMessage: string | null
       LocationContext: string | null
+      /// Page region the finding refers to, in PDF points (origin bottom-left), if known.
+      Region: StructureGeometry | null
       IsFixable: bool
       FixOptions: string | null }
 
@@ -21,6 +23,7 @@ type FailureDetail =
           Message = violation.Message
           ErrorMessage = violation.ErrorMessage
           LocationContext = violation.LocationContext
+          Region = violation.Geometry
           IsFixable = violation.IsFixable
           FixOptions = if violation.IsFixable then violation.FixOptions.ToString() else null }
 

@@ -72,6 +72,24 @@ module internal VeraPdf =
         else
             PdfFixOptions.None
 
+    /// Adds page regions to veraPDF's failures and appends Legibyl's own warnings, sharing
+    /// one iText/PdfPig read of the file.
+    let withLegibylAnalysis (pdfPath: string) (assertions: RuleViolation list) =
+        try
+            use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(pdfPath))
+            let context = StructureTreeObjects.createContext document pdfPath
+            let located =
+                assertions
+                |> List.map (fun assertion ->
+                    if assertion.Passed then
+                        assertion
+                    else
+                        { assertion with Geometry = FindingGeometry.locate context document assertion |> Option.toObj })
+            located @ LegibylChecks.run document context
+        with
+        | :? iText.Kernel.Exceptions.PdfException
+        | :? IOException as ex -> assertions @ [ LegibylChecks.couldNotInspect ex.Message ]
+
     let toReport (pdfPath: string) profile (result: ValidationResult) : ValidationReport =
         let assertions =
             [ for item in javaSeq (result.getTestAssertions ()) do
@@ -89,14 +107,15 @@ module internal VeraPdf =
                     ErrorMessage = assertion.getErrorMessage ()
                     LocationContext = assertion.getLocation () |?> _.getContext()
                     Severity = FindingSeverity.Failure
-                    FixOptions = determineFixOptions (assertion.getMessage ()) } ]
+                    FixOptions = determineFixOptions (assertion.getMessage ())
+                    Geometry = null } ]
 
         { FilePath = pdfPath
           Profile = profile
           FlavourId = result.getPDFAFlavour().getId()
           IsCompliant = result.isCompliant ()
           TotalAssertions = result.getTotalAssertions ()
-          Assertions = List.toArray (assertions @ StructureChecks.warnings pdfPath) }
+          Assertions = List.toArray (withLegibylAnalysis pdfPath assertions) }
 
     let createTemporaryPdfPath (outputPath: string) =
         let prefix =
@@ -209,7 +228,7 @@ type VeraPdfValidator() =
                 if options.HasFlag PdfFixOptions.AnnotationTabs || options.HasFlag PdfFixOptions.RemoveEmptyParagraphs then
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempStructuralOutput <- tempOutput
-                    match StructureChecks.applyFixes currentInput tempOutput options with
+                    match StructureFixes.applyFixes currentInput tempOutput options with
                     | 0, 0 ->
                         tryDeleteTemporary tempOutput
                         tempStructuralOutput <- null

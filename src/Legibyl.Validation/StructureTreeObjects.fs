@@ -1,0 +1,195 @@
+/// Reading a tagged PDF's raw structure tree objects via iText: resolving pages, text,
+/// and page geometry for structure elements. Shared by LegibylChecks (warnings) and
+/// StructureFixes (repairs).
+module internal Legibyl.Validation.StructureTreeObjects
+
+open System
+open System.Collections.Generic
+open System.Text
+open iText.Kernel.Pdf
+open Legibyl.Validation.Interop
+
+type Context =
+    { PageNumberByObject: IReadOnlyDictionary<int, int>
+      MarkedContent: MarkedContentTextIndex.Index }
+
+/// Maps each page's indirect object number to its 1-based page number.
+let pageNumberIndex (document: PdfDocument) : IReadOnlyDictionary<int, int> =
+    let index = Dictionary<int, int>()
+    for pageNumber in 1 .. document.GetNumberOfPages() do
+        match document.GetPage(pageNumber).GetPdfObject().GetIndirectReference() with
+        | null -> ()
+        | reference -> index[reference.GetObjNumber()] <- pageNumber
+    index
+
+let createContext (document: PdfDocument) (pdfPath: string) =
+    { PageNumberByObject = pageNumberIndex document
+      MarkedContent = MarkedContentTextIndex.build pdfPath }
+
+/// Unions geometries that are all on one page; None if there are none or they span pages.
+let unionGeometry (geometries: StructureGeometry seq) =
+    match List.ofSeq geometries with
+    | [] -> None
+    | first :: _ as list when list |> List.forall (fun g -> g.PageNumber = first.PageNumber) ->
+        Some
+            { PageNumber = first.PageNumber
+              Left = list |> List.map _.Left |> List.min
+              Bottom = list |> List.map _.Bottom |> List.min
+              Right = list |> List.map _.Right |> List.max
+              Top = list |> List.map _.Top |> List.max }
+    | _ -> None
+
+let resolve (obj: PdfObject | null) : PdfObject | null =
+    match obj with
+    | :? PdfIndirectReference as reference -> reference.GetRefersTo()
+    | obj -> obj
+
+let structElemPage (dictionary: PdfDictionary) context (inheritedPage: int option) =
+    match dictionary.GetAsDictionary(PdfName.Pg) |?> _.GetIndirectReference() with
+    | null -> inheritedPage
+    | reference -> lookup context.PageNumberByObject (reference.GetObjNumber()) |> Option.orElse inheritedPage
+
+/// A structure element's page: its own /Pg, or else its nearest ancestor's (following /P).
+let ancestorPage (dictionary: PdfDictionary) context =
+    let rec climb (dictionary: PdfDictionary | null) depth =
+        match dictionary with
+        | null -> None
+        | _ when depth > 200 -> None
+        | dictionary ->
+            match structElemPage dictionary context None with
+            | Some page -> Some page
+            | None -> climb (dictionary.GetAsDictionary(PdfName.P)) (depth + 1)
+    climb dictionary 0
+
+/// An annotation's /Rect as geometry on pageNumber.
+let rectGeometry pageNumber (annotation: PdfDictionary) =
+    match annotation.GetAsArray(PdfName.Rect) with
+    | NonNull rect when rect.Size() >= 4 ->
+        let at (i: int) = rect.GetAsNumber(i) |> Option.ofObj |> Option.map _.DoubleValue()
+        match at 0, at 1, at 2, at 3 with
+        | Some x1, Some y1, Some x2, Some y2 ->
+            Some
+                { PageNumber = pageNumber
+                  Left = min x1 x2
+                  Bottom = min y1 y2
+                  Right = max x1 x2
+                  Top = max y1 y2 }
+        | _ -> None
+    | _ -> None
+
+let private actualText (dictionary: PdfDictionary) =
+    dictionary.GetAsString(PdfName.ActualText) |?> _.ToUnicodeString()
+
+let isParagraph (dictionary: PdfDictionary) = PdfName.P.Equals(dictionary.GetAsName(PdfName.S))
+
+let private markedContent context (mcid: PdfNumber) pageNumber =
+    lookup context.MarkedContent (pageNumber, mcid.IntValue())
+
+/// Whether obj has no visible text anywhere below it (and no /ActualText standing in for it).
+let rec isSubtreeEmpty (obj: PdfObject | null) context (inheritedPage: int option) =
+    match resolve obj with
+    | null -> true
+    | :? PdfArray as array -> Seq.init (array.Size()) array.Get |> Seq.forall (fun kid -> isSubtreeEmpty kid context inheritedPage)
+    | :? PdfNumber as mcid when inheritedPage.IsSome ->
+        markedContent context mcid inheritedPage.Value
+        |> Option.forall (fun content -> String.IsNullOrWhiteSpace content.Text)
+    | :? PdfDictionary as dictionary ->
+        if not (PdfName.StructElem.Equals(dictionary.GetAsName(PdfName.Type))) && isNull (dictionary.GetAsName(PdfName.S)) then
+            false
+        elif not (String.IsNullOrWhiteSpace(actualText dictionary)) then
+            false
+        else
+            let ownPage = structElemPage dictionary context inheritedPage
+            match dictionary.Get(PdfName.K) with
+            | null -> true
+            | kids -> isSubtreeEmpty kids context ownPage
+    | _ -> false
+
+/// The text a screen reader would read for obj: its /ActualText, or else its marked content.
+let rec extractText (obj: PdfObject | null) context (inheritedPage: int option) : string =
+    match resolve obj with
+    | null -> ""
+    | :? PdfArray as array ->
+        let sb = StringBuilder()
+        for i in 0 .. array.Size() - 1 do
+            sb.Append(' ').Append(extractText (array.Get i) context inheritedPage) |> ignore
+        sb.ToString()
+    | :? PdfNumber as mcid when inheritedPage.IsSome ->
+        markedContent context mcid inheritedPage.Value |> Option.map _.Text |> Option.defaultValue ""
+    | :? PdfDictionary as dictionary ->
+        match actualText dictionary with
+        | NonNull text when not (String.IsNullOrWhiteSpace text) -> text
+        | _ -> extractText (dictionary.Get(PdfName.K)) context (structElemPage dictionary context inheritedPage)
+    | _ -> ""
+
+let rec private collectGeometries (obj: PdfObject | null) context (inheritedPage: int option) : StructureGeometry list =
+    match resolve obj with
+    | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do yield! collectGeometries (array.Get i) context inheritedPage ]
+    | :? PdfNumber as mcid when inheritedPage.IsSome ->
+        markedContent context mcid inheritedPage.Value |> Option.bind _.Geometry |> Option.toList
+    | :? PdfDictionary as dictionary ->
+        let page = structElemPage dictionary context inheritedPage
+        match dictionary.GetAsDictionary(PdfName.Obj), page with
+        // An object reference (/OBJR), e.g. a link's or form field's annotation.
+        | NonNull annotation, Some page -> rectGeometry page annotation |> Option.toList
+        | NonNull _, None -> []
+        // A marked-content reference (/MCR) names its MCID in /K (and possibly its own /Pg),
+        // so the same recursion covers it and nested structure elements.
+        | Null, _ -> collectGeometries (dictionary.Get(PdfName.K)) context page
+    | _ -> []
+
+/// Best-effort bounding box of everything drawn under obj, if it's all on one page.
+let subtreeGeometry (obj: PdfObject | null) context (inheritedPage: int option) =
+    collectGeometries obj context inheritedPage |> unionGeometry
+
+/// One dictionary in the structure tree, as seen while walking it in reading order.
+type StructElemVisit =
+    { Element: PdfDictionary
+      /// Where the element sits, e.g. "StructTreeRoot/K[0]/K[3]".
+      Path: string
+      /// The element's page: its own /Pg, or its nearest ancestor's.
+      Page: int option
+      /// The element that follows this one in its parent's /K array, if it's a dictionary.
+      NextSibling: StructElemVisit option }
+
+/// Every dictionary below the StructTreeRoot, parents before children.
+let walk (structTreeRoot: PdfDictionary) context : StructElemVisit seq =
+    let rec visitKids (kids: PdfObject | null) path inheritedPage : StructElemVisit seq =
+        match resolve kids with
+        | :? PdfArray as array ->
+            let items =
+                [| for i in 0 .. array.Size() - 1 ->
+                       match resolve (array.Get i) with
+                       | :? PdfDictionary as dictionary -> Some(dictionary, $"{path}[{i}]")
+                       | _ -> None |]
+
+            let visitAt i =
+                items[i]
+                |> Option.map (fun (dictionary, itemPath) ->
+                    { Element = dictionary
+                      Path = itemPath
+                      Page = structElemPage dictionary context inheritedPage
+                      NextSibling = None })
+
+            seq {
+                for i in 0 .. items.Length - 1 do
+                    match visitAt i with
+                    | Some visit ->
+                        let visit = { visit with NextSibling = if i + 1 < items.Length then visitAt (i + 1) else None }
+                        yield visit
+                        yield! visitKids (visit.Element.Get(PdfName.K)) $"{visit.Path}/K" visit.Page
+                    | None -> ()
+            }
+        | :? PdfDictionary as dictionary ->
+            let visit =
+                { Element = dictionary
+                  Path = path
+                  Page = structElemPage dictionary context inheritedPage
+                  NextSibling = None }
+            seq {
+                yield visit
+                yield! visitKids (dictionary.Get(PdfName.K)) $"{path}/K" visit.Page
+            }
+        | _ -> Seq.empty
+
+    visitKids (structTreeRoot.Get(PdfName.K)) "StructTreeRoot/K" (structElemPage structTreeRoot context None)
