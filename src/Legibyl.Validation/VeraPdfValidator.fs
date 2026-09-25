@@ -437,9 +437,13 @@ type VeraPdfValidator() =
     /// (no shared parser/session state), since reading the tagged structure is a
     /// distinct concern from PDF/A|UA rule validation and callers may want it without
     /// running a full validation pass.
-    member _.ReadStructureTree(pdfPath: string) : StructureNode | null =
+    member _.ReadStructureTree
+        (
+            pdfPath: string,
+            [<Optional; DefaultParameterValue(null: IProgress<StructureReadProgress> | null)>] progress: IProgress<StructureReadProgress> | null
+        ) : StructureNode | null =
         ensureExists pdfPath
-        wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath)
+        wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath progress)
 
     interface IPdfValidator with
         member this.Validate(pdfPath, profile, progress) = this.Validate(pdfPath, profile, progress)
@@ -448,4 +452,4 @@ type VeraPdfValidator() =
         member this.Fix(pdfPath, profile, outputPath, options) = this.Fix(pdfPath, profile, outputPath, options)
 
     interface IStructureTreeReader with
-        member this.ReadStructureTree pdfPath = this.ReadStructureTree pdfPath
+        member this.ReadStructureTree(pdfPath, progress) = this.ReadStructureTree(pdfPath, progress)

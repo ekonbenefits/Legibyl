@@ -196,9 +196,17 @@ module private MainView =
         features.Add(FontFeature.Parse "tnum")
         AttrBuilder<TextBlock>.CreateProperty<FontFeatureCollection | null>(TextBlock.FontFeaturesProperty, features, ValueNone)
 
-    /// "Page 57 of 675   Checks 394,185   Rules failed 1   Elapsed 0:07": each value sits in a
-    /// fixed-width slot with equal-width digits, so the line doesn't shift as it updates.
-    let private progressLine (progress: ValidationProgress) : IView =
+    /// What the progress row under the file row is showing.
+    type BusyProgress =
+        | Validating of ValidationProgress
+        | ReadingStructure of StructureReadProgress
+
+    let private formatElapsed (elapsed: TimeSpan) =
+        if elapsed.TotalHours >= 1.0 then elapsed.ToString(@"h\:mm\:ss") else elapsed.ToString(@"m\:ss")
+
+    /// e.g. "Page 57 of 675   Checks 394,185   Rules failed 1   Elapsed 0:07": each value sits
+    /// in a fixed-width slot with equal-width digits, so the line doesn't shift as it updates.
+    let private progressLine (progress: BusyProgress) : IView =
         let secondaryText = Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
         let slot (width: float) (alignment: TextAlignment) (text: string) =
             TextBlock.create [
@@ -217,34 +225,48 @@ module private MainView =
                     slot width TextAlignment.Right value
                 ]
             ]
-        let elapsed =
-            if progress.Elapsed.TotalHours >= 1.0 then progress.Elapsed.ToString(@"h\:mm\:ss")
-            else progress.Elapsed.ToString(@"m\:ss")
-        let status =
-            match progress.Stage with
-            | ValidationStage.CheckingPages -> $"Page {progress.Page:N0} of {progress.PageCount:N0}"
-            | ValidationStage.Finishing -> "Finishing up…"
-            | _ -> "Reading the PDF…"
+        let status, stats =
+            match progress with
+            | Validating progress ->
+                let status =
+                    match progress.Stage with
+                    | ValidationStage.CheckingPages -> $"Page {progress.Page:N0} of {progress.PageCount:N0}"
+                    | ValidationStage.Finishing -> "Finishing up…"
+                    | _ -> "Reading the PDF…"
+                status,
+                [ stat "Checks" 80.0 (progress.Checks.ToString "N0")
+                  stat "Rules failed" 32.0 (progress.FailedRules.ToString "N0")
+                  stat "Elapsed" 48.0 (formatElapsed progress.Elapsed) ]
+            | ReadingStructure progress ->
+                let status =
+                    match progress.Stage with
+                    | StructureReadStage.ReadingText -> $"Reading page text {progress.Page:N0} of {progress.PageCount:N0}"
+                    | StructureReadStage.ReadingLinks -> "Reading links…"
+                    | _ -> "Building the tree…"
+                status,
+                [ stat "Elements" 64.0 (progress.Elements.ToString "N0")
+                  stat "Elapsed" 48.0 (formatElapsed progress.Elapsed) ]
         WrapPanel.create [
             WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
-            WrapPanel.children [
-                slot 150.0 TextAlignment.Left status
-                stat "Checks" 80.0 (progress.Checks.ToString "N0")
-                stat "Rules failed" 32.0 (progress.FailedRules.ToString "N0")
-                stat "Elapsed" 48.0 elapsed
-            ]
+            WrapPanel.children [ yield slot 210.0 TextAlignment.Left status :> IView; for stat in stats do yield stat :> IView ]
         ]
 
-    /// The progress bar fills page by page, since that's nearly all of veraPDF's time; it's
-    /// indeterminate while the file is being read, before veraPDF reaches the first page.
-    let private progressBarState (progress: ValidationProgress option) : IAttr<ProgressBar> list =
-        match progress with
-        | Some progress when progress.Stage = ValidationStage.CheckingPages && progress.PageCount > 0 ->
+    /// The bar fills page by page, which is most of the time for both validating (veraPDF
+    /// checking pages) and reading the structure (extracting page text). It's full for the
+    /// short steps after that, and indeterminate before the first page.
+    let private progressBarState (progress: BusyProgress option) : IAttr<ProgressBar> list =
+        let fraction page pageCount =
             [ ProgressBar.isIndeterminate false
-              ProgressBar.maximum (float progress.PageCount)
-              ProgressBar.value (float (progress.Page - 1)) ]
-        | Some progress when progress.Stage = ValidationStage.Finishing ->
-            [ ProgressBar.isIndeterminate false; ProgressBar.maximum 1.0; ProgressBar.value 1.0 ]
+              ProgressBar.maximum (float pageCount)
+              ProgressBar.value (float (page - 1)) ]
+        let full = [ ProgressBar.isIndeterminate false; ProgressBar.maximum 1.0; ProgressBar.value 1.0 ]
+        match progress with
+        | Some(Validating progress) when progress.Stage = ValidationStage.CheckingPages && progress.PageCount > 0 ->
+            fraction progress.Page progress.PageCount
+        | Some(Validating progress) when progress.Stage = ValidationStage.Finishing -> full
+        | Some(ReadingStructure progress) when progress.Stage = StructureReadStage.ReadingText && progress.PageCount > 0 ->
+            fraction progress.Page progress.PageCount
+        | Some(ReadingStructure _) -> full
         | _ -> [ ProgressBar.isIndeterminate true ]
 
     let view (window: Window) (openRequests: IReadable<string option>) =
@@ -254,7 +276,7 @@ module private MainView =
             let selectedFile = ctx.useState (None: string option)
             let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
-            let validationProgress = ctx.useState (None: ValidationProgress option)
+            let busyProgress = ctx.useState (None: BusyProgress option)
             let outcome = ctx.useState NotValidated
             let selectedRow = ctx.useState (None: RuleViolationRow option)
             let preview = ctx.useState noPreview
@@ -323,9 +345,9 @@ module private MainView =
                         let profile = currentProfile ()
                         isBusy.Set true
                         clearResults ()
-                        validationProgress.Set None
+                        busyProgress.Set None
                         // Created on the UI thread, so its reports arrive there too.
-                        let progress = Progress<ValidationProgress>(fun p -> validationProgress.Set(Some p))
+                        let progress = Progress<ValidationProgress>(fun p -> busyProgress.Set(Some(Validating p)))
                         try
                             try
                                 let! report = Task.Run(fun () -> validator.Validate(filePath, profile, progress))
@@ -394,9 +416,12 @@ module private MainView =
                     match selectedFile.Current with
                     | Some filePath ->
                         isBusy.Set true
+                        busyProgress.Set None
+                        // Created on the UI thread, so its reports arrive there too.
+                        let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
                         try
                             try
-                                match! Task.Run(fun () -> validator.ReadStructureTree filePath) with
+                                match! Task.Run(fun () -> validator.ReadStructureTree(filePath, progress)) with
                                 | null ->
                                     do!
                                         Dialogs.showMessage
@@ -749,9 +774,9 @@ module private MainView =
                             ProgressBar.create [
                                 ProgressBar.height 4.0
                                 ProgressBar.minHeight 4.0
-                                yield! progressBarState validationProgress.Current
+                                yield! progressBarState busyProgress.Current
                             ]
-                            match validationProgress.Current with
+                            match busyProgress.Current with
                             | Some progress when busy -> progressLine progress
                             | _ -> ()
                         ]
