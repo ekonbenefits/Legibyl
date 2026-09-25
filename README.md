@@ -313,7 +313,11 @@ Options:
   would satisfy `dc:title` while misdescribing the document to a screen reader
   user, so Legibyl does not do it at all. A file with no title anywhere
   therefore still reports the `dc:title` failure after `--fix`, rather than
-  being quietly given a made-up one. The GUI dialog
+  being quietly given a made-up one — unless you opt in with
+  `--title-from-first-page` (or the matching Fix dialog option, off by
+  default): then a document with no title in Info or XMP is titled from the
+  text of its first page, as long as more pages follow and that page is short
+  enough to be a title page (at most 30 words and 200 characters). The GUI dialog
   exposes the same repairs as individual checkboxes, plus removal of empty
   semantic `/P` structure elements, retagging headings recovered from the table
   of contents, and tagging marked paragraphs as lists (all off by default), which

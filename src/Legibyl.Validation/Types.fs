@@ -18,7 +18,10 @@ type PdfFixOptions =
     | HeadingsFromToc = 32
     /// Tags runs of paragraphs that start with list markers as lists; see ParagraphLists.
     | ListsFromParagraphs = 64
-    | All = 127
+    /// Like DocumentTitle, but when the document carries no title anywhere, falls back to
+    /// the text of a short first page (a title page); see StructureFixes.titlePageText.
+    | TitleFromFirstPage = 128
+    | All = 255
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
