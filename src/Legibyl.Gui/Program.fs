@@ -11,6 +11,8 @@ type App() =
     inherit Application()
 
     override this.Initialize() =
+        // Shown as the macOS app menu's title.
+        this.Name <- "Legibyl"
         // Follow the OS light/dark setting.
         this.RequestedThemeVariant <- ThemeVariant.Default
         this.Styles.Add(SemiTheme())
