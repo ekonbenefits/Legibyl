@@ -494,13 +494,12 @@ module private MainView =
                             ]
                         DataGridTemplateColumn.create [
                             DataGridTemplateColumn.header "Type"
-                            // Set directly: the width attribute isn't applied to this template column.
-                            DataGridTemplateColumn.init (fun column -> column.Width <- DataGridLength 60.0)
+                            DataGridTemplateColumn.width (DataGridLength 64.0)
                             DataGridTemplateColumn.cellTemplate (
                                 DataTemplateView<RuleViolationRow>.create (fun row -> severityIcon row.Violation)
                             )
                         ]
-                        textColumn "Fixable" "Fixable" 72.0
+                        textColumn "Fixable" "Fixable" 76.0
                         textColumn "Clause" "Clause" 72.0
                         textColumn "Test" "TestNumber" 60.0
                         textColumn "Page" "PageDisplay" 72.0
