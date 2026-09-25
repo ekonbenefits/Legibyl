@@ -115,9 +115,13 @@ let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedCon
         if element.Children.Count > 0 then
             indexMarkedContent pageNumber element.Children index
 
-let build (pdfPath: string) : Index =
+/// Builds the index, calling onPage (page number, page count) as each page starts.
+let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
     let index = Index()
     use document = PdfDocument.Open pdfPath
     for page in document.GetPages() do
+        onPage page.Number document.NumberOfPages
         indexMarkedContent page.Number (page.GetMarkedContents()) index
     index
+
+let build (pdfPath: string) : Index = buildReporting pdfPath (fun _ _ -> ())

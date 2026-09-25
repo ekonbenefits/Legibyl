@@ -112,3 +112,19 @@ let ``Validate reports progress, ending with the final counts`` () =
     let inOrder (values: int list) = values |> List.pairwise |> List.forall (fun (a, b) -> a <= b)
     reports |> Seq.map _.Page |> List.ofSeq |> inOrder |> should be True
     reports |> Seq.map (_.Stage >> int) |> List.ofSeq |> inOrder |> should be True
+
+[<Fact>]
+let ``ReadStructureTree reports its stages in order, page by page`` () =
+    use input = new TempPdf()
+    createPdfWithUntitledFigures input.Path 3
+    let reports = Collections.Concurrent.ConcurrentQueue<StructureReadProgress>()
+    let progress = { new IProgress<StructureReadProgress> with member _.Report value = reports.Enqueue value }
+
+    VeraPdfValidator().ReadStructureTree(input.Path, progress) |> notNull |> ignore
+
+    let stages = reports |> Seq.map (_.Stage >> int) |> List.ofSeq
+    stages |> List.pairwise |> List.forall (fun (a, b) -> a <= b) |> should be True
+    stages |> List.distinct |> should equal [ 0; 1; 2 ]
+    let textReports = reports |> Seq.filter (fun r -> r.Stage = StructureReadStage.ReadingText) |> List.ofSeq
+    textReports.Head.Page |> should equal 1
+    textReports |> List.forall (fun r -> r.PageCount >= 3 && r.Page <= r.PageCount) |> should be True

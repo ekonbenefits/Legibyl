@@ -35,7 +35,9 @@ type private LinkAnnotationTarget = { Geometry: StructureGeometry; Target: LinkT
 type private WalkContext =
     { PageNumberByKey: IReadOnlyDictionary<string, int>
       TextIndex: MarkedContentTextIndex.Index
-      LinkAnnotationTargets: LinkAnnotationTarget list }
+      LinkAnnotationTargets: LinkAnnotationTarget list
+      /// Called once per structure element walked, for progress.
+      OnElement: unit -> unit }
 
 let private atom (value: string) = ASAtom.getASAtom value
 
@@ -340,7 +342,9 @@ let rec private walkChildren (node: PDStructTreeNode) context inheritedPage dept
         // visible text and counts them via ContentLeafCount.
         [| for child in javaSeq (node.getChildren ()) do
                match child with
-               | :? PDStructElem as elem -> toStructureNode elem context inheritedPage depth
+               | :? PDStructElem as elem ->
+                   context.OnElement()
+                   toStructureNode elem context inheritedPage depth
                | _ -> () |]
 
 and private toStructureNode (elem: PDStructElem) context inheritedPage depth : StructureNode =
@@ -415,13 +419,38 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
       ContentLeafCount = leaves.Length
       Children = children }
 
-/// Reads the structure tree of the PDF at pdfPath, or null if it has no StructTreeRoot.
-let read (pdfPath: string) : StructureNode | null =
+/// Reports reading progress to an optional sink: stage changes always, updates within a
+/// stage at most ten times a second.
+type private ReadReporter(progress: IProgress<StructureReadProgress> | null) =
+    let stopwatch = Diagnostics.Stopwatch.StartNew()
+    let mutable lastStage = enum<StructureReadStage> -1
+    let mutable lastReport = TimeSpan.Zero
+
+    member _.Report(stage: StructureReadStage, page: int, pageCount: int, elements: int) =
+        match progress with
+        | null -> ()
+        | progress ->
+            let now = stopwatch.Elapsed
+            if stage <> lastStage || now - lastReport >= TimeSpan.FromMilliseconds 100.0 then
+                lastStage <- stage
+                lastReport <- now
+                progress.Report
+                    { Stage = stage
+                      Page = page
+                      PageCount = pageCount
+                      Elements = elements
+                      Elapsed = now }
+
+/// Reads the structure tree of the PDF at pdfPath, or null if it has no StructTreeRoot,
+/// reporting to progress (if given) as it goes.
+let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) : StructureNode | null =
+    let reporter = ReadReporter progress
     let doc = PDDocument(pdfPath)
     try
         match doc.getStructTreeRoot () with
         | null -> null
         | structTreeRoot ->
+            let mutable elements = 0
             // Text and link targets come from separate parses (PdfPig, iText). If either
             // fails (e.g. a PDF quirk that library can't parse but veraPDF tolerates),
             // degrade gracefully: keep the structure tree itself, just without that detail.
@@ -429,14 +458,20 @@ let read (pdfPath: string) : StructureNode | null =
                 { PageNumberByKey = pageNumberIndex doc
                   TextIndex =
                     try
-                        MarkedContentTextIndex.build pdfPath
+                        MarkedContentTextIndex.buildReporting pdfPath (fun page pageCount ->
+                            reporter.Report(StructureReadStage.ReadingText, page, pageCount, 0))
                     with _ ->
                         MarkedContentTextIndex.Index()
                   LinkAnnotationTargets =
                     try
+                        reporter.Report(StructureReadStage.ReadingLinks, 0, 0, 0)
                         buildLinkAnnotationIndex pdfPath
                     with _ ->
-                        [] }
+                        []
+                  OnElement =
+                    fun () ->
+                        elements <- elements + 1
+                        reporter.Report(StructureReadStage.BuildingTree, 0, 0, elements) }
 
             let children = walkChildren structTreeRoot context None 0
             { Tag = "StructTreeRoot"

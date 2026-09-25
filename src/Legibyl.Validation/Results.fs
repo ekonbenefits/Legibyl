@@ -152,11 +152,35 @@ type IPdfFixer =
         [<Optional; DefaultParameterValue(PdfFixOptions.Metadata)>] options: PdfFixOptions ->
             FixResult
 
+/// Which part of reading a structure tree is running.
+type StructureReadStage =
+    /// Extracting each page's tagged text, page by page: see StructureReadProgress.Page.
+    | ReadingText = 0
+    /// Finding where link annotations point.
+    | ReadingLinks = 1
+    /// Walking the structure tree itself.
+    | BuildingTree = 2
+
+/// How far reading a structure tree has got. Reading the pages' text is most of the time.
+type StructureReadProgress =
+    { Stage: StructureReadStage
+      /// The 1-based page whose text is being read; 0 outside ReadingText.
+      Page: int
+      PageCount: int
+      /// Structure elements walked so far (BuildingTree).
+      Elements: int
+      /// Time since reading started.
+      Elapsed: TimeSpan }
+
 /// Reads a tagged PDF's logical structure tree — the semantic hierarchy (headings,
 /// paragraphs, lists, tables, links, etc.) that screen readers use to present the
 /// document. Implementations wrap veraPDF's Java PD model (loaded via IKVM).
 type IStructureTreeReader =
     /// Reads the structure tree of the PDF at pdfPath, rooted at its StructTreeRoot, or
     /// returns null if the document has no StructTreeRoot at all (i.e. it is completely
-    /// untagged). Throws VeraPdfValidationException if the file cannot be parsed.
-    abstract ReadStructureTree: pdfPath: string -> StructureNode | null
+    /// untagged), reporting to progress (if given) as it goes. Throws
+    /// VeraPdfValidationException if the file cannot be parsed.
+    abstract ReadStructureTree:
+        pdfPath: string *
+        [<Optional; DefaultParameterValue(null: IProgress<StructureReadProgress> | null)>] progress: IProgress<StructureReadProgress> | null ->
+            StructureNode | null
