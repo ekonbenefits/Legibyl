@@ -127,10 +127,13 @@ PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
 
 ## GUI results view
 
-While a file validates, a line under the progress bar shows how many checks
-veraPDF has run, on how many objects, how many rules have failed so far, and
-the time elapsed. veraPDF finds objects as it goes, so there's no percentage
-to show; very large documents can take minutes.
+While a file validates, the progress bar fills page by page ("Page 57 of
+675"): veraPDF checks the pages in order, and that's nearly all of its time.
+Beside it are the checks run so far, how many rules have failed, and the time
+elapsed. veraPDF doesn't publish where it is, so Legibyl reads it from the
+validator's private `objectsContext` field; if a future veraPDF renames it,
+the bar just stays indeterminate (and a test fails). Very large documents can
+take minutes.
 
 The results list is sorted by page number by default (unlocated failures —
 those with no `pages[N]` in their context, such as document-level metadata

@@ -190,22 +190,62 @@ module private MainView =
             yield! attrs
         ]
 
-    /// e.g. "Validating… 394,185 checks on 640,196 objects, 1 rule failed so far · 0:07".
-    /// veraPDF keeps finding objects as it goes, so there's no percentage to show.
-    let private describeProgress (progress: ValidationProgress) =
+    /// Equal-width digits, so a number that changes doesn't change width.
+    let private tabularFigures: IAttr<TextBlock> =
+        let features = FontFeatureCollection()
+        features.Add(FontFeature.Parse "tnum")
+        AttrBuilder<TextBlock>.CreateProperty<FontFeatureCollection | null>(TextBlock.FontFeaturesProperty, features, ValueNone)
+
+    /// "Page 57 of 675   Checks 394,185   Rules failed 1   Elapsed 0:07": each value sits in a
+    /// fixed-width slot with equal-width digits, so the line doesn't shift as it updates.
+    let private progressLine (progress: ValidationProgress) : IView =
+        let secondaryText = Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+        let slot (width: float) (alignment: TextAlignment) (text: string) =
+            TextBlock.create [
+                TextBlock.minWidth width
+                TextBlock.textAlignment alignment
+                TextBlock.text text
+                tabularFigures
+                secondaryText
+            ]
+        let stat (label: string) (width: float) (value: string) =
+            StackPanel.create [
+                StackPanel.orientation Orientation.Horizontal
+                StackPanel.margin (16.0, 0.0, 0.0, 0.0)
+                StackPanel.children [
+                    TextBlock.create [ TextBlock.text label; secondaryText ]
+                    slot width TextAlignment.Right value
+                ]
+            ]
         let elapsed =
             if progress.Elapsed.TotalHours >= 1.0 then progress.Elapsed.ToString(@"h\:mm\:ss")
             else progress.Elapsed.ToString(@"m\:ss")
-        if progress.Checks = 0 && progress.ProcessedObjects = 0 then
-            // veraPDF spends the first moments reading the file before it counts anything.
-            $"Reading the PDF… · {elapsed}"
-        else
-            let failed =
-                match progress.FailedRules with
-                | 0 -> "no rules failed so far"
-                | 1 -> "1 rule failed so far"
-                | n -> $"{n:N0} rules failed so far"
-            $"Validating… {progress.Checks:N0} checks on {progress.ProcessedObjects:N0} objects, {failed} · {elapsed}"
+        let status =
+            match progress.Stage with
+            | ValidationStage.CheckingPages -> $"Page {progress.Page:N0} of {progress.PageCount:N0}"
+            | ValidationStage.Finishing -> "Finishing up…"
+            | _ -> "Reading the PDF…"
+        WrapPanel.create [
+            WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
+            WrapPanel.children [
+                slot 150.0 TextAlignment.Left status
+                stat "Checks" 80.0 (progress.Checks.ToString "N0")
+                stat "Rules failed" 32.0 (progress.FailedRules.ToString "N0")
+                stat "Elapsed" 48.0 elapsed
+            ]
+        ]
+
+    /// The progress bar fills page by page, since that's nearly all of veraPDF's time; it's
+    /// indeterminate while the file is being read, before veraPDF reaches the first page.
+    let private progressBarState (progress: ValidationProgress option) : IAttr<ProgressBar> list =
+        match progress with
+        | Some progress when progress.Stage = ValidationStage.CheckingPages && progress.PageCount > 0 ->
+            [ ProgressBar.isIndeterminate false
+              ProgressBar.maximum (float progress.PageCount)
+              ProgressBar.value (float (progress.Page - 1)) ]
+        | Some progress when progress.Stage = ValidationStage.Finishing ->
+            [ ProgressBar.isIndeterminate false; ProgressBar.maximum 1.0; ProgressBar.value 1.0 ]
+        | _ -> [ ProgressBar.isIndeterminate true ]
 
     let view (window: Window) (openRequests: IReadable<string option>) =
         Component(fun ctx ->
@@ -706,16 +746,10 @@ module private MainView =
                             ProgressBar.create [
                                 ProgressBar.height 4.0
                                 ProgressBar.minHeight 4.0
-                                ProgressBar.isIndeterminate true
+                                yield! progressBarState validationProgress.Current
                             ]
                             match validationProgress.Current with
-                            | Some progress when busy ->
-                                TextBlock.create [
-                                    TextBlock.margin (0.0, 4.0, 0.0, 0.0)
-                                    TextBlock.text (describeProgress progress)
-                                    TextBlock.textWrapping TextWrapping.Wrap
-                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                ]
+                            | Some progress when busy -> progressLine progress
                             | _ -> ()
                         ]
                     ]

@@ -8,6 +8,7 @@ open System.Threading
 open System.Threading.Tasks
 open org.verapdf.core
 open org.verapdf.gf.foundry
+open org.verapdf.gf.model
 open org.verapdf.pdfa
 open org.verapdf.pdfa.flavours
 open org.verapdf.pdfa.results
@@ -139,23 +140,65 @@ module internal VeraPdf =
     let private progressPattern =
         Regex(@"(\d+) checks, (\d+) failed, (\d+) processed objects, (\d+) in stack", RegexOptions.Compiled)
 
-    /// Runs validate, reporting the validator's counters to progress every quarter second
-    /// and once more when it finishes.
-    let withProgress (validator: PDFAValidator) (progress: IProgress<ValidationProgress>) (validate: unit -> 'T) =
+    /// Reads the path of the object veraPDF is checking, e.g. "root/document[0]/pages[57](…)/
+    /// contentStream[0]/…", from the top of BaseValidator's private objectsContext stack.
+    /// veraPDF has no public way to say where it is; if a later version renames the field,
+    /// the reader returns "" and progress just stays on Preparing.
+    let private contextReader (validator: PDFAValidator) : unit -> string =
+        let rec findField (t: Type | null) : Reflection.FieldInfo | null =
+            match t with
+            | null -> null
+            | t ->
+                match t.GetField("objectsContext", Reflection.BindingFlags.Instance ||| Reflection.BindingFlags.NonPublic) with
+                | null -> findField t.BaseType
+                | field -> field
+        match findField (validator.GetType()) with
+        | null -> fun () -> ""
+        | field ->
+            fun () ->
+                match field.GetValue validator with
+                | :? java.util.Deque as stack -> string (stack.peekFirst ())
+                | _ -> ""
+
+    let private pagePattern = Regex(@"^root/document\[0\]/pages\[(\d+)\]", RegexOptions.Compiled)
+
+    /// Runs validate, reporting the validator's counters and position to progress every
+    /// quarter second and once more when it finishes.
+    let withProgress (validator: PDFAValidator) (pageCount: int) (progress: IProgress<ValidationProgress>) (validate: unit -> 'T) =
         let stopwatch = Diagnostics.Stopwatch.StartNew()
-        let report () =
+        // veraPDF checks the pages in order, then the rest (e.g. the structure tree). Keep the
+        // furthest page seen: while reading, and briefly between pages, there's no current
+        // object at all. Any other object after the pages have started means they're done.
+        let mutable page = 0
+        let mutable pastPages = false
+        let currentContext = contextReader validator
+        let report finished =
             let found = progressPattern.Match(validator.getValidationProgressString ())
             if found.Success then
+                let context = currentContext ()
+                let onPage = pagePattern.Match context
+                if finished || (page > 0 && context <> "" && not onPage.Success) then
+                    pastPages <- true
+                    page <- max page pageCount
+                elif onPage.Success && not pastPages then
+                    page <- max page (int onPage.Groups[1].Value + 1)
+                let stage =
+                    if pastPages then ValidationStage.Finishing
+                    elif page = 0 then ValidationStage.Preparing
+                    else ValidationStage.CheckingPages
                 let count (group: int) = int found.Groups[group].Value
                 progress.Report
-                    { Checks = count 1
+                    { Stage = stage
+                      Page = page
+                      PageCount = pageCount
+                      Checks = count 1
                       FailedRules = count 2
                       ProcessedObjects = count 3
                       QueuedObjects = count 4
                       Elapsed = stopwatch.Elapsed }
         // An exception escaping a timer callback would take down the process; progress is
         // best-effort, so a failed read just skips that update.
-        let timer = new Timer((fun _ -> try report () with _ -> ()), null, 0, 250)
+        let timer = new Timer((fun _ -> try report false with _ -> ()), null, 0, 250)
         let result =
             try
                 validate ()
@@ -164,7 +207,7 @@ module internal VeraPdf =
                 use stopped = new ManualResetEvent(false)
                 if timer.Dispose stopped then
                     stopped.WaitOne() |> ignore
-        report ()
+        report true
         result
 
     let toReport (pdfPath: string) profile (result: ValidationResult) (analysis: LegibylAnalysis) : ValidationReport =
@@ -301,7 +344,12 @@ type VeraPdfValidator() =
                 let result =
                     match progress with
                     | null -> validator.validate parser
-                    | progress -> withProgress validator progress (fun () -> validator.validate parser)
+                    | progress ->
+                        let pageCount =
+                            match parser with
+                            | :? GFModelParser as parser -> try parser.getPDDocument().getNumberOfPages () with _ -> 0
+                            | _ -> 0
+                        withProgress validator pageCount progress (fun () -> validator.validate parser)
                 toReport pdfPath profile result (analysis.GetAwaiter().GetResult()))
         finally
             closeLegibylAnalysis analysis
