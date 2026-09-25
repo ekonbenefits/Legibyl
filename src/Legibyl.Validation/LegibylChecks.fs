@@ -13,8 +13,8 @@
 ///   4. Cover it in tests/Legibyl.Validation.Tests/PdfFixerTests.fs.
 ///
 /// Checks that look at the document as a whole rather than one element at a time (like
-/// the table-of-contents heading checks, Structure-3 to 5, and lists tagged as paragraphs,
-/// Structure-6) are added in `run` directly.
+/// the table-of-contents heading checks, Structure-3 to 5, lists tagged as paragraphs,
+/// Structure-6, and missing bookmarks, Structure-7) are added in `run` directly.
 module internal Legibyl.Validation.LegibylChecks
 
 open System
@@ -169,6 +169,30 @@ let private paragraphListFindings (document: PdfDocument) context =
               PdfFixOptions.ListsFromParagraphs
               (Option.toObj run.Geometry) ]
 
+// ---- Structure-7: headings but no bookmarks (see Bookmarks) ----
+
+[<Literal>]
+let private MissingBookmarksMessage =
+    "The document has headings but no bookmarks, so readers can't jump between its sections from the navigation pane. The Fix dialog can add them for the H1 and H2 headings."
+
+let private missingBookmarkFindings (document: PdfDocument) context =
+    match Bookmarks.find document context with
+    | None -> []
+    | Some missing ->
+        let bookmarkable = missing.Bookmarkable.Length
+        let detail = $"{missing.HeadingCount} heading(s), {bookmarkable} of them H1 or H2 with text to bookmark."
+        let fixable = bookmarkable > 0 && missing.LanguageDeclared
+        [ warning
+              MissingBookmarksMessage
+              (if bookmarkable > 0 && not missing.LanguageDeclared then
+                   $"{detail} Declare the document's language (/Lang) first: bookmark text needs one."
+               else
+                   detail)
+              missing.FirstHeadingPath
+              7
+              (if fixable then PdfFixOptions.BookmarksFromHeadings else PdfFixOptions.None)
+              null ]
+
 /// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
@@ -182,7 +206,8 @@ let run (document: PdfDocument) context : RuleViolation list =
                       warning check.Message null finding.Location check.TestNumber check.FixOptions (Option.toObj finding.Geometry)
                   | None -> ()
           yield! tocHeadingFindings document context
-          yield! paragraphListFindings document context ]
+          yield! paragraphListFindings document context
+          yield! missingBookmarkFindings document context ]
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
 let couldNotInspect (errorMessage: string) =

@@ -21,7 +21,9 @@ type PdfFixOptions =
     /// Like DocumentTitle, but when the document carries no title anywhere, falls back to
     /// the text of a short first page (a title page); see StructureFixes.titlePageText.
     | TitleFromFirstPage = 128
-    | All = 255
+    /// Adds bookmarks for the H1 and H2 headings when there are none; see Bookmarks.
+    | BookmarksFromHeadings = 256
+    | All = 511
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.

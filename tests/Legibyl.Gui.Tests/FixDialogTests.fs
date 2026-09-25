@@ -71,4 +71,5 @@ let ``the fix dialog counts what each repair addresses and ticks only what appli
         // Opt-in repairs show their count but stay unticked even when found.
         shown["Tag runs of"] |> should equal (false, "3 found")
         shown["Tag headings the"] |> should equal (false, "None found in this PDF")
-        shown["Remove empty semantic"] |> should equal (false, "None found in this PDF"))
+        shown["Remove empty semantic"] |> should equal (false, "None found in this PDF")
+        shown["Add bookmarks for"] |> should equal (false, "None found in this PDF"))
