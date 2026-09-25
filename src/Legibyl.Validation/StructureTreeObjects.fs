@@ -11,7 +11,9 @@ open Legibyl.Validation.Interop
 
 type Context =
     { PageNumberByObject: IReadOnlyDictionary<int, int>
-      MarkedContent: MarkedContentTextIndex.Index }
+      MarkedContent: MarkedContentTextIndex.Index
+      /// The StructTreeRoot's /RoleMap: custom tag -> the tag it stands for.
+      RoleMap: IReadOnlyDictionary<PdfName, PdfName> }
 
 /// Maps each page's indirect object number to its 1-based page number.
 let pageNumberIndex (document: PdfDocument) : IReadOnlyDictionary<int, int> =
@@ -22,9 +24,24 @@ let pageNumberIndex (document: PdfDocument) : IReadOnlyDictionary<int, int> =
         | reference -> index[reference.GetObjNumber()] <- pageNumber
     index
 
+let private roleMap (document: PdfDocument) : IReadOnlyDictionary<PdfName, PdfName> =
+    let map = Dictionary<PdfName, PdfName>()
+    match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
+    | null -> ()
+    | structTreeRoot ->
+        match structTreeRoot.GetAsDictionary(PdfName.RoleMap) with
+        | null -> ()
+        | roles ->
+            for key in roles.KeySet() do
+                match roles.GetAsName key with
+                | null -> ()
+                | role -> map[key] <- role
+    map
+
 let createContext (document: PdfDocument) (pdfPath: string) =
     { PageNumberByObject = pageNumberIndex document
-      MarkedContent = MarkedContentTextIndex.build pdfPath }
+      MarkedContent = MarkedContentTextIndex.build pdfPath
+      RoleMap = roleMap document }
 
 /// Unions geometries that are all on one page; None if there are none or they span pages.
 let unionGeometry (geometries: StructureGeometry seq) =
@@ -80,7 +97,17 @@ let rectGeometry pageNumber (annotation: PdfDictionary) =
 let private actualText (dictionary: PdfDictionary) =
     dictionary.GetAsString(PdfName.ActualText) |?> _.ToUnicodeString()
 
-let isParagraph (dictionary: PdfDictionary) = PdfName.P.Equals(dictionary.GetAsName(PdfName.S))
+/// The element's tag after following the /RoleMap (e.g. LibreOffice's "Text body" -> P).
+let standardTag (dictionary: PdfDictionary) context : PdfName | null =
+    let rec follow (tag: PdfName) depth =
+        match lookup context.RoleMap tag with
+        | Some role when depth < 16 && not (role.Equals tag) -> follow role (depth + 1)
+        | _ -> tag
+    match dictionary.GetAsName(PdfName.S) with
+    | null -> null
+    | tag -> follow tag 0
+
+let isParagraph (dictionary: PdfDictionary) context = PdfName.P.Equals(standardTag dictionary context)
 
 let private markedContent context (mcid: PdfNumber) pageNumber =
     lookup context.MarkedContent (pageNumber, mcid.IntValue())

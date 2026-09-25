@@ -35,7 +35,7 @@ type Check =
 // ---- Structure-1: empty /P ----
 
 let private emptyParagraph context (visit: StructElemVisit) =
-    if isParagraph visit.Element && isSubtreeEmpty visit.Element context visit.Page then
+    if isParagraph visit.Element context && isSubtreeEmpty visit.Element context visit.Page then
         Some
             { Location = visit.Path
               Geometry = subtreeGeometry visit.Element context visit.Page }
@@ -68,7 +68,7 @@ let private isLikelySplitParagraph (currentText: string) (nextText: string) =
 
 let private splitParagraph context (visit: StructElemVisit) =
     match visit.NextSibling with
-    | Some next when isParagraph visit.Element && isParagraph next.Element ->
+    | Some next when isParagraph visit.Element context && isParagraph next.Element context ->
         let onDifferentPages = visit.Page.IsSome && next.Page.IsSome && visit.Page <> next.Page
         let currentText = normalizeText (extractText visit.Element context visit.Page)
         let nextText = normalizeText (extractText next.Element context next.Page)

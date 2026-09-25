@@ -39,7 +39,7 @@ and private shouldRemoveEmptyParagraph (obj: PdfObject | null) context inherited
     | :? PdfDictionary as dictionary ->
         let pageNumber = structElemPage dictionary context inheritedPage
         let removedFromChildren = removeEmptyParagraphsInside dictionary context pageNumber
-        isParagraph dictionary && isSubtreeEmpty dictionary context pageNumber, removedFromChildren
+        isParagraph dictionary context && isSubtreeEmpty dictionary context pageNumber, removedFromChildren
     | _ -> false, 0
 
 /// Sets /Tabs /S on annotated pages and/or removes empty /P structure elements, writing
