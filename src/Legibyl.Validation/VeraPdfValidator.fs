@@ -9,6 +9,7 @@ open org.verapdf.gf.foundry
 open org.verapdf.pdfa
 open org.verapdf.pdfa.flavours
 open org.verapdf.pdfa.results
+open org.verapdf.pdfa.validation.profiles
 open Legibyl.Validation.Interop
 
 module internal VeraPdf =
@@ -20,6 +21,15 @@ module internal VeraPdf =
             lock initLock (fun () ->
                 if not initialised then
                     VeraGreenfieldFoundryProvider.initialise ()
+                    // Each validation profile is shared process-wide and builds its rule lookup
+                    // tables on first use, without locking: a rebuild clears the table while
+                    // another thread may be reading it, which surfaces as a NullPointerException
+                    // ("FixError") in the metadata fixer. Build them once here, on one thread.
+                    for profile in javaSeq (Profiles.getVeraProfileDirectory().getValidationProfiles ()) do
+                        let profile = profile :?> ValidationProfile
+                        match Seq.tryHead (javaSeq (profile.getRules ())) with
+                        | Some rule -> profile.getRuleByRuleId((rule :?> Rule).getRuleId ()) |> ignore
+                        | None -> ()
                     initialised <- true)
 
     let ensureExists (pdfPath: string) =
