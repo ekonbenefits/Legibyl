@@ -6,6 +6,7 @@ open iText.IO.Font.Constants
 open iText.Kernel.Font
 open iText.Kernel.Pdf
 open iText.Kernel.Pdf.Canvas
+open iText.Kernel.XMP
 open Xunit
 open FsUnit.Xunit
 open Legibyl.Validation
@@ -385,6 +386,17 @@ let private linkContentsOf (path: string) =
         |> notNull
         |> fun annotation -> annotation.GetAsString(PdfName.Contents) |> Option.ofObj |> Option.map _.ToUnicodeString() ]
 
+/// Rewrites path in place, giving it an XMP dc:title and nothing in Info /Title —
+/// the shape a document has when its title needs moving across rather than inventing.
+let private setXmpTitle (path: string) (title: string) =
+    let bytes = File.ReadAllBytes path
+    use reader = new PdfReader(new MemoryStream(bytes))
+    use writer = new PdfWriter(path)
+    use document = new PdfDocument(reader, writer)
+    let xmp = XMPMetaFactory.Create()
+    xmp.SetLocalizedText(XMPConst.NS_DC, "title", null, XMPConst.X_DEFAULT, title)
+    document.SetXmpMetadata xmp
+
 [<Fact>]
 let ``Fix link contents describes an undescribed link from its own text`` () =
     use input = new TempPdf()
@@ -434,36 +446,30 @@ let ``Fix link contents leaves a link that already has a description alone`` () 
     linkContentsOf input.Path |> should equal [ Some "Hand-written description" ]
 
 [<Fact>]
-let ``Fix document title names an untitled document and shows the title`` () =
+let ``Fix document title moves a title the document carries in XMP into the Info dictionary`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
     createPdfWithLinks input.Path [ "Read more", None ]
+    setXmpTitle input.Path "Retirement Plan Summary"
     let fixer = VeraPdfValidator()
 
-    let result =
-        fixer.Fix(
-            input.Path,
-            PdfProfile.PdfUa1,
-            output.Path,
-            PdfFixOptions.DocumentTitle ||| PdfFixOptions.TitleFromFileName
-        )
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle)
 
     result.WasFixed |> should be True
     use document = new PdfDocument(new PdfReader(output.Path))
-    document.GetDocumentInfo().GetTitle()
-    |> should equal (Path.GetFileNameWithoutExtension input.Path)
+    document.GetDocumentInfo().GetTitle() |> should equal "Retirement Plan Summary"
     let preferences = document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.ViewerPreferences) |> notNull
     preferences.Get(PdfName.DisplayDocTitle) |> should equal PdfBoolean.TRUE
 
 [<Fact>]
-let ``Fix document title without the file name fallback leaves an untitled document unnamed`` () =
+let ``Fix document title never invents a title for a document that carries none`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
     createPdfWithLinks input.Path [ "Read more", None ]
     let fixer = VeraPdfValidator()
 
-    // /DisplayDocTitle is still worth setting, so the file does change — but a title must
-    // not be invented from the file name unless the caller asked for that.
+    // /DisplayDocTitle is still worth setting, so the file does change — but a title the
+    // author never wrote is not ours to make up, least of all out of the file name.
     fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle) |> ignore
 
     use document = new PdfDocument(new PdfReader(output.Path))

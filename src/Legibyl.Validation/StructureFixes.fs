@@ -110,14 +110,6 @@ let private describeLinks (structTreeRoot: PdfDictionary) context =
 
 // ---- Document title ----
 
-/// A readable title from the file name, for documents that never carried one:
-/// "annual_report 2024.pdf" -> "annual report 2024".
-let private titleFromFileName (inputPath: string) =
-    let name = Path.GetFileNameWithoutExtension inputPath |> Option.ofObj |> Option.defaultValue ""
-    let withoutFixedSuffix = Regex.Replace(name, @"\.fixed$", "", RegexOptions.IgnoreCase)
-    let spaced = Regex.Replace(withoutFixedSuffix.Replace('_', ' '), @"\s+", " ").Trim()
-    if String.IsNullOrWhiteSpace spaced then None else Some spaced
-
 /// The document's XMP `dc:title`, if it has one. Best-effort: a malformed XMP packet
 /// should not stop the rest of the repairs.
 let private xmpTitle (document: PdfDocument) =
@@ -138,18 +130,16 @@ let private xmpTitle (document: PdfDocument) =
 /// A title the document already carries is kept — in the Info dictionary, or in XMP,
 /// where it only needs copying across.
 ///
-/// Deriving a title from the file name is a guess, and a wrong one is worse than none:
-/// it satisfies dc:title while telling a screen reader user something untrue about the
-/// document. So it only happens when the caller opts in, which the CLI does not do —
-/// there a title is only ever moved from somewhere the author actually put it.
-let private nameDocument (document: PdfDocument) (inputPath: string) allowFileNameFallback =
+/// A title is never invented. Guessing one from the file name would satisfy dc:title
+/// while telling a screen reader user something untrue about the document, so a
+/// document that carries no title anywhere keeps reporting that as a failure.
+let private nameDocument (document: PdfDocument) =
     let info = document.GetDocumentInfo()
     let titleSet =
         if not (String.IsNullOrWhiteSpace(info.GetTitle())) then
             None
         else
             xmpTitle document
-            |> Option.orElseWith (fun () -> if allowFileNameFallback then titleFromFileName inputPath else None)
             |> Option.map (fun title ->
                 info.SetTitle title |> ignore
                 title)
@@ -209,7 +199,7 @@ let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions)
 
     let titleSet, displayDocTitleSet =
         if options.HasFlag PdfFixOptions.DocumentTitle then
-            nameDocument document inputPath (options.HasFlag PdfFixOptions.TitleFromFileName)
+            nameDocument document
         else
             None, false
 

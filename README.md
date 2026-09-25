@@ -248,14 +248,13 @@ Options:
   link's own visible text (a table-of-contents entry's dot leaders and printed
   page number are stripped, so `Scope of this document ..... 3` becomes
   `Scope of this document`); and a **document title** plus `/DisplayDocTitle`,
-  so readers show the title rather than the file name. The title is only ever
+  so readers show the title rather than the file name. A title is only ever
   moved from somewhere the author actually put it — the Info dictionary, or
-  XMP `dc:title`. Deriving a title from the **file name** is a guess, and a
-  wrong one satisfies `dc:title` while misdescribing the document to a screen
-  reader user, so the CLI never does it; it is offered in the GUI **Fix…**
-  dialog as an opt-in sub-option where a human can see the result. A file with
-  no title anywhere therefore still reports the `dc:title` failure after
-  `--fix`, rather than being quietly given a made-up one. The GUI dialog
+  XMP `dc:title` — and never invented. Guessing one from the **file name**
+  would satisfy `dc:title` while misdescribing the document to a screen reader
+  user, so Legibyl does not do it at all. A file with no title anywhere
+  therefore still reports the `dc:title` failure after `--fix`, rather than
+  being quietly given a made-up one. The GUI dialog
   exposes the same repairs as individual checkboxes, plus removal of empty
   semantic `/P` structure elements, which the CLI deliberately does not apply.
   Structural fixes run
