@@ -8,6 +8,9 @@
 
     <SummaryInformation Comments="Version ($(var.FullVersion))" />
     <MediaTemplate EmbedCab="yes" />
+    <Icon Id="LegibylIcon" SourceFile="$(var.RepoRoot)assets\Legibyl.ico" />
+    <!-- Shown in Settings > Apps (Add/Remove Programs). -->
+    <Property Id="ARPPRODUCTICON" Value="LegibylIcon" />
     <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
     <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
