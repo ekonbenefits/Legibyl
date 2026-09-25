@@ -1,7 +1,10 @@
 module Legibyl.Validation.Tests.StructureTreeReaderTests
 
 open System
+open iText.IO.Font.Constants
+open iText.Kernel.Font
 open iText.Kernel.Pdf
+open iText.Kernel.Pdf.Canvas
 open Xunit
 open FsUnit.Xunit
 open Legibyl.Validation
@@ -80,6 +83,37 @@ let private createPdfWithTaggedTocItemLink (path: string) =
 
     setStructTreeRoot document tocItem
 
+/// A /P with no /Pg of its own whose text, on page 2, it references through a marked-content
+/// reference (/MCR) that carries the page instead, as many PDF writers do.
+let private createPdfWithParagraphReferencingContentByMcr (path: string) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.AddNewPage() |> ignore
+    let page2 = document.AddNewPage()
+
+    let properties = PdfDictionary()
+    properties.Put(PdfName.MCID, PdfNumber 0) |> ignore
+    PdfCanvas(page2)
+        .BeginMarkedContent(PdfName.P, properties)
+        .BeginText()
+        .SetFontAndSize(PdfFontFactory.CreateFont(StandardFonts.HELVETICA), 12f)
+        .MoveText(72.0, 700.0)
+        .ShowText("Text on the second page")
+        .EndText()
+        .EndMarkedContent()
+    |> ignore
+
+    let mcr = PdfDictionary()
+    mcr.Put(PdfName.Type, PdfName.MCR) |> ignore
+    mcr.Put(PdfName.Pg, page2.GetPdfObject()) |> ignore
+    mcr.Put(PdfName.MCID, PdfNumber 0) |> ignore
+
+    let paragraph = PdfDictionary()
+    paragraph.Put(PdfName.Type, PdfName.StructElem) |> ignore
+    paragraph.Put(PdfName.S, PdfName.P) |> ignore
+    paragraph.Put(PdfName.K, mcr) |> ignore
+
+    setStructTreeRoot document paragraph
+
 [<Fact>]
 let ``ReadStructureTree tagged document returns expected hierarchy`` () =
     let root = reader.ReadStructureTree(corpusFile "pdfua1-pass.pdf") |> notNull
@@ -128,3 +162,14 @@ let ``ReadStructureTree TOC item with child link destination reports destination
     let tocItem = root.Children |> single (fun n -> n.Tag = "TOCI")
     tocItem.LinkDestinationPageNumber |> should equal (Nullable 2)
     tocItem.LinkDestinationDescription |> should haveSubstring "page 2"
+
+[<Fact>]
+let ``ReadStructureTree element without its own page takes the page of its marked content`` () =
+    use input = new TempPdf()
+    createPdfWithParagraphReferencingContentByMcr input.Path
+
+    let root = reader.ReadStructureTree input.Path |> notNull
+
+    let paragraph = root.Children |> single (fun n -> n.Tag = "P")
+    paragraph.PageNumber |> should equal (Nullable 2)
+    paragraph.Content |> should equal "Text on the second page"

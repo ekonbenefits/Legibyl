@@ -363,6 +363,20 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
         |> List.ofSeq
 
     let contentInfos = leaves |> List.choose (fun child -> resolveContentInfo child ownPage context)
+
+    // Many writers leave /Pg off the element and put it on each marked-content reference
+    // instead, so fall back to the page its own content is on (when that's one page).
+    let displayPage =
+        ownPage
+        |> Option.orElseWith (fun () ->
+            leaves
+            |> List.choose (function
+                | :? PDMCRDictionary as mcr -> pageNumberOfKey context (mcr.getPageObjectKey ())
+                | _ -> None)
+            |> List.distinct
+            |> function
+                | [ page ] -> Some page
+                | _ -> None)
     let contentTexts = contentInfos |> List.map _.Text |> List.filter (not << String.IsNullOrEmpty)
     let formField = leaves |> List.tryPick (fun child -> readFormFieldInfo child ownPage)
 
@@ -397,7 +411,7 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
       LinkDestinationDescription = linkTarget |> Option.map _.DestinationDescription |> Option.toObj
       Geometry = Option.toObj geometry
       Language = nullIfEmpty (elem.getLang () |?> _.toString())
-      PageNumber = Option.toNullable ownPage
+      PageNumber = Option.toNullable displayPage
       ContentLeafCount = leaves.Length
       Children = children }
 
