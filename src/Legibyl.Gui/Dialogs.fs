@@ -79,6 +79,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let bookmarks = ctx.useState (found PdfFixOptions.BookmarksFromHeadings > 0)
             // These change what the document says it is, so they stay opt-in even when found.
             let emptyParagraphs = ctx.useState false
+            let emptyTocEntries = ctx.useState false
             let tocHeadings = ctx.useState false
             let paragraphLists = ctx.useState false
             // The page's text may not be the title an author would give it.
@@ -118,6 +119,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                     [ metadata.Current, PdfFixOptions.Metadata
                       annotationTabs.Current, PdfFixOptions.AnnotationTabs
                       emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
+                      emptyTocEntries.Current, PdfFixOptions.RemoveEmptyTocEntries
                       linkContents.Current, PdfFixOptions.LinkContents
                       documentTitle.Current, PdfFixOptions.DocumentTitle
                       tocHeadings.Current, PdfFixOptions.HeadingsFromToc
@@ -152,6 +154,9 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                             checkBox
                                 emptyParagraphs
                                 (label "Remove empty semantic /P structure elements (optional cleanup)" PdfFixOptions.RemoveEmptyParagraphs)
+                            checkBox
+                                emptyTocEntries
+                                (label "Remove empty table-of-contents entries (TOCI) (optional cleanup)" PdfFixOptions.RemoveEmptyTocEntries)
                             checkBox
                                 paragraphLists
                                 (label

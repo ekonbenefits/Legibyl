@@ -46,6 +46,16 @@ let private emptyParagraph context (visit: StructElemVisit) =
     else
         None
 
+// ---- Structure-8: empty TOCI ----
+
+let private emptyTocEntry context (visit: StructElemVisit) =
+    if isTocItem visit.Element context && isSubtreeEmpty visit.Element context visit.Page then
+        Some
+            { Location = visit.Path
+              Geometry = subtreeGeometry visit.Element context visit.Page }
+    else
+        None
+
 // ---- Structure-2: likely split paragraph ----
 
 let private normalizeText (text: string) = Regex.Replace(text, @"\s+", " ").Trim()
@@ -100,7 +110,12 @@ let all: Check list =
         Message =
           "Likely split paragraph: adjacent /P structure elements look like visual line fragments from the same sentence. This is best fixed in the source document if possible."
         FixOptions = PdfFixOptions.None
-        Inspect = splitParagraph } ]
+        Inspect = splitParagraph }
+      { TestNumber = 8
+        Message =
+          "Empty table-of-contents entry (TOCI). It adds a meaningless stop when a screen reader moves through the table of contents and can be removed by the Fix dialog."
+        FixOptions = PdfFixOptions.RemoveEmptyTocEntries
+        Inspect = emptyTocEntry } ]
 
 let private warning message (errorMessage: string | null) location testNumber fixOptions geometry =
     { Specification = "Legibyl"

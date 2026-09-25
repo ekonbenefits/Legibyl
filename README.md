@@ -166,7 +166,9 @@ and **Copy Finding** copies the selected rule, message, error detail, and
 both location forms. **Copy Summary** and **Save Report** sit below the
 results list and include the same location information for every finding.
 Legibyl also adds warning rows for fixable cleanup issues that veraPDF does
-not report directly, such as empty semantic `/P` structure elements, and
+not report directly, such as empty semantic `/P` structure elements and empty
+table-of-contents entries (`TOCI`, Structure-8; an entry that still owns a link
+annotation isn't empty), and
 marks known repairable rows in the **Fixable** column. It also warns about
 adjacent sibling `/P` tags that look like visual line fragments from the same
 sentence; those are intentionally warning-only because the safest repair is
@@ -328,7 +330,7 @@ Options:
   text of its first page, as long as more pages follow and that page is short
   enough to be a title page (at most 30 words and 200 characters). The GUI dialog
   exposes the same repairs as individual checkboxes, plus removal of empty
-  semantic `/P` structure elements, retagging headings recovered from the table
+  semantic `/P` structure elements and empty table-of-contents entries, retagging headings recovered from the table
   of contents, and tagging marked paragraphs as lists (all off by default), and
   adding bookmarks for H1 and H2 headings; the CLI deliberately applies none of
   these.

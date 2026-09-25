@@ -13,45 +13,46 @@ open iText.Kernel.XMP
 open Legibyl.Validation.Interop
 open Legibyl.Validation.StructureTreeObjects
 
-/// Removes empty /P elements below dictionary; returns how many were removed.
-let rec private removeEmptyParagraphsInside (dictionary: PdfDictionary) context inheritedPage : int =
+/// Removes, below dictionary, every element isTarget accepts that has nothing visible below it
+/// (empty /P, empty TOCI); returns how many were removed.
+let rec private removeEmptyInside isTarget (dictionary: PdfDictionary) context inheritedPage : int =
     match dictionary.Get(PdfName.K) with
     | null -> 0
     | kids ->
         let pageNumber = structElemPage dictionary context inheritedPage
         match resolve kids with
-        // A single child: shouldRemoveEmptyParagraph has already cleaned up inside it, so
-        // keep its count (the array case below counts its own children instead).
+        // A single child: shouldRemoveEmpty has already cleaned up inside it, so keep its
+        // count (the array case below counts its own children instead).
         | :? PdfDictionary ->
-            match shouldRemoveEmptyParagraph kids context pageNumber with
+            match shouldRemoveEmpty isTarget kids context pageNumber with
             | true, removedFromChild ->
                 dictionary.Remove(PdfName.K) |> ignore
                 removedFromChild + 1
             | false, removedFromChild -> removedFromChild
-        | _ -> removeEmptyParagraphsFromKids kids context pageNumber
+        | _ -> removeEmptyFromKids isTarget kids context pageNumber
 
-and private removeEmptyParagraphsFromKids (kids: PdfObject) context inheritedPage : int =
+and private removeEmptyFromKids isTarget (kids: PdfObject) context inheritedPage : int =
     match resolve kids with
     | :? PdfArray as array ->
         let mutable removed = 0
         for i in array.Size() - 1 .. -1 .. 0 do
-            let remove, childRemoved = shouldRemoveEmptyParagraph (array.Get i) context inheritedPage
+            let remove, childRemoved = shouldRemoveEmpty isTarget (array.Get i) context inheritedPage
             if remove then
                 array.Remove i
                 removed <- removed + 1
             removed <- removed + childRemoved
         removed
-    | :? PdfDictionary as dictionary -> removeEmptyParagraphsInside dictionary context inheritedPage
+    | :? PdfDictionary as dictionary -> removeEmptyInside isTarget dictionary context inheritedPage
     | _ -> 0
 
-/// Cleans up obj's own children first, then reports whether obj itself is an empty /P
-/// (plus how many were removed below it).
-and private shouldRemoveEmptyParagraph (obj: PdfObject | null) context inheritedPage : bool * int =
+/// Cleans up obj's own children first, then reports whether obj itself is an empty element
+/// isTarget accepts (plus how many were removed below it).
+and private shouldRemoveEmpty isTarget (obj: PdfObject | null) context inheritedPage : bool * int =
     match resolve obj with
     | :? PdfDictionary as dictionary ->
         let pageNumber = structElemPage dictionary context inheritedPage
-        let removedFromChildren = removeEmptyParagraphsInside dictionary context pageNumber
-        isParagraph dictionary context && isSubtreeEmpty dictionary context pageNumber, removedFromChildren
+        let removedFromChildren = removeEmptyInside isTarget dictionary context pageNumber
+        isTarget dictionary context && isSubtreeEmpty dictionary context pageNumber, removedFromChildren
     | _ -> false, 0
 
 // ---- Link /Contents ----
@@ -204,13 +205,19 @@ let private tagHeadingsFromToc (document: PdfDocument) context =
         [ $"Tagged {headings.Length} heading(s) listed in the table of contents." ]
     | _ -> []
 
-let private removeEmptyParagraphs (document: PdfDocument) context =
+let private removeEmpty isTarget (describe: int -> string) (document: PdfDocument) context =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
     | structTreeRoot ->
-        match removeEmptyParagraphsInside structTreeRoot context None with
+        match removeEmptyInside isTarget structTreeRoot context None with
         | 0 -> []
-        | removed -> [ $"Removed {removed} empty /P structure element(s)." ]
+        | removed -> [ describe removed ]
+
+let private removeEmptyParagraphs =
+    removeEmpty isParagraph (fun removed -> $"Removed {removed} empty /P structure element(s).")
+
+let private removeEmptyTocEntries =
+    removeEmpty isTocItem (fun removed -> $"Removed {removed} empty table-of-contents entr(ies) (TOCI).")
 
 let private tagParagraphLists (document: PdfDocument) context =
     match ParagraphLists.find document context with
@@ -261,8 +268,9 @@ let private setDocumentTitle fromFirstPage (document: PdfDocument) _ =
 ///   1. Headings from the table of contents first. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list repair could take it for a list item.
-///   2. Empty paragraphs next, so blank lines between list items are gone before lists are
-///      tagged. (The list repair copes with them either way, keeping them in the item.)
+///   2. Empty paragraphs and table-of-contents entries next, so blank lines between list items
+///      are gone before lists are tagged. (The list repair copes with them either way, keeping
+///      them in the item.)
 ///   3. Lists.
 ///   4. Bookmarks, after headings are recovered, so those get bookmarks too.
 ///   5. The rest touch pages, annotations and the Info dictionary rather than paragraphs, so
@@ -273,6 +281,7 @@ let private setDocumentTitle fromFirstPage (document: PdfDocument) _ =
 let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
+      PdfFixOptions.RemoveEmptyTocEntries, removeEmptyTocEntries
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
       PdfFixOptions.BookmarksFromHeadings, addBookmarks
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder

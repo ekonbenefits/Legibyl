@@ -11,6 +11,7 @@ module PdfFixDescriptions =
         [ PdfFixOptions.Metadata, "Fix XMP metadata"
           PdfFixOptions.AnnotationTabs, "Set /Tabs /S on pages that contain annotations"
           PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements"
+          PdfFixOptions.RemoveEmptyTocEntries, "Remove empty table-of-contents entries (TOCI)"
           PdfFixOptions.LinkContents, "Describe table-of-contents links from their own text (/Contents)"
           PdfFixOptions.HeadingsFromToc, "Tag headings the table of contents lists (H1–H6)"
           PdfFixOptions.ListsFromParagraphs, "Tag paragraphs that start with list markers as a list (L/LI)"

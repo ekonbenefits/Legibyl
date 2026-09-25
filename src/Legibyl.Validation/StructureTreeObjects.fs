@@ -110,6 +110,8 @@ let standardTag (dictionary: PdfDictionary) context : PdfName | null =
 
 let isParagraph (dictionary: PdfDictionary) context = PdfName.P.Equals(standardTag dictionary context)
 
+let isTocItem (dictionary: PdfDictionary) context = PdfName.TOCI.Equals(standardTag dictionary context)
+
 let private markedContent context (mcid: PdfNumber) pageNumber =
     lookup context.MarkedContent (pageNumber, mcid.IntValue())
 
