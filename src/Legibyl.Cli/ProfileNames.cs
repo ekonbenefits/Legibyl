@@ -1,3 +1,4 @@
+using System.Reflection;
 using Legibyl.Validation;
 
 namespace Legibyl.Cli;
@@ -37,10 +38,11 @@ internal static class ProfileNames
     public const string DefaultName = "pdfua1";
 
     /// <summary>
-    /// Version of the vendored veraPDF engine (see lib/vendor/verapdf-jars/README.md).
-    /// Kept in sync with the first three components of the assembly version.
+    /// Version of the veraPDF engine, stamped from VeraPdfVersion in Directory.Build.props.
     /// </summary>
-    public const string VendoredEngineVersion = "1.28.1";
+    public static string VendoredEngineVersion { get; } =
+        typeof(ProfileNames).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "VeraPdfVersion")?.Value ?? "unknown";
 
     public static bool TryParse(string name, out PdfProfile profile) =>
         Aliases.TryGetValue(name.Trim(), out profile);

@@ -1,8 +1,11 @@
-# Vendored veraPDF jars
+# veraPDF jar
 
-This directory contains a vendored copy of the veraPDF "greenfield-apps" fat
-jar, used as the Java validation engine loaded into the .NET process via
-[IKVM.NET](https://ikvm.org/).
+The veraPDF "greenfield-apps" fat jar is the Java validation engine loaded
+into the .NET process via [IKVM.NET](https://ikvm.org/). It is **not**
+committed to this repo: `src/Legibyl.Validation/Legibyl.Validation.csproj`
+downloads it from Maven Central on the first build, verifies it against
+`VeraPdfSha256` in `Directory.Build.props`, and caches it at
+`src/Legibyl.Validation/obj/verapdf/`. The build fails on a checksum mismatch.
 
 ## Provenance
 
@@ -53,14 +56,14 @@ including those license texts and this attribution notice — see
 
 ## Updating the jar
 
-To update to a newer veraPDF release:
 1. Check https://search.maven.org/artifact/org.verapdf.apps/greenfield-apps
    for the latest version.
-2. Download the new jar, recompute its SHA-256, and update this README.
-3. Re-run the IKVM build (`dotnet build`) and the validation test suite to
-   confirm the new jar still loads and validates correctly under IKVM.
-4. Update `VersionPrefix` in `Directory.Build.props` (repo root) and
-   `ProfileNames.VendoredEngineVersion` (`src/Legibyl.Cli/ProfileNames.cs`)
-   to match the new jar version, and reset `VersionBuild` to `0` — see
-   "Versioning" in the root README for why the tool's version is tied to
-   this jar's version.
+2. In `Directory.Build.props`, set `VeraPdfVersion` to the new version and
+   reset `VersionBuild` to `0` (`VersionPrefix` and the CLI's `--version`
+   engine string follow `VeraPdfVersion` automatically).
+3. Run `dotnet build`. It will fail with a SHA-256 mismatch that prints the
+   new jar's actual hash. Confirm that hash independently (e.g. against
+   the `.sha256`/`.sha1` published next to the jar on Maven Central), then set
+   `VeraPdfSha256` to it and update the Provenance table above.
+4. Re-run `dotnet build` and `dotnet test` to confirm the new jar still loads
+   and validates correctly under IKVM.

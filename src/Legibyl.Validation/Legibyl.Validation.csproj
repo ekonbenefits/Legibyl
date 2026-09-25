@@ -14,8 +14,28 @@
     <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 
+  <!-- veraPDF fat jar: fetched from Maven Central on first build, pinned by
+       VeraPdfVersion/VeraPdfSha256 in Directory.Build.props, cached under obj/. -->
+  <PropertyGroup>
+    <VeraPdfJarName>greenfield-apps-$(VeraPdfVersion).jar</VeraPdfJarName>
+    <VeraPdfJarUrl>https://repo1.maven.org/maven2/org/verapdf/apps/greenfield-apps/$(VeraPdfVersion)/$(VeraPdfJarName)</VeraPdfJarUrl>
+    <VeraPdfJarDir>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)verapdf/</VeraPdfJarDir>
+    <VeraPdfJar>$(VeraPdfJarDir)$(VeraPdfJarName)</VeraPdfJar>
+  </PropertyGroup>
+
   <ItemGroup>
-    <IkvmReference Include="..\..\lib\vendor\verapdf-jars\greenfield-apps-1.28.1.jar" />
+    <IkvmReference Include="$(VeraPdfJar)" />
   </ItemGroup>
+
+  <Target Name="FetchVeraPdfJar" BeforeTargets="GetIkvmReferenceItemsFromIkvmReferences" Condition="!Exists('$(VeraPdfJar)')">
+    <DownloadFile SourceUrl="$(VeraPdfJarUrl)" DestinationFolder="$(VeraPdfJarDir)" DestinationFileName="$(VeraPdfJarName).download" Retries="3" />
+    <GetFileHash Files="$(VeraPdfJar).download" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_VeraPdfActualSha256" />
+    </GetFileHash>
+    <Delete Files="$(VeraPdfJar).download" Condition="'$(_VeraPdfActualSha256)' != '$(VeraPdfSha256)'" />
+    <Error Condition="'$(_VeraPdfActualSha256)' != '$(VeraPdfSha256)'"
+           Text="SHA-256 mismatch for $(VeraPdfJarUrl): expected $(VeraPdfSha256), got $(_VeraPdfActualSha256). If you are upgrading veraPDF, update VeraPdfSha256 in Directory.Build.props." />
+    <Move SourceFiles="$(VeraPdfJar).download" DestinationFiles="$(VeraPdfJar)" />
+  </Target>
 
 </Project>
