@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Legibyl.Validation\Legibyl.Validation.fsproj" />
@@ -7,12 +7,21 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>legibyl</AssemblyName>
     <RootNamespace>Legibyl.Cli</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="ProfileNames.fs" />
+    <Compile Include="FileValidationResult.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FSharp.SystemCommandLine" Version="2.2.0" />
+  </ItemGroup>
 
   <ItemGroup>
     <AssemblyMetadata Include="VeraPdfVersion" Value="$(VeraPdfVersion)" />
