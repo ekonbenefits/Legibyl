@@ -87,3 +87,19 @@ let ``Validate reports every occurrence of a repeated failure`` () =
     |> Seq.distinct
     |> Seq.length
     |> should equal 4
+
+[<Fact>]
+let ``Validate reports progress, ending with the final counts`` () =
+    use input = new TempPdf()
+    createPdfWithUntitledFigures input.Path 4
+    let reports = Collections.Concurrent.ConcurrentQueue<ValidationProgress>()
+    let progress = { new IProgress<ValidationProgress> with member _.Report value = reports.Enqueue value }
+
+    let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1, progress)
+
+    reports |> should not' (be Empty)
+    let last = Seq.last reports
+    last.Checks |> should equal report.TotalAssertions
+    last.FailedRules |> should equal (report.FailedAssertions |> Seq.distinctBy _.RuleId |> Seq.length)
+    last.ProcessedObjects |> should be (greaterThan 0)
+    last.QueuedObjects |> should equal 0

@@ -127,6 +127,11 @@ PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
 
 ## GUI results view
 
+While a file validates, a line under the progress bar shows how many checks
+veraPDF has run, on how many objects, how many rules have failed so far, and
+the time elapsed. veraPDF finds objects as it goes, so there's no percentage
+to show; very large documents can take minutes.
+
 The results list is sorted by page number by default (unlocated failures —
 those with no `pages[N]` in their context, such as document-level metadata
 checks — sort to the end). It keeps only the short clause, test, page, and

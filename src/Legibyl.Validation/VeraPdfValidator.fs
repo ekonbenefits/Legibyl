@@ -3,6 +3,7 @@ namespace Legibyl.Validation
 open System
 open System.IO
 open System.Runtime.InteropServices
+open System.Text.RegularExpressions
 open System.Threading
 open System.Threading.Tasks
 open org.verapdf.core
@@ -132,6 +133,40 @@ module internal VeraPdf =
             | :? iText.Kernel.Exceptions.PdfException
             | :? IOException as ex -> assertions @ [ LegibylChecks.couldNotInspect ex.Message ]
 
+    /// veraPDF only exposes its running counters as text ("Progress: 12 checks, 0 failed, 3
+    /// processed objects, 9 in stack.", where "failed" counts rules, not checks); its own
+    /// progress output goes to stdout.
+    let private progressPattern =
+        Regex(@"(\d+) checks, (\d+) failed, (\d+) processed objects, (\d+) in stack", RegexOptions.Compiled)
+
+    /// Runs validate, reporting the validator's counters to progress every quarter second
+    /// and once more when it finishes.
+    let withProgress (validator: PDFAValidator) (progress: IProgress<ValidationProgress>) (validate: unit -> 'T) =
+        let stopwatch = Diagnostics.Stopwatch.StartNew()
+        let report () =
+            let found = progressPattern.Match(validator.getValidationProgressString ())
+            if found.Success then
+                let count (group: int) = int found.Groups[group].Value
+                progress.Report
+                    { Checks = count 1
+                      FailedRules = count 2
+                      ProcessedObjects = count 3
+                      QueuedObjects = count 4
+                      Elapsed = stopwatch.Elapsed }
+        // An exception escaping a timer callback would take down the process; progress is
+        // best-effort, so a failed read just skips that update.
+        let timer = new Timer((fun _ -> try report () with _ -> ()), null, 0, 250)
+        let result =
+            try
+                validate ()
+            finally
+                // Wait for any in-flight callback, so no stale report lands after the final one.
+                use stopped = new ManualResetEvent(false)
+                if timer.Dispose stopped then
+                    stopped.WaitOne() |> ignore
+        report ()
+        result
+
     let toReport (pdfPath: string) profile (result: ValidationResult) (analysis: LegibylAnalysis) : ValidationReport =
         let assertions =
             [ for item in javaSeq (result.getTestAssertions ()) do
@@ -245,7 +280,12 @@ open VeraPdf
 type VeraPdfValidator() =
     do ensureInitialised ()
 
-    member _.Validate(pdfPath: string, profile: PdfProfile) : ValidationReport =
+    member _.Validate
+        (
+            pdfPath: string,
+            profile: PdfProfile,
+            [<Optional; DefaultParameterValue(null: IProgress<ValidationProgress> | null)>] progress: IProgress<ValidationProgress> | null
+        ) : ValidationReport =
         ensureExists pdfPath
         let flavour = toJavaFlavour profile
         let foundry = Foundries.defaultInstance ()
@@ -258,7 +298,10 @@ type VeraPdfValidator() =
                 // each rule, so logging passed checks hides repeated failures on any document
                 // of more than a few pages.
                 let validator = foundry.createValidator (flavour, -1, false, false, false)
-                let result = validator.validate parser
+                let result =
+                    match progress with
+                    | null -> validator.validate parser
+                    | progress -> withProgress validator progress (fun () -> validator.validate parser)
                 toReport pdfPath profile result (analysis.GetAwaiter().GetResult()))
         finally
             closeLegibylAnalysis analysis
@@ -351,7 +394,7 @@ type VeraPdfValidator() =
         wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath)
 
     interface IPdfValidator with
-        member this.Validate(pdfPath, profile) = this.Validate(pdfPath, profile)
+        member this.Validate(pdfPath, profile, progress) = this.Validate(pdfPath, profile, progress)
 
     interface IPdfFixer with
         member this.Fix(pdfPath, profile, outputPath, options) = this.Fix(pdfPath, profile, outputPath, options)
