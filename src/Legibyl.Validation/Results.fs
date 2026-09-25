@@ -13,6 +13,7 @@ module PdfFixDescriptions =
           PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements"
           PdfFixOptions.LinkContents, "Describe table-of-contents links from their own text (/Contents)"
           PdfFixOptions.HeadingsFromToc, "Tag headings the table of contents lists (H1–H6)"
+          PdfFixOptions.ListsFromParagraphs, "Tag paragraphs that start with list markers as a list (L/LI)"
           PdfFixOptions.DocumentTitle, "Set a document title and show it in the title bar" ]
         |> List.filter (fun (option, _) -> options.HasFlag option)
         |> List.map snd

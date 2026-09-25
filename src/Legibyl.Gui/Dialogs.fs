@@ -76,6 +76,7 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
             let documentTitle = ctx.useState true
             // Retagging changes what the document says it is, so it's opt-in for now.
             let tocHeadings = ctx.useState false
+            let paragraphLists = ctx.useState false
 
             let checkBox (state: IWritable<bool>) (content: IView) =
                 CheckBox.create [
@@ -98,7 +99,8 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                       emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
                       linkContents.Current, PdfFixOptions.LinkContents
                       documentTitle.Current, PdfFixOptions.DocumentTitle
-                      tocHeadings.Current, PdfFixOptions.HeadingsFromToc ]
+                      tocHeadings.Current, PdfFixOptions.HeadingsFromToc
+                      paragraphLists.Current, PdfFixOptions.ListsFromParagraphs ]
                     |> List.fold (fun all (isChecked, option) -> if isChecked then all ||| option else all) PdfFixOptions.None
 
                 if options = PdfFixOptions.None then
@@ -126,6 +128,9 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
                             checkBox
                                 tocHeadings
                                 (label "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent)")
+                            checkBox
+                                paragraphLists
+                                (label "Tag runs of paragraphs that start with list markers (•, (1), a.) as lists (L/LI; the page looks the same)")
                             TextBlock.create [
                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                 TextBlock.textWrapping TextWrapping.Wrap

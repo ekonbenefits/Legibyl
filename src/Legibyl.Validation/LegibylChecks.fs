@@ -13,7 +13,8 @@
 ///   4. Cover it in tests/Legibyl.Validation.Tests/PdfFixerTests.fs.
 ///
 /// Checks that look at the document as a whole rather than one element at a time (like
-/// the table-of-contents heading checks, Structure-3 to 5) are added in `run` directly.
+/// the table-of-contents heading checks, Structure-3 to 5, and lists tagged as paragraphs,
+/// Structure-6) are added in `run` directly.
 module internal Legibyl.Validation.LegibylChecks
 
 open System
@@ -152,6 +153,22 @@ let private tocHeadingFindings (document: PdfDocument) context =
         [ warning TocHeadingsUnrecoverableMessage $"Not recovered because {reason}." tocPath 5 PdfFixOptions.None (Option.toObj tocGeometry)
           yield! List.map unmatchedWarning unmatched ]
 
+// ---- Structure-6: lists tagged as plain paragraphs (see ParagraphLists) ----
+
+[<Literal>]
+let private ParagraphListMessage =
+    "Looks like a list tagged as plain paragraphs: consecutive paragraphs start with list markers, so screen readers won't announce them as a list. The Fix dialog can tag them as one."
+
+let private paragraphListFindings (document: PdfDocument) context =
+    [ for run in ParagraphLists.find document context ->
+          warning
+              ParagraphListMessage
+              $"{run.Paragraphs.Length} paragraphs on page {run.Page}, marked \"{run.FirstMarker}\" to \"{run.LastMarker}\"."
+              run.Path
+              6
+              PdfFixOptions.ListsFromParagraphs
+              (Option.toObj run.Geometry) ]
+
 /// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
@@ -164,7 +181,8 @@ let run (document: PdfDocument) context : RuleViolation list =
                   | Some finding ->
                       warning check.Message null finding.Location check.TestNumber check.FixOptions (Option.toObj finding.Geometry)
                   | None -> ()
-          yield! tocHeadingFindings document context ]
+          yield! tocHeadingFindings document context
+          yield! paragraphListFindings document context ]
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
 let couldNotInspect (errorMessage: string) =

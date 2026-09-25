@@ -22,6 +22,7 @@
     <Compile Include="PdfRegionRendererTests.fs" />
     <Compile Include="TechniqueSampleTests.fs" />
     <Compile Include="TocHeadingsTests.fs" />
+    <Compile Include="ParagraphListsTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
