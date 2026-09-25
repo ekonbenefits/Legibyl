@@ -49,16 +49,29 @@ let ``results grid column headers are not clipped`` () =
         Assert.True(clipped.IsEmpty, String.Join("; ", clipped)))
 
 [<Fact>]
-let ``empty paragraph warning shows a warning icon, its page, and a preview`` () =
+let ``empty paragraph warning shows warning and fixable icons, its page, and a preview`` () =
     onUiThread (fun () ->
         let window = openSample "libreoffice-empty-paragraph.pdf"
         let grid = HeadlessWindow.resultsGrid window
         let firstRow = descendants<DataGridRow> grid |> List.find (fun row -> row.GetIndex() = 0)
 
-        let icon = descendants<Path> firstRow |> List.exactlyOne
-        Assert.Equal("Warning", AutomationProperties.GetName icon)
+        let icons = descendants<Path> firstRow
+        let expected = [ "Warning"; "Fixable: Remove empty /P structure elements" ]
+        Assert.Equal<string list>(expected, icons |> List.map AutomationProperties.GetName)
+        Assert.Equal<string list>(expected, icons |> List.map (fun icon -> string (ToolTip.GetTip icon)))
         Assert.Contains("Page 1", descendants<TextBlock> firstRow |> List.map _.Text)
 
         let preview = descendants<Image> window |> List.tryFind (fun image -> not (isNull image.Source))
         Assert.True(preview.IsSome, "The selected warning's page preview wasn't shown.")
         window.Close())
+
+[<Fact>]
+let ``findings that can't be fixed have no fixable icon`` () =
+    onUiThread (fun () ->
+        let window = openSample "pages-clipped-paragraphs.pdf"
+        let rows = descendants<DataGridRow> (HeadlessWindow.resultsGrid window)
+        // The first row is untagged content, which no fix addresses.
+        let firstRow = rows |> List.find (fun row -> row.GetIndex() = 0)
+        let icons = descendants<Path> firstRow |> List.map AutomationProperties.GetName
+        window.Close()
+        Assert.Equal<string list>([ "Failure" ], icons))

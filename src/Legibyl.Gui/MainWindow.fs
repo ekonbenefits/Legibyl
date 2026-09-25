@@ -27,6 +27,7 @@ type RuleViolationRow =
       Clause: string
       TestNumber: int
       Severity: string
+      /// What the Fix dialog can do about this finding, e.g. "Fix XMP metadata"; empty if nothing.
       Fixable: string
       Message: string
       LocationContext: string | null
@@ -45,10 +46,11 @@ type RuleViolationRow =
             | _, NonNull geometry -> Some geometry.PageNumber
             | _ -> None
 
+        // Worded like the Fix dialog's options.
         let fixOptions =
-            [ PdfFixOptions.Metadata, "Metadata"
-              PdfFixOptions.AnnotationTabs, "Tabs"
-              PdfFixOptions.RemoveEmptyParagraphs, "Empty P" ]
+            [ PdfFixOptions.Metadata, "Fix XMP metadata"
+              PdfFixOptions.AnnotationTabs, "Set /Tabs /S on pages that contain annotations"
+              PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements" ]
             |> List.filter (fun (option, _) -> violation.FixOptions.HasFlag option)
             |> List.map snd
 
@@ -56,7 +58,7 @@ type RuleViolationRow =
           Clause = violation.Clause
           TestNumber = violation.TestNumber
           Severity = violation.Severity.ToString()
-          Fixable = if violation.IsFixable then String.Join(", ", fixOptions) else ""
+          Fixable = String.Join("; ", fixOptions)
           Message = violation.Message
           LocationContext = violation.LocationContext
           PageNumber = pageNumber
@@ -104,6 +106,7 @@ module private MainView =
         new Bitmap(stream)
 
     // 16x16 icons; the even-odd fill cuts the "!" and "×" out of the shapes.
+    // The wrench is a single outline (head, notch, handle) rotated 45°.
     let private warningIcon =
         Geometry.Parse "F0 M8,1 L15.5,14.5 L0.5,14.5 Z M7.2,5.5 L8.8,5.5 L8.6,10 L7.4,10 Z M7.1,11.2 L8.9,11.2 L8.9,13 L7.1,13 Z"
 
@@ -111,14 +114,12 @@ module private MainView =
         Geometry.Parse
             "F0 M8,0.5 A7.5,7.5 0 1 1 7.99,0.5 Z M4.9,5.9 L5.9,4.9 L8,7 L10.1,4.9 L11.1,5.9 L9,8 L11.1,10.1 L10.1,11.1 L8,9 L5.9,11.1 L4.9,10.1 L7,8 Z"
 
-    /// The finding's severity as an icon, with its name as tooltip and screen-reader text.
-    let severityIcon (violation: RuleViolation) =
-        let icon, color =
-            match violation.Severity with
-            | FindingSeverity.Warning -> warningIcon, Theme.Tokens.Warning
-            | _ -> failureIcon, Theme.Tokens.Danger
+    let private fixIcon =
+        Geometry.Parse
+            "F1 M10.68,8.56 L17.25,15.13 A1.5,1.5 0 0 1 15.13,17.25 L8.56,10.68 A4,4 0 0 1 3.45,5.15 L5.44,7.14 L7.14,5.44 L5.15,3.45 A4,4 0 0 1 10.68,8.56 Z"
 
-        let name = string violation.Severity
+    /// A small results-grid icon, with name as its tooltip and screen-reader text.
+    let private gridIcon (icon: Geometry) (color: string) (name: string) =
         // Qualified: System.IO also defines Path.
         Avalonia.FuncUI.DSL.Path.create [
             AttrBuilder<Shapes.Path>.CreateProperty<Geometry | null>(Shapes.Path.DataProperty, icon, ValueNone)
@@ -131,6 +132,18 @@ module private MainView =
             ToolTip.tip name
             AttrBuilder<Shapes.Path>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, name, ValueNone)
         ]
+
+    let severityIcon (violation: RuleViolation) =
+        match violation.Severity with
+        | FindingSeverity.Warning -> gridIcon warningIcon Theme.Tokens.Warning "Warning"
+        | _ -> gridIcon failureIcon Theme.Tokens.Danger "Failure"
+
+    /// A wrench for findings the Fix dialog can repair; nothing otherwise.
+    let fixableIcon (row: RuleViolationRow) : IView =
+        if row.Violation.IsFixable then
+            gridIcon fixIcon Theme.Tokens.Primary $"Fixable: {row.Fixable}"
+        else
+            TextBlock.create []
 
     let gridLinesVisibility (value: DataGridGridLinesVisibility) : IAttr<DataGrid> =
         AttrBuilder<DataGrid>.CreateProperty<DataGridGridLinesVisibility>(DataGrid.GridLinesVisibilityProperty, value, ValueNone)
@@ -499,7 +512,13 @@ module private MainView =
                                 DataTemplateView<RuleViolationRow>.create (fun row -> severityIcon row.Violation)
                             )
                         ]
-                        textColumn "Fixable" "Fixable" 76.0
+                        DataGridTemplateColumn.create [
+                            DataGridTemplateColumn.header "Fix"
+                            DataGridTemplateColumn.width (DataGridLength 52.0)
+                            DataGridTemplateColumn.cellTemplate (
+                                DataTemplateView<RuleViolationRow>.create (fun row -> fixableIcon row)
+                            )
+                        ]
                         textColumn "Clause" "Clause" 72.0
                         textColumn "Test" "TestNumber" 60.0
                         textColumn "Page" "PageDisplay" 72.0
