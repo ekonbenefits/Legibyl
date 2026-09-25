@@ -73,7 +73,9 @@ dotnet run --project src/Legibyl.Gui/Legibyl.Gui.fsproj
 dotnet test Legibyl.slnx
 ```
 
-`Legibyl.Validation.Tests` covers validation, fixes, and rendering.
+`Legibyl.Validation.Tests` covers validation, fixes, and rendering. It also
+checks veraPDF against the PDF Association's labeled PDF/UA-1 technique
+samples (see `tests/Legibyl.Validation.Tests/SampleCorpus/README.md`).
 `Legibyl.Gui.Tests` opens sample PDFs in the real `MainWindow` on Avalonia's
 headless platform (rendered with Skia, no display needed) and checks what's
 on screen, e.g. that no results-grid column header is clipped.

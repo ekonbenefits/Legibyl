@@ -25,3 +25,31 @@ to `/P`, and one of them contains only a non-breaking space, drawn with an
 embedded TrueType font whose glyph box is empty. `PdfFixerTests` uses it to
 check that empty-paragraph detection follows the RoleMap and that the
 warning gets a one-character region.
+
+## Techniques for Accessible PDF
+
+`techniques-for-accessible-pdf/` holds the sample PDFs from the PDF
+Association's Techniques for Accessible PDF:
+
+- Source: https://github.com/pdf-association/techniques-for-accessible-pdf
+- Commit: `3e31095d8aeea941eccbbb766a23369374c2e9a6` (2026-08-30)
+- License: [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/),
+  copyright PDF Association, Inc. See `techniques-for-accessible-pdf/LICENSE`.
+
+Only each technique's PDF and `technique-info.yaml`, plus
+`config/matterhorn.yaml` and the license, are copied, unmodified and at their
+upstream paths. `technique-info.yaml` labels a sample Pass or Fail and lists
+the Matterhorn Protocol checkpoints it covers; `matterhorn.yaml` says whether
+each checkpoint is machine-checkable (M) or needs a person (H).
+
+`TechniqueSampleTests` validates every sample as PDF/UA-1:
+
+- Pass samples must be compliant.
+- Fail samples covering a machine-checkable checkpoint must fail some rule
+  besides 5-1. Every Fail sample leaves out the PDF/UA identifier, so 5-1
+  alone doesn't show the sample's defect was found. Samples veraPDF misses
+  are skipped via a known-gaps list in the tests.
+- Fail samples covering only human-checkable checkpoints are skipped.
+
+To update, copy the same files from a newer upstream commit and update the
+commit above.

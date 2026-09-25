@@ -20,6 +20,7 @@
     <Compile Include="StructureTreeReaderTests.fs" />
     <Compile Include="PdfFixerTests.fs" />
     <Compile Include="PdfRegionRendererTests.fs" />
+    <Compile Include="TechniqueSampleTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,6 +30,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit.v3" Version="4.0.1" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,7 +39,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="SampleCorpus\*.pdf" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="SampleCorpus\**\*.pdf;SampleCorpus\**\*.yaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
