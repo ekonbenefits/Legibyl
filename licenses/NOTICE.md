@@ -60,7 +60,8 @@ it. These features use:
 - [PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia)
   — a PdfPig extension that rasterises pages to
   [SkiaSharp](https://github.com/mono/SkiaSharp) bitmaps, licensed under
-  the Apache License, Version 2.0. SkiaSharp itself is MIT-licensed.
+  the Apache License, Version 2.0. SkiaSharp itself is MIT-licensed (see
+  below).
 
 Both are used unmodified via NuGet package references (no vendored/bundled
 source), so no additional source-availability obligations apply beyond the
@@ -76,3 +77,40 @@ pages with annotations and removing empty `/P` structure elements.
 iText Core is used via the `itext` NuGet package under the GNU Affero
 General Public License v3.0 or later. This is compatible with Legibyl's own
 AGPL-3.0-or-later license. It is used unmodified.
+
+## MIT-licensed components
+
+The GUI and CLI also use the following components, each licensed under the
+MIT License (full text in `LICENSE.MIT` in this directory). All are used
+unmodified via NuGet package references.
+
+- [F# Core Library (FSharp.Core)](https://github.com/dotnet/fsharp) — the
+  F# runtime library used by all of Legibyl's projects.
+  Copyright (c) Microsoft Corporation.
+- [Avalonia](https://github.com/AvaloniaUI/Avalonia) (`Avalonia`,
+  `Avalonia.Desktop`) and
+  [Avalonia.Controls.DataGrid](https://github.com/AvaloniaUI/Avalonia.Controls.DataGrid)
+  — the cross-platform UI framework for the GUI.
+  Copyright (c) AvaloniaUI OÜ.
+- [Avalonia.FuncUI](https://github.com/fsprojects/Avalonia.FuncUI) — the
+  F# view and component layer the GUI is written with.
+  Copyright (c) 2019 Josua Jäger.
+- [AvaloniaCommunity.FuncUI.Bindings.DataGrid](https://www.nuget.org/packages/AvaloniaCommunity.FuncUI.Bindings.DataGrid)
+  — FuncUI bindings for the DataGrid. Package author: JaggerJo (the
+  package metadata gives no separate copyright line).
+- [Semi.Avalonia](https://github.com/irihitech/Semi.Avalonia)
+  (`Semi.Avalonia`, `Semi.Avalonia.DataGrid`) — the GUI's light/dark theme.
+  Copyright (c) 2022 IRIHI Technology.
+- [FSharp.SystemCommandLine](https://github.com/JordanMarr/FSharp.SystemCommandLine)
+  — the CLI's argument parser.
+  Copyright (c) 2022 Jordan Marr.
+- [System.CommandLine](https://github.com/dotnet/command-line-api) — the
+  command-line parsing library FSharp.SystemCommandLine builds on.
+  Copyright © .NET Foundation and Contributors.
+- [SkiaSharp and HarfBuzzSharp](https://github.com/mono/SkiaSharp) — 2D
+  graphics and text shaping, used by Avalonia and PdfPig.Rendering.Skia.
+  Copyright (c) 2015-2016 Xamarin, Inc. Copyright (c) 2017-2018 Microsoft
+  Corporation.
+
+These packages in turn depend on other open-source packages under their own
+licenses; consult the individual project pages for those.
