@@ -439,6 +439,8 @@ module private MainView =
                 | Validated(_, rows) -> rows
                 | _ -> []
 
+            let gridFontSize = 12.0
+
             let resultsGrid =
                 DataGrid.create [
                     DataGrid.isReadOnly true
@@ -460,6 +462,7 @@ module private MainView =
                                 DataGridTextColumn.header header
                                 DataGridTextColumn.binding (Binding property)
                                 DataGridTextColumn.width (DataGridLength width)
+                                DataGridTextColumn.fontSize gridFontSize
                             ]
                         textColumn "Type" "Severity" 72.0
                         textColumn "Fixable" "Fixable" 72.0
@@ -474,6 +477,7 @@ module private MainView =
                                 DataTemplateView<RuleViolationRow>.create (fun row ->
                                     TextBlock.create [
                                         TextBlock.text row.FriendlyLocation
+                                        TextBlock.fontSize gridFontSize
                                         TextBlock.textWrapping TextWrapping.Wrap
                                         TextBlock.margin (8.0, 3.0)
                                         TextBlock.verticalAlignment VerticalAlignment.Center
