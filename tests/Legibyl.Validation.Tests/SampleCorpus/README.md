@@ -17,3 +17,11 @@ paragraphs, which Pages drops rather than tagging as empty `/P`s). Its first
 paragraph's marked content also contains a page-sized clipping rectangle
 (`re W n`), which `VeraPdfValidatorTests` uses to check that clipping paths
 don't inflate a finding's region.
+
+`libreoffice-empty-paragraph.pdf` was made for this project by converting a
+small HTML file with LibreOffice (`soffice --convert-to pdf` with
+`UseTaggedPDF`). Its paragraphs use the custom tag "Text body", role-mapped
+to `/P`, and one of them contains only a non-breaking space, drawn with an
+embedded TrueType font whose glyph box is empty. `PdfFixerTests` uses it to
+check that empty-paragraph detection follows the RoleMap and that the
+warning gets a one-character region.

@@ -8,6 +8,9 @@ namespace Legibyl.Validation.Tests;
 
 public class PdfFixerTests
 {
+    private static string CorpusFile(string name) =>
+        Path.Combine(AppContext.BaseDirectory, "SampleCorpus", name);
+
     [Fact]
     public void Fix_AnnotationTabsAndEmptyParagraphs_AppliesSelectedStructuralFixes()
     {
@@ -159,29 +162,38 @@ public class PdfFixerTests
     }
 
     [Fact]
-    public void Validate_WhitespaceOnlyParagraph_HasOneCharacterGeometryAtItsLine()
+    public void Validate_LibreOfficeRoleMappedWhitespaceParagraph_IsEmptyWithOneCharacterGeometry()
     {
-        string input = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.pdf");
+        var validator = new VeraPdfValidator();
+
+        ValidationReport report = validator.Validate(CorpusFile("libreoffice-empty-paragraph.pdf"), PdfProfile.PdfUa1);
+
+        RuleViolation warning = Assert.Single(report.Assertions.Where(a =>
+            a.Severity == FindingSeverity.Warning &&
+            a.Message.Contains("Empty semantic /P", StringComparison.Ordinal)));
+        StructureGeometry geometry = Assert.IsType<StructureGeometry>(warning.Geometry);
+        Assert.Equal(1, geometry.PageNumber);
+        Assert.InRange(geometry.Right - geometry.Left, 1, 12);
+        Assert.InRange(geometry.Top - geometry.Bottom, 6, 18);
+    }
+
+    [Fact]
+    public void Fix_LibreOfficeRoleMappedWhitespaceParagraph_IsRemoved()
+    {
+        string output = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.fixed.pdf");
         try
         {
-            // Word writes an empty paragraph as a lone space glyph, whose own glyph box is empty.
-            CreatePdfWithMarkedContentParagraphs(input, (700, " "));
-            var validator = new VeraPdfValidator();
+            FixResult result = new VeraPdfValidator().Fix(
+                CorpusFile("libreoffice-empty-paragraph.pdf"),
+                PdfProfile.PdfUa1,
+                output,
+                PdfFixOptions.RemoveEmptyParagraphs);
 
-            ValidationReport report = validator.Validate(input, PdfProfile.PdfUa1);
-
-            RuleViolation warning = Assert.Single(report.Assertions.Where(a => a.Severity == FindingSeverity.Warning));
-            Assert.Contains("Empty semantic /P", warning.Message);
-            StructureGeometry geometry = Assert.IsType<StructureGeometry>(warning.Geometry);
-            Assert.Equal(1, geometry.PageNumber);
-            Assert.InRange(geometry.Left, 71, 73);
-            Assert.InRange(geometry.Right - geometry.Left, 2, 12);
-            Assert.InRange(geometry.Top - geometry.Bottom, 6, 18);
-            Assert.True(geometry.Bottom <= 700 && geometry.Top > 700);
+            Assert.Contains(result.AppliedFixes, fix => fix.Contains("Removed 1 empty /P", StringComparison.Ordinal));
         }
         finally
         {
-            DeleteIfExists(input);
+            DeleteIfExists(output);
         }
     }
 
