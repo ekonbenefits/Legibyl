@@ -171,6 +171,81 @@ let private nameDocument (document: PdfDocument) =
 
 // ---- Running the fixes ----
 
+let private tagHeadingsFromToc (document: PdfDocument) context =
+    match TocHeadings.analyse document context with
+    | TocHeadings.Recoverable(headings, _) ->
+        for heading in headings do
+            heading.Paragraph.Put(PdfName.S, PdfName $"H{heading.Level}") |> ignore
+        [ $"Tagged {headings.Length} heading(s) listed in the table of contents." ]
+    | _ -> []
+
+let private removeEmptyParagraphs (document: PdfDocument) context =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
+    | null -> []
+    | structTreeRoot ->
+        match removeEmptyParagraphsInside structTreeRoot context None with
+        | 0 -> []
+        | removed -> [ $"Removed {removed} empty /P structure element(s)." ]
+
+let private tagParagraphLists (document: PdfDocument) context =
+    match ParagraphLists.find document context with
+    | [] -> []
+    | runs ->
+        // Later runs first: tagging one shortens its parent's /K, which would move the ones after it.
+        for run in List.rev runs do
+            ParagraphLists.tagAsList document run
+        [ $"Tagged {runs.Length} run(s) of marked paragraphs as lists." ]
+
+let private setAnnotationTabOrder (document: PdfDocument) _ =
+    let mutable fixedPages = 0
+    for pageNumber in 1 .. document.GetNumberOfPages() do
+        let page = document.GetPage(pageNumber).GetPdfObject()
+        match page.GetAsArray(PdfName.Annots) with
+        | null -> ()
+        | annotations when annotations.Size() = 0 -> ()
+        | _ ->
+            if not (PdfName.S.Equals(page.GetAsName(PdfName.Tabs))) then
+                page.Put(PdfName.Tabs, PdfName.S) |> ignore
+                fixedPages <- fixedPages + 1
+    if fixedPages > 0 then [ $"Set /Tabs /S on {fixedPages} page(s) containing annotations." ] else []
+
+let private describeTocLinks (document: PdfDocument) context =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
+    | null -> []
+    | structTreeRoot ->
+        match describeLinks structTreeRoot context with
+        | 0 -> []
+        | described -> [ $"Described {described} link annotation(s) from their own text." ]
+
+let private setDocumentTitle (document: PdfDocument) _ =
+    let titleSet, displayDocTitleSet = nameDocument document
+    [ match titleSet with
+      | Some title -> $"Set the document title to \"{title}\"."
+      | None -> ()
+      if displayDocTitleSet then "Set /DisplayDocTitle so readers show the document title rather than the file name." ]
+
+/// Legibyl's own repairs, in the order they run. Each takes the open document and returns a
+/// line per change it made. The order matters where one repair changes what another sees:
+///
+///   1. Headings from the table of contents first. Its analysis has to see the tree the
+///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
+///      heading before the list repair could take it for a list item.
+///   2. Empty paragraphs next, so blank lines between list items are gone before lists are
+///      tagged. (The list repair copes with them either way, keeping them in the item.)
+///   3. Lists.
+///   4. The rest touch pages, annotations and the Info dictionary rather than paragraphs, so
+///      their order among themselves doesn't matter.
+///
+/// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
+/// result, and syncs XMP with the Info dictionary the title repair may have just set.
+let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
+    [ PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
+      PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
+      PdfFixOptions.ListsFromParagraphs, tagParagraphLists
+      PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
+      PdfFixOptions.LinkContents, describeTocLinks
+      PdfFixOptions.DocumentTitle, setDocumentTitle ]
+
 /// The structural repairs Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per repair that actually changed something, so a
 /// document that already had a given fix applied reports nothing for it.
@@ -179,65 +254,6 @@ let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
-    let structTreeRoot = document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot)
-
-    let mutable tabsFixed = 0
-    if options.HasFlag PdfFixOptions.AnnotationTabs then
-        for pageNumber in 1 .. document.GetNumberOfPages() do
-            let page = document.GetPage(pageNumber).GetPdfObject()
-            match page.GetAsArray(PdfName.Annots) with
-            | null -> ()
-            | annotations when annotations.Size() = 0 -> ()
-            | _ ->
-                if not (PdfName.S.Equals(page.GetAsName(PdfName.Tabs))) then
-                    page.Put(PdfName.Tabs, PdfName.S) |> ignore
-                    tabsFixed <- tabsFixed + 1
-
-    // Before any other structural change, so the analysis sees the tree as validated.
-    let headingsTagged =
-        if options.HasFlag PdfFixOptions.HeadingsFromToc then
-            match TocHeadings.analyse document context with
-            | TocHeadings.Recoverable(headings, _) ->
-                for heading in headings do
-                    heading.Paragraph.Put(PdfName.S, PdfName $"H{heading.Level}") |> ignore
-                headings.Length
-            | _ -> 0
-        else
-            0
-
-    // Later runs first: tagging one shortens its parent's /K, which would move the ones after it.
-    let listsTagged =
-        if options.HasFlag PdfFixOptions.ListsFromParagraphs then
-            let runs = ParagraphLists.find document context
-            for run in List.rev runs do
-                ParagraphLists.tagAsList document run
-            runs.Length
-        else
-            0
-
-    let emptyParagraphsRemoved =
-        match structTreeRoot with
-        | NonNull structTreeRoot when options.HasFlag PdfFixOptions.RemoveEmptyParagraphs ->
-            removeEmptyParagraphsInside structTreeRoot context None
-        | _ -> 0
-
-    let linksDescribed =
-        match structTreeRoot with
-        | NonNull structTreeRoot when options.HasFlag PdfFixOptions.LinkContents -> describeLinks structTreeRoot context
-        | _ -> 0
-
-    let titleSet, displayDocTitleSet =
-        if options.HasFlag PdfFixOptions.DocumentTitle then
-            nameDocument document
-        else
-            None, false
-
-    [ if headingsTagged > 0 then $"Tagged {headingsTagged} heading(s) listed in the table of contents."
-      if listsTagged > 0 then $"Tagged {listsTagged} run(s) of marked paragraphs as lists."
-      if tabsFixed > 0 then $"Set /Tabs /S on {tabsFixed} page(s) containing annotations."
-      if emptyParagraphsRemoved > 0 then $"Removed {emptyParagraphsRemoved} empty /P structure element(s)."
-      if linksDescribed > 0 then $"Described {linksDescribed} link annotation(s) from their own text."
-      match titleSet with
-      | Some title -> $"Set the document title to \"{title}\"."
-      | None -> ()
-      if displayDocTitleSet then "Set /DisplayDocTitle so readers show the document title rather than the file name." ]
+    [ for option, apply in orderedFixes do
+          if options.HasFlag option then
+              yield! apply document context ]

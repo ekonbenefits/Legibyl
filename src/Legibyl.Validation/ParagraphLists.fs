@@ -16,9 +16,10 @@ open Legibyl.Validation.StructureTreeObjects
 type ListRun =
     { /// The element whose /K array holds the paragraphs.
       Parent: PdfDictionary
-      /// Their positions in that array (consecutive).
+      /// Their positions in that array, including any empty paragraphs between items.
       Indexes: int list
-      Paragraphs: PdfDictionary list
+      /// Each item's paragraph, followed by any empty paragraphs between it and the next.
+      Items: PdfDictionary list list
       /// Where the first one is, e.g. "StructTreeRoot/K[0]/K[3]".
       Path: string
       Page: int
@@ -137,6 +138,8 @@ let private SameIndent = 3.0
 type private Candidate =
     { Index: int
       Paragraph: PdfDictionary
+      /// Empty paragraphs between this one and the next item, with their positions.
+      Trailing: (int * PdfDictionary) list
       Path: string
       Marker: Marker
       MarkerText: string
@@ -191,6 +194,7 @@ let find (document: PdfDocument) context : ListRun list =
                               Some
                                   { Index = i
                                     Paragraph = paragraph
+                                    Trailing = []
                                     Path = $"{kidsPath}[{i}]"
                                     Marker = marker
                                     MarkerText = markerText
@@ -200,21 +204,40 @@ let find (document: PdfDocument) context : ListRun list =
                       | _ -> None
 
                   // Maximal runs of consecutive marked paragraphs on one page, sharing an indent.
+                  // Empty paragraphs between items (blank lines, common in exported documents)
+                  // don't end a run; they go with the item before them.
                   let runs = List<List<Candidate>>()
+                  let mutable blanks: (int * PdfDictionary) list = []
                   for i in 0 .. kids.Size() - 1 do
                       match candidateAt i with
                       | Some candidate ->
+                          let run = if runs.Count > 0 then Some runs[runs.Count - 1] else None
                           let continues =
-                              runs.Count > 0
-                              && (let last = runs[runs.Count - 1][runs[runs.Count - 1].Count - 1]
-                                  last.Index = i - 1
+                              match run with
+                              | Some run ->
+                                  let last = run[run.Count - 1]
+                                  last.Index + blanks.Length = i - 1
                                   && last.Page = candidate.Page
                                   && (match last.Geometry, candidate.Geometry with
                                       | Some a, Some b -> abs (a.Left - b.Left) <= SameIndent
-                                      | _ -> true))
-                          if continues then runs[runs.Count - 1].Add candidate
-                          else runs.Add(List [ candidate ])
-                      | None -> ()
+                                      | _ -> true)
+                              | None -> false
+                          match run with
+                          | Some run when continues ->
+                              run[run.Count - 1] <- { run[run.Count - 1] with Trailing = List.rev blanks }
+                              run.Add candidate
+                          | _ -> runs.Add(List [ candidate ])
+                          blanks <- []
+                      | None ->
+                          blanks <-
+                              match resolve (kids.Get i) with
+                              | :? PdfDictionary as paragraph when
+                                  isParagraph paragraph context
+                                  && isSubtreeEmpty paragraph context (structElemPage paragraph context None)
+                                  ->
+                                  (i, paragraph) :: blanks
+                              // Anything else ends the run: the arithmetic above won't line up.
+                              | _ -> []
 
                   for run in runs do
                       if run.Count >= 2 then
@@ -223,8 +246,8 @@ let find (document: PdfDocument) context : ListRun list =
                           | Some numbering ->
                               yield
                                   { Parent = parent
-                                    Indexes = items |> List.map _.Index
-                                    Paragraphs = items |> List.map _.Paragraph
+                                    Indexes = items |> List.collect (fun item -> item.Index :: List.map fst item.Trailing)
+                                    Items = items |> List.map (fun item -> item.Paragraph :: List.map snd item.Trailing)
                                     Path = items.Head.Path
                                     Page = items.Head.Page
                                     FirstMarker = items.Head.MarkerText
@@ -244,8 +267,9 @@ let private structElement (document: PdfDocument) (tag: PdfName) (parent: PdfDic
     element.MakeIndirect document |> ignore
     element
 
-/// Wraps the run's paragraphs in L > LI > LBody, in place of the paragraphs in their parent.
-/// Each paragraph keeps its own content (and parent-tree entries); only its parent changes.
+/// Wraps the run's paragraphs in L > LI > LBody, in place of the paragraphs in their parent
+/// (an item's trailing empty paragraphs go in its LBody too). Each paragraph keeps its own
+/// content (and parent-tree entries); only its parent changes.
 let tagAsList (document: PdfDocument) (run: ListRun) =
     let list = structElement document PdfName.L run.Parent
     let attributes = PdfDictionary()
@@ -254,11 +278,14 @@ let tagAsList (document: PdfDocument) (run: ListRun) =
     list.Put(PdfName.A, attributes) |> ignore
 
     let items = PdfArray()
-    for paragraph in run.Paragraphs do
+    for paragraphs in run.Items do
         let item = structElement document PdfName.LI list
         let body = structElement document PdfName.LBody item
-        body.Put(PdfName.K, paragraph) |> ignore
-        paragraph.Put(PdfName.P, body) |> ignore
+        let contents = PdfArray()
+        for paragraph in paragraphs do
+            contents.Add paragraph
+            paragraph.Put(PdfName.P, body) |> ignore
+        body.Put(PdfName.K, contents) |> ignore
         item.Put(PdfName.K, body) |> ignore
         items.Add item
     list.Put(PdfName.K, items) |> ignore

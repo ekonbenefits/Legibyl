@@ -163,7 +163,7 @@ let private paragraphListFindings (document: PdfDocument) context =
     [ for run in ParagraphLists.find document context ->
           warning
               ParagraphListMessage
-              $"{run.Paragraphs.Length} paragraphs on page {run.Page}, marked \"{run.FirstMarker}\" to \"{run.LastMarker}\"."
+              $"{run.Items.Length} paragraphs on page {run.Page}, marked \"{run.FirstMarker}\" to \"{run.LastMarker}\"."
               run.Path
               6
               PdfFixOptions.ListsFromParagraphs

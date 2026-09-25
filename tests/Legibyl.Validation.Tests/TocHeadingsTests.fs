@@ -226,3 +226,16 @@ let ``only a paragraph on the entry's destination page counts`` () =
     fixHeadings input.Path output.Path |> ignore
 
     bodyTags output.Path |> should equal [ "H1"; "P"; "H1" ]
+
+[<Fact>]
+let ``numbered headings become headings, not a list, when both repairs run`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // "1. Scope" and "2. Terms" are consecutive numbered paragraphs, so they'd pass for a
+    // list too; the TOC says they're headings, and headings run first.
+    createPdfWithToc input.Path false [ entry "1. Scope" 72f 2; entry "2. Terms" 72f 2 ] (paragraphs 2 [ "1. Scope"; "2. Terms" ])
+
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.HeadingsFromToc ||| PdfFixOptions.ListsFromParagraphs)
+    |> ignore
+
+    bodyTags output.Path |> should equal [ "H1"; "H1" ]
