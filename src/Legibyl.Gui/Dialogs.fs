@@ -150,3 +150,261 @@ let chooseFixOptions (owner: Window) : Task<PdfFixOptions option> =
 
     // Closing with the title-bar button returns null, which is None.
     window.ShowDialog<PdfFixOptions option> owner
+
+type private StatusStyle =
+    { Title: string
+      Detail: string
+      Glyph: string
+      ColorToken: string }
+
+let private statusStyle (outcome: Result<FixResult, string>) =
+    match outcome with
+    | Error message ->
+        { Title = "Repair failed"; Detail = message; Glyph = "✕"; ColorToken = Theme.Tokens.Danger }
+    | Ok fix ->
+        match fix.Status with
+        | RepairStatus.Success ->
+            { Title = "Repaired"
+              Detail = "The selected fixes changed the file, and a repaired copy was saved."
+              Glyph = "✓"
+              ColorToken = Theme.Tokens.Success }
+        | RepairStatus.IdRemoved ->
+            { Title = "Conformance claim removed"
+              Detail =
+                "The file claimed PDF/A or PDF/UA conformance it doesn't meet, so veraPDF removed that claim. "
+                + "Without it, the check that requires a conformance claim now fails too, "
+                + "so the repaired copy can show one more failure."
+              Glyph = "!"
+              ColorToken = Theme.Tokens.Warning }
+        | RepairStatus.NoAction ->
+            { Title = "Nothing to repair"
+              Detail = "The selected fixes had nothing to change in this file, so no copy was saved."
+              Glyph = "i"
+              ColorToken = Theme.Tokens.Primary }
+        | RepairStatus.WontFix ->
+            { Title = "Couldn't repair"
+              Detail = "veraPDF found no way to fix these problems with the selected repairs, so no copy was saved."
+              Glyph = "!"
+              ColorToken = Theme.Tokens.Warning }
+        | _ ->
+            { Title = "Repair failed"
+              Detail = "veraPDF tried to repair the metadata but failed, so no copy was saved."
+              Glyph = "✕"
+              ColorToken = Theme.Tokens.Danger }
+
+let private sectionHeading (text: string) : IView =
+    TextBlock.create [
+        TextBlock.text text
+        TextBlock.fontWeight FontWeight.SemiBold
+        TextBlock.margin (0.0, 16.0, 0.0, 6.0)
+        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+    ]
+
+/// One before → after row. `better` says whether the change is an improvement
+/// (Some true), a regression (Some false) or neither (None).
+let private comparisonCells (row: int) (label: string) (before: string) (after: string) (better: bool option) : IView list =
+    let cell column (text: string) (attrs: IAttr<TextBlock> list) : IView =
+        TextBlock.create [
+            Grid.row row
+            Grid.column column
+            TextBlock.text text
+            TextBlock.margin (0.0, 2.0, 16.0, 2.0)
+            yield! attrs
+        ]
+
+    [ cell 0 label []
+      cell 1 before [ Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ] ]
+      cell 2 "→" [ Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ] ]
+      cell 3 after [
+          TextBlock.fontWeight FontWeight.SemiBold
+          match better with
+          | Some true -> Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Success ]
+          | Some false -> Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Danger ]
+          | None -> ()
+      ] ]
+
+let private comparison (before: ValidationReport) (after: ValidationReport) : IView =
+    let count label (b: int) (a: int) = label, string b, string a, (if a < b then Some true elif a > b then Some false else None)
+    let yesNo value = if value then "Yes" else "No"
+    let rows =
+        [ count "Failed checks" before.FailedCount after.FailedCount
+          count "Warnings" before.WarningCount after.WarningCount
+          $"Compliant with {after.FlavourId.ToUpperInvariant()}",
+          yesNo before.IsCompliant,
+          yesNo after.IsCompliant,
+          (if after.IsCompliant = before.IsCompliant then None else Some after.IsCompliant) ]
+
+    Grid.create [
+        Grid.columnDefinitions "Auto,Auto,Auto,Auto"
+        Grid.rowDefinitions (String.replicate rows.Length "Auto," |> fun s -> s.TrimEnd ',')
+        Grid.children [
+            for index, (label, b, a, better) in List.indexed rows do
+                yield! comparisonCells index label b a better
+        ]
+    ]
+
+/// Shows the outcome of a Fix: a plain-language status, what changed, how the
+/// repaired copy validates compared with the original, and where it was saved.
+let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: ValidationReport option) : Task =
+    let window = dialogWindow "Fix PDF" 540.0
+    let style = statusStyle outcome
+
+    let savedPath =
+        match outcome with
+        | Ok fix when fix.WasFixed -> Option.ofObj fix.OutputPath
+        | _ -> None
+
+    let openFolder (folder: string) =
+        window.Launcher.LaunchDirectoryInfoAsync(DirectoryInfo folder) |> ignore
+
+    window.Content <-
+        Component(fun _ ->
+            StackPanel.create [
+                StackPanel.margin 20.0
+                StackPanel.children [
+                    // Status headline
+                    Grid.create [
+                        Grid.columnDefinitions "Auto,*"
+                        Grid.children [
+                            Border.create [
+                                Border.width 36.0
+                                Border.height 36.0
+                                Border.cornerRadius 18.0
+                                Border.margin (0.0, 0.0, 14.0, 0.0)
+                                Border.verticalAlignment VerticalAlignment.Top
+                                Theme.resources [ Border.BackgroundProperty, style.ColorToken ]
+                                Border.child (
+                                    TextBlock.create [
+                                        TextBlock.text style.Glyph
+                                        TextBlock.fontSize 18.0
+                                        TextBlock.fontWeight FontWeight.Bold
+                                        TextBlock.foreground Brushes.White
+                                        TextBlock.horizontalAlignment HorizontalAlignment.Center
+                                        TextBlock.verticalAlignment VerticalAlignment.Center
+                                    ]
+                                )
+                            ]
+                            StackPanel.create [
+                                Grid.column 1
+                                StackPanel.children [
+                                    TextBlock.create [
+                                        TextBlock.text style.Title
+                                        TextBlock.fontSize 18.0
+                                        TextBlock.fontWeight FontWeight.SemiBold
+                                    ]
+                                    SelectableTextBlock.create [
+                                        SelectableTextBlock.text style.Detail
+                                        SelectableTextBlock.textWrapping TextWrapping.Wrap
+                                        SelectableTextBlock.margin (0.0, 4.0, 0.0, 0.0)
+                                        Theme.resources [ SelectableTextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+
+                    // Before → after
+                    match outcome, after with
+                    | Ok fix, Some after ->
+                        sectionHeading "Result (original → repaired copy)"
+                        comparison fix.OriginalReport after
+                    | _ -> ()
+
+                    // Changes made
+                    match outcome with
+                    | Ok fix when fix.AppliedFixes.Count > 0 ->
+                        sectionHeading "Changes made"
+                        StackPanel.create [
+                            StackPanel.spacing 4.0
+                            StackPanel.children [
+                                for change in fix.AppliedFixes ->
+                                    Grid.create [
+                                        Grid.columnDefinitions "Auto,*"
+                                        Grid.children [
+                                            TextBlock.create [
+                                                TextBlock.text "✓"
+                                                TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+                                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Success ]
+                                            ]
+                                            TextBlock.create [
+                                                Grid.column 1
+                                                TextBlock.text change
+                                                TextBlock.textWrapping TextWrapping.Wrap
+                                            ]
+                                        ]
+                                    ]
+                            ]
+                        ]
+                    | _ -> ()
+
+                    // Saved as
+                    match savedPath with
+                    | Some path ->
+                        let folder = Path.GetDirectoryName path |> Option.ofObj |> Option.defaultValue ""
+                        sectionHeading "Saved as"
+                        Grid.create [
+                            Grid.columnDefinitions "*,Auto"
+                            Grid.children [
+                                StackPanel.create [
+                                    StackPanel.children [
+                                        SelectableTextBlock.create [
+                                            SelectableTextBlock.text (match Path.GetFileName path with NonNull name -> name | Null -> path)
+                                            SelectableTextBlock.fontWeight FontWeight.SemiBold
+                                        ]
+                                        SelectableTextBlock.create [
+                                            SelectableTextBlock.text folder
+                                            SelectableTextBlock.textWrapping TextWrapping.Wrap
+                                            Theme.resources [ SelectableTextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                        ]
+                                        TextBlock.create [
+                                            TextBlock.text "Legibyl is now showing this copy."
+                                            TextBlock.margin (0.0, 4.0, 0.0, 0.0)
+                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                        ]
+                                    ]
+                                ]
+                                Button.create [
+                                    Grid.column 1
+                                    Button.content "Open folder"
+                                    Button.margin (12.0, 0.0, 0.0, 0.0)
+                                    Button.verticalAlignment VerticalAlignment.Top
+                                    Button.isEnabled (folder <> "")
+                                    Button.onClick (fun _ -> openFolder folder)
+                                ]
+                            ]
+                        ]
+                    | None -> ()
+
+                    // Footnote and OK
+                    Grid.create [
+                        Grid.margin (0.0, 20.0, 0.0, 0.0)
+                        Grid.columnDefinitions "*,Auto"
+                        Grid.children [
+                            match outcome with
+                            | Ok _ ->
+                                TextBlock.create [
+                                    TextBlock.text
+                                        "Fixes are best-effort and limited to the repairs you selected. They don't add missing alt text, retag untagged content, or infer table headers."
+                                    TextBlock.fontSize 12.0
+                                    TextBlock.textWrapping TextWrapping.Wrap
+                                    TextBlock.margin (0.0, 0.0, 16.0, 0.0)
+                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                ]
+                            | Error _ -> ()
+                            Button.create [
+                                Grid.column 1
+                                Button.content "OK"
+                                Button.minWidth 82.0
+                                Button.isDefault true
+                                Button.isCancel true
+                                Button.horizontalContentAlignment HorizontalAlignment.Center
+                                Button.verticalAlignment VerticalAlignment.Bottom
+                                Button.onClick (fun _ -> window.Close())
+                            ]
+                        ]
+                    ]
+                ]
+            ])
+
+    window.ShowDialog owner

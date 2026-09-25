@@ -16,6 +16,7 @@ module Tokens =
     let Success = "SemiColorSuccess"
     let Danger = "SemiColorDanger"
     let Warning = "SemiColorWarning"
+    let Primary = "SemiColorPrimary"
 
 /// Binds properties to theme resources, so they follow light/dark changes without a
 /// re-render (FuncUI has no dynamic-resource attribute). FuncUI keys every init
