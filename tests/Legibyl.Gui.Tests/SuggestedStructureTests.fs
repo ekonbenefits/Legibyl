@@ -69,5 +69,42 @@ let ``the suggested structure lists each region the detector finds`` () =
         let texts = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
         window.Close()
         found |> should be (greaterThan 0)
-        texts |> should contain "Page 1 of 1"
+        texts |> List.exists (fun t -> t.StartsWith "Page 1 of 1") |> should be True
         texts |> List.exists (fun t -> t.StartsWith " 1 ") |> should be True)
+
+[<Fact>]
+let ``every page's layout is found in the background, so the next page shows at once`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "two-pages.pdf")
+    do
+        use document = new PdfDocument(new PdfWriter(pdf))
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        for title in [ "First page"; "Second page" ] do
+            let canvas = PdfCanvas(document.AddNewPage())
+            canvas.BeginText().SetFontAndSize(font, 24f).MoveText(72.0, 700.0).ShowText(title).EndText() |> ignore
+            for line in 0 .. 5 do
+                canvas.BeginText().SetFontAndSize(font, 12f).MoveText(72.0, 640.0 - 16.0 * float line)
+                    .ShowText("A paragraph of ordinary text, long enough to read as a block of body copy.").EndText()
+                |> ignore
+    try
+        onUiThread (fun () ->
+            let window = SuggestedStructureWindow(pdf)
+            window.Show()
+            let texts () = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
+            let allFound () = texts () |> List.exists (fun t -> t.EndsWith "every page's layout found")
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) allFound |> ignore
+            let foundBeforeMoving = allFound ()
+
+            click (button window "Next ▶")
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            let afterMoving = texts ()
+            window.Close()
+
+            foundBeforeMoving |> should be True
+            afterMoving |> List.exists (fun t -> t.StartsWith "Page 2 of 2") |> should be True
+            afterMoving |> List.exists (fun t -> t.StartsWith "Finding the layout") |> should be False)
+    finally
+        Directory.Delete(folder, true)

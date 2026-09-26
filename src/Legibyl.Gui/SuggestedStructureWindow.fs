@@ -16,6 +16,68 @@ open Avalonia.Media.Imaging
 open Legibyl.Layout
 open Legibyl.Rendering
 
+/// Finds every page's layout in the background, one page at a time (each takes seconds): the
+/// page being viewed first, then the pages after it, then any before. So moving to another page
+/// usually shows it at once.
+[<Sealed>]
+type LayoutPrefetcher(suggester: LayoutSuggester) =
+    let results = Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>()
+    let failures = Collections.Concurrent.ConcurrentDictionary<int, string>()
+    let cancel = new CancellationTokenSource()
+    let pageReady = Event<int * PageSuggestion>()
+    let pageFailed = Event<int * string>()
+    let mutable wanted = 1
+    let mutable worker: Task = Task.CompletedTask
+
+    let next () =
+        let count = suggester.PageCount
+        let current = wanted
+        seq { yield current; yield! [ current + 1 .. count ]; yield! [ 1 .. current - 1 ] }
+        |> Seq.tryFind (fun page -> page >= 1 && page <= count && not (results.ContainsKey page) && not (failures.ContainsKey page))
+
+    let rec run () =
+        match next () with
+        | Some page when not cancel.IsCancellationRequested ->
+            try
+                let result = suggester.Suggest page
+                results[page] <- result
+                if not cancel.IsCancellationRequested then pageReady.Trigger((page, result))
+            with ex when not cancel.IsCancellationRequested ->
+                failures[page] <- ex.Message
+                pageFailed.Trigger((page, ex.Message))
+            run ()
+        | _ -> ()
+
+    /// Raised on a background thread as each page's layout is found.
+    member _.PageReady = pageReady.Publish
+    /// Raised on a background thread when a page's layout can't be found, with why.
+    member _.PageFailed = pageFailed.Publish
+    member _.PageCount = suggester.PageCount
+    member _.ReadyCount = results.Count
+
+    /// Makes page the next one found, if it isn't found already.
+    member _.Want(page: int) = wanted <- page
+
+    member _.TryGet(page: int) =
+        match results.TryGetValue page with
+        | true, result -> Some result
+        | _ -> None
+
+    member _.Failure(page: int) =
+        match failures.TryGetValue page with
+        | true, reason -> Some reason
+        | _ -> None
+
+    /// Starts finding pages, once (the model must be downloaded).
+    member _.Start() =
+        if worker.IsCompleted && results.Count + failures.Count < suggester.PageCount then
+            worker <- Task.Run(fun () -> run ())
+
+    /// Stops after the page being found, and waits for it.
+    member _.Stop() =
+        cancel.Cancel()
+        worker.Wait()
+
 /// For an untagged PDF: the structure a layout detector suggests for each page, drawn over the
 /// page. A preview only; nothing is written to the PDF.
 module SuggestedStructureView =
@@ -38,7 +100,7 @@ module SuggestedStructureView =
     let private snippet (text: string) =
         if text.Length > 90 then text[..89] + "…" else text
 
-    let view (suggester: LayoutSuggester) (renderer: PdfRegionRenderer) (pdfPath: string) =
+    let view (prefetcher: LayoutPrefetcher) (renderer: PdfRegionRenderer) (pdfPath: string) =
         Component(fun ctx ->
             let modelReady = ctx.useState (LayoutModel.isDownloaded ())
             let downloadProgress = ctx.useState (None: float option)
@@ -47,9 +109,8 @@ module SuggestedStructureView =
             let suggestion = ctx.useState (None: PageSuggestion option)
             let image = ctx.useState (None: Bitmap option)
             let status = ctx.useState ""
-            // Pages already detected: each takes seconds.
-            let detected = ctx.useState (Dictionary<int, PageSuggestion>(), renderOnChange = false)
-            // Bumped per request, so a slow page that finishes late doesn't replace a newer one.
+            let readyCount = ctx.useState prefetcher.ReadyCount
+            // Bumped per page shown, so a rendering that finishes late doesn't replace a newer one.
             let version = ctx.useState (0, renderOnChange = false)
 
             let render (result: PageSuggestion) (emphasised: int option) (current: int) =
@@ -67,36 +128,51 @@ module SuggestedStructureView =
                     if current = version.Current then image.Set(Some bitmap) else bitmap.Dispose()
                 }
 
+            let pagesReady () =
+                if readyCount.Current >= prefetcher.PageCount then "every page's layout found"
+                else $"{readyCount.Current} of {prefetcher.PageCount} pages' layouts found"
+
+            /// Shows a page whose layout is found.
+            let display (result: PageSuggestion) =
+                suggestion.Set(Some result)
+                status.Set(
+                    if result.Rotated then "This page is rotated, and rotated pages aren't detected yet."
+                    elif result.Blocks.IsEmpty then "Nothing was found on this page."
+                    elif not result.HasText then
+                        "This page has no text layer (it may be a scan), so tagging it would need OCR first."
+                    else ""
+                )
+                render result None version.Current |> ignore
+
             let showPage (number: int) =
-                task {
-                    version.Set(version.Current + 1)
-                    let current = version.Current
-                    page.Set number
-                    selected.Set None
-                    suggestion.Set None
-                    try
-                        let! result =
-                            match detected.Current.TryGetValue number with
-                            | true, result -> Task.FromResult result
-                            | _ ->
-                                status.Set $"Finding the layout of page {number}… (this takes several seconds a page)"
-                                Task.Run(fun () -> suggester.Suggest number)
-                        detected.Current[number] <- result
-                        if current = version.Current then
-                            suggestion.Set(Some result)
-                            status.Set(
-                                if result.Rotated then "This page is rotated, and rotated pages aren't detected yet."
-                                elif result.Blocks.IsEmpty then "Nothing was found on this page."
-                                elif not result.HasText then
-                                    "This page has no text layer (it may be a scan), so tagging it would need OCR first."
-                                else ""
-                            )
-                            do! render result None current
-                    with ex ->
-                        if current = version.Current then
-                            status.Set $"Couldn't find page {number}'s layout: {ex.Message}"
-                }
-                |> ignore
+                version.Set(version.Current + 1)
+                page.Set number
+                selected.Set None
+                suggestion.Set None
+                prefetcher.Want number
+                match prefetcher.TryGet number, prefetcher.Failure number with
+                | Some result, _ -> display result
+                | None, Some reason -> status.Set $"Couldn't find page {number}'s layout: {reason}"
+                | None, None -> status.Set $"Finding the layout of page {number}… (several seconds a page)"
+
+            // Pages arrive from the prefetcher's thread; show the one being waited for.
+            ctx.useEffect (
+                (fun () ->
+                    let ready =
+                        prefetcher.PageReady.Subscribe(fun (number, result) ->
+                            Avalonia.Threading.Dispatcher.UIThread.Post(fun () ->
+                                readyCount.Set prefetcher.ReadyCount
+                                if page.Current = number && suggestion.Current.IsNone then display result))
+                    let failed =
+                        prefetcher.PageFailed.Subscribe(fun (number, reason) ->
+                            Avalonia.Threading.Dispatcher.UIThread.Post(fun () ->
+                                if page.Current = number then status.Set $"Couldn't find page {number}'s layout: {reason}"))
+                    { new IDisposable with
+                        member _.Dispose() =
+                            ready.Dispose()
+                            failed.Dispose() }),
+                [ EffectTrigger.AfterInit ]
+            )
 
             let select (block: SuggestedBlock) =
                 match suggestion.Current with
@@ -113,13 +189,20 @@ module SuggestedStructureView =
                         downloadProgress.Set None
                         modelReady.Set true
                         showPage 1
+                        prefetcher.Start()
                     with ex ->
                         downloadProgress.Set None
                         status.Set $"Couldn't download the layout model: {ex.Message}"
                 }
                 |> ignore
 
-            ctx.useEffect ((fun () -> if modelReady.Current then showPage 1), [ EffectTrigger.AfterInit ])
+            ctx.useEffect (
+                (fun () ->
+                    if modelReady.Current then
+                        showPage 1
+                        prefetcher.Start()),
+                [ EffectTrigger.AfterInit ]
+            )
 
             let intro =
                 "Suggested structure for this untagged PDF, from what each page looks like: its regions, "
@@ -237,11 +320,11 @@ module SuggestedStructureView =
                                 ]
                                 TextBlock.create [
                                     TextBlock.verticalAlignment VerticalAlignment.Center
-                                    TextBlock.text $"Page {page.Current} of {suggester.PageCount}"
+                                    TextBlock.text $"Page {page.Current} of {prefetcher.PageCount} · {pagesReady ()}"
                                 ]
                                 Button.create [
                                     Button.content "Next ▶"
-                                    Button.isEnabled (page.Current < suggester.PageCount)
+                                    Button.isEnabled (page.Current < prefetcher.PageCount)
                                     Button.onClick (fun _ -> showPage (page.Current + 1))
                                 ]
                             ]
@@ -306,11 +389,15 @@ type SuggestedStructureWindow(pdfPath: string) as this =
     inherit
         HostWindow(Title = "Suggested Structure", Width = 1000.0, Height = 760.0, MinWidth = 600.0, MinHeight = 420.0)
     let suggester = new LayoutSuggester(pdfPath)
+    let prefetcher = LayoutPrefetcher(suggester)
     let renderer = new PdfRegionRenderer()
-    do this.Content <- SuggestedStructureView.view suggester renderer pdfPath
+    do this.Content <- SuggestedStructureView.view prefetcher renderer pdfPath
 
     override _.OnClosed(e) =
         base.OnClosed e
-        // A detection may still be running; it holds the suggester's lock until it finishes.
-        Task.Run(fun () -> (suggester :> IDisposable).Dispose()) |> ignore
+        // A page may still be being found: stop after it, then let go of the suggester.
+        Task.Run(fun () ->
+            prefetcher.Stop()
+            (suggester :> IDisposable).Dispose())
+        |> ignore
         renderer.Dispose()
