@@ -345,7 +345,7 @@ module SuggestedStructureView =
                             window
                             (Avalonia.Platform.Storage.FilePickerSaveOptions(
                                 Title = "Save tagged copy",
-                                SuggestedFileName = $"{Path.GetFileNameWithoutExtension pdfPath}.tagged.pdf",
+                                SuggestedFileName = CopyNames.nextVersion pdfPath,
                                 DefaultExtension = "pdf"
                             ))
                             pdfPath

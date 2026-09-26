@@ -506,8 +506,7 @@ module private MainView =
                                     window
                                     (FilePickerSaveOptions(
                                         Title = "Save repaired PDF",
-                                        SuggestedFileName =
-                                            $"{Path.GetFileNameWithoutExtension sourcePath}.fixed{Path.GetExtension sourcePath}",
+                                        SuggestedFileName = CopyNames.nextVersion sourcePath,
                                         DefaultExtension = "pdf",
                                         FileTypeChoices = [ pdfFileType; FilePickerFileTypes.All ]
                                     ))
