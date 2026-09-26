@@ -1,4 +1,4 @@
-/// The repairs --fixes names, and the sets "safe" and "all".
+/// The repairs --fixes names, and the sets "safe", "all" and "none" (only edits or a layout).
 module Legibyl.Cli.FixNames
 
 open System
@@ -23,7 +23,7 @@ let names =
       "title-from-first-page", PdfFixOptions.TitleFromFirstPage
       "metadata", PdfFixOptions.Metadata ]
 
-/// The repairs that need no guesswork about the document's meaning: what --fix applies. The
+/// The repairs that need no guesswork about the document's meaning: what `fix` applies by default. The
 /// title only moves across a title the author did write, in Info or in XMP; a title is never
 /// invented from the file name.
 let safe =
@@ -38,11 +38,11 @@ let all =
     names |> List.fold (fun all (_, option) -> all ||| option) PdfFixOptions.None
     &&& ~~~PdfFixOptions.LinkTitlesFromWeb
 
-/// The repairs a comma-separated list names ("safe", "all", or repair names, in any case).
+/// The repairs a comma-separated list names ("safe", "all", "none", or repair names, in any case).
 let parse (text: string) : Result<PdfFixOptions, string> =
     let parts = text.Split(',', StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries)
     if parts.Length = 0 then
-        Error "--fixes needs at least one repair name. Run --list-fixes to see them."
+        Error "--fixes needs at least one repair name. Run 'legibyl list fixes' to see them."
     else
         parts
         |> Array.fold
@@ -52,10 +52,11 @@ let parse (text: string) : Result<PdfFixOptions, string> =
                     match part.ToLowerInvariant() with
                     | "safe" -> Ok(options ||| safe)
                     | "all" -> Ok(options ||| all)
+                    | "none" -> Ok options
                     | name ->
                         match names |> List.tryFind (fst >> (=) name) with
                         | Some(_, option) -> Ok(options ||| option)
-                        | None -> Error $"Unknown repair '{part}'. Run --list-fixes to see the names."))
+                        | None -> Error $"Unknown repair '{part}'. Run 'legibyl list fixes' to see the names."))
             (Ok PdfFixOptions.None)
 
 /// Whether the repairs need the layout model (tagging, and what reads the page's layout).

@@ -20,7 +20,7 @@ let ``every repair leaves out only the one that visits web pages`` () =
 
 [<Fact>]
 let ``an unknown or missing name says so`` () =
-    FixNames.parse "safe,nope" |> should equal (Error "Unknown repair 'nope'. Run --list-fixes to see the names." : Result<PdfFixOptions, string>)
+    FixNames.parse "safe,nope" |> should equal (Error "Unknown repair 'nope'. Run 'legibyl list fixes' to see the names." : Result<PdfFixOptions, string>)
     FixNames.parse " , " |> Result.isError |> should be True
 
 [<Fact>]
@@ -29,3 +29,8 @@ let ``each repair is listed with what it does`` () =
     listing |> should haveLength FixNames.names.Length
     listing |> List.find (fun line -> line.StartsWith "lists ") |> should haveSubstring "Tag paragraphs that start with list markers"
     listing |> List.find (fun line -> line.StartsWith "metadata ") |> should haveSubstring "(safe)"
+
+[<Fact>]
+let ``none names no repairs, for edits or a layout alone`` () =
+    FixNames.parse "none" |> should equal (Ok PdfFixOptions.None : Result<PdfFixOptions, string>)
+    FixNames.parse "none,lists" |> should equal (Ok PdfFixOptions.ListsFromParagraphs : Result<PdfFixOptions, string>)

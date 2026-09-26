@@ -52,7 +52,15 @@ let private withUntaggedPdf (test: string -> unit) =
 let private run (args: string list) =
     let output = Path.GetTempFileName()
     try
-        let code = Legibyl.Cli.Program.main (Array.ofList (args @ [ "--output"; output ]))
+        // Where each command writes its report: fix and layout apply take --report, validate and
+        // structure --output; layout suggest writes the layout to its own --output.
+        let report =
+            match args with
+            | "fix" :: _
+            | "layout" :: "apply" :: _ -> [ "--report"; output ]
+            | "layout" :: _ -> []
+            | _ -> [ "--output"; output ]
+        let code = Legibyl.Cli.Program.main (Array.ofList (args @ report))
         let json = if File.Exists output && FileInfo(output).Length > 0L then Some(JsonDocument.Parse(File.ReadAllText output)) else None
         code, json |> Option.map (fun json -> json.RootElement[0])
     finally
@@ -108,7 +116,7 @@ let private heading = [| 70.0; 695.0; 300.0; 715.0 |]
 let private figure = [| 70.0; 548.0; 175.0; 652.0 |]
 
 [<Fact>]
-let ``--apply-layout tags the file from the layout as found, with the edits layered on`` () =
+let ``layout apply tags the file from the layout as found, with the edits layered on`` () =
     withUntaggedPdf (fun pdf ->
         let path = pdf + ".layout.json"
         File.WriteAllText(path, LayoutFile.toJson (LayoutSuggestions.toLayoutFile pdf [ suggestion ] None))
@@ -118,9 +126,9 @@ let ``--apply-layout tags the file from the layout as found, with the edits laye
             ReviewFile.toJson (edits "The garden" [ { editOn "H" heading with Retag = "H1" }; { editOn "Figure" figure with Alt = "Tomato seedlings" } ])
         )
 
-        let _, result = run [ pdf; "--apply-layout"; path; "--edits-from"; review ]
+        let _, result = run [ "layout"; "apply"; pdf; "--layout"; path; "--edits-from"; review ]
 
-        let copy = result.Value.GetProperty("fixOutputPath").GetString() |> nonNull
+        let copy = result.Value.GetProperty("outputPath").GetString() |> nonNull
         let tagged = VeraPdfValidator().ReadStructureTree copy |> nonNull |> nodes
         tagged |> List.map _.Tag |> List.filter (fun t -> t = "H1" || t = "Figure") |> should equal [ "H1"; "Figure" ]
         (tagged |> List.find (fun n -> n.Tag = "Figure")).AlternateDescription |> should equal "Tomato seedlings"
@@ -128,40 +136,45 @@ let ``--apply-layout tags the file from the layout as found, with the edits laye
         document.GetDocumentInfo().GetTitle() |> should equal "The garden")
 
 [<Fact>]
-let ``--apply-layout on a tagged file says the layout wasn't applied`` () =
+let ``layout apply on a tagged file says it's already tagged`` () =
     withUntaggedPdf (fun pdf ->
         let path = pdf + ".layout.json"
         File.WriteAllText(path, LayoutFile.toJson (LayoutSuggestions.toLayoutFile pdf [ suggestion ] None))
-        let _, first = run [ pdf; "--apply-layout"; path ]
-        let copy = first.Value.GetProperty("fixOutputPath").GetString() |> nonNull
+        let _, first = run [ "layout"; "apply"; pdf; "--layout"; path ]
+        let copy = first.Value.GetProperty("outputPath").GetString() |> nonNull
 
-        let _, again = run [ copy; "--apply-layout"; path ]
+        let code, again = run [ "layout"; "apply"; copy; "--layout"; path ]
 
-        let notApplied = again.Value.GetProperty("fixNotApplied")
-        notApplied[0].GetString() |> should haveSubstring "the file already has a structure tree")
+        again.Value.GetProperty("status").GetString() |> should equal "already-tagged"
+        code |> should equal 1)
 
 [<Fact>]
-let ``a layout that can't be used, or layout options used wrongly, are usage errors`` () =
+let ``a layout or review that can't be used, or commands used wrongly, are usage errors`` () =
     withUntaggedPdf (fun pdf ->
         let path = pdf + ".layout.json"
         File.WriteAllText(path, "{ not json")
-        fst (run [ pdf; "--apply-layout"; path ]) |> should equal 64
-        fst (run [ pdf; "--suggest-layout-output"; path ]) |> should equal 64
-        fst (run [ pdf; pdf; "--apply-layout"; path ]) |> should equal 64)
+        fst (run [ "layout"; "apply"; pdf; "--layout"; path ]) |> should equal 64
+        fst (run [ "layout"; "apply"; pdf ]) |> should equal 64
+        fst (run [ "layout"; "apply"; pdf; pdf; "--layout"; path ]) |> should equal 64
+        fst (run [ "fix"; pdf; "--fixes" ]) |> should equal 64
+        fst (run [ "fix"; pdf; "--edits-from"; pdf + ".missing.json" ]) |> should equal 64
+        fst (run [ "fix"; pdf; pdf; "--output"; path ]) |> should equal 64
+        fst (run [ "fix"; pdf; "--edits"; "--edits-from"; path ]) |> should equal 64
+        fst (run []) |> should equal 64)
 
 [<Fact>]
-let ``--suggest-layout returns each page's regions, ready to apply`` () =
+let ``layout suggest writes each page's regions, ready to apply`` () =
     if not (LayoutModel.isDownloaded ()) then
         Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
     withUntaggedPdf (fun pdf ->
         let path = pdf + ".layout.json"
 
-        let _, result = run [ pdf; "--suggest-layout"; "--suggest-layout-output"; path ]
+        let code, _ = run [ "layout"; "suggest"; pdf; "--output"; path ]
 
-        let pages = result.Value.GetProperty("suggestedLayout").GetProperty("pages")
-        pages.GetArrayLength() |> should equal 1
-        pages[0].GetProperty("regions").GetArrayLength() |> should be (greaterThan 0)
-        LayoutFile.read path |> Result.isOk |> should be True)
+        code |> should equal 0
+        let layout = match LayoutFile.read path with Ok layout -> layout | Error message -> failwith message
+        layout.Pages |> should haveLength 1
+        layout.Pages[0].Regions.Length |> should be (greaterThan 0))
 
 [<Fact>]
 let ``--figure-images writes a picture of each figure the model finds`` () =
@@ -170,7 +183,7 @@ let ``--figure-images writes a picture of each figure the model finds`` () =
     withUntaggedPdf (fun pdf ->
         let path = pdf + ".layout.json"
 
-        run [ pdf; "--suggest-layout"; "--suggest-layout-output"; path; "--figure-images" ] |> ignore
+        run [ "layout"; "suggest"; pdf; "--output"; path; "--figure-images" ] |> ignore
 
         let layout = match LayoutFile.read path with Ok layout -> layout | Error message -> failwith message
         let figures = layout.Pages |> Array.collect _.Regions |> Array.filter (fun r -> r.Tag = "Figure")
@@ -219,7 +232,7 @@ let ``a figure is given the text just before and after it`` () =
 
 [<Fact>]
 let ``figure images need a layout file to go beside`` () =
-    withUntaggedPdf (fun pdf -> fst (run [ pdf; "--suggest-layout"; "--figure-images" ]) |> should equal 64)
+    withUntaggedPdf (fun pdf -> fst (run [ "layout"; "suggest"; pdf; "--figure-images" ]) |> should equal 64)
 
 let private fixedSource (regions: LayoutRegion list) =
     { new IPageLayoutSource with
@@ -251,9 +264,9 @@ let ``a review records an untagged PDF's layout as found, and --edits tags from 
             { edits "The garden" [ { editOn "H" heading with Retag = "H1" }; { editOn "Figure" figure with Exclude = true } ] with
                 Layout = layout }
 
-        let _, result = run [ pdf; "--edits" ]
+        let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
 
-        let copy = result.Value.GetProperty("fixOutputPath").GetString() |> nonNull
+        let copy = result.Value.GetProperty("outputPath").GetString() |> nonNull
         let tagged = VeraPdfValidator().ReadStructureTree copy |> nonNull |> nodes
         tagged |> List.map _.Tag |> List.filter (fun t -> t = "H1" || t = "H2" || t = "Figure") |> should equal [ "H1" ]
         use document = new PdfDocument(new PdfReader(copy))

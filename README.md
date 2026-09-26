@@ -393,7 +393,7 @@ another tag a `retag` edit, and alt text and corrected text are edits too.
 Nothing is written to the PDF until **Save…** in the main window tags a copy
 with the regions and the edits on them. Once you've decided something, the
 edits are kept in the file next to the PDF, with the layout they're on recorded
-as found (`layout`, in the same format as the CLI's `--suggest-layout`, see
+as found (`layout`, in the same format as the CLI's `layout suggest`, see
 `LayoutFile.fs`): reopening the PDF, even in a later session, shows the pages
 found so far at once, without the detector, with your edits on them. Each
 recorded page has a fingerprint of its size and text, so a page that's changed
@@ -494,7 +494,7 @@ gets a borderless link over it, tagged as a `Link` holding the figure, unless
 the page already has a link there.
 
 The Auto Fixes dialog's **Describe web links from their pages** option (off by
-default; `--link-titles-from-web` with `--fix`) describes each link to a web
+default; `fix --fixes link-titles-from-web` on the command line) describes each link to a web
 page that has no description (`/Contents`) by the title of the page it goes
 to, with the link's own site: "Apply for benefits (example.com)". It works on
 any link, not only those in a table of contents, since a page's title says
@@ -543,170 +543,46 @@ are present under each semantic role, not just the raw PDF/UA rule failures.
 
 ## Command-line tool (for scripts / AI agents)
 
-`Legibyl.Cli` builds a standalone `legibyl` executable intended for
-use in scripts or by an AI agent iterating on PDF/UA compatibility fixes.
-Output defaults to structured JSON on stdout, and the **process exit code**
-tells you the outcome without needing to parse output:
+`Legibyl.Cli` builds a standalone `legibyl` executable intended for use in
+scripts or by an AI agent iterating on PDF/UA compatibility fixes. It has a
+command for each job:
 
-| Exit code | Meaning |
-|-----------|---------|
-| `0`  | All files validated and are compliant. |
-| `1`  | All files validated successfully, but at least one is non-compliant. |
-| `2`  | At least one file could not be validated (missing/corrupt/encrypted). |
-| `64` | Invalid command-line usage. |
+```
+legibyl validate <files>… [--profile p] [--format json|text] [--output report] [--structure]
+legibyl fix <files>… [--fixes safe|all|none|names] [--edits | --edits-from review] [--output out.pdf] [--report path]
+legibyl structure <files>… [--format json|text] [--output path]
+legibyl layout suggest <file> [--output layout.json] [--figure-images]
+legibyl layout apply <file> --layout layout.json [--edits | --edits-from review] [--fixes names] [--output out.pdf]
+legibyl list fixes|profiles [--format text|json]
+```
 
 ```powershell
-dotnet run --project src/Legibyl.Cli/Legibyl.Cli.fsproj -- <file.pdf> [<file2.pdf> ...] [options]
+dotnet run --project src/Legibyl.Cli/Legibyl.Cli.fsproj -- validate <file.pdf> [<file2.pdf> ...] [options]
 ```
 
 Or after building, run the exe directly:
-`src\Legibyl.Cli\bin\Debug\net10.0\legibyl.exe <file.pdf>`
+`src\Legibyl.Cli\bin\Debug\net10.0\legibyl.exe validate <file.pdf>`.
+`legibyl <command> --help` describes each command's options.
 
-Options:
-- `--profile <name>` — profile to validate against (default `pdfua1`). Run
-  `--list-profiles` for all accepted names (`pdfua1`, `pdfa1b`, `pdfa2b`,
-  `pdfa2u`, `pdfa3b`, `pdfa4`).
-- `--format <json|text>` — output format (default `json`).
-- `--output <path>` — write output to a file instead of stdout.
-- `--fix` — also attempt to repair the file, writing a repaired copy next to
-  the original as its next version: `<name>.v2<ext>` (a name that already ends
-  in a version, like `flyer v2.pdf`, goes to `flyer v3.pdf`), skipping versions
-  that already exist. It applies the repairs that need no
-  guesswork about what the document means: XMP **metadata** via veraPDF's
-  metadata fixer (missing PDF/A|PDF/UA identifier, false conformance claims,
-  Info-dictionary sync; for a document with **no metadata stream at all**,
-  which veraPDF won't fix, Legibyl first writes one from the Info dictionary
-  for it to repair); page annotation tab order (`/Tabs /S`); the **glyph
-  mapping** embedded TrueType CID fonts leave out (`/CIDToGIDMap /Identity`,
-  which PDF/UA requires written down and readers already assume when it's
-  missing, so nothing draws differently; macOS Quartz omits it); a **description for table-of-contents links that have none**,
-  taken from the entry's own visible text with its dot leaders and printed page
-  number stripped, so `Scope of this document ..... 3` becomes `Scope of this
-  document`. Only a link inside a `TOC`/`TOCI` (at any depth) is described,
-  because only there does its text reliably name where it goes. Elsewhere a
-  link often reads "click here" or "read more"; copying that into `/Contents`
-  would make the failure stop reporting while a screen reader user still hears
-  nothing useful, so other links keep failing for a person to describe (and
-  aren't marked fixable); and a **document title** plus `/DisplayDocTitle`,
-  so readers show the title rather than the file name. A title is only ever
-  moved from somewhere the author actually put it — the Info dictionary, or
-  XMP `dc:title` — and never invented. Guessing one from the **file name**
-  would satisfy `dc:title` while misdescribing the document to a screen reader
-  user, so Legibyl does not do it at all. A file with no title anywhere
-  therefore still reports the `dc:title` failure after `--fix`, rather than
-  being quietly given a made-up one — unless you opt in with
-  `--title-from-first-page` (or the matching Auto Fixes dialog option, off by
-  default): then a document with no title in Info or XMP is titled from the
-  text of its first page, as long as more pages follow and that page is short
-  enough to be a title page (at most 30 words and 200 characters). The GUI's Auto Fixes dialog
-  lists the same repairs, in the order they run, showing only those the PDF
-  needs unless asked for all ("Repair XMP metadata" starts ticked only when
-  every failure is automatically fixable, since veraPDF otherwise won't fix it), plus removal of empty
-  semantic `/P` structure elements and empty table-of-contents entries, retagging headings recovered from the table
-  of contents, and tagging marked paragraphs as lists (all off by default), and
-  adding bookmarks for H1 and H2 headings; `--fix` alone applies none of
-  these, but `--fixes` can name them.
-  Structural fixes run
-  before the veraPDF metadata fixer so metadata is repaired against the
-  already-cleaned copy in the same operation. veraPDF saves its metadata
-  repair as an incremental update that iText can't read reliably (a classic
-  xref section chained onto xref streams, with an off-by-one `/Prev`), so
-  Legibyl reads the repaired XMP and Info dictionary back with veraPDF's own
-  parser and writes them into the input with iText instead. Intermediate
-  repair files are created under the operating system temp directory, not
-  beside the source PDF or requested output path. Empty `/P` cleanup is
-  visible as a warning and fixable option, but it is unchecked by default in
-  the GUI so users opt into structure-tree deletion. Neither path writes alt
-  text a person didn't (`--edits` writes theirs) or infers table headers.
-- `--fixes <names>` — repair each file (implies `--fix`) with the repairs
-  named, comma-separated: `safe` (what `--fix` applies), `all` (every repair
-  but `link-titles-from-web`, which visits web pages and has to be named), or
-  names from `--list-fixes`, e.g. `--fixes safe,lists,headings-from-toc`.
-  `tag-from-layout` (with `qr-links`) and `join-split-paragraphs` use the
-  layout model, downloading it (about 130 MB) the first time, with progress on
-  stderr.
-- `--edits` — repair each file (implies `--fix`) with the edits in its review:
-  the `<name>.pdf.legibyl.json` file next to it, as the GUI saves it, or else
-  the review inside a copy Legibyl saved. Alt text, replacement text and merged
-  paragraphs are written to the elements they're for; an untagged file tagged
-  with `tag-from-layout` is tagged from the review (its alt text, corrected OCR
-  text and title). The repaired copy carries the review. Without a review, the
-  result says so and nothing is written.
-- `--edits-from <path>` — like `--edits`, with the review in path: a
-  `.legibyl.json` file, or a PDF whose review to use, e.g. an earlier
-  version's.
-- `--fix-output <path>` — use with `--fix` and exactly one input file to
-  write the repaired copy to an exact path instead of the auto-derived name.
-- `--structure` — include each file's tagged logical structure tree (the
-  semantic heading/paragraph/list/table/link hierarchy a screen reader
-  uses) in the output, under a `structure` key. Each node includes a
-  `content` property containing the visible text directly owned by that
-  semantic element (matched by page + MCID), plus `alt`, `actualText`,
-  language, page, role-map, best-effort same-page `geometry`, and children.
-  `/Form` nodes also include widget field metadata (`formFieldName`,
-  `formFieldDescription`, `formFieldType`, `formFieldValue`) resolved from
-  the referenced annotation's `/T`, `/TU`, `/FT`, and `/V`. In `--format text`
-  mode this prints an indented outline with `text="..."`, `field="..."`, and
-  `tooltip="..."` details instead.
-  Absent/`null` `structure` with no `structureError` means the file has no
-  structure tree at all (it's completely untagged).
-- `--suggest-layout` — include the layout the layout model suggests for each
-  file's pages in the output, under `suggestedLayout` (`LayoutFile.fs`): each
-  page's regions in reading order, with the tag each suggests (`H1`, `H`, `P`,
-  `LI`, `Figure`, `Table`, `Caption`, `Note`, `Formula`, `Lbl`, `Artifact`), its
-  `page` and `box` (left, bottom, right, top, in points), its `text`
-  (`recognized` when OCR read it because it's drawn rather than written), a QR
-  code's `qrText`, and a `title`. It's what Suggest Structure shows, and like a
-  structure read from a PDF it's meant to be left as found: write changes as
-  edits in a review file, each naming a region by its `page`, `tag` and `box`
-  (copied from the layout), with `exclude: true`, `retag` (e.g. `"H1"`), `alt`,
-  or `text` (a correction of recognized text), and tag with `--apply-layout`
-  and `--edits-from`:
+Output is structured JSON on stdout by default (a JSON array, one object per
+file, where a command takes several), progress and errors go to stderr, and the
+**process exit code** tells you the outcome without needing to parse output. It
+means the same for every command, about what that command did:
 
-  ```json
-  { "version": 1, "title": "Joining the Community Garden",
-    "edits": [
-      { "page": 1, "tag": "H", "box": [68.5, 714, 372, 738], "retag": "H1" },
-      { "page": 1, "tag": "Figure", "box": [70, 518, 234, 642], "alt": "Seedlings in a tray" },
-      { "page": 1, "tag": "Artifact", "box": [70, 30, 300, 45], "exclude": true } ] }
-  ```
+| Exit code | Meaning |
+|-----------|---------|
+| `0`  | Done, and the document is fine: it complies (`validate`, the copy `fix` or `layout apply` wrote), or has a structure (`structure`). |
+| `1`  | Done, but a document has a problem: it doesn't comply, has no structure tree, or (`layout apply`) was already tagged. |
+| `2`  | The tool couldn't do it for a file: missing, corrupt, encrypted, or the layout model couldn't be downloaded. |
+| `64` | Invalid command-line usage (including a review or layout file that can't be read). |
 
-  (A layout file changed by hand still tags; edits are the way that's kept
-  apart, re-appliable to another version of the PDF by box.) Structure nodes in
-  `--structure` output name themselves the same way, with `page` and `box`, so
-  an edit is written the same way for a tagged PDF. Downloads the layout model
-  the first time; several seconds a page, with
-  progress on stderr. `--suggest-layout-output <path>` (one input file) also
-  writes it to a file. Each figure also gets `textBefore` and `textAfter`, the
-  text of the regions just before and after it (a caption, the paragraph about
-  it), since good alt text says why a figure is there.
-- `--figure-images` — with `--suggest-layout-output`, also writes a PNG of each
-  figure (its region with a little margin, at 144 dpi, at most 1024 pixels a
-  side) into a folder beside the layout file — `scan.layout.json` gets
-  `scan.layout.images/p1-r3.png` for page 1's region 3 — and gives the figure
-  that path as `image`, relative to the layout file. An agent reading the JSON
-  opens each image to see the figure, and writes its `alt` edit (base64 inside the JSON would only be text
-  to it, and costly). Each run clears the folder of the last run's images (only
-  files named like them); delete the folder with the layout file when done.
-  `--apply-layout` doesn't use them.
-- `--apply-layout <path>` — tag an untagged file (one input file; implies
-  `--fix`) from the layout in path, as `--suggest-layout` writes it, with the
-  edits from `--edits-from` (or `--edits`) layered on: its regions become the
-  structure in their order, less those excluded, retagged, with alt text,
-  recognized text (as corrected) as replacement text, and a title. It needs no
-  layout model. Other repairs can
-  be named with `--fixes` alongside (e.g. `safe,qr-links`). A file that's
-  already tagged isn't changed, and the result says so.
-- `--list-profiles` — print supported profile names and exit `0`.
-- `--list-fixes` — print the repairs `--fixes` can name, with what each does
-  (and which are in `safe`), and exit `0`.
-- `--version` — print tool build + vendored veraPDF engine version and exit `0`.
-- `--help` / `-h` — print usage and exit `0`.
+### validate
 
-Multiple PDF paths can be passed at once (batch mode); output is always a
-JSON array (one object per file) or one text line/block per file.
-
-Example JSON output (one non-compliant file):
+Validates PDFs against a profile: `--profile <name>` (default `pdfua1`; `legibyl
+list profiles` gives them all: `pdfua1`, `pdfa1b`, `pdfa2b`, `pdfa2u`,
+`pdfa3b`, `pdfa4`), `--format json|text`, and `--output <path>` to write the
+report to a file. `--structure` also includes each file's structure tree, as
+`structure` gives it. Example JSON output (one non-compliant file):
 
 ```json
 [
@@ -725,25 +601,176 @@ Example JSON output (one non-compliant file):
         "message": "Content marked as Artifact should not be present inside tagged content",
         "errorMessage": null,
         "locationContext": "root/document[0]/pages[0](11 0 obj PDPage)/contentStream[0](21 0 obj PDSemanticContentStream)/content[10]{mcid:22}/contentItem[0]{mcid:22}",
-        "region": {
-          "pageNumber": 1,
-          "left": 70.96,
-          "bottom": 73.47,
-          "right": 540.56,
-          "top": 104.85
-        },
+        "region": { "pageNumber": 1, "left": 70.96, "bottom": 73.47, "right": 540.56, "top": 104.85 },
         "isFixable": false,
         "fixOptions": null
       }
     ],
-    "error": null
+    "warnings": [],
+    "error": null,
+    "structure": null,
+    "structureError": null
   }
 ]
 ```
 
-If a file can't be validated at all (missing, corrupt, encrypted), its
-entry has `"error": "<message>"` and the other fields are `null` — check
-`error` first before reading `isCompliant`.
+If a file can't be validated at all (missing, corrupt, encrypted), its entry has
+`"error": "<message>"` and the other fields are `null` — check `error` first
+before reading `isCompliant`.
+
+### fix
+
+Repairs PDFs, writing each one's next version — `<name>.v2<ext>` (a name that
+already ends in a version, like `flyer v2.pdf`, goes to `flyer v3.pdf`),
+skipping versions that already exist, or `--output <path>` for one file — and
+validates the copy. `--fixes` names the repairs, comma-separated: `safe` (the
+default), `all` (every repair but `link-titles-from-web`, which visits web
+pages and has to be named), `none` (only edits), or names from `legibyl list
+fixes`, e.g. `--fixes safe,lists,headings-from-toc`. `tag-from-layout` (with
+`qr-links`) and `join-split-paragraphs` use the layout model, downloading it
+(about 130 MB) the first time, with progress on stderr. `--report <path>` writes
+the report to a file.
+
+Each file's result says what happened and how the document stands before and
+after:
+
+```json
+[
+  {
+    "file": "document.pdf",
+    "profile": "pdfua1",
+    "status": "repaired",
+    "outputPath": "document.v2.pdf",
+    "applied": [ "Declared the document's language as en (English), detected from its text." ],
+    "notApplied": [],
+    "error": null,
+    "before": { "isCompliant": false, "failedCount": 13 },
+    "after": { "isCompliant": false, "failedCount": 7 }
+  }
+]
+```
+
+`status` is `repaired` (a copy was written), `nothing-to-do`, or `error`; the
+exit code is about the copy (or, with nothing to do, the original).
+
+The `safe` repairs need no guesswork about what the document means: XMP
+**metadata** via veraPDF's metadata fixer (missing PDF/A|PDF/UA identifier,
+false conformance claims, Info-dictionary sync; for a document with **no
+metadata stream at all**, which veraPDF won't fix, Legibyl first writes one
+from the Info dictionary for it to repair); page annotation tab order (`/Tabs
+/S`); the **glyph mapping** embedded TrueType CID fonts leave out
+(`/CIDToGIDMap /Identity`, which PDF/UA requires written down and readers
+already assume when it's missing, so nothing draws differently; macOS Quartz
+omits it); a **description for table-of-contents links that have none**, taken
+from the entry's own visible text with its dot leaders and printed page number
+stripped, so `Scope of this document ..... 3` becomes `Scope of this document`.
+Only a link inside a `TOC`/`TOCI` (at any depth) is described, because only
+there does its text reliably name where it goes. Elsewhere a link often reads
+"click here" or "read more"; copying that into `/Contents` would make the
+failure stop reporting while a screen reader user still hears nothing useful,
+so other links keep failing for a person to describe (and aren't marked
+fixable); and a **document title** plus `/DisplayDocTitle`, so readers show the
+title rather than the file name. A title is only ever moved from somewhere the
+author actually put it — the Info dictionary, or XMP `dc:title` — and never
+invented. Guessing one from the **file name** would satisfy `dc:title` while
+misdescribing the document to a screen reader user, so Legibyl does not do it
+at all. A file with no title anywhere therefore still reports the `dc:title`
+failure, rather than being quietly given a made-up one — unless you name
+`title-from-first-page`: then a document with no title in Info or XMP is titled
+from the text of its first page, as long as more pages follow and that page is
+short enough to be a title page (at most 30 words and 200 characters). The
+GUI's Auto Fixes dialog lists the same repairs, in the order they run.
+
+Structural fixes run before the veraPDF metadata fixer so metadata is repaired
+against the already-cleaned copy in the same operation. veraPDF saves its
+metadata repair as an incremental update that iText can't read reliably (a
+classic xref section chained onto xref streams, with an off-by-one `/Prev`), so
+Legibyl reads the repaired XMP and Info dictionary back with veraPDF's own
+parser and writes them into the input with iText instead. Intermediate repair
+files are created under the operating system temp directory, not beside the
+source PDF or requested output path. No repair writes alt text a person didn't
+(edits write theirs) or infers table headers.
+
+`--edits` also writes the edits in each file's review: the
+`<name>.pdf.legibyl.json` file next to it, as the GUI saves it, or else the
+review inside a copy Legibyl saved. Alt text, replacement text, tags, merged
+paragraphs and link descriptions go to the elements they're for; an untagged
+file whose review recorded a layout is tagged from it, with its edits. The copy
+carries the review. `--edits-from <path>` does the same with another review: a
+`.legibyl.json` file, or a PDF whose review to use (an earlier version's, say).
+
+### structure
+
+Reads each PDF's tagged structure tree (the semantic heading/paragraph/list/
+table/link hierarchy a screen reader uses), without validating it. Each node
+has its `tag`, the visible text it directly owns as `content` (matched by page +
+MCID), `alt`, `actualText`, language, role-map, `linkDescription` for a link,
+and where it is: `page` and `box` (left, bottom, right, top, in points — the way
+edits name it), with the fuller `geometry`. `/Form` nodes also include widget
+field metadata (`formFieldName`, `formFieldDescription`, `formFieldType`,
+`formFieldValue`) resolved from the referenced annotation's `/T`, `/TU`, `/FT`,
+and `/V`. `--format text` prints an indented outline instead. A file with no
+structure tree (untagged) has `"structure": null` and exits `1`.
+
+### layout suggest and layout apply
+
+For an untagged PDF: `layout suggest` writes the layout the layout model
+suggests (`LayoutFile.fs`) — each page's regions in reading order, with the tag
+each suggests (`H1`, `H`, `P`, `LI`, `Figure`, `Table`, `Caption`, `Note`,
+`Formula`, `Lbl`, `Artifact`), its `page` and `box`, its `text` (`recognized`
+when OCR read it because it's drawn rather than written), a QR code's `qrText`,
+and a `title` — to stdout, or with `--output <path>` to a file (stdout then
+gets a summary). Each figure also gets `textBefore` and `textAfter`, the text of
+the regions just before and after it (a caption, the paragraph about it), since
+good alt text says why a figure is there. It's what Suggest Structure shows.
+Downloads the layout model the first time; several seconds a page, with
+progress on stderr.
+
+`--figure-images` (with `--output`) also writes a PNG of each figure (its region
+with a little margin, at 144 dpi, at most 1024 pixels a side) into a folder
+beside the layout file — `scan.layout.json` gets `scan.layout.images/p1-r3.png`
+for page 1's region 3 — and gives the figure that path as `image`, relative to
+the layout file. An agent reading the JSON opens each image to see the figure,
+and writes its `alt` edit (base64 inside the JSON would only be text to it, and
+costly). Each run clears the folder of the last run's images (only files named
+like them); delete the folder with the layout file when done.
+
+Like a structure read from a PDF, the layout is meant to be left as found:
+write changes as edits in a review file, each naming a region by its `page`,
+`tag` and `box` (copied from the layout), with `exclude: true`, `retag` (e.g.
+`"H1"`), `alt`, or `text` (a correction of recognized text):
+
+```json
+{ "version": 1, "title": "Joining the Community Garden",
+  "edits": [
+    { "page": 1, "tag": "H", "box": [68.5, 714, 372, 738], "retag": "H1" },
+    { "page": 1, "tag": "Figure", "box": [70, 518, 234, 642], "alt": "Seedlings in a tray" },
+    { "page": 1, "tag": "Artifact", "box": [70, 30, 300, 45], "exclude": true } ] }
+```
+
+then `layout apply <file> --layout <layout.json> --edits-from <review.json>`
+tags the file from the layout with the edits layered on: its regions become the
+structure in their order, less those excluded, retagged, with alt text,
+recognized text (as corrected) as replacement text, and the title. It needs no
+layout model. Other repairs can come with it (`--fixes safe,qr-links`); the
+result is the same shape as `fix`'s, with `status` `already-tagged` (exit `1`)
+for a file that already has a structure tree. (A layout file changed by hand
+still tags; edits are the way that's kept apart, re-appliable to another version
+of the PDF by box. Structure nodes name themselves the same way, so an edit is
+written the same way for a tagged PDF, and applied with `fix --edits-from`.)
+
+```
+legibyl layout suggest scan.pdf --output scan.layout.json --figure-images
+#   ...read scan.layout.json and scan.layout.images/*.png, write scan.edits.json...
+legibyl layout apply scan.pdf --layout scan.layout.json --edits-from scan.edits.json --fixes safe,qr-links
+```
+
+### list
+
+`legibyl list fixes` prints the repairs `--fixes` can name, with what each does
+and which are in `safe`; `legibyl list profiles` the profiles `--profile`
+accepts. `--format json` gives them as JSON. `legibyl --version` prints the tool
+build and the vendored veraPDF engine version.
 
 ## Versioning
 

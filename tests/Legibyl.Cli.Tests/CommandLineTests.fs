@@ -52,7 +52,15 @@ let private withTaggedPdf (test: string -> unit) =
 let private run (args: string list) =
     let output = Path.GetTempFileName()
     try
-        let code = Legibyl.Cli.Program.main (Array.ofList (args @ [ "--output"; output ]))
+        // Where each command writes its report: fix and layout apply take --report, validate and
+        // structure --output; layout suggest writes the layout to its own --output.
+        let report =
+            match args with
+            | "fix" :: _
+            | "layout" :: "apply" :: _ -> [ "--report"; output ]
+            | "layout" :: _ -> []
+            | _ -> [ "--output"; output ]
+        let code = Legibyl.Cli.Program.main (Array.ofList (args @ report))
         let json = if File.Exists output && FileInfo(output).Length > 0L then Some(JsonDocument.Parse(File.ReadAllText output)) else None
         code, json |> Option.map (fun json -> json.RootElement[0])
     finally
@@ -83,12 +91,12 @@ let ``--edits writes the review next to the PDF into the repaired copy, and carr
         writeReview (ReviewFile.filePath pdf) "Tomato seedlings"
         let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
 
-        let _, result = run [ pdf; "--edits" ]
+        let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
 
-        strings result.Value "fixAppliedFixes" |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
+        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
         figureAlt copy |> should equal (Some "Tomato seedlings")
         // Only the edits: no other repair was asked for.
-        strings result.Value "fixAppliedFixes" |> should haveLength 1
+        strings result.Value "applied" |> should haveLength 1
         EmbeddedReview.read copy |> Option.isSome |> should be True)
 
 [<Fact>]
@@ -98,35 +106,35 @@ let ``--edits-from reads another review, such as an earlier version's`` () =
         writeReview other "Seedlings in a tray"
         let copy = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "out.pdf")
 
-        run [ pdf; "--edits-from"; other; "--fix-output"; copy ] |> ignore
+        run [ "fix"; pdf; "--edits-from"; other; "--fixes"; "none"; "--output"; copy ] |> ignore
 
         figureAlt copy |> should equal (Some "Seedlings in a tray"))
 
 [<Fact>]
 let ``--edits without a review says there's nothing to apply`` () =
     withTaggedPdf (fun pdf ->
-        let _, result = run [ pdf; "--edits" ]
+        let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
 
-        result.Value.GetProperty("fixStatus").GetString() |> should equal "NoAction"
-        strings result.Value "fixNotApplied" |> List.head |> should haveSubstring "No edits were applied: there's no garden.pdf.legibyl.json next to it")
+        result.Value.GetProperty("status").GetString() |> should equal "nothing-to-do"
+        strings result.Value "notApplied" |> List.head |> should haveSubstring "No edits were applied: there's no garden.pdf.legibyl.json next to it")
 
 [<Fact>]
 let ``--fixes runs the repairs named`` () =
     withTaggedPdf (fun pdf ->
-        let _, result = run [ pdf; "--fixes"; "language" ]
+        let _, result = run [ "fix"; pdf; "--fixes"; "language" ]
 
-        strings result.Value "fixAppliedFixes" |> should equal [ "Declared the document's language as en (English), detected from its text." ])
+        strings result.Value "applied" |> should equal [ "Declared the document's language as en (English), detected from its text." ])
 
 [<Fact>]
 let ``an unknown repair is a usage error`` () =
     withTaggedPdf (fun pdf ->
-        let code, _ = run [ pdf; "--fixes"; "safe,nope" ]
+        let code, _ = run [ "fix"; pdf; "--fixes"; "safe,nope" ]
         code |> should equal 64)
 
 [<Fact>]
 let ``structure nodes say where they are as edits do: page and box`` () =
     withTaggedPdf (fun pdf ->
-        let _, result = run [ pdf; "--structure" ]
+        let _, result = run [ "structure"; pdf ]
 
         let rec withBox (node: JsonElement) : JsonElement list =
             [ if node.GetProperty("box").ValueKind = JsonValueKind.Array then node
@@ -135,3 +143,52 @@ let ``structure nodes say where they are as edits do: page and box`` () =
         let figure = withBox (result.Value.GetProperty "structure") |> List.find (fun n -> n.GetProperty("tag").GetString() = "Figure")
         figure.GetProperty("page").GetInt32() |> should equal 1
         [ for v in figure.GetProperty("box").EnumerateArray() -> v.GetDouble() ] |> should haveLength 4)
+
+[<Fact>]
+let ``validate reports compliance, with nothing about repairs`` () =
+    withTaggedPdf (fun pdf ->
+        let code, result = run [ "validate"; pdf ]
+
+        code |> should equal 1
+        result.Value.GetProperty("isCompliant").GetBoolean() |> should be False
+        [ for property in result.Value.EnumerateObject() -> property.Name ] |> should not' (contain "status"))
+
+[<Fact>]
+let ``fix validates the copy it writes, and its exit code is about that copy`` () =
+    withTaggedPdf (fun pdf ->
+        let code, result = run [ "fix"; pdf; "--fixes"; "language" ]
+
+        result.Value.GetProperty("status").GetString() |> should equal "repaired"
+        let before = result.Value.GetProperty "before"
+        let after = result.Value.GetProperty "after"
+        after.GetProperty("failedCount").GetInt32() |> should be (lessThan (before.GetProperty("failedCount").GetInt32()))
+        code |> should equal (if after.GetProperty("isCompliant").GetBoolean() then 0 else 1))
+
+[<Fact>]
+let ``structure reads a tagged file, and says an untagged one has none`` () =
+    withTaggedPdf (fun pdf ->
+        let untagged = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "untagged.pdf")
+
+        let tagged, _ = run [ "structure"; pdf ]
+        let none, result = run [ "structure"; untagged ]
+
+        tagged |> should equal 0
+        none |> should equal 1
+        result.Value.GetProperty("structure").ValueKind |> should equal JsonValueKind.Null)
+
+[<Fact>]
+let ``the lists come as JSON too`` () =
+    let original = Console.Out
+    use writer = new StringWriter()
+    Console.SetOut writer
+    let code =
+        try
+            Legibyl.Cli.Program.main [| "list"; "fixes"; "--format"; "json" |]
+        finally
+            Console.SetOut original
+    let fixes = JsonDocument.Parse(writer.ToString()).RootElement
+
+    code |> should equal 0
+    [ for fix in fixes.EnumerateArray() -> fix.GetProperty("name").GetString() ] |> should contain "lists"
+    (fixes.EnumerateArray() |> Seq.find (fun f -> f.GetProperty("name").GetString() = "metadata")).GetProperty("safe").GetBoolean()
+    |> should be True
