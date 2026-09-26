@@ -355,10 +355,13 @@ port in `Legibyl.Layout`). Each region is outlined on the page with the tag it
 suggests (H1, H, P, Figure, Table, Caption, Note, or Artifact for page
 furniture) and its reading order. The detector has no list regions, so runs of
 paragraphs that start with list markers become list items (LI) by the same
-rules as the lists-from-paragraphs fix; the list beside it shows each region's text.
+rules as the lists-from-paragraphs fix; the list beside it shows each region's text,
+with a picker to give it another tag (H1, H, P, LI, Figure, Table, Caption,
+Note, Formula, Lbl, Artifact) — a heading the detector took for a paragraph,
+say. A region's alt text and corrected text go with it when it's retagged.
 Nothing is written to the PDF until **Save…** in the main window tags a copy
-from it. Once you've decided something (discarded a suggestion, written alt text
-or corrected text, changed the title), the review is kept in the file next to
+from it. Once you've decided something (discarded or retagged a suggestion, written
+alt text or corrected text, changed the title), the review is kept in the file next to
 the PDF: the edits, and the layout as reviewed (`layout`, in the same format as
 the CLI's `--suggest-layout`, see `LayoutFile.fs`), each page found so far with
 its discarded suggestions marked. Reopening the PDF, even in a later session,

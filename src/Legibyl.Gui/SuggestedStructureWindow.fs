@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
 open Avalonia.FuncUI
+open Avalonia.FuncUI.Builder
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.Hosts
 open Avalonia.Layout
@@ -71,9 +72,12 @@ type LayoutReview(modified: DateTime) =
                                        [| for region in page.Regions ->
                                               { region with Discarded = this.Discarded.Contains((page.Page, region.Order)) } |] } |] }
 
-    /// Whether a person has decided anything here (discarded a suggestion, written an edit or a
-    /// title), so the layout is worth keeping next to the PDF.
-    member this.HasDecisions = not this.Discarded.IsEmpty || not this.Edits.IsEmpty || this.Title.IsSome
+    /// Whether a layout is kept next to the PDF: one was saved before, or a region was retagged.
+    member val LayoutKept = false with get, set
+
+    /// Whether a person has decided anything here (discarded a suggestion, retagged one, written
+    /// an edit or a title), so the layout is worth keeping next to the PDF.
+    member this.HasDecisions = this.LayoutKept || not this.Discarded.IsEmpty || not this.Edits.IsEmpty || this.Title.IsSome
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
@@ -112,6 +116,7 @@ type LayoutReviews() =
             review.Title <- title
             match layout with
             | Some layout ->
+                review.LayoutKept <- true
                 for page in layout.Pages do
                     review.Pages[page.Page] <- LayoutSuggestions.ofLayoutPage page
                 review.Discarded <-
@@ -413,7 +418,7 @@ module SuggestedStructureView =
 
             let intro =
                 "Suggested structure for this untagged PDF, from what each page looks like: its regions, "
-                + "the tag each suggests, and their reading order (the numbers). Keep or discard each suggestion, then Save… in the main "
+                + "the tag each suggests, and their reading order (the numbers). Keep or discard each suggestion, or pick another tag for it, then Save… in the main "
                 + "window tags a copy with the kept ones (a discarded region's text joins the nearest kept one; its images and lines are "
                 + "decoration), on every page. The original isn't changed. "
                 + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
@@ -464,6 +469,37 @@ module SuggestedStructureView =
                 with
                 | :? IOException
                 | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save edits next to the PDF: {ex.Message}"
+
+            /// Gives a region another tag. Its edits (alt text, corrected text) go with it, since
+            /// they're found by tag; a list item's numbering goes if it isn't one any more.
+            let retag (block: SuggestedBlock) (tag: string) =
+                match suggestion.Current with
+                | Some result when tag <> block.Tag ->
+                    let updated =
+                        { result with
+                            Blocks =
+                                result.Blocks
+                                |> List.map (fun b ->
+                                    if b.Order = block.Order then
+                                        { b with Tag = tag; ListNumbering = (if tag = "LI" then b.ListNumbering else None) }
+                                    else
+                                        b) }
+                    review.Pages[result.PageNumber] <- updated
+                    review.LayoutKept <- true
+                    let moved =
+                        edits.Current
+                        |> List.map (fun e ->
+                            if e.MergeWith.IsEmpty && e.Page = result.PageNumber && e.Tag = block.Tag
+                               && RegionEdits.overlap e.Box block.Geometry >= RegionEdits.SameRegionOverlap then
+                                { e with Tag = tag }
+                            else
+                                e)
+                    if moved <> edits.Current then saveEdits moved
+                    suggestion.Set(Some updated)
+                    saveLayout ()
+                    onChanged ()
+                    render updated selected.Current version.Current |> ignore
+                | _ -> ()
 
             let currentPage () = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
 
@@ -583,7 +619,7 @@ module SuggestedStructureView =
                                    StackPanel.opacity (if isDiscarded then 0.5 else 1.0)
                                    StackPanel.children [
                                   Grid.create [
-                                    Grid.columnDefinitions "*,Auto"
+                                    Grid.columnDefinitions "*,Auto,Auto"
                                     Grid.children [
                                     Button.create [
                                         Button.horizontalAlignment HorizontalAlignment.Stretch
@@ -614,11 +650,12 @@ module SuggestedStructureView =
                                                         Border.verticalAlignment VerticalAlignment.Top
                                                         Border.background (brushFor block.Tag)
                                                     ]
+                                                    // Its reading order; its tag is in the picker beside it.
                                                     TextBlock.create [
                                                         DockPanel.dock Dock.Left
-                                                        TextBlock.width 84.0
+                                                        TextBlock.width 28.0
                                                         TextBlock.fontFamily Fonts.Monospace
-                                                        TextBlock.text $"{block.Order,2} {block.Tag}"
+                                                        TextBlock.text $"{block.Order,2}"
                                                     ]
                                                     TextBlock.create [
                                                         TextBlock.textWrapping TextWrapping.Wrap
@@ -640,8 +677,25 @@ module SuggestedStructureView =
                                             ]
                                         )
                                     ]
-                                    Button.create [
+                                    ComboBox.create [
                                         Grid.column 1
+                                        ComboBox.margin (4.0, 0.0, 0.0, 0.0)
+                                        ComboBox.minWidth 92.0
+                                        ComboBox.verticalAlignment VerticalAlignment.Top
+                                        ComboBox.dataItems LayoutFile.tags
+                                        ComboBox.selectedItem block.Tag
+                                        ComboBox.isEnabled (not isDiscarded)
+                                        AttrBuilder<ComboBox>.CreateProperty<string | null>(
+                                            Automation.AutomationProperties.NameProperty, $"Tag for region {block.Order}", ValueNone)
+                                        ToolTip.tip
+                                            "The tag to give it: H1 (the title), H (a heading), P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
+                                        ComboBox.onSelectedItemChanged (fun item ->
+                                            match item with
+                                            | :? string as tag -> retag block tag
+                                            | _ -> ())
+                                    ]
+                                    Button.create [
+                                        Grid.column 2
                                         Button.margin (4.0, 0.0, 0.0, 0.0)
                                         Button.padding (8.0, 2.0)
                                         Button.verticalAlignment VerticalAlignment.Top
