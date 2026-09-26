@@ -7,6 +7,7 @@ open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
 open Avalonia.FuncUI
+open Avalonia.FuncUI.Builder
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.Hosts
 open Avalonia.FuncUI.Types
@@ -101,6 +102,14 @@ module private StructureView =
             [ if node.Tag = "Figure" || node.Tag = "Formula" || not (isNull node.AlternateDescription) then AltText
               if not (isNull node.ActualText) then ReplacementText ]
 
+    /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
+    let retagTags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
+
+    /// Whether node is a block of text that can be given another tag (it needs its place on its
+    /// page, which is how the edit finds it again).
+    let canRetag (node: StructureNode) =
+        not (isNull node.Geometry) && (node.Tag = "H" || List.contains node.Tag retagTags)
+
     /// The user's edit for node, if any.
     let editFor (edits: RegionEdits.Edit list) (node: StructureNode) =
         match node.Geometry with
@@ -143,7 +152,10 @@ module private StructureView =
 
     /// What of edit isn't in the element yet: (label, text) lines.
     let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
-        [ match edit.Alt with
+        [ match edit.Retag with
+          | Some tag when tag <> node.Tag -> "tag", tag
+          | _ -> ()
+          match edit.Alt with
           | Some alt when alt <> string node.AlternateDescription -> "alt", alt
           | _ -> ()
           match edit.Text with
@@ -308,7 +320,7 @@ module private StructureView =
                 StackPanel.children [
                     header
                     match node.AlternateDescription with NonNull alt -> detailLine $"alt: \"{alt}\"" true | Null -> ()
-                    if not (editKinds node).IsEmpty || (node.Tag = "P" && not (isNull node.Geometry)) then
+                    if not (editKinds node).IsEmpty || canRetag node then
                         // Its own component, so an edit re-renders just this line.
                         Component.create("pending-edit", fun ctx ->
                             let edits = ctx.usePassedRead selection.Edits
@@ -735,7 +747,43 @@ module private StructureView =
                                     Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                     TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                 ]
-                                // Paragraphs next to each other can be merged into one.
+                                // A block of text can be given another tag; paragraphs next to each
+                                // other can be merged into one.
+                                StackPanel.create [
+                                  Grid.row 2
+                                  StackPanel.children [
+                                match selected.Current with
+                                | [ single ] when canRetag single ->
+                                    let box = nonNull single.Geometry
+                                    let tag =
+                                        editFor edits.Current single |> Option.bind _.Retag |> Option.defaultValue single.Tag
+                                    DockPanel.create [
+                                        DockPanel.margin (0.0, 0.0, 0.0, 8.0)
+                                        DockPanel.children [
+                                            TextBlock.create [
+                                                DockPanel.dock Dock.Left
+                                                TextBlock.text "Tag"
+                                                TextBlock.verticalAlignment VerticalAlignment.Center
+                                                TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+                                            ]
+                                            ComboBox.create [
+                                                ComboBox.minWidth 120.0
+                                                ComboBox.horizontalAlignment HorizontalAlignment.Left
+                                                ComboBox.dataItems (if List.contains tag retagTags then retagTags else tag :: retagTags)
+                                                ComboBox.selectedItem tag
+                                                AttrBuilder<ComboBox>.CreateProperty<string | null>(
+                                                    Automation.AutomationProperties.NameProperty, $"Tag for this <{single.Tag}>", ValueNone)
+                                                ToolTip.tip
+                                                    "Give this block another tag, e.g. a heading tagged as a paragraph (as an edit: Save… in the main window writes it to a copy)."
+                                                ComboBox.onSelectedItemChanged (fun item ->
+                                                    match item with
+                                                    | :? string as picked when picked <> tag ->
+                                                        saveEdits (RegionEdits.setRetag edits.Current box.PageNumber single.Tag box picked) |> ignore
+                                                    | _ -> ())
+                                            ]
+                                        ]
+                                    ]
+                                | _ -> ()
                                 let pendingMerge =
                                     match mergeable selected.Current with
                                     | Some(first :: rest) ->
@@ -746,7 +794,6 @@ module private StructureView =
                                 match mergeable selected.Current, pendingMerge with
                                 | Some _, Some merge ->
                                     Button.create [
-                                        Grid.row 2
                                         Button.content "Don't Merge These"
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
                                         ToolTip.tip "Drop this merge: they stay separate paragraphs."
@@ -755,7 +802,6 @@ module private StructureView =
                                     ]
                                 | Some paragraphs, None ->
                                     Button.create [
-                                        Grid.row 2
                                         Button.content $"Merge {paragraphs.Length} Paragraphs"
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
                                         ToolTip.tip "Make these paragraphs one, as an edit: Save… in the main window writes it to a copy."
@@ -767,7 +813,6 @@ module private StructureView =
                                     match selected.Current with
                                     | [ single ] when single.Tag = "P" ->
                                         TextBlock.create [
-                                            Grid.row 2
                                             TextBlock.text "Shift-click the paragraphs after it to merge them into one."
                                             TextBlock.textWrapping TextWrapping.Wrap
                                             TextBlock.fontSize 11.0
@@ -775,6 +820,8 @@ module private StructureView =
                                             TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                         ]
                                     | _ -> ()
+                                  ]
+                                ]
                                 // The selected block's page, and for a link, the page it goes to below it.
                                 let imageBox (row: int) (image: Bitmap option) =
                                     Border.create [
@@ -828,7 +875,8 @@ module private StructureView =
                         allNodes
                         |> List.choose (fun node ->
                             match node.Geometry with
-                            | NonNull geometry when node.Tag = edit.Tag && geometry.PageNumber = edit.Page ->
+                            // Once retagged, it has its new tag.
+                            | NonNull geometry when (node.Tag = edit.Tag || edit.Retag = Some node.Tag) && geometry.PageNumber = edit.Page ->
                                 Some(node, RegionEdits.overlap geometry edit.Box)
                             | _ -> None)
                         |> List.filter (fun (_, o) -> o >= RegionEdits.SameRegionOverlap)
@@ -876,6 +924,9 @@ module private StructureView =
                                                     TextBlock.fontFamily Fonts.Monospace
                                                     TextBlock.fontSize 12.0
                                                 ]
+                                                match edit.Retag with
+                                                | Some tag -> detailLine $"tag: {tag}" false
+                                                | None -> ()
                                                 match edit.Alt with
                                                 | Some alt -> detailLine $"alt: \"{alt}\"" false
                                                 | None -> ()

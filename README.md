@@ -304,7 +304,10 @@ would hide what the page says). An edit is saved with the rest of the review
 tag and box like the edits in Suggest Structure, and the block shows it as not
 in the PDF yet. Paragraphs can be merged too: shift-click extends the selection
 over a block's siblings (the page preview outlines and numbers each one), and
-when two or more neighbouring paragraphs on one page are selected (none with alt
+when a single block of text (a paragraph, heading, caption, note or block
+quote) is selected, a **Tag** picker beside the preview gives it another tag —
+a heading tagged as a paragraph, say — as a `retag` edit; and when two or more
+neighbouring paragraphs on one page are selected (none with alt
 text or replacement text), **Merge N Paragraphs** records the merge as an edit,
 keyed by each paragraph's box; **Don't Merge These** drops it again. Save joins
 them into the first, as **Join split paragraphs** does. The **Edits** tab lists every edit and whether it's in the PDF

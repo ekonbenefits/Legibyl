@@ -165,9 +165,9 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     let count = applied.Length + runs.Length
     [ if count > 0 then
           if missing = 0 then
-              $"Applied {count} of your edits (alt text, replacement text and merged paragraphs)."
+              $"Applied {count} of your edits (alt text, replacement text, tags and merged paragraphs)."
           else
-              $"Applied {count} of your edits (alt text, replacement text and merged paragraphs); {missing} weren't, as no element with their tag is in about the same place." ]
+              $"Applied {count} of your edits (alt text, replacement text, tags and merged paragraphs); {missing} weren't, as no element with their tag is in about the same place." ]
 
 /// How many of edits would change pdfPath: their element is found and doesn't already say it, or
 /// the paragraphs to merge are still apart.
