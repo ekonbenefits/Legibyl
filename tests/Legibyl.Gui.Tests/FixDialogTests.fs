@@ -175,3 +175,29 @@ let ``tagging from the layout says when it uses a review from Suggest Structure`
         |> ignore
 
         text |> should haveSubstring "Uses your review in Suggest Structure: 2 suggestions discarded.")
+
+[<Fact>]
+let ``with every repair shown on a short screen, the list scrolls and the buttons stay on screen`` () =
+    onUiThread (fun () ->
+        let mutable height = 0.0
+        let mutable continueBottom = Double.MaxValue
+        let mutable scrolls = false
+        let mutable limited = false
+        withDialog findings (fun dialog ->
+            // It limits itself to the screen...
+            limited <- not (Double.IsInfinity dialog.MaxHeight)
+            // ...here a short one.
+            dialog.MaxHeight <- 500.0
+            (descendants<ToggleSwitch> dialog |> List.exactlyOne).IsChecked <- true
+            pump ()
+            height <- dialog.Bounds.Height
+            let continueButton = descendants<Button> dialog |> List.find (fun b -> string b.Content = "Continue…")
+            continueBottom <- (continueButton.TranslatePoint(Point(0.0, continueButton.Bounds.Height), dialog)).Value.Y
+            let list = descendants<ScrollViewer> dialog |> List.head
+            scrolls <- list.Extent.Height > list.Viewport.Height)
+        |> ignore
+
+        limited |> should be True
+        height |> should be (lessThanOrEqualTo 500.0)
+        continueBottom |> should be (lessThanOrEqualTo height)
+        scrolls |> should be True)
