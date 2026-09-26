@@ -435,12 +435,17 @@ module private MainView =
                         task {
                             match structure with
                             | null ->
-                                do!
-                                    Dialogs.showMessage
+                                let! suggest =
+                                    Dialogs.showMessageWithAction
                                         window
                                         ("This PDF has no structure tree at all — it is completely untagged, so there is no "
-                                         + "semantic hierarchy for a screen reader to use.")
+                                         + "semantic hierarchy for a screen reader to use.\n\n"
+                                         + "Suggest Structure shows what a layout detector finds on each page: headings, "
+                                         + "paragraphs, figures, tables and their reading order. It's a preview; the PDF isn't changed.")
                                         "Document Structure"
+                                        "Suggest Structure…"
+                                if suggest then
+                                    SuggestedStructureWindow(filePath).Show window
                             | structure -> StructureTreeWindow(structure, filePath).Show window
                         }
 

@@ -9,6 +9,7 @@ open Avalonia.FuncUI.Types
 /// Semi design tokens used by the app. These are theme resources, so they switch
 /// with the light/dark variant.
 module Tokens =
+    let Text = "SemiColorText0"
     let SecondaryText = "SemiColorText2"
     let Border = "SemiColorBorder"
     let Fill = "SemiColorFill0"

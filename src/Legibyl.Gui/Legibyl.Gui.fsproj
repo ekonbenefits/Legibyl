@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Legibyl.Validation\Legibyl.Validation.fsproj" />
     <ProjectReference Include="..\Legibyl.Rendering\Legibyl.Rendering.fsproj" />
+    <ProjectReference Include="..\Legibyl.Layout\Legibyl.Layout.fsproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -20,6 +21,7 @@
     <Compile Include="StructureCache.fs" />
     <Compile Include="Dismissals.fs" />
     <Compile Include="StructureTreeWindow.fs" />
+    <Compile Include="SuggestedStructureWindow.fs" />
     <Compile Include="MainWindow.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Legibyl.Cli/Legibyl.Cli.fsproj" />
     <Project Path="src/Legibyl.Gui/Legibyl.Gui.fsproj" />
+    <Project Path="src/Legibyl.Layout/Legibyl.Layout.fsproj" />
     <Project Path="src/Legibyl.Rendering/Legibyl.Rendering.fsproj" />
     <Project Path="src/Legibyl.Validation/Legibyl.Validation.fsproj" />
   </Folder>
@@ -14,9 +15,7 @@
   </Folder>
   <Folder Name="/installer/">
     <Project Path="installer/Legibyl.Gui.Installer/Legibyl.Gui.Installer.wixproj">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <!-- Windows-only (WiX): build it explicitly, see README "Windows installer (MSI)". -->
-      <Build Project="false" />
+      <Platform Project="x64" />
     </Project>
   </Folder>
 </Solution>

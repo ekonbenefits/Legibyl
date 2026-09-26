@@ -117,3 +117,25 @@ let ``RenderPageWithTarget outlines the page when the link gives no position`` (
 
     result.HasPreciseRegion |> should be False
     result.Note |> should haveSubstring "without a position"
+
+[<Fact>]
+let ``RenderPageWithRegions outlines each region in its color, filling the emphasised one`` () =
+    use renderer = new PdfRegionRenderer()
+    let region left bottom right top color emphasised =
+        { Geometry = { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
+          Label = "1 P"
+          Color = color
+          Emphasised = emphasised }
+
+    let png =
+        renderer.RenderPageWithRegions(
+            corpusFile "pdfua1-fail.pdf",
+            1,
+            [ region 100.0 100.0 200.0 200.0 0x00C000u false; region 300.0 100.0 400.0 200.0 0xE00000u true ]
+        )
+
+    shouldBePng png
+    let outline = colorAt png 100.0 150.0
+    outline.Green |> should be (greaterThan outline.Red)
+    let filled = colorAt png 350.0 150.0
+    filled.Red |> should be (greaterThan filled.Green)

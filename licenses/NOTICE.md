@@ -97,6 +97,18 @@ Includes OSXAdapter
 Copyright (C) 2003-2007 Apple, Inc., All Rights Reserved
 ```
 
+## PaddleOCR (layout detection)
+
+The GUI's **Suggest Structure** preview uses
+[PaddleOCR for .NET](https://github.com/theolivenbaum/PaddleOCR) (the
+`PaddleOCR` NuGet package), a pure C# port of
+[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), licensed under the
+Apache License, Version 2.0 (full text in `LICENSE.Apache` in this directory).
+It's used unmodified via a NuGet package reference. Its layout detection model,
+PP-DocLayoutV3 (Apache License 2.0, by PaddlePaddle), isn't shipped with
+Legibyl: the app downloads it only when the user asks, into PaddleOCR's own
+model cache.
+
 ## iText Core
 
 Legibyl uses [iText Core for .NET](https://github.com/itext/itext-dotnet)

@@ -25,6 +25,7 @@
     <Compile Include="ParagraphListsTests.fs" />
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
+    <Compile Include="LayoutSuggestionsTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,6 +41,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Legibyl.Validation\Legibyl.Validation.fsproj" />
     <ProjectReference Include="..\..\src\Legibyl.Rendering\Legibyl.Rendering.fsproj" />
+    <ProjectReference Include="..\..\src\Legibyl.Layout\Legibyl.Layout.fsproj" />
   </ItemGroup>
 
   <ItemGroup>
