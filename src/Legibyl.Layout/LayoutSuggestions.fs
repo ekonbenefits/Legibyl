@@ -138,7 +138,8 @@ module LayoutSuggestions =
                 Geometry = block.Geometry
                 ListNumbering = Option.toObj block.ListNumbering
                 ActualText = if block.Recognized then block.Text else null
-                QrText = Option.toObj block.QrText } ]
+                QrText = Option.toObj block.QrText
+                Alt = null } ]
 
     /// Whether a suggested tag is for text (so a region with none as text needs OCR).
     let holdsText (tag: string) = tag <> "Figure" && tag <> "Table" && tag <> "Artifact"

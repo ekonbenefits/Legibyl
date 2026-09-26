@@ -103,7 +103,10 @@ type LayoutRegion =
       ActualText: string | null
       /// For a "Figure" that's a QR code, what it encodes: its alt text says so, and the
       /// QrCodeLinks fix links it when it's a web address.
-      QrText: string | null }
+      QrText: string | null
+      /// For a "Figure": alt text a person wrote for it (in Suggest Structure). Written as its
+      /// /Alt, ahead of any Legibyl would derive.
+      Alt: string | null }
 
 /// Where the LinkTitlesFromWeb fix gets the titles of the web pages links go to.
 type IPageTitleSource =

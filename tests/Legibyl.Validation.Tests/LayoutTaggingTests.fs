@@ -46,7 +46,8 @@ let private region tag (left, bottom, right, top) numbering : LayoutRegion =
       Geometry = { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
       ListNumbering = numbering
       ActualText = null
-      QrText = null }
+      QrText = null
+      Alt = null }
 
 let private regions =
     [ region "Artifact" (70.0, 745.0, 200.0, 762.0) null
@@ -316,3 +317,19 @@ let ``a fix reports each step it runs, in order, with pages where there are page
           FixStage.RepairingMetadata, 4, 4 ]
     reports |> Seq.exists (fun p -> p.Stage = FixStage.CheckingOriginal && p.Page = 1 && p.PageCount = 1) |> should be True
     reports |> Seq.exists (fun p -> p.Stage = FixStage.Tagging && p.Page = 1 && p.PageCount = 1) |> should be True
+
+[<Fact>]
+let ``alt text written for a figure is its alt text, ahead of a QR code's own`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let written =
+        regions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = "Our pack's colour swatch"; QrText = "https://example.com/apply" } else r)
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout written))
+
+    result.AppliedFixes |> should contain "Gave 1 figure the alt text written in Suggest Structure"
+    result.AppliedFixes |> Seq.exists (fun line -> line.Contains "need alt text" || line.Contains "needs alt text") |> should be False
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    (flatten root |> List.find (fun node -> node.Tag = "Figure")).AlternateDescription |> should equal "Our pack's colour swatch"
+    failedRules output.Path |> should not' (contain "7.3-1")

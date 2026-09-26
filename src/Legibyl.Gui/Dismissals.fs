@@ -1,5 +1,6 @@
 /// Warnings the user has dismissed for a PDF, kept in memory and, if they choose, in a
 /// "<name>.pdf.legibyl.json" file next to the PDF so they stay dismissed when it's opened again.
+/// The same file holds figures' alt text written in Suggest Structure (see FigureAlt).
 module Legibyl.Gui.Dismissals
 
 open System.IO
@@ -48,48 +49,89 @@ type SavedWarning =
       [<JsonPropertyName "location">] Location: string
       [<JsonPropertyName "message">] Message: string }
 
+/// Alt text written for a figure in Suggest Structure, found again by where it is.
+[<CLIMutable>]
+type SavedFigure =
+    { [<JsonPropertyName "page">] Page: int
+      /// The suggested tag, e.g. "Figure".
+      [<JsonPropertyName "tag">] Tag: string
+      /// Left, bottom, right, top, in PDF points.
+      [<JsonPropertyName "box">] Box: float array
+      [<JsonPropertyName "alt">] Alt: string }
+
+/// The file next to a PDF: its remembered dismissals and its figures' alt text, either of which
+/// may be missing (null).
 [<CLIMutable>]
 type SavedFile =
     { [<JsonPropertyName "version">] Version: int
-      /// Null if a hand-edited file leaves it out.
-      [<JsonPropertyName "dismissedWarnings">] DismissedWarnings: SavedWarning array | null }
+      /// Null if dismissals aren't being remembered (or a hand-edited file leaves them out).
+      [<JsonPropertyName "dismissedWarnings">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      DismissedWarnings: SavedWarning array | null
+      [<JsonPropertyName "figureAltText">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      FigureAltText: SavedFigure array | null }
 
-let private jsonOptions = JsonSerializerOptions(WriteIndented = true)
+// Relaxed escaping keeps the text people write readable ("wolf's", not "wolf\u0027s") in a
+// file they may open by hand.
+let private jsonOptions =
+    JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
 
-/// The dismissals saved next to pdfPath, or None if there's no file (or it can't be read).
-let load (pdfPath: string) : Dismissed option =
-    let path = filePath pdfPath
+/// The file at path, or None if there's none (or it can't be read).
+let readFile (path: string) : SavedFile option =
     if not (File.Exists path) then
         None
     else
         try
-            match JsonSerializer.Deserialize<SavedFile>(File.ReadAllText path, jsonOptions) with
-            | null -> None
-            | saved ->
-                saved.DismissedWarnings
-                |> Option.ofObj
-                |> Option.defaultValue [||]
-                |> Array.map (fun warning -> { Rule = warning.Rule; Location = warning.Location }, warning.Message)
-                |> Map.ofArray
-                |> Some
+            JsonSerializer.Deserialize<SavedFile>(File.ReadAllText path, jsonOptions) |> Option.ofObj
         with
         | :? JsonException
         | :? IOException -> None
 
-/// Writes dismissed to the file next to pdfPath. Throws IOException/UnauthorizedAccessException
-/// if it can't be written.
-let save (pdfPath: string) (dismissed: Dismissed) =
-    let saved =
-        { Version = 1
-          DismissedWarnings =
-            [| for KeyValue(key, message) in dismissed ->
-                   { Rule = key.Rule
-                     Location = key.Location
-                     Message = message } |] }
-    File.WriteAllText(filePath pdfPath, JsonSerializer.Serialize(saved, jsonOptions))
-
-/// Deletes the file next to pdfPath, if there is one.
-let forget (pdfPath: string) =
+/// Writes file next to pdfPath, or deletes it when there's nothing left in it. Throws
+/// IOException/UnauthorizedAccessException if it can't be written.
+let writeFile (pdfPath: string) (file: SavedFile) =
     let path = filePath pdfPath
-    if File.Exists path then
-        File.Delete path
+    let empty (items: 'T array | null) =
+        match items with
+        | NonNull items -> items.Length = 0
+        | Null -> true
+    if isNull file.DismissedWarnings && empty file.FigureAltText then
+        if File.Exists path then File.Delete path
+    else
+        File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
+
+/// The file next to pdfPath, or an empty one.
+let readOrEmpty (pdfPath: string) =
+    readFile (filePath pdfPath)
+    |> Option.defaultValue { Version = 1; DismissedWarnings = null; FigureAltText = null }
+
+/// The dismissals saved next to pdfPath, or None if none are (no file, or one holding only
+/// alt text).
+let load (pdfPath: string) : Dismissed option =
+    readFile (filePath pdfPath)
+    |> Option.bind (fun saved -> Option.ofObj saved.DismissedWarnings)
+    |> Option.map (fun warnings ->
+        warnings
+        |> Array.map (fun warning -> { Rule = warning.Rule; Location = warning.Location }, warning.Message)
+        |> Map.ofArray)
+
+/// Writes dismissed to the file next to pdfPath, keeping any alt text in it. Throws
+/// IOException/UnauthorizedAccessException if it can't be written.
+let save (pdfPath: string) (dismissed: Dismissed) =
+    writeFile
+        pdfPath
+        { readOrEmpty pdfPath with
+            Version = 1
+            DismissedWarnings =
+                [| for KeyValue(key, message) in dismissed ->
+                       { Rule = key.Rule
+                         Location = key.Location
+                         Message = message } |] }
+
+/// Stops remembering dismissals next to pdfPath: removes them from its file, deleting the file
+/// if that leaves it empty.
+let forget (pdfPath: string) =
+    match readFile (filePath pdfPath) with
+    | Some saved -> writeFile pdfPath { saved with DismissedWarnings = null }
+    | None -> ()

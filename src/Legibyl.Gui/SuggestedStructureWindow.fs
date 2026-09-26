@@ -13,6 +13,7 @@ open Avalonia.FuncUI.Hosts
 open Avalonia.Layout
 open Avalonia.Media
 open Avalonia.Media.Imaging
+open Avalonia.Platform.Storage
 open Legibyl.Layout
 open Legibyl.Validation
 open Legibyl.Rendering
@@ -28,6 +29,12 @@ type LayoutReview(modified: DateTime) =
     /// Discarded suggestions, by (page, order).
     member val Discarded: Set<int * int> = Set.empty with get, set
     member val LastPage = 1 with get, set
+    /// Alt text written for figures, as saved next to the PDF (see FigureAlt).
+    member val Figures: FigureAlt.Figure list = [] with get, set
+
+    /// The alt text written for a suggested figure on page, if any.
+    member this.AltFor(page: int, block: SuggestedBlock) =
+        if block.Tag = "Figure" then FigureAlt.find this.Figures page block.Tag block.Geometry |> Option.map _.Alt else None
 
 /// The layout reviews of the files opened this session, each forgotten if its file changes.
 [<Sealed>]
@@ -38,11 +45,12 @@ type LayoutReviews() =
     member _.For(pdfPath: string) =
         let fullPath = Path.GetFullPath pdfPath
         let modified = File.GetLastWriteTimeUtc fullPath
-        reviews.AddOrUpdate(
-            fullPath,
-            (fun _ -> LayoutReview modified),
-            (fun _ existing -> if existing.Modified = modified then existing else LayoutReview modified)
-        )
+        let fresh () =
+            // Any alt text saved next to the PDF, written for it or an earlier version of it.
+            let review = LayoutReview modified
+            review.Figures <- FigureAlt.load fullPath
+            review
+        reviews.AddOrUpdate(fullPath, (fun _ -> fresh ()), (fun _ existing -> if existing.Modified = modified then existing else fresh ()))
 
 /// Finds every page's layout in the background, one page at a time (each takes seconds): the
 /// page being viewed first, then the pages after it, then any before. So moving to another page
@@ -115,12 +123,14 @@ type LayoutPrefetcher(suggester: LayoutSuggester, results: Collections.Concurren
         worker.Wait()
 
 /// The regions to tag: each page's suggestions, less the ones the user discarded.
-type ReviewedLayout(prefetcher: LayoutPrefetcher, discarded: Set<int * int>) =
+type ReviewedLayout(prefetcher: LayoutPrefetcher, review: LayoutReview) =
     interface IPageLayoutSource with
         member _.PageRegions(_, page) =
-            (prefetcher.Find page).Blocks
-            |> List.filter (fun block -> not (discarded.Contains((page, block.Order))))
-            |> LayoutSuggestions.toRegions
+            let kept = (prefetcher.Find page).Blocks |> List.filter (fun block -> not (review.Discarded.Contains((page, block.Order))))
+            List.map2
+                (fun block (region: LayoutRegion) -> { region with Alt = review.AltFor(page, block) |> Option.toObj })
+                kept
+                (LayoutSuggestions.toRegions kept)
             :> Collections.Generic.IReadOnlyList<_>
 
 /// For an untagged PDF: the structure a layout detector suggests for each page, drawn over the
@@ -291,7 +301,7 @@ module SuggestedStructureView =
                         let before = status.Current
                         let progress =
                             Progress<FixProgress>(fun p -> status.Set(Legibyl.Gui.BusyStatus.statusText (Legibyl.Gui.BusyStatus.Fixing p)))
-                        let source = ReviewedLayout(prefetcher, discarded.Current)
+                        let source = ReviewedLayout(prefetcher, review)
                         try
                             try
                                 let! result =
@@ -378,6 +388,69 @@ module SuggestedStructureView =
                     ]
                 ]
 
+            // Alt text written for figures; saved next to the PDF as it's typed.
+            let figures = ctx.useState review.Figures
+
+            let saveFigures (next: FigureAlt.Figure list) =
+                figures.Set next
+                review.Figures <- next
+                try
+                    FigureAlt.save pdfPath next
+                with
+                | :? IOException
+                | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save alt text next to the PDF: {ex.Message}"
+
+            /// A figure's alt text, to edit. A QR code's own description shows as the hint.
+            let altBox (block: SuggestedBlock) =
+                let page = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
+                let written = FigureAlt.find figures.Current page block.Tag block.Geometry |> Option.map _.Alt |> Option.defaultValue ""
+                TextBox.create [
+                    TextBox.margin (22.0, 2.0, 0.0, 6.0)
+                    TextBox.textWrapping TextWrapping.Wrap
+                    TextBox.acceptsReturn false
+                    TextBox.text written
+                    TextBox.placeHolderText (
+                        match block.QrText with
+                        | Some text -> LinkTitles.qrAltText titles.Current text
+                        | None -> "Alt text: what this figure shows, for someone who can't see it"
+                    )
+                    ToolTip.tip "Written as the figure's alt text when tagging. Saved next to the PDF, and found again if the layout is suggested again."
+                    TextBox.onTextChanged (fun text ->
+                        let current = FigureAlt.find figures.Current page block.Tag block.Geometry |> Option.map _.Alt |> Option.defaultValue ""
+                        if text <> current then
+                            saveFigures (FigureAlt.set figures.Current page block.Tag block.Geometry text))
+                ]
+
+            /// Adds alt text from another .legibyl.json file, e.g. one saved for an earlier version
+            /// of this PDF under another name.
+            let importAlt _ =
+                task {
+                    let! files =
+                        window.StorageProvider.OpenFilePickerAsync(
+                            Avalonia.Platform.Storage.FilePickerOpenOptions(
+                                Title = "Import alt text",
+                                AllowMultiple = false,
+                                FileTypeFilter = [ Avalonia.Platform.Storage.FilePickerFileType("Legibyl files", Patterns = [ "*.legibyl.json"; "*.json" ]) ]
+                            )
+                        )
+                    match files |> Seq.tryHead |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath())) with
+                    | Some path ->
+                        let imported = FigureAlt.fromFile path
+                        let merged, added = FigureAlt.merge figures.Current imported
+                        saveFigures merged
+                        let found =
+                            review.Pages.Values
+                            |> Seq.sumBy (fun result ->
+                                result.Blocks |> List.filter (fun b -> b.Tag = "Figure" && (FigureAlt.find merged result.PageNumber b.Tag b.Geometry).IsSome) |> List.length)
+                        do!
+                            Dialogs.showMessage
+                                window
+                                $"Imported {added} of {imported.Length} alt texts from {Path.GetFileName path} (the rest were already here). {found} figures found so far have alt text."
+                                "Import Alt Text"
+                    | None -> ()
+                }
+                |> ignore
+
             let blockList =
                 ScrollViewer.create [
                     ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
@@ -388,9 +461,11 @@ module SuggestedStructureView =
                                 for block in suggestion.Current |> Option.map _.Blocks |> Option.defaultValue [] ->
                                   let isDiscarded =
                                       suggestion.Current |> Option.exists (fun result -> discarded.Current.Contains((result.PageNumber, block.Order)))
+                                  StackPanel.create [
+                                   StackPanel.opacity (if isDiscarded then 0.5 else 1.0)
+                                   StackPanel.children [
                                   Grid.create [
                                     Grid.columnDefinitions "*,Auto"
-                                    Grid.opacity (if isDiscarded then 0.5 else 1.0)
                                     Grid.children [
                                     Button.create [
                                         Button.horizontalAlignment HorizontalAlignment.Stretch
@@ -455,6 +530,9 @@ module SuggestedStructureView =
                                         Button.onClick (fun _ -> setDiscarded [ block.Order ] (not isDiscarded))
                                     ]
                                     ]
+                                  ]
+                                  if block.Tag = "Figure" then altBox block
+                                   ]
                                   ]
                             ]
                         ]
@@ -530,6 +608,12 @@ module SuggestedStructureView =
                                     ToolTip.tip "Discard every suggestion on this page."
                                     Button.onClick (fun _ ->
                                         suggestion.Current |> Option.iter (fun result -> setDiscarded [ for b in result.Blocks -> b.Order ] true))
+                                ]
+                                Button.create [
+                                    Button.content "Import Alt Text…"
+                                    Button.margin (16.0, 0.0, 0.0, 0.0)
+                                    ToolTip.tip "Use the alt text saved for another PDF, such as an earlier version of this one saved under another name."
+                                    Button.onClick importAlt
                                 ]
                                 Button.create [
                                     Button.content "Save Tagged Copy…"

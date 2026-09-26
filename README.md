@@ -339,6 +339,17 @@ that needs OCR. Text drawn as outlines is tagged as its region's element, with
 the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
 and the report asks for it to be checked. It doesn't describe links outside a table of contents.
 
+Figures can be given alt text right in Suggest Structure: each Figure has an
+alt text box (a QR code's own description shows as its hint), and what's typed
+is written as the figure's `/Alt` when tagging, by **Save Tagged Copy** or the
+Fix dialog. It's saved as it's typed in the `<name>.pdf.legibyl.json` file next
+to the PDF, alongside any remembered dismissals, keyed by page, suggested tag
+and box. So it's filled in again whenever the layout is suggested again, even
+for a regenerated PDF, as long as the figure is in about the same place (same
+page and tag, boxes overlapping at least 60%). The file is read automatically
+when it's named after the PDF; **Import Alt Text…** takes one with another name,
+such as the one saved for an earlier version.
+
 QR codes are read with [ZXing.Net](https://github.com/micjahn/ZXing.Net),
 following the approach of [qr-link-pdf](https://github.com/jbtule/qr-link-pdf):
 each page is scanned whole at several scales (1, 0.6, 0.4 and 0.25 of about 300

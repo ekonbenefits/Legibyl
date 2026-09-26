@@ -475,11 +475,17 @@ module private MainView =
                     | Some sourcePath, Some report ->
                         let review = layoutReviews.For sourcePath
                         let reviewNote =
+                            let alt =
+                                match review.Figures.Length with
+                                | 0 -> ""
+                                | 1 -> " 1 figure has alt text written for it."
+                                | n -> $" {n} figures have alt text written for them."
                             match review.Pages.Count, review.Discarded.Count with
-                            | 0, 0 -> None
-                            | _, 0 -> Some "Uses the suggestions found in Suggest Structure."
-                            | _, 1 -> Some "Uses your review in Suggest Structure: 1 suggestion discarded."
-                            | _, discarded -> Some $"Uses your review in Suggest Structure: {discarded} suggestions discarded."
+                            | 0, 0 when alt = "" -> None
+                            | 0, 0 -> Some(alt.Trim())
+                            | _, 0 -> Some("Uses the suggestions found in Suggest Structure." + alt)
+                            | _, 1 -> Some("Uses your review in Suggest Structure: 1 suggestion discarded." + alt)
+                            | _, discarded -> Some($"Uses your review in Suggest Structure: {discarded} suggestions discarded." + alt)
                         match! Dialogs.chooseFixOptions window report reviewNote with
                         | None -> ()
                         | Some options ->
@@ -511,7 +517,7 @@ module private MainView =
                                         let source =
                                             if tagging then
                                                 let suggester = new LayoutSuggester(sourcePath)
-                                                Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review.Discarded))
+                                                Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
                                             else
                                                 None
                                         try
