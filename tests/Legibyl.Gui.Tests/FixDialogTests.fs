@@ -57,7 +57,7 @@ let private rowText (dialog: Window) (title: string) =
 /// the test already closed it; returns the dialog's result.
 let private withDialogNoted (tagNote: string option) (findings: RuleViolation list) (test: Window -> unit) =
     let owner = HeadlessWindow.show 800.0 600.0
-    let pending = Dialogs.chooseFixOptions owner (report findings) tagNote
+    let pending = Dialogs.chooseFixOptions owner (report findings) tagNote 0
     HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
     let dialog = owner.OwnedWindows |> Seq.exactlyOne
     test dialog
@@ -126,6 +126,7 @@ let ``showing all repairs lists the ones this PDF doesn't need too, still in ord
               "Join split paragraphs"
               "Tag lists"
               "Add bookmarks"
+              "Apply your edits"
               "Tab order for annotations"
               "Font glyph mapping"
               "Describe contents links"

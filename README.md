@@ -273,6 +273,19 @@ validation pass), so it reflects exactly what the validator itself sees.
 Reading it is mostly extracting each page's tagged text, so the progress bar
 fills page by page while it loads. The last structure read is kept, so
 reopening the window for the same, unchanged file is immediate.
+
+Alt text and replacement text can be edited there: right-click a block in
+the **Layout** tab for **Edit Alt Text…** (figures, formulas, and anything
+that already has alt text) or **Edit Replacement Text…** (only elements that
+already have `/ActualText`, like OCR'd text, since writing it over real text
+would hide what the page says). An edit is saved with the rest of the review
+(`<name>.pdf.legibyl.json`, and inside copies Legibyl saves), keyed by page,
+tag and box like the edits in Suggest Structure, and the block shows it as not
+in the PDF yet. The **Edits** tab lists every edit and whether it's in the PDF
+yet, and removes ones you no longer want. **Apply your edits** in the Fix
+dialog (ticked when some aren't in the PDF yet) writes them to a new copy
+(`ElementEdits.fs`), each to the element with its tag in about the same place,
+so they still apply after other repairs have rearranged the tree.
 The default **Layout** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
 (headings, lists, tables, links, figures, etc. use different colors).

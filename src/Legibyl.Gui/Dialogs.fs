@@ -106,6 +106,57 @@ let showMessageWithAction (owner: Window) (message: string) (title: string) (act
         return chosen
     }
 
+/// Asks for a piece of text (alt text, say): prompt above a box starting with initial. Some text
+/// on OK, None on Cancel.
+let promptText (owner: Window) (title: string) (prompt: string) (initial: string) (placeholder: string) : Task<string option> =
+    let window = dialogWindow title 520.0
+    let mutable chosen = None
+    window.Content <-
+        Component(fun ctx ->
+            let text = ctx.useState initial
+            StackPanel.create [
+                StackPanel.margin 16.0
+                StackPanel.spacing 12.0
+                StackPanel.children [
+                    TextBlock.create [ TextBlock.text prompt; TextBlock.textWrapping TextWrapping.Wrap ]
+                    TextBox.create [
+                        TextBox.text text.Current
+                        TextBox.placeHolderText placeholder
+                        TextBox.acceptsReturn true
+                        TextBox.textWrapping TextWrapping.Wrap
+                        TextBox.minHeight 60.0
+                        TextBox.onTextChanged text.Set
+                    ]
+                    StackPanel.create [
+                        StackPanel.orientation Orientation.Horizontal
+                        StackPanel.horizontalAlignment HorizontalAlignment.Right
+                        StackPanel.spacing 8.0
+                        StackPanel.children [
+                            Button.create [
+                                Button.content "OK"
+                                Button.minWidth 82.0
+                                Button.isDefault true
+                                Button.horizontalContentAlignment HorizontalAlignment.Center
+                                Button.onClick (fun _ ->
+                                    chosen <- Some text.Current
+                                    window.Close())
+                            ]
+                            Button.create [
+                                Button.content "Cancel"
+                                Button.minWidth 82.0
+                                Button.isCancel true
+                                Button.horizontalContentAlignment HorizontalAlignment.Center
+                                Button.onClick (fun _ -> window.Close())
+                            ]
+                        ]
+                    ]
+                ]
+            ])
+    task {
+        do! window.ShowDialog owner
+        return chosen
+    }
+
 /// A repair the Fix dialog offers.
 type private FixChoice =
     { Option: PdfFixOptions
@@ -157,6 +208,11 @@ let private fixChoices =
         Title = "Add bookmarks"
         Detail = "Bookmarks for the H1 and H2 headings, when the document has none."
         OptIn = false }
+      { Option = PdfFixOptions.ApplyEdits
+        Title = "Apply your edits"
+        Detail =
+          "Write the alt text and replacement text you edited (in View Structure's Edits tab) to the elements they're for, found by page, tag and place."
+        OptIn = false }
       { Option = PdfFixOptions.AnnotationTabs
         Title = "Tab order for annotations"
         Detail = "Set /Tabs /S on pages that contain annotations, so keyboard order follows the structure."
@@ -192,8 +248,9 @@ let private fixChoices =
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
 /// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
 /// Returns None if the user cancelled.
-/// tagNote, if any, says what tagging from the layout will use (a review in Suggest Structure).
-let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) : Task<PdfFixOptions option> =
+/// tagNote, if any, says what tagging from the layout will use (a review in Suggest Structure),
+/// and editCount how many of the user's edits aren't in the PDF yet.
+let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) (editCount: int) : Task<PdfFixOptions option> =
     let window = dialogWindow "Fix PDF" 560.0
     // Never taller than the screen: the list scrolls in whatever room is left. (All the repairs
     // at once are taller than a laptop screen.)
@@ -201,7 +258,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
         match owner.Screens.ScreenFromWindow owner with
         | NonNull screen -> float screen.WorkingArea.Height / screen.Scaling * 0.9
         | Null -> 700.0
-    let found (option: PdfFixOptions) = report.FixableCount option
+    let found (option: PdfFixOptions) =
+        if option = PdfFixOptions.ApplyEdits then editCount else report.FixableCount option
     /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
     /// and so can describing them from the pages they go to.
     let withTagging (choice: FixChoice) =
@@ -226,7 +284,9 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                 let count =
                     match found choice.Option with
                     | 0 when withTagging choice -> "with tagging"
+                    | 0 when choice.Option = PdfFixOptions.ApplyEdits -> "none to apply"
                     | 0 -> "none found"
+                    | n when choice.Option = PdfFixOptions.ApplyEdits -> $"{n} to apply"
                     | n -> $"{n} found"
                 let detail =
                     if choice.Option = PdfFixOptions.TagFromLayout && tagNote.IsSome then

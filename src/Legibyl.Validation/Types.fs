@@ -44,7 +44,10 @@ type PdfFixOptions =
     /// Joins neighbouring paragraphs whose text a layout detector finds in one block of text
     /// (a paragraph tagged line by line); see ParagraphJoins. Needs an IPageLayoutSource.
     | JoinSplitParagraphs = 32768
-    | All = 65535
+    /// Writes the edits a person made (alt text, replacement text; see ElementEdit) to the
+    /// elements they were made for. Needs the edits (VeraPdfValidator.Edits).
+    | ApplyEdits = 65536
+    | All = 131071
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
@@ -91,6 +94,19 @@ type StructureGeometry =
       Bottom: float
       Right: float
       Top: float }
+
+/// A change a person made to a structure element (in View Structure) or to a region to tag (in
+/// Suggest Structure). The element is found again by its page, its tag and about the same box,
+/// so the edit still applies after repairs have rearranged the structure tree.
+type ElementEdit =
+    { Page: int
+      /// Its standard tag, e.g. "Figure".
+      Tag: string
+      Box: StructureGeometry
+      /// Alt text to write (/Alt); null to leave it.
+      Alt: string | null
+      /// Replacement text to write (/ActualText); "" for nothing to read, null to leave it.
+      Text: string | null }
 
 /// A region of a page to tag, e.g. one a layout detector found (see Legibyl.Layout).
 type LayoutRegion =

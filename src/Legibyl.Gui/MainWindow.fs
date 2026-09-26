@@ -498,7 +498,18 @@ module private MainView =
                             | _, 0 -> Some("Uses the suggestions found in Suggest Structure." + alt)
                             | _, 1 -> Some("Uses your review in Suggest Structure: 1 suggestion discarded." + alt)
                             | _, discarded -> Some($"Uses your review in Suggest Structure: {discarded} suggestions discarded." + alt)
-                        match! Dialogs.chooseFixOptions window report reviewNote with
+                        // The edits made for it (in View Structure) that aren't in it yet. Finding their
+                        // elements means reading the PDF, so off the UI thread.
+                        let edits = RegionEdits.toElementEdits (RegionEdits.load sourcePath)
+                        let! pendingEdits =
+                            Task.Run(fun () ->
+                                try
+                                    ElementEdits.pending sourcePath edits
+                                with
+                                | :? iText.Commons.Exceptions.ITextException
+                                | :? IOException
+                                | :? UnauthorizedAccessException -> 0)
+                        match! Dialogs.chooseFixOptions window report reviewNote pendingEdits with
                         | None -> ()
                         | Some options ->
                             let! outputPath =
@@ -547,6 +558,7 @@ module private MainView =
                                                         // The review (as the window has it) goes in the repaired copy.
                                                         // Reading it can mean opening the PDF, so it's done here too.
                                                         validator.Review <- Dismissals.reviewJson sourcePath (Some dismissedNow)
+                                                        validator.Edits <- edits
                                                         validator.Fix(sourcePath, profile, outputPath, options, progress))
                                                 return Ok fix
                                             with
@@ -555,6 +567,7 @@ module private MainView =
                                         finally
                                             validator.LayoutSource <- null
                                             validator.Review <- null
+                                            validator.Edits <- []
                                             source |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
                                             busyProgress.Set None
                                             isBusy.Set false
