@@ -68,9 +68,9 @@ type SavedFile =
       [<JsonPropertyName "dismissedWarnings">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       DismissedWarnings: SavedWarning array | null
-      [<JsonPropertyName "figureAltText">]
+      [<JsonPropertyName "figures">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      FigureAltText: SavedFigure array | null }
+      Figures: SavedFigure array | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf\u0027s") in a
 // file they may open by hand.
@@ -96,7 +96,7 @@ let writeFile (pdfPath: string) (file: SavedFile) =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    if isNull file.DismissedWarnings && empty file.FigureAltText then
+    if isNull file.DismissedWarnings && empty file.Figures then
         if File.Exists path then File.Delete path
     else
         File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
@@ -104,7 +104,7 @@ let writeFile (pdfPath: string) (file: SavedFile) =
 /// The file next to pdfPath, or an empty one.
 let readOrEmpty (pdfPath: string) =
     readFile (filePath pdfPath)
-    |> Option.defaultValue { Version = 1; DismissedWarnings = null; FigureAltText = null }
+    |> Option.defaultValue { Version = 1; DismissedWarnings = null; Figures = null }
 
 /// The dismissals saved next to pdfPath, or None if none are (no file, or one holding only
 /// alt text).
