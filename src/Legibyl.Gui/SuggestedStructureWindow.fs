@@ -29,12 +29,8 @@ type LayoutReview(modified: DateTime) =
     /// Discarded suggestions, by (page, order).
     member val Discarded: Set<int * int> = Set.empty with get, set
     member val LastPage = 1 with get, set
-    /// Alt text written for figures, as saved next to the PDF (see FigureAlt).
-    member val Figures: FigureAlt.Figure list = [] with get, set
-
-    /// The alt text written for a suggested figure on page, if any.
-    member this.AltFor(page: int, block: SuggestedBlock) =
-        if block.Tag = "Figure" then FigureAlt.find this.Figures page block.Tag block.Geometry |> Option.map _.Alt else None
+    /// Figures' alt text and corrected OCR text, as saved next to the PDF (see RegionEdits).
+    member val Edits: RegionEdits.Edit list = [] with get, set
 
 /// The layout reviews of the files opened this session, each forgotten if its file changes.
 [<Sealed>]
@@ -48,7 +44,7 @@ type LayoutReviews() =
         let fresh () =
             // Any alt text saved next to the PDF, written for it or an earlier version of it.
             let review = LayoutReview modified
-            review.Figures <- FigureAlt.load fullPath
+            review.Edits <- RegionEdits.load fullPath
             review
         reviews.AddOrUpdate(fullPath, (fun _ -> fresh ()), (fun _ existing -> if existing.Modified = modified then existing else fresh ()))
 
@@ -128,7 +124,7 @@ type ReviewedLayout(prefetcher: LayoutPrefetcher, review: LayoutReview) =
         member _.PageRegions(_, page) =
             let kept = (prefetcher.Find page).Blocks |> List.filter (fun block -> not (review.Discarded.Contains((page, block.Order))))
             List.map2
-                (fun block (region: LayoutRegion) -> { region with Alt = review.AltFor(page, block) |> Option.toObj })
+                (fun block region -> RegionEdits.apply review.Edits page block region)
                 kept
                 (LayoutSuggestions.toRegions kept)
             :> Collections.Generic.IReadOnlyList<_>
@@ -354,7 +350,7 @@ module SuggestedStructureView =
                 + "decoration). The original isn't changed. "
                 + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
                 + "list markers are list items (LI), and Artifact marks page furniture like running headers and page numbers. "
-                + "Text drawn as outlines or pixels rather than as text is read with OCR (marked OCR), and QR codes are read "
+                + "Text drawn as outlines or pixels rather than as text is read with OCR, and can be corrected; figures can be given alt text. Both are saved next to the PDF, and QR codes are read "
                 + "and shown with the alt text tagging would give them (Alt)."
 
             let downloadPanel =
@@ -388,27 +384,28 @@ module SuggestedStructureView =
                     ]
                 ]
 
-            // Alt text written for figures; saved next to the PDF as it's typed.
-            let figures = ctx.useState review.Figures
+            // Figures' alt text and corrected OCR text; saved next to the PDF as they're typed.
+            let edits = ctx.useState review.Edits
 
-            let saveFigures (next: FigureAlt.Figure list) =
-                figures.Set next
-                review.Figures <- next
+            let saveEdits (next: RegionEdits.Edit list) =
+                edits.Set next
+                review.Edits <- next
                 try
-                    FigureAlt.save pdfPath next
+                    RegionEdits.save pdfPath next
                 with
                 | :? IOException
-                | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save alt text next to the PDF: {ex.Message}"
+                | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save edits next to the PDF: {ex.Message}"
+
+            let currentPage () = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
 
             /// A figure's alt text, to edit. A QR code's own description shows as the hint.
             let altBox (block: SuggestedBlock) =
-                let page = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
-                let written = FigureAlt.find figures.Current page block.Tag block.Geometry |> Option.map _.Alt |> Option.defaultValue ""
+                let page = currentPage ()
                 TextBox.create [
                     TextBox.margin (22.0, 2.0, 0.0, 6.0)
                     TextBox.textWrapping TextWrapping.Wrap
                     TextBox.acceptsReturn false
-                    TextBox.text written
+                    TextBox.text (RegionEdits.altFor edits.Current page block |> Option.defaultValue "")
                     TextBox.placeHolderText (
                         match block.QrText with
                         | Some text -> LinkTitles.qrAltText titles.Current text
@@ -416,37 +413,53 @@ module SuggestedStructureView =
                     )
                     ToolTip.tip "Written as the figure's alt text when tagging. Saved next to the PDF, and found again if the layout is suggested again."
                     TextBox.onTextChanged (fun text ->
-                        let current = FigureAlt.find figures.Current page block.Tag block.Geometry |> Option.map _.Alt |> Option.defaultValue ""
-                        if text <> current then
-                            saveFigures (FigureAlt.set figures.Current page block.Tag block.Geometry text))
+                        if text <> (RegionEdits.altFor edits.Current page block |> Option.defaultValue "") then
+                            saveEdits (RegionEdits.setAlt edits.Current page block.Tag block.Geometry text))
                 ]
 
-            /// Adds alt text from another .legibyl.json file, e.g. one saved for an earlier version
+            /// A region's OCR text, to correct. Only a change is recorded; clearing it means
+            /// there's nothing to read there.
+            let ocrBox (block: SuggestedBlock) =
+                let page = currentPage ()
+                TextBox.create [
+                    TextBox.margin (22.0, 2.0, 0.0, 6.0)
+                    TextBox.textWrapping TextWrapping.Wrap
+                    TextBox.acceptsReturn false
+                    TextBox.text (RegionEdits.textFor edits.Current page block |> Option.defaultValue "")
+                    TextBox.placeHolderText "Nothing to read here (cleared)"
+                    ToolTip.tip
+                        "What OCR read. Correct it and the correction is what a screen reader hears (its /ActualText) when tagging; it's saved next to the PDF. Put back exactly what OCR read to drop the correction."
+                    TextBox.onTextChanged (fun text ->
+                        if text <> (RegionEdits.textFor edits.Current page block |> Option.defaultValue "") then
+                            saveEdits (RegionEdits.setText edits.Current page block.Tag block.Geometry block.Text text))
+                ]
+
+            /// Adds edits (alt text, corrected text) from another .legibyl.json file, e.g. one saved for an earlier version
             /// of this PDF under another name.
             let importAlt _ =
                 task {
                     let! files =
                         window.StorageProvider.OpenFilePickerAsync(
                             Avalonia.Platform.Storage.FilePickerOpenOptions(
-                                Title = "Import alt text",
+                                Title = "Import edits",
                                 AllowMultiple = false,
                                 FileTypeFilter = [ Avalonia.Platform.Storage.FilePickerFileType("Legibyl files", Patterns = [ "*.legibyl.json"; "*.json" ]) ]
                             )
                         )
                     match files |> Seq.tryHead |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath())) with
                     | Some path ->
-                        let imported = FigureAlt.fromFile path
-                        let merged, added = FigureAlt.merge figures.Current imported
-                        saveFigures merged
+                        let imported = RegionEdits.fromFile path
+                        let merged, added = RegionEdits.merge edits.Current imported
+                        saveEdits merged
                         let found =
                             review.Pages.Values
                             |> Seq.sumBy (fun result ->
-                                result.Blocks |> List.filter (fun b -> b.Tag = "Figure" && (FigureAlt.find merged result.PageNumber b.Tag b.Geometry).IsSome) |> List.length)
+                                result.Blocks |> List.filter (fun b -> (RegionEdits.find merged result.PageNumber b.Tag b.Geometry).IsSome) |> List.length)
                         do!
                             Dialogs.showMessage
                                 window
-                                $"Imported {added} of {imported.Length} alt texts from {Path.GetFileName path} (the rest were already here). {found} figures found so far have alt text."
-                                "Import Alt Text"
+                                $"Imported {added} of {imported.Length} edits (alt text and corrected text) from {Path.GetFileName path}; the rest were already here. {found} regions found so far have edits."
+                                "Import Edits"
                     | None -> ()
                 }
                 |> ignore
@@ -509,7 +522,12 @@ module SuggestedStructureView =
                                                             | Some text -> $"Alt: {LinkTitles.qrAltText titles.Current text}"
                                                             | None ->
                                                             if block.Text = "" then "(no text)"
-                                                            elif block.Recognized then $"OCR: {snippet block.Text}"
+                                                            // The text itself is in the box below, to correct.
+                                                            elif block.Recognized then
+                                                                let page = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
+                                                                match RegionEdits.find edits.Current page block.Tag block.Geometry |> Option.bind _.Text with
+                                                                | Some _ -> "Read with OCR · corrected"
+                                                                | None -> "Read with OCR"
                                                             else snippet block.Text
                                                         )
                                                     ]
@@ -532,6 +550,7 @@ module SuggestedStructureView =
                                     ]
                                   ]
                                   if block.Tag = "Figure" then altBox block
+                                  elif block.Recognized then ocrBox block
                                    ]
                                   ]
                             ]
@@ -610,9 +629,9 @@ module SuggestedStructureView =
                                         suggestion.Current |> Option.iter (fun result -> setDiscarded [ for b in result.Blocks -> b.Order ] true))
                                 ]
                                 Button.create [
-                                    Button.content "Import Alt Text…"
+                                    Button.content "Import Edits…"
                                     Button.margin (16.0, 0.0, 0.0, 0.0)
-                                    ToolTip.tip "Use the alt text saved for another PDF, such as an earlier version of this one saved under another name."
+                                    ToolTip.tip "Use the alt text and corrected text saved for another PDF, such as an earlier version of this one saved under another name."
                                     Button.onClick importAlt
                                 ]
                                 Button.create [

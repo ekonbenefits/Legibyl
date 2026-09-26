@@ -1,6 +1,6 @@
 /// Warnings the user has dismissed for a PDF, kept in memory and, if they choose, in a
 /// "<name>.pdf.legibyl.json" file next to the PDF so they stay dismissed when it's opened again.
-/// The same file holds figures' alt text written in Suggest Structure (see FigureAlt).
+/// The same file holds the edits made in Suggest Structure (see RegionEdits).
 module Legibyl.Gui.Dismissals
 
 open System.IO
@@ -49,8 +49,8 @@ type SavedWarning =
       [<JsonPropertyName "location">] Location: string
       [<JsonPropertyName "message">] Message: string }
 
-/// A change made in Suggest Structure to a suggested region, found again by where it is: for
-/// now, the alt text written for a figure.
+/// Changes made in Suggest Structure to a suggested region, found again by where it is. Each
+/// field it has says what it changes; the others are left out (null).
 [<CLIMutable>]
 type SavedEdit =
     { [<JsonPropertyName "page">] Page: int
@@ -58,7 +58,14 @@ type SavedEdit =
       [<JsonPropertyName "tag">] Tag: string
       /// Left, bottom, right, top, in PDF points.
       [<JsonPropertyName "box">] Box: float array
-      [<JsonPropertyName "alt">] Alt: string }
+      /// A figure's alt text.
+      [<JsonPropertyName "alt">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Alt: string | null
+      /// The text of a region read with OCR, corrected ("" for none to read).
+      [<JsonPropertyName "text">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Text: string | null }
 
 /// The file next to a PDF: its remembered dismissals and the edits made in Suggest Structure,
 /// either of which may be missing (null).
