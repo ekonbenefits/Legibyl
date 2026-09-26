@@ -462,7 +462,10 @@ type VeraPdfValidator() =
         let validationProgress =
             { new IProgress<ValidationProgress> with
                 member _.Report p =
-                    if p.Stage = ValidationStage.CheckingPages then report FixStage.CheckingOriginal p.Page p.PageCount }
+                    // Pages as they're checked, and all of them once they're done (a short
+                    // document can finish before the first page is ever sampled).
+                    if p.Stage = ValidationStage.CheckingPages || p.Stage = ValidationStage.Finishing then
+                        report FixStage.CheckingOriginal p.Page p.PageCount }
         let originalReport = this.Validate(pdfPath, profile, validationProgress)
         let appliedFixes = ResizeArray<string>()
         let notApplied = ResizeArray<string>()
