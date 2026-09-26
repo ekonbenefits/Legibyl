@@ -193,3 +193,33 @@ let ``ReadStructureTree link to a rectangle reports the rectangle`` () =
     let destination = (root.Children |> single (fun n -> n.Tag = "Link")).LinkDestination |> notNull
     (destination.Kind, destination.Left, destination.Bottom, destination.Right, destination.Top)
     |> should equal ("FitR", Nullable 50.0, Nullable 400.0, Nullable 300.0, Nullable 500.0)
+
+let private arrayOf (items: PdfObject list) =
+    let array = PdfArray()
+    for item in items do
+        array.Add item
+    array
+
+[<Fact>]
+let ``attributes followed by revision numbers are read, as Canva writes them`` () =
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(output.Path))
+        let page = document.AddNewPage()
+        let layout = PdfDictionary()
+        layout.Put(PdfName.O, PdfName.Layout) |> ignore
+        layout.Put(PdfName.BBox, numbers [ 100.0; 200.0; 300.0; 400.0 ]) |> ignore
+        let figure = structElem PdfName.Figure page
+        // An attribute object and its revision number.
+        figure.Put(PdfName.A, arrayOf [ layout.MakeIndirect document; PdfNumber 0 ]) |> ignore
+        figure.Put(PdfName.Alt, PdfString "A figure") |> ignore
+        let revisionOnly = structElem PdfName.Figure page
+        revisionOnly.Put(PdfName.A, arrayOf [ PdfNumber 0 ]) |> ignore
+        setStructTreeRoot document (arrayOf [ figure; revisionOnly ])
+
+    let root = reader.ReadStructureTree output.Path |> notNull
+
+    let figure = root.Children[0]
+    let geometry = figure.Geometry |> notNull
+    (geometry.Left, geometry.Bottom, geometry.Right, geometry.Top) |> should equal (100.0, 200.0, 300.0, 400.0)
+    root.Children[1].Geometry |> should be Null
