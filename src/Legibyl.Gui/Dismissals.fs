@@ -7,7 +7,8 @@ open System.Text.Json
 open System.Text.Json.Serialization
 open Legibyl.Validation
 
-/// Identifies a warning across validations of the same file: its rule and where it is.
+/// Identifies a warning across validations of the same file: its rule and where it is, or
+/// AnyLocation for every warning of the rule.
 type Key = { Rule: string; Location: string }
 
 /// Dismissed warnings, with each one's message (saved only so the file is readable).
@@ -20,8 +21,21 @@ let keyOf (violation: RuleViolation) =
     { Rule = $"{violation.Specification} {violation.RuleId}"
       Location = violation.LocationContext |> Option.ofObj |> Option.defaultValue "" }
 
+/// The location of a key that dismisses every warning of its rule, wherever it is.
+[<Literal>]
+let AnyLocation = "*"
+
+/// The key that ignores every warning of violation's rule (type).
+let ruleKeyOf (violation: RuleViolation) =
+    { keyOf violation with Location = AnyLocation }
+
+/// Whether the user ignores every warning of violation's rule.
+let isRuleIgnored (dismissed: Dismissed) (violation: RuleViolation) =
+    canDismiss violation && dismissed.ContainsKey(ruleKeyOf violation)
+
+/// Whether violation is dismissed on its own or ignored with the rest of its rule.
 let isDismissed (dismissed: Dismissed) (violation: RuleViolation) =
-    canDismiss violation && dismissed.ContainsKey(keyOf violation)
+    canDismiss violation && (dismissed.ContainsKey(keyOf violation) || dismissed.ContainsKey(ruleKeyOf violation))
 
 /// "report.pdf" -> "report.pdf.legibyl.json".
 let filePath (pdfPath: string) = pdfPath + ".legibyl.json"
