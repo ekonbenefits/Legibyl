@@ -22,6 +22,7 @@ open Avalonia.Styling
 open Legibyl.Layout
 open Legibyl.Rendering
 open Legibyl.Validation
+open Legibyl.Gui.BusyStatus
 
 /// Flattened, display-friendly view of a RuleViolation for the results grid.
 type RuleViolationRow =
@@ -201,19 +202,10 @@ module private MainView =
         features.Add(FontFeature.Parse "tnum")
         AttrBuilder<TextBlock>.CreateProperty<FontFeatureCollection | null>(TextBlock.FontFeaturesProperty, features, ValueNone)
 
-    /// What the progress row under the file row is showing.
-    type BusyProgress =
-        | Validating of ValidationProgress
-        | ReadingStructure of StructureReadProgress
-        /// Downloading the layout model for tagging from the layout: the fraction done.
-        | DownloadingLayoutModel of float
-        /// Fixing: which step, and the page within it where there are pages.
-        | Fixing of FixProgress
-
     let private formatElapsed (elapsed: TimeSpan) =
         if elapsed.TotalHours >= 1.0 then elapsed.ToString(@"h\:mm\:ss") else elapsed.ToString(@"m\:ss")
 
-    /// e.g. "Page 57 of 675   Checks 394,185   Rules failed 1   Elapsed 0:07": each value sits
+    /// e.g. "Validating: page 57 of 675   Checks 394,185   Rules failed 1   Elapsed 0:07": each value sits
     /// in a fixed-width slot with equal-width digits, so the line doesn't shift as it updates.
     let private progressLine (progress: BusyProgress) : IView =
         let secondaryText = Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
@@ -234,40 +226,17 @@ module private MainView =
                     slot width TextAlignment.Right value
                 ]
             ]
-        let status, stats =
+        let status = statusText progress
+        let stats =
             match progress with
-            | Validating progress ->
-                let status =
-                    match progress.Stage with
-                    | ValidationStage.CheckingPages -> $"Page {progress.Page:N0} of {progress.PageCount:N0}"
-                    | ValidationStage.Finishing -> "Finishing up…"
-                    | _ -> "Reading the PDF…"
-                status,
+            | Validating(_, progress) ->
                 [ stat "Checks" 80.0 (progress.Checks.ToString "N0")
                   stat "Rules failed" 32.0 (progress.FailedRules.ToString "N0")
                   stat "Elapsed" 48.0 (formatElapsed progress.Elapsed) ]
             | ReadingStructure progress ->
-                let status =
-                    match progress.Stage with
-                    | StructureReadStage.ReadingText -> $"Reading page text {progress.Page:N0} of {progress.PageCount:N0}"
-                    | StructureReadStage.ReadingLinks -> "Reading links…"
-                    | _ -> "Building the tree…"
-                status,
                 [ stat "Elements" 64.0 (progress.Elements.ToString "N0")
                   stat "Elapsed" 48.0 (formatElapsed progress.Elapsed) ]
-            | DownloadingLayoutModel fraction -> $"Downloading the layout model… {fraction:P0}", []
-            | Fixing progress ->
-                let step = $"Step {progress.Step} of {progress.Steps}: "
-                let pages = progress.Page > 0 && progress.PageCount > 0
-                let status =
-                    match progress.Stage with
-                    | FixStage.CheckingOriginal when pages -> $"{step}checking the original, page {progress.Page:N0} of {progress.PageCount:N0}"
-                    | FixStage.CheckingOriginal -> $"{step}checking the original…"
-                    | FixStage.Tagging when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to tag it"
-                    | FixStage.Tagging -> $"{step}tagging from the layout…"
-                    | FixStage.Repairing -> $"{step}applying the repairs…"
-                    | _ -> $"{step}repairing metadata with veraPDF…"
-                status, []
+            | _ -> []
         WrapPanel.create [
             WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
             WrapPanel.children [ yield slot 210.0 TextAlignment.Left status :> IView; for stat in stats do yield stat :> IView ]
@@ -283,9 +252,9 @@ module private MainView =
               ProgressBar.value (float (page - 1)) ]
         let full = [ ProgressBar.isIndeterminate false; ProgressBar.maximum 1.0; ProgressBar.value 1.0 ]
         match progress with
-        | Some(Validating progress) when progress.Stage = ValidationStage.CheckingPages && progress.PageCount > 0 ->
+        | Some(Validating(_, progress)) when progress.Stage = ValidationStage.CheckingPages && progress.PageCount > 0 ->
             fraction progress.Page progress.PageCount
-        | Some(Validating progress) when progress.Stage = ValidationStage.Finishing -> full
+        | Some(Validating(_, progress)) when progress.Stage = ValidationStage.Finishing -> full
         | Some(ReadingStructure progress) when progress.Stage = StructureReadStage.ReadingText && progress.PageCount > 0 ->
             fraction progress.Page progress.PageCount
         | Some(ReadingStructure _) -> full
@@ -369,7 +338,8 @@ module private MainView =
                 |> ignore
 
             /// Validates the selected file, returning its report (None if it couldn't be validated).
-            let runValidation () : Task<ValidationReport option> =
+            /// activity names it in the progress row ("Validating", "Validating the repaired copy").
+            let runValidation (activity: string) : Task<ValidationReport option> =
                 task {
                     match selectedFile.Current with
                     | Some filePath when not isBusy.Current ->
@@ -378,7 +348,7 @@ module private MainView =
                         clearResults ()
                         busyProgress.Set None
                         // Created on the UI thread, so its reports arrive there too.
-                        let progress = Progress<ValidationProgress>(fun p -> busyProgress.Set(Some(Validating p)))
+                        let progress = Progress<ValidationProgress>(fun p -> busyProgress.Set(Some(Validating(activity, p))))
                         try
                             try
                                 let! report = Task.Run(fun () -> validator.Validate(filePath, profile, progress))
@@ -400,8 +370,8 @@ module private MainView =
                     | _ -> return None
                 }
 
-            /// Opens a file and validates it with the current profile.
-            let openFile (path: string) =
+            /// Opens a file and validates it with the current profile, naming that activity.
+            let openFileAs (activity: string) (path: string) =
                 selectedFile.Set(Some path)
                 clearResults ()
                 match Dismissals.load path with
@@ -412,7 +382,10 @@ module private MainView =
                     dismissed.Set Map.empty
                     rememberDismissals.Set false
                 showDismissed.Set false
-                runValidation ()
+                runValidation activity
+
+            /// Opens a file and validates it with the current profile.
+            let openFile (path: string) = openFileAs "Validating" path
 
             // Auto-validate as soon as a file is picked/dropped.
             let setSelectedFile (path: string) = openFile path |> ignore
@@ -553,7 +526,7 @@ module private MainView =
                                     match fixOutcome with
                                     | Ok fix when fix.WasFixed ->
                                         match fix.OutputPath with
-                                        | NonNull path -> openFile path
+                                        | NonNull path -> openFileAs "Validating the repaired copy" path
                                         | Null -> Task.FromResult None
                                     | _ -> Task.FromResult None
 
@@ -680,14 +653,14 @@ module private MainView =
                                 if index >= 0 && index <> profileIndex.Current then
                                     profileIndex.Set index
                                     // Re-validate automatically when the profile changes, if a file is selected.
-                                    runValidation () |> ignore)
+                                    runValidation "Validating" |> ignore)
                         ]
                         Button.create [
                             Grid.column 3
                             Button.content "Validate"
                             Button.padding (16.0, 4.0)
                             Button.isEnabled (not busy && selectedFile.Current.IsSome)
-                            Button.onClick (fun _ -> runValidation () |> ignore)
+                            Button.onClick (fun _ -> runValidation "Validating" |> ignore)
                         ]
                     ]
                 ]

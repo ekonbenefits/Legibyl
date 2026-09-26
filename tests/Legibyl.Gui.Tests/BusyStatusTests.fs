@@ -1,0 +1,49 @@
+module Legibyl.Gui.Tests.BusyStatusTests
+
+open System
+open Xunit
+open FsUnit.Xunit
+open Legibyl.Gui.BusyStatus
+open Legibyl.Validation
+
+let private validation stage page pageCount =
+    { Stage = stage
+      Page = page
+      PageCount = pageCount
+      Checks = 0
+      FailedRules = 0
+      ProcessedObjects = 0
+      QueuedObjects = 0
+      Elapsed = TimeSpan.Zero }
+
+let private fixing stage step steps page pageCount =
+    Fixing { Stage = stage; Step = step; Steps = steps; Page = page; PageCount = pageCount }
+
+[<Fact>]
+let ``every progress line says what's happening first`` () =
+    [ Validating("Validating", validation ValidationStage.Preparing 0 0)
+      Validating("Validating", validation ValidationStage.CheckingPages 57 675)
+      Validating("Validating the repaired copy", validation ValidationStage.Finishing 10 10)
+      ReadingStructure
+          { Stage = StructureReadStage.ReadingText
+            Page = 3
+            PageCount = 10
+            Elements = 0
+            Elapsed = TimeSpan.Zero }
+      DownloadingLayoutModel 0.45
+      fixing FixStage.CheckingOriginal 1 4 12 40
+      fixing FixStage.Tagging 2 4 3 10
+      fixing FixStage.Repairing 3 4 0 0
+      fixing FixStage.RepairingMetadata 4 4 0 0 ]
+    |> List.map statusText
+    |> should
+        equal
+        [ "Validating: reading the PDF…"
+          "Validating: page 57 of 675"
+          "Validating the repaired copy: finishing up…"
+          "Reading the structure: page text 3 of 10"
+          "Downloading the layout model: 45%"
+          "Fixing, step 1 of 4: checking the original, page 12 of 40"
+          "Fixing, step 2 of 4: finding page 3 of 10's layout, to tag it"
+          "Fixing, step 3 of 4: applying the repairs…"
+          "Fixing, step 4 of 4: repairing metadata with veraPDF…" ]
