@@ -58,35 +58,13 @@ let private emptyTocEntry context (visit: StructElemVisit) =
 
 // ---- Structure-2: likely split paragraph ----
 
-let private normalizeText (text: string) = Regex.Replace(text, @"\s+", " ").Trim()
-
-let private isLikelyStandaloneParagraph (text: string) =
-    text.Length <= 3
-    || Regex.IsMatch(text, @"^(SECTION|ARTICLE)\b", RegexOptions.IgnoreCase)
-    || Regex.IsMatch(text, @"^\d+(\.\d+)*\s+\S+")
-    || Regex.IsMatch(text, @"^[a-z]\.\s+\S+", RegexOptions.IgnoreCase)
-
-let private isLikelySplitParagraph (currentText: string) (nextText: string) =
-    let startsWith (prefix: string) = nextText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-
-    currentText.Length >= 20
-    && nextText.Length >= 10
-    && not (isLikelyStandaloneParagraph currentText || isLikelyStandaloneParagraph nextText)
-    && not (".:;!?…".Contains currentText[currentText.Length - 1])
-    && (Char.IsLower nextText[0]
-        || startsWith "and "
-        || startsWith "or "
-        || startsWith "to "
-        || startsWith "of "
-        || startsWith "the ")
-
 let private splitParagraph context (visit: StructElemVisit) =
     match visit.NextSibling with
     | Some next when isParagraph visit.Element context && isParagraph next.Element context ->
         let onDifferentPages = visit.Page.IsSome && next.Page.IsSome && visit.Page <> next.Page
-        let currentText = normalizeText (extractText visit.Element context visit.Page)
-        let nextText = normalizeText (extractText next.Element context next.Page)
-        if not onDifferentPages && isLikelySplitParagraph currentText nextText then
+        let currentText = ParagraphJoins.normalizeText (extractText visit.Element context visit.Page)
+        let nextText = ParagraphJoins.normalizeText (extractText next.Element context next.Page)
+        if not onDifferentPages && ParagraphJoins.looksSplit currentText nextText then
             Some
                 { Location = $"{visit.Path} + {next.Path}"
                   Geometry =

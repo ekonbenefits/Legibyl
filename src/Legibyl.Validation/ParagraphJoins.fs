@@ -1,5 +1,6 @@
-/// Joins paragraphs that were tagged line by line: neighbouring /P elements on one page whose
-/// text a layout detector (see Legibyl.Layout) finds in the same block of text. The first
+/// Joins paragraphs that were tagged line by line: neighbouring /P elements on one page that the
+/// split-paragraph warning flags, where a layout detector (see Legibyl.Layout) confirms their
+/// text is in the same block. The first
 /// paragraph of each run takes the others' content, in order, and the others are removed; what
 /// the page draws doesn't change.
 module internal Legibyl.Validation.ParagraphJoins
@@ -48,6 +49,32 @@ let private regionOf (regions: IReadOnlyList<LayoutRegion>) (geometry: Structure
     |> List.tryHead
     |> Option.map fst
 
+// ---- Which paragraphs look split ----
+
+let normalizeText (text: string) = Regex.Replace(text, @"\s+", " ").Trim()
+
+let private isLikelyStandaloneParagraph (text: string) =
+    text.Length <= 3
+    || Regex.IsMatch(text, @"^(SECTION|ARTICLE)\b", RegexOptions.IgnoreCase)
+    || Regex.IsMatch(text, @"^\d+(\.\d+)*\s+\S+")
+    || Regex.IsMatch(text, @"^[a-z]\.\s+\S+", RegexOptions.IgnoreCase)
+
+/// Whether next reads as the rest of current's sentence: the split-paragraph warning
+/// (Structure-2), and the pairs the layout is asked to confirm.
+let looksSplit (currentText: string) (nextText: string) =
+    let startsWith (prefix: string) = nextText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+
+    currentText.Length >= 20
+    && nextText.Length >= 10
+    && not (isLikelyStandaloneParagraph currentText || isLikelyStandaloneParagraph nextText)
+    && not (".:;!?…".Contains currentText[currentText.Length - 1])
+    && (Char.IsLower nextText[0]
+        || startsWith "and "
+        || startsWith "or "
+        || startsWith "to "
+        || startsWith "of "
+        || startsWith "the ")
+
 /// A paragraph that can take part in a join, with its page and where its text is drawn.
 type private Piece =
     { Paragraph: PdfDictionary
@@ -69,19 +96,22 @@ let private pieceOf context (obj: PdfObject | null) =
                 { Paragraph = paragraph
                   Page = page
                   Geometry = geometry
-                  Text = Regex.Replace(extractText paragraph context (Some page), @"\s+", " ").Trim() })
+                  Text = normalizeText (extractText paragraph context (Some page)) })
         | _ -> None
     | _ -> None
 
-/// Whether next can be joined onto previous if the layout agrees: on the same page, in the
-/// same language, and not a list item of its own.
+/// Whether next can be joined onto previous if the layout agrees: the split-paragraph warning
+/// flags them (so only what it reported is joined), and they're on the same page, in the same
+/// language, and next isn't a list item of its own.
 let private couldFollow (previous: Piece) (next: Piece) =
     previous.Page = next.Page
+    && looksSplit previous.Text next.Text
     && Object.Equals(previous.Paragraph.Get(PdfName.Lang), next.Paragraph.Get(PdfName.Lang))
     && not (ParagraphLists.startsWithMarker next.Text)
 
-/// Every run of two or more sibling paragraphs whose text the layout puts in one text region.
-/// regions gives a page's regions; it's only asked for pages that have neighbouring paragraphs.
+/// Every run of two or more sibling paragraphs the split-paragraph warning flags whose text the
+/// layout puts in one text region. regions gives a page's regions; it's only asked for pages
+/// with flagged paragraphs.
 let find (document: PdfDocument) context (regions: int -> IReadOnlyList<LayoutRegion>) : JoinRun list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
