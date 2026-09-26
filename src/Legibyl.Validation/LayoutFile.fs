@@ -3,7 +3,7 @@
 /// ElementEdits.onRegions): excluding a region, retagging it, writing alt text, correcting OCR'd
 /// text are edits, keyed by a region's page, tag and box, not changes to the layout. (A layout
 /// file can be changed by hand, and still tags, but edits are the way.) The CLI writes one with
-/// --suggest-layout and tags from it with --apply-layout; a review file records one for an
+/// 'layout suggest' and tags from it with 'layout apply'; a review file records one for an
 /// untagged PDF (see ReviewFile). Suggesting one is Legibyl.Layout's.
 module Legibyl.Validation.LayoutFile
 

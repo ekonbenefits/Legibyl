@@ -14,70 +14,46 @@ open FSharp.SystemCommandLine
 open Input
 open Legibyl.Validation
 
-/// Process exit codes. Designed so an agent/script can distinguish "the PDF has
-/// compliance problems" (1) from "the tool itself failed to run" (2/64).
+/// Process exit codes, the same for every command: 0 done and fine, 1 done but the document has a
+/// problem (it doesn't comply, has no structure, was already tagged), 2 the tool couldn't do it
+/// (a file missing, corrupt, encrypted), 64 invalid usage.
 module ExitCodes =
-    /// All requested files validated and are compliant.
     [<Literal>]
     let Success = 0
 
-    /// All files were validated successfully, but at least one is non-compliant.
     [<Literal>]
-    let NonCompliant = 1
+    let DocumentProblem = 1
 
-    /// At least one file could not be validated (missing, corrupt, encrypted, etc).
     [<Literal>]
-    let ValidationError = 2
+    let ToolError = 2
 
-    /// Invalid command-line usage (bad arguments, unknown profile, no files given).
     [<Literal>]
     let UsageError = 64 // matches sysexits.h EX_USAGE convention
-
-type Args =
-    { Files: string array
-      ProfileName: string
-      Format: string
-      OutputPath: string option
-      Fix: bool
-      /// The repairs --fixes names, as given.
-      Fixes: string option
-      /// Apply the edits in each file's own review (the file next to it, or inside it).
-      Edits: bool
-      /// Apply the edits in this review (a .legibyl.json file, or a PDF's own review).
-      EditsFrom: string option
-      /// Suggest each file's layout, in the output.
-      SuggestLayout: bool
-      /// Also write the suggested layout here (one input file).
-      SuggestLayoutOutput: string option
-      /// Write a picture of each figure beside the layout written there.
-      FigureImages: bool
-      /// Tag the file from the layout in this file (see --suggest-layout).
-      ApplyLayout: string option
-      TitleFromFirstPage: bool
-      LinkTitlesFromWeb: bool
-      FixOutputPath: string option
-      IncludeStructure: bool }
 
 let private usageError (message: string) =
     eprintfn $"error: {message}"
     eprintfn "Run with --help for usage."
     ExitCodes.UsageError
 
-/// Whether the arguments ask for a repaired copy: --fix, or what implies it.
-let private fixing (args: Args) =
-    args.Fix || args.Fixes.IsSome || args.Edits || args.EditsFrom.IsSome || args.ApplyLayout.IsSome
+// Relaxed escaping keeps text readable ("page's", not "page\u0027s").
+let private jsonOptions =
+    JsonSerializerOptions(
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+        Encoder = Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    )
 
-/// The repairs asked for: those --fixes names (the safe ones with just --fix), and the ones
-/// their own flags ask for. Edits are added per file, when it has some.
-let private requestedFixes (args: Args) =
-    let named =
-        match args.Fixes with
-        | Some names -> FixNames.parse names |> Result.defaultValue PdfFixOptions.None
-        | None when args.Fix -> FixNames.safe
-        | None -> PdfFixOptions.None
-    [ args.TitleFromFirstPage, PdfFixOptions.TitleFromFirstPage
-      args.LinkTitlesFromWeb, PdfFixOptions.LinkTitlesFromWeb ]
-    |> List.fold (fun all (asked, option) -> if asked then all ||| option else all) named
+let private toJson (value: 'T) = JsonSerializer.Serialize(value, jsonOptions)
+
+/// Writes rendered output to path, or stdout if none.
+let private write (path: string option) (rendered: string) =
+    match path with
+    | Some path -> File.WriteAllText(path, rendered)
+    | None -> Console.WriteLine rendered
+
+/// The worst of several exit codes (a tool error over a document problem over success).
+let private worst (codes: int seq) = if Seq.isEmpty codes then ExitCodes.Success else Seq.max codes
 
 /// Downloads the layout model if it isn't yet, saying how it's going on stderr.
 let private ensureLayoutModel () =
@@ -93,26 +69,79 @@ let private ensureLayoutModel () =
                         eprintfn $"  {percent}%%" }
         Legibyl.Layout.LayoutModel.download progress Threading.CancellationToken.None |> _.GetAwaiter().GetResult()
 
-let private deriveFixOutputPath (file: string) =
-    let fixedName = CopyNames.nextVersion file
-    match Path.GetDirectoryName file with
-    | NonNull dir when dir <> "" -> Path.Combine(dir, fixedName)
-    | _ -> fixedName
+// ---- Shared inputs ----
 
-/// The layout the model suggests for each of file's pages, with a title, saying which page it's
-/// on as it goes (each takes seconds).
-let private suggestLayout (file: string) =
-    ensureLayoutModel ()
-    use suggester = new Legibyl.Layout.LayoutSuggester(file)
-    let pages =
-        [ for page in 1 .. suggester.PageCount ->
-              eprintfn $"Finding page {page} of {suggester.PageCount}'s layout…"
-              suggester.Suggest page ]
-    Legibyl.Layout.LayoutSuggestions.toLayoutFile file pages (Legibyl.Layout.LayoutSuggestions.suggestedTitle file pages)
+let private filesArgument () =
+    argument<string array> "files"
+    |> desc "PDF files."
+    |> arity Arity.OneOrMore
+    |> validate (fun files ->
+        match files |> Array.tryFind (fun f -> f.StartsWith '-' && f.Length > 1) with
+        | Some unknown -> Error $"Unknown option '{unknown}'."
+        | None -> Ok())
 
-/// appliedLayout is --apply-layout's layout, read and checked.
-let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayout: LayoutFile.SavedLayout option) profile (file: string) =
-    let result = FileValidationResult.Empty(file, args.ProfileName)
+let private fileArgument () = argument<string> "file" |> desc "A PDF file."
+
+let private profileOption () =
+    option "--profile"
+    |> desc "Profile to validate against. See 'legibyl list profiles'."
+    |> helpName "name"
+    |> def ProfileNames.DefaultName
+    |> validate (fun name ->
+        match ProfileNames.tryParse name with
+        | Some _ -> Ok()
+        | None -> Error $"Unknown profile '{name}'. Run 'legibyl list profiles' to see valid names.")
+
+let private formatOption () =
+    option "--format"
+    |> desc "Output format."
+    |> helpName "json|text"
+    |> def "json"
+    |> validate (fun format ->
+        if format = "json" || format = "text" then Ok() else Error $"Unknown --format '{format}'. Expected 'json' or 'text'.")
+
+let private fixesOption (defaultNames: string) =
+    optionMaybe<string> "--fixes"
+    |> desc
+        $"The repairs to run, comma-separated: \"safe\" (the ones that need no guesswork), \"all\" (every one \
+          but link-titles-from-web, which visits web pages), \"none\", or names from 'legibyl list fixes', e.g. \
+          \"safe,lists,headings-from-toc\". Default: {defaultNames}. tag-from-layout and join-split-paragraphs \
+          download the layout model (about 130 MB) the first time."
+    |> helpName "names"
+    |> arity Arity.ExactlyOne
+    |> validate (fun names ->
+        match names with
+        | Some names -> FixNames.parse names |> Result.map ignore
+        | None -> Ok())
+
+let private editsOption () =
+    option<bool> "--edits"
+    |> desc
+        "Also write the edits in each file's review: the \"<name>.pdf.legibyl.json\" file next to it (as the GUI \
+         saves it), or else the review inside a copy Legibyl saved. Alt text, replacement text, tags, merged \
+         paragraphs and link descriptions go to the elements they're for; the copy carries the review."
+
+let private editsFromOption () =
+    optionMaybe<string> "--edits-from"
+    |> desc "Like --edits, with the review in path: a .legibyl.json file, or a PDF whose review to use (an earlier version's, say)."
+    |> helpName "path"
+    |> arity Arity.ExactlyOne
+
+let private reportOption () =
+    optionMaybe<string> "--report" |> desc "Write the JSON (or text) report to path instead of stdout." |> helpName "path"
+
+// ---- validate ----
+
+type private ValidateArgs =
+    { Files: string array
+      ProfileName: string
+      Format: string
+      Output: string option
+      Structure: bool }
+
+let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (file: string) =
+    let result = ValidationResult.Empty(file, args.ProfileName)
+    let profile = (ProfileNames.tryParse args.ProfileName).Value
     match (try Ok(validator.Validate(file, profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) with
     | Error message -> { result with Error = message }
     | Ok report ->
@@ -128,137 +157,13 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
                     |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning)
                     |> Seq.map FailureDetail.Of
                     |> Array.ofSeq }
-
-        let result =
-            if not (fixing args) then
-                result
-            else
-                let targetPath = args.FixOutputPath |> Option.defaultWith (fun () -> deriveFixOutputPath file)
-                // The review whose edits to apply, if asked for.
-                let review =
-                    match args.EditsFrom with
-                    | Some path -> ReviewFile.readFrom path
-                    | None when args.Edits -> ReviewFile.readFor file
-                    | None -> None
-                let noReview =
-                    [ if (args.Edits || args.EditsFrom.IsSome) && review.IsNone then
-                          match args.EditsFrom with
-                          | Some path -> $"No edits were applied: {path} has no review to read them from."
-                          | None -> $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
-                // A review of an untagged PDF can hold its reviewed layout, to tag from.
-                // (Only the pages that haven't changed since it was saved.)
-                let review =
-                    review
-                    |> Option.map (fun review ->
-                        match review.Layout with
-                        | NonNull layout -> { review with Layout = LayoutFile.current file layout }
-                        | Null -> review)
-                let reviewLayout = review |> Option.bind (fun review -> Option.ofObj review.Layout)
-                let options =
-                    requestedFixes args
-                    ||| (if appliedLayout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
-                    ||| (match review with
-                         | Some review when not (ReviewFile.edits review).IsEmpty -> PdfFixOptions.ApplyEdits
-                         | _ -> PdfFixOptions.None)
-                if options = PdfFixOptions.None then
-                    { result with
-                        FixStatus = RepairStatus.NoAction.ToString()
-                        FixNotApplied = if noReview.IsEmpty then null else withNull (ResizeArray noReview) }
-                else
-                    // The layout model, for the repairs that read the page's layout, unless a layout
-                    // given or reviewed has every page.
-                    let pageCount () =
-                        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(file))
-                        document.GetNumberOfPages()
-                    let needsModel =
-                        FixNames.usesLayout options
-                        && (match appliedLayout |> Option.orElse reviewLayout with
-                            | Some layout -> not (LayoutFile.covers layout (pageCount ()))
-                            | None -> true)
-                    let model =
-                        if needsModel then
-                            ensureLayoutModel ()
-                            Some(new Legibyl.Layout.LayoutRegionSource(null))
-                        else
-                            None
-                    let modelSource = model |> Option.map (fun model -> model :> IPageLayoutSource)
-                    let layout: IPageLayoutSource option =
-                        match appliedLayout, review with
-                        // The layout given, with the review's edits layered on (not its own layout).
-                        | Some saved, Some review ->
-                            Some(ReviewFile.ReviewedRegions(LayoutFile.FileRegions(saved, modelSource), { review with Layout = null }))
-                        | Some saved, None -> Some(LayoutFile.FileRegions(saved, modelSource))
-                        | None, Some review when FixNames.usesLayout options ->
-                            Some(ReviewFile.ReviewedRegions(modelSource |> Option.defaultValue ReviewFile.noRegions, review))
-                        | None, _ -> modelSource
-                    try
-                        try
-                            layout |> Option.iter (fun source -> validator.LayoutSource <- source)
-                            match review with
-                            | Some review ->
-                                validator.Edits <- ReviewFile.edits review
-                                validator.Review <- ReviewFile.forCopy (Some review)
-                            | None -> ()
-                            let fix = validator.Fix(file, profile, targetPath, options)
-                            let tagged = fix.AppliedFixes |> Seq.exists (fun line -> line.StartsWith "Tagged ")
-                            let layoutUnused =
-                                [ if appliedLayout.IsSome && not tagged then
-                                      "The layout wasn't applied: the file already has a structure tree, and tagging from a layout is for an untagged file." ]
-                            let notApplied = List.ofSeq fix.NotApplied @ noReview @ layoutUnused
-                            { result with
-                                FixStatus = fix.Status.ToString()
-                                FixOutputPath = fix.OutputPath
-                                FixAppliedFixes = if fix.AppliedFixes.Count > 0 then withNull fix.AppliedFixes else null
-                                FixNotApplied = if notApplied.IsEmpty then null else withNull (ResizeArray notApplied) }
-                        with
-                        | :? VeraPdfValidationException as ex -> { result with FixError = ex.Message }
-                        | :? Net.Http.HttpRequestException as ex -> { result with FixError = $"Couldn't download the layout model: {ex.Message}" }
-                    finally
-                        validator.LayoutSource <- null
-                        validator.Edits <- []
-                        validator.Review <- null
-                        model |> Option.iter (fun model -> (model :> IDisposable).Dispose())
-
-        let result =
-            if not args.IncludeStructure then
-                result
-            else
-                try
-                    { result with Structure = validator.ReadStructureTree file }
-                with :? VeraPdfValidationException as ex ->
-                    { result with StructureError = ex.Message }
-
-        if not args.SuggestLayout then
+        if not args.Structure then
             result
         else
             try
-                let layout = suggestLayout file
-                let layout =
-                    match args.SuggestLayoutOutput with
-                    | Some path ->
-                        let layout =
-                            if args.FigureImages then
-                                use renderer = new Legibyl.Rendering.PdfRegionRenderer()
-                                LayoutFile.withFigureImages path (fun geometry -> renderer.RenderRegion(file, geometry)) layout
-                            else
-                                layout
-                        File.WriteAllText(path, LayoutFile.toJson layout)
-                        layout
-                    | None -> layout
-                { result with SuggestedLayout = layout }
-            with
-            | :? Net.Http.HttpRequestException as ex -> { result with SuggestedLayoutError = $"Couldn't download the layout model: {ex.Message}" }
-            | :? IOException
-            | :? UnauthorizedAccessException as ex -> { result with SuggestedLayoutError = ex.Message }
-
-let private renderJson (results: FileValidationResult list) =
-    let options =
-        JsonSerializerOptions(
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.Never
-        )
-    JsonSerializer.Serialize(results, options)
+                { result with Structure = validator.ReadStructureTree file }
+            with :? VeraPdfValidationException as ex ->
+                { result with StructureError = ex.Message }
 
 let rec private appendStructure (sb: StringBuilder) (node: StructureNode) (indent: int) =
     let pad = String(' ', indent)
@@ -286,7 +191,7 @@ let rec private appendStructure (sb: StringBuilder) (node: StructureNode) (inden
     for child in node.Children do
         appendStructure sb child (indent + 2)
 
-let private renderText (results: FileValidationResult list) =
+let private validationText (results: ValidationResult list) =
     let sb = StringBuilder()
     let line (text: string) = sb.AppendLine text |> ignore
     let fixableSuffix (detail: FailureDetail) =
@@ -298,12 +203,9 @@ let private renderText (results: FileValidationResult list) =
         | NonNull error -> line $"{r.File}: ERROR — {error}"
         | Null ->
             line (
-                if r.IsCompliant = Nullable true then
-                    $"{r.File}: PASS ({r.Profile}, {r.TotalAssertions} checks)"
-                else
-                    $"{r.File}: FAIL ({r.Profile}, {r.FailedCount}/{r.TotalAssertions} checks failed)"
+                if r.IsCompliant = Nullable true then $"{r.File}: PASS ({r.Profile}, {r.TotalAssertions} checks)"
+                else $"{r.File}: FAIL ({r.Profile}, {r.FailedCount}/{r.TotalAssertions} checks failed)"
             )
-
             for prefix, items in [ "", r.Failures; "WARNING ", r.Warnings ] do
                 for f in details items do
                     line $"  {prefix}[{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}{fixableSuffix f}"
@@ -312,43 +214,6 @@ let private renderText (results: FileValidationResult list) =
                     match f.Region with
                     | NonNull region -> line $"    region: {ValidationReportTextFormatter.FormatRegion region}"
                     | Null -> ()
-
-            match r.FixError, r.FixStatus with
-            | NonNull error, _ -> line $"  fix: ERROR — {error}"
-            | Null, NonNull status ->
-                match r.FixOutputPath with
-                | NonNull path -> line $"  fix: {status} → {path}"
-                | Null -> line $"  fix: {status} (no output written)"
-                match r.FixAppliedFixes with
-                | NonNull applied -> for fix in applied do line $"    - {fix}"
-                | Null -> ()
-                match r.FixNotApplied with
-                | NonNull notApplied -> for fix in notApplied do line $"    ! {fix}"
-                | Null -> ()
-            | Null, Null -> ()
-
-            match r.SuggestedLayoutError, r.SuggestedLayout with
-            | NonNull error, _ -> line $"  suggested layout: ERROR — {error}"
-            | Null, NonNull layout ->
-                line "  suggested layout:"
-                match layout.Title with
-                | NonNull title -> line $"    title: \"{title}\""
-                | Null -> ()
-                for page in layout.Pages do
-                    line $"    page {page.Page}:"
-                    for region in page.Regions do
-                        let text =
-                            match region.QrText, region.Text with
-                            | NonNull qr, _ -> $" QR: {qr}"
-                            | _, NonNull text when text <> "" -> $" \"{text}\""
-                            | _ -> ""
-                        let recognized = if region.Recognized then " (OCR)" else ""
-                        line $"      {region.Order} {region.Tag}{recognized}{text}"
-                        match region.Image with
-                        | NonNull image -> line $"        image: {image}"
-                        | Null -> ()
-            | Null, Null -> ()
-
             match r.StructureError, r.Structure with
             | NonNull error, _ -> line $"  structure: ERROR — {error}"
             | Null, NonNull structure ->
@@ -358,83 +223,371 @@ let private renderText (results: FileValidationResult list) =
 
     sb.ToString().TrimEnd('\n', '\r')
 
-let private run (args: Args) =
-    if args.Files.Length = 0 then
-        usageError "No input PDF files given."
-    elif args.FixOutputPath.IsSome && not (fixing args) then
-        usageError "--fix-output requires --fix (or --fixes or --edits)."
-    elif args.TitleFromFirstPage && not (fixing args) then
-        usageError "--title-from-first-page requires --fix."
-    elif args.LinkTitlesFromWeb && not (fixing args) then
-        usageError "--link-titles-from-web requires --fix."
-    elif args.Fixes |> Option.exists (fun names -> Result.isError (FixNames.parse names)) then
-        match FixNames.parse args.Fixes.Value with
-        | Error message -> usageError message
-        | Ok _ -> ExitCodes.UsageError
-    elif args.Edits && args.EditsFrom.IsSome then
-        usageError "Use --edits or --edits-from, not both."
-    elif args.SuggestLayoutOutput.IsSome && not args.SuggestLayout then
-        usageError "--suggest-layout-output requires --suggest-layout."
-    elif args.FigureImages && args.SuggestLayoutOutput.IsNone then
-        usageError "--figure-images requires --suggest-layout-output: the images go in a folder beside that file."
-    elif args.SuggestLayoutOutput.IsSome && args.Files.Length > 1 then
-        usageError "--suggest-layout-output can only be used with a single input file."
-    elif args.ApplyLayout.IsSome && args.Files.Length > 1 then
-        usageError "--apply-layout can only be used with a single input file: a layout is for one document."
-    elif args.FixOutputPath.IsSome && args.Files.Length > 1 then
-        usageError "--fix-output can only be used with a single input file."
+let private runValidate (args: ValidateArgs) =
+    let validator = VeraPdfValidator()
+    let results = [ for file in args.Files -> validateFile validator args file ]
+    write args.Output (if args.Format = "json" then toJson results else validationText results)
+    results
+    |> List.map (fun r ->
+        if not (isNull r.Error) then ExitCodes.ToolError
+        elif r.IsCompliant = Nullable false then ExitCodes.DocumentProblem
+        else ExitCodes.Success)
+    |> worst
+
+// ---- fix and layout apply ----
+
+/// What to repair a file with.
+type private Repair =
+    { ProfileName: string
+      Fixes: PdfFixOptions
+      Review: ReviewFile.SavedFile option
+      /// Whether a review was asked for (--edits): one that isn't there is then worth saying so.
+      ReviewAsked: bool
+      /// `layout apply`'s layout, to tag from.
+      Layout: LayoutFile.SavedLayout option
+      Output: string option }
+
+let private compliance (report: ValidationReport) = { IsCompliant = report.IsCompliant; FailedCount = report.FailedCount }
+
+let private nextVersion (file: string) =
+    let name = CopyNames.nextVersion file
+    match Path.GetDirectoryName file with
+    | NonNull dir when dir <> "" -> Path.Combine(dir, name)
+    | _ -> name
+
+let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: string) : RepairResult =
+    let profile = (ProfileNames.tryParse repair.ProfileName).Value
+    let result =
+        { File = file
+          Profile = repair.ProfileName
+          Status = FixStatus.Error
+          OutputPath = null
+          Applied = [||]
+          NotApplied = [||]
+          Error = null
+          Before = None
+          After = None }
+    let targetPath = repair.Output |> Option.defaultWith (fun () -> nextVersion file)
+    // The review's edits (--edits: the file's own review), and a layout it recorded for an
+    // untagged PDF (only the pages that haven't changed since).
+    let review =
+        repair.Review
+        |> Option.orElseWith (fun () -> if repair.ReviewAsked then ReviewFile.readFor file else None)
+        |> Option.map (fun review ->
+            match review.Layout with
+            | NonNull layout -> { review with Layout = LayoutFile.current file layout }
+            | Null -> review)
+    let noReview =
+        [ if repair.ReviewAsked && review.IsNone then
+              $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
+    let reviewLayout = review |> Option.bind (fun review -> Option.ofObj review.Layout)
+    let options =
+        repair.Fixes
+        ||| (if repair.Layout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
+        ||| (match review with
+             | Some review when not (ReviewFile.edits review).IsEmpty -> PdfFixOptions.ApplyEdits
+             | _ -> PdfFixOptions.None)
+    if options = PdfFixOptions.None then
+        let before = try Some(compliance (validator.Validate(file, profile))) with :? VeraPdfValidationException -> None
+        match before with
+        | Some before -> { result with Status = FixStatus.NothingToDo; NotApplied = Array.ofList noReview; Before = Some before }
+        | None -> { result with Error = $"'{file}' couldn't be validated." }
     else
-        // The --profile validator has already rejected unknown names.
-        let profile = (ProfileNames.tryParse args.ProfileName).Value
-        let validator = VeraPdfValidator()
-        match args.ApplyLayout |> Option.map LayoutFile.read with
+        // The layout model, for the repairs that read the page's layout, unless a layout given or
+        // reviewed has every page.
+        let pageCount () =
+            use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(file))
+            document.GetNumberOfPages()
+        let model =
+            let needed =
+                FixNames.usesLayout options
+                && (match repair.Layout |> Option.orElse reviewLayout with
+                    | Some layout -> not (LayoutFile.covers layout (pageCount ()))
+                    | None -> true)
+            if needed then
+                ensureLayoutModel ()
+                Some(new Legibyl.Layout.LayoutRegionSource(null))
+            else
+                None
+        let modelSource = model |> Option.map (fun model -> model :> IPageLayoutSource)
+        let layout: IPageLayoutSource option =
+            match repair.Layout, review with
+            // The layout given, with the review's edits layered on (not a layout of its own).
+            | Some given, Some review -> Some(ReviewFile.ReviewedRegions(LayoutFile.FileRegions(given, modelSource), { review with Layout = null }))
+            | Some given, None -> Some(LayoutFile.FileRegions(given, modelSource))
+            | None, Some review when FixNames.usesLayout options ->
+                Some(ReviewFile.ReviewedRegions(modelSource |> Option.defaultValue ReviewFile.noRegions, review))
+            | None, _ -> modelSource
+        try
+            try
+                layout |> Option.iter (fun source -> validator.LayoutSource <- source)
+                match review with
+                | Some review ->
+                    validator.Edits <- ReviewFile.edits review
+                    validator.Review <- ReviewFile.forCopy (Some review)
+                | None -> ()
+                let fix = validator.Fix(file, profile, targetPath, options)
+                let before = Some(compliance fix.OriginalReport)
+                let applied = Array.ofSeq fix.AppliedFixes
+                let notApplied = Array.ofList (List.ofSeq fix.NotApplied @ noReview)
+                let tagged = applied |> Array.exists (fun line -> line.StartsWith "Tagged ")
+                match fix.OutputPath with
+                | _ when repair.Layout.IsSome && not tagged ->
+                    { result with
+                        Status = FixStatus.AlreadyTagged
+                        OutputPath = fix.OutputPath
+                        Applied = applied
+                        NotApplied = notApplied
+                        Before = before
+                        After = fix.OutputPath |> Option.ofObj |> Option.map (fun copy -> compliance (validator.Validate(copy, profile))) }
+                | NonNull copy ->
+                    { result with
+                        Status = FixStatus.Repaired
+                        OutputPath = copy
+                        Applied = applied
+                        NotApplied = notApplied
+                        Before = before
+                        After = Some(compliance (validator.Validate(copy, profile))) }
+                | Null -> { result with Status = FixStatus.NothingToDo; Applied = applied; NotApplied = notApplied; Before = before }
+            with
+            | :? VeraPdfValidationException as ex -> { result with Error = ex.Message }
+            | :? Net.Http.HttpRequestException as ex -> { result with Error = $"Couldn't download the layout model: {ex.Message}" }
+        finally
+            validator.LayoutSource <- null
+            validator.Edits <- []
+            validator.Review <- null
+            model |> Option.iter (fun model -> (model :> IDisposable).Dispose())
+
+let private fixText (results: RepairResult list) =
+    let sb = StringBuilder()
+    let line (text: string) = sb.AppendLine text |> ignore
+    let standing (c: Compliance) = if c.IsCompliant then "PASS" else $"FAIL, {c.FailedCount} failed"
+    for r in results do
+        match r.Status, r.Before, r.After with
+        | FixStatus.Error, _, _ -> line $"{r.File}: ERROR — {r.Error}"
+        | FixStatus.Repaired, Some before, Some after ->
+            line $"{r.File}: repaired → {r.OutputPath} (before: {standing before}; after: {standing after})"
+        | FixStatus.AlreadyTagged, _, _ -> line $"{r.File}: already tagged; a layout is for an untagged file"
+        | _, Some before, _ -> line $"{r.File}: nothing to do ({standing before})"
+        | status, _, _ -> line $"{r.File}: {status}"
+        for applied in r.Applied do
+            line $"  - {applied}"
+        for skipped in r.NotApplied do
+            line $"  ! {skipped}"
+    sb.ToString().TrimEnd('\n', '\r')
+
+/// The exit code for a repair: whether the document it leaves (the copy, else the original)
+/// complies.
+let private fixExit (r: RepairResult) =
+    match r.Status, r.After, r.Before with
+    | FixStatus.Error, _, _ -> ExitCodes.ToolError
+    | FixStatus.AlreadyTagged, _, _ -> ExitCodes.DocumentProblem
+    | _, Some after, _ -> if after.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
+    | _, None, Some before -> if before.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
+    | _ -> ExitCodes.Success
+
+/// The review --edits-from names, or why it can't be used.
+let private reviewFrom (path: string) =
+    if not (File.Exists path) then Error $"--edits-from: {path} doesn't exist."
+    else
+        match ReviewFile.readFrom path with
+        | Some review -> Ok review
+        | None -> Error $"--edits-from: {path} has no review in it."
+
+let private runRepair (validator: VeraPdfValidator) (files: string list) (repair: Repair) (format: string) (report: string option) =
+    let results = [ for file in files -> repairFile validator repair file ]
+    write report (if format = "json" then toJson results else fixText results)
+    results |> List.map fixExit |> worst
+
+type private FixArgs =
+    { Files: string array
+      ProfileName: string
+      Format: string
+      Report: string option
+      Fixes: string option
+      Edits: bool
+      EditsFrom: string option
+      Output: string option }
+
+let private runFix (args: FixArgs) =
+    if args.Edits && args.EditsFrom.IsSome then
+        usageError "Use --edits or --edits-from, not both."
+    elif args.Output.IsSome && args.Files.Length > 1 then
+        usageError "--output names one repaired copy: use it with a single file (several get their next versions)."
+    else
+        match args.EditsFrom |> Option.map reviewFrom with
         | Some(Error message) -> usageError message
-        | appliedLayout ->
-            let appliedLayout = appliedLayout |> Option.bind Result.toOption
-            let results = [ for file in args.Files -> validateOne validator args appliedLayout profile file ]
-            let rendered = if args.Format = "json" then renderJson results else renderText results
+        | review ->
+            let fixes = FixNames.parse (defaultArg args.Fixes "safe") |> Result.defaultValue FixNames.safe
+            runRepair
+                (VeraPdfValidator())
+                (List.ofArray args.Files)
+                { ProfileName = args.ProfileName
+                  Fixes = fixes
+                  Review = review |> Option.bind Result.toOption
+                  ReviewAsked = args.Edits
+                  Layout = None
+                  Output = args.Output }
+                args.Format
+                args.Report
 
-            match args.OutputPath with
-            | Some path -> File.WriteAllText(path, rendered)
-            | None -> Console.WriteLine rendered
+// ---- structure ----
 
-            if results |> List.exists (fun r -> not (isNull r.Error)) then ExitCodes.ValidationError
-            elif results |> List.exists (fun r -> r.IsCompliant = Nullable false) then ExitCodes.NonCompliant
-            else ExitCodes.Success
+type private StructureArgs = { Files: string array; Format: string; Output: string option }
 
-/// Runs a function in place of a command's action, e.g. for --list-profiles or --version.
+let private runStructure (args: StructureArgs) =
+    let validator = VeraPdfValidator()
+    let results =
+        [ for file in args.Files ->
+              try
+                  { File = file; Structure = validator.ReadStructureTree file; Error = null }
+              with :? VeraPdfValidationException as ex ->
+                  { File = file; Structure = null; Error = ex.Message } ]
+    let text () =
+        let sb = StringBuilder()
+        for r in results do
+            match r.Error, r.Structure with
+            | NonNull error, _ -> sb.AppendLine $"{r.File}: ERROR — {error}" |> ignore
+            | Null, Null -> sb.AppendLine $"{r.File}: no structure tree (untagged)" |> ignore
+            | Null, NonNull structure ->
+                sb.AppendLine $"{r.File}:" |> ignore
+                appendStructure sb structure 2
+        sb.ToString().TrimEnd('\n', '\r')
+    write args.Output (if args.Format = "json" then toJson results else text ())
+    results
+    |> List.map (fun r ->
+        if not (isNull r.Error) then ExitCodes.ToolError
+        elif isNull r.Structure then ExitCodes.DocumentProblem
+        else ExitCodes.Success)
+    |> worst
+
+// ---- layout suggest and layout apply ----
+
+type private SuggestArgs = { File: string; Output: string option; FigureImages: bool }
+
+let private runSuggest (args: SuggestArgs) =
+    if args.FigureImages && args.Output.IsNone then
+        usageError "--figure-images needs --output: the images go in a folder beside the layout file."
+    elif not (File.Exists args.File) then
+        eprintfn $"error: {args.File} doesn't exist."
+        ExitCodes.ToolError
+    else
+        try
+            ensureLayoutModel ()
+            use suggester = new Legibyl.Layout.LayoutSuggester(args.File)
+            let pages =
+                [ for page in 1 .. suggester.PageCount ->
+                      eprintfn $"Finding page {page} of {suggester.PageCount}'s layout…"
+                      suggester.Suggest page ]
+            let layout =
+                Legibyl.Layout.LayoutSuggestions.toLayoutFile args.File pages (Legibyl.Layout.LayoutSuggestions.suggestedTitle args.File pages)
+            match args.Output with
+            | None -> Console.WriteLine(LayoutFile.toJson layout)
+            | Some path ->
+                let layout =
+                    if args.FigureImages then
+                        use renderer = new Legibyl.Rendering.PdfRegionRenderer()
+                        LayoutFile.withFigureImages path (fun geometry -> renderer.RenderRegion(args.File, geometry)) layout
+                    else
+                        layout
+                File.WriteAllText(path, LayoutFile.toJson layout)
+                Console.WriteLine(
+                    toJson
+                        { File = args.File
+                          Layout = path
+                          Images = if args.FigureImages then LayoutFile.imagesFolder path else null
+                          Pages = layout.Pages.Length
+                          Regions = layout.Pages |> Array.sumBy _.Regions.Length }
+                )
+            ExitCodes.Success
+        with
+        | :? Net.Http.HttpRequestException as ex ->
+            eprintfn $"error: couldn't download the layout model: {ex.Message}"
+            ExitCodes.ToolError
+        | :? IOException
+        | :? UnauthorizedAccessException
+        | :? InvalidOperationException as ex ->
+            eprintfn $"error: {ex.Message}"
+            ExitCodes.ToolError
+
+type private ApplyArgs =
+    { File: string
+      Layout: string
+      ProfileName: string
+      Format: string
+      Report: string option
+      Fixes: string option
+      Edits: bool
+      EditsFrom: string option
+      Output: string option }
+
+let private runApply (args: ApplyArgs) =
+    if args.Edits && args.EditsFrom.IsSome then
+        usageError "Use --edits or --edits-from, not both."
+    else
+        match LayoutFile.read args.Layout, args.EditsFrom |> Option.map reviewFrom with
+        | Error message, _ -> usageError message
+        | _, Some(Error message) -> usageError message
+        | Ok layout, review ->
+            let fixes = FixNames.parse (defaultArg args.Fixes "none") |> Result.defaultValue PdfFixOptions.None
+            runRepair
+                (VeraPdfValidator())
+                [ args.File ]
+                { ProfileName = args.ProfileName
+                  Fixes = fixes
+                  Review = review |> Option.bind Result.toOption
+                  ReviewAsked = args.Edits
+                  Layout = Some layout
+                  Output = args.Output }
+                args.Format
+                args.Report
+
+// ---- list ----
+
+let private listFixes (format: string) =
+    if format = "json" then
+        Console.WriteLine(
+            toJson
+                [ for name, option in FixNames.names ->
+                      {| Name = name
+                         Description = PdfFixDescriptions.Describe option |> List.tryHead |> Option.toObj
+                         Safe = FixNames.safe.HasFlag option
+                         InAll = FixNames.all.HasFlag option
+                         UsesLayoutModel = FixNames.usesLayout option |} ]
+        )
+    else
+        FixNames.listing () |> List.iter (printfn "%s")
+    ExitCodes.Success
+
+let private listProfiles (format: string) =
+    if format = "json" then Console.WriteLine(toJson ProfileNames.CanonicalNames)
+    else ProfileNames.CanonicalNames |> List.iter (printfn "%s")
+    ExitCodes.Success
+
+// ---- The command line ----
+
+/// Runs a function in place of a command's action, e.g. for --version.
 type private InvokeAction(invoke: ParseResult -> int) =
     inherit SynchronousCommandLineAction()
     override _.Invoke(parseResult) = invoke parseResult
 
 let private helpFooter =
-    """EXIT CODES:
-  0   all files validated and are compliant.
-  1   all files validated successfully, but at least one is non-compliant.
-  2   at least one file could not be validated (missing/corrupt/encrypted).
+    """EXIT CODES (every command):
+  0   done, and the document is fine (complies, has a structure, was tagged).
+  1   done, but a document has a problem (doesn't comply, has no structure, was already tagged).
+  2   the tool couldn't do it for a file (missing, corrupt, encrypted, model download failed).
   64  invalid command-line usage.
 
 EXAMPLES:
-  legibyl document.pdf
-  legibyl document.pdf --profile pdfa1b --format text
-  legibyl *.pdf --output results.json
-  legibyl document.pdf --fix
-  legibyl document.pdf --fixes safe,lists,headings-from-toc
-  legibyl document.pdf --fixes all --edits
-  legibyl flyer.v3.pdf --edits-from flyer.v2.pdf
-  legibyl scan.pdf --suggest-layout --suggest-layout-output scan.layout.json --figure-images
-  legibyl scan.pdf --apply-layout scan.layout.json --edits-from scan.edits.json
-  legibyl document.pdf --fix --fix-output document-repaired.pdf
-  legibyl document.pdf --structure --output structure.json
+  legibyl validate document.pdf
+  legibyl validate *.pdf --profile pdfa2b --output results.json
+  legibyl fix document.pdf --fixes safe,lists,headings-from-toc
+  legibyl fix flyer.v3.pdf --edits-from flyer.v2.pdf --output flyer.v4.pdf
+  legibyl structure document.pdf --output structure.json
+  legibyl layout suggest scan.pdf --output scan.layout.json --figure-images
+  legibyl layout apply scan.pdf --layout scan.layout.json --edits-from scan.edits.json --fixes safe,qr-links
+  legibyl list fixes --format json
 """
-
-let private listProfiles _ =
-    ProfileNames.CanonicalNames |> List.iter (printfn "%s")
-    ExitCodes.Success
-
-let private listFixes _ =
-    FixNames.listing () |> List.iter (printfn "%s")
-    ExitCodes.Success
 
 let private printVersion _ =
     printfn $"legibyl {Assembly.GetExecutingAssembly().GetName().Version} (vendored veraPDF engine {ProfileNames.VendoredEngineVersion})"
@@ -447,185 +600,179 @@ let private reportParseError (parseResult: ParseResult) =
     | :? OptionResult as option when option.Tokens.Count = 0 -> usageError $"{option.Option.Name} requires a value."
     | _ -> usageError error.Message
 
+let private validateCommand =
+    command "validate" {
+        description "Validate PDFs against a profile (PDF/UA-1 by default), reporting each failure and Legibyl's own warnings."
+        inputs (
+            input {
+                let! files = filesArgument ()
+                and! profileName = profileOption ()
+                and! format = formatOption ()
+                and! output = optionMaybe "--output" |> desc "Write the report to path instead of stdout." |> helpName "path"
+                and! structure =
+                    option<bool> "--structure"
+                    |> desc "Also include each file's structure tree (as 'legibyl structure' gives it)."
+                return
+                    { Files = files
+                      ProfileName = profileName
+                      Format = format
+                      Output = output
+                      Structure = structure }
+            }
+        )
+        setAction runValidate
+    }
+
+let private fixCommand =
+    command "fix" {
+        description
+            "Repair PDFs, writing each one's next version (\"<name>.v2.pdf\"; \"<name>.v3.pdf\" for \"<name>.v2.pdf\"), and validate the copy."
+        inputs (
+            input {
+                let! files = filesArgument ()
+                and! fixes = fixesOption "safe"
+                and! edits = editsOption ()
+                and! editsFrom = editsFromOption ()
+                and! output = optionMaybe "--output" |> desc "The repaired copy's path (one file only)." |> helpName "path"
+                and! profileName = profileOption ()
+                and! format = formatOption ()
+                and! report = reportOption ()
+                return
+                    { Files = files
+                      ProfileName = profileName
+                      Format = format
+                      Report = report
+                      Fixes = fixes
+                      Edits = edits
+                      EditsFrom = editsFrom
+                      Output = output }
+            }
+        )
+        setAction runFix
+    }
+
+let private structureCommand =
+    command "structure" {
+        description
+            "Read each PDF's structure tree: the heading/paragraph/list/table/link hierarchy screen readers use, with each element's text, page and box."
+        inputs (
+            input {
+                let! files = filesArgument ()
+                and! format = formatOption ()
+                and! output = optionMaybe "--output" |> desc "Write it to path instead of stdout." |> helpName "path"
+                return { Files = files; Format = format; Output = output }
+            }
+        )
+        setAction runStructure
+    }
+
+let private suggestCommand =
+    command "suggest" {
+        description
+            "Suggest a layout for an untagged PDF: each page's regions in reading order, with the tag each suggests, its page, \
+             box and text, as JSON. Leave it as found and write changes as edits (exclude, retag, alt, text) in a review \
+             file; then 'legibyl layout apply'. Downloads the layout model (about 130 MB) the first time; several seconds a page."
+        inputs (
+            input {
+                let! file = fileArgument ()
+                and! output =
+                    optionMaybe "--output"
+                    |> desc "Write the layout to path (stdout then gets a summary); without it, the layout goes to stdout."
+                    |> helpName "path"
+                and! figureImages =
+                    option<bool> "--figure-images"
+                    |> desc
+                        "With --output: also write a PNG of each figure into a folder beside the layout \
+                         (\"scan.layout.json\" -> \"scan.layout.images/p1-r3.png\"), named in the figure's \"image\", to \
+                         look at when writing its alt text. Each run clears the last run's images."
+                return { File = file; Output = output; FigureImages = figureImages }
+            }
+        )
+        setAction runSuggest
+    }
+
+let private applyCommand =
+    command "apply" {
+        description
+            "Tag an untagged PDF from a layout ('legibyl layout suggest''s), with a review's edits layered on, writing its next \
+             version and validating it."
+        inputs (
+            input {
+                let! file = fileArgument ()
+                and! layout =
+                    option<string> "--layout" |> desc "The layout to tag from." |> helpName "path" |> required
+                and! edits = editsOption ()
+                and! editsFrom = editsFromOption ()
+                and! fixes = fixesOption "none"
+                and! output = optionMaybe "--output" |> desc "The tagged copy's path." |> helpName "path"
+                and! profileName = profileOption ()
+                and! format = formatOption ()
+                and! report = reportOption ()
+                return
+                    { File = file
+                      Layout = layout
+                      ProfileName = profileName
+                      Format = format
+                      Report = report
+                      Fixes = fixes
+                      Edits = edits
+                      EditsFrom = editsFrom
+                      Output = output }
+            }
+        )
+        setAction runApply
+    }
+
+let private layoutCommand =
+    command "layout" {
+        description "Suggest a layout for an untagged PDF, and tag it from one."
+        noAction
+        addCommand suggestCommand
+        addCommand applyCommand
+    }
+
+let private listFormatOption () =
+    option "--format"
+    |> desc "Output format."
+    |> helpName "text|json"
+    |> def "text"
+    |> validate (fun format ->
+        if format = "json" || format = "text" then Ok() else Error $"Unknown --format '{format}'. Expected 'text' or 'json'.")
+
+let private listCommand =
+    command "list" {
+        description "List what the other commands accept."
+        noAction
+        addCommand (
+            command "fixes" {
+                description "The repairs 'fix --fixes' can name, with what each does."
+                inputs (listFormatOption ())
+                setAction listFixes
+            }
+        )
+        addCommand (
+            command "profiles" {
+                description "The profiles '--profile' accepts."
+                inputs (listFormatOption ())
+                setAction listProfiles
+            }
+        )
+    }
+
 [<EntryPoint>]
 let main argv =
     let root =
         ManualInvocation.rootCommand {
             description
-                "legibyl - PDF/UA & PDF/A validator (CLI) powered by veraPDF via IKVM.\n\n\
-                 Designed for scripting and AI-agent use: default output is machine-readable\n\
-                 JSON on stdout, and the process exit code tells you the outcome without\n\
-                 needing to parse output."
-
-            input {
-                let! files =
-                    argument<string array> "files"
-                    |> desc "PDF files to validate."
-                    |> arity Arity.ZeroOrMore
-                    |> validate (fun files ->
-                        match files |> Array.tryFind (fun f -> f.StartsWith '-' && f.Length > 1) with
-                        | Some unknown -> Error $"Unknown option '{unknown}'."
-                        | None -> Ok())
-
-                and! profileName =
-                    option "--profile"
-                    |> desc "Profile to validate against. See --list-profiles for all accepted names."
-                    |> helpName "name"
-                    |> def ProfileNames.DefaultName
-                    |> validate (fun name ->
-                        match ProfileNames.tryParse name with
-                        | Some _ -> Ok()
-                        | None -> Error $"Unknown profile '{name}'. Run --list-profiles to see valid names.")
-
-                and! format =
-                    option "--format"
-                    |> desc "Output format."
-                    |> helpName "json|text"
-                    |> def "json"
-                    |> validate (fun format ->
-                        if format = "json" || format = "text" then Ok()
-                        else Error $"Unknown --format '{format}'. Expected 'json' or 'text'.")
-
-                and! outputPath =
-                    optionMaybe "--output"
-                    |> desc "Write output to a file instead of stdout."
-                    |> helpName "path"
-
-                and! fix =
-                    option<bool> "--fix"
-                    |> desc
-                        "Also attempt to repair each file, writing a repaired copy next to the original as its \
-                         next version: \"<name>.v2<ext>\" (\"<name>.v3<ext>\" for \"<name>.v2<ext>\"), skipping \
-                         versions that already exist. Applies the safe repairs, which need no guesswork about \
-                         what the document means: XMP metadata (missing metadata stream, missing PDF/A|PDF/UA \
-                         identifier, false conformance claims, Info-dictionary sync); /Tabs /S on pages \
-                         containing annotations; the glyph mapping embedded TrueType CID fonts leave out; a \
-                         description for links that have none, taken from the link's own text; and a document \
-                         title shown in place of the file name. --fixes chooses others."
-
-                and! fixes =
-                    optionMaybe "--fixes"
-                    |> desc
-                        "Repair each file (implies --fix) with the repairs named, comma-separated: \"safe\" \
-                         (what --fix applies), \"all\" (every repair but link-titles-from-web, which visits \
-                         web pages), or names from --list-fixes, e.g. \"safe,lists,headings-from-toc\". \
-                         tag-from-layout and join-split-paragraphs download the layout model (about 130 MB) the \
-                         first time."
-                    |> helpName "names"
-
-                and! edits =
-                    option<bool> "--edits"
-                    |> desc
-                        "Repair each file (implies --fix) with the edits in its review: the \
-                         \"<name>.pdf.legibyl.json\" file next to it (as the GUI saves it), or else the review \
-                         inside a copy Legibyl saved. Alt text, replacement text and merged paragraphs are \
-                         written to the elements they're for; an untagged file tagged with tag-from-layout is \
-                         tagged from the review. The repaired copy carries the review."
-
-                and! editsFrom =
-                    optionMaybe "--edits-from"
-                    |> desc
-                        "Like --edits, with the review in path: a .legibyl.json file, or a PDF whose review to \
-                         use, e.g. an earlier version's."
-                    |> helpName "path"
-
-                and! titleFromFirstPage =
-                    option<bool> "--title-from-first-page"
-                    |> desc
-                        "Use with --fix. When a file carries no title in Info or XMP, title it from the text \
-                         of its first page, if that page is short enough to be a title page (at most 30 words) \
-                         and more pages follow."
-
-                and! linkTitlesFromWeb =
-                    option<bool> "--link-titles-from-web"
-                    |> desc
-                        "Use with --fix. Describe links to web pages that have no description by the title of \
-                         the page each goes to, with its site (\"Apply for benefits (example.com)\"). This visits \
-                         those addresses: only public internet ones, reading only their titles, but the sites see \
-                         the visit. Check the descriptions."
-
-                and! fixOutputPath =
-                    optionMaybe "--fix-output"
-                    |> desc
-                        "Use with --fix and exactly one input file to write the repaired copy to an exact \
-                         path instead of the auto-derived name."
-                    |> helpName "path"
-
-                and! suggestLayout =
-                    option<bool> "--suggest-layout"
-                    |> desc
-                        "Include the layout the layout model suggests for each file's pages in the output, \
-                         under \"suggestedLayout\": each page's regions in reading order, with the tag each \
-                         suggests (H1, H, P, LI, Figure, Table, Caption, Note, Formula, Lbl, Artifact), its \
-                         page and box, its text (read by OCR where it's drawn rather than written), what a QR \
-                         code encodes, a figure's surrounding text, and a title. Leave it as found, like a \
-                         structure read from a PDF, and write your changes as edits in a review file (each \
-                         naming a region's page, tag and box: \"exclude\", \"retag\", \"alt\", \"text\"), \
-                         then tag the file with --apply-layout and --edits-from. Downloads the layout model \
-                         (about 130 MB) the first time; several seconds a page."
-
-                and! suggestLayoutOutput =
-                    optionMaybe "--suggest-layout-output"
-                    |> desc "Use with --suggest-layout and one input file to also write the suggested layout to path, ready for --apply-layout."
-                    |> helpName "path"
-
-                and! figureImages =
-                    option<bool> "--figure-images"
-                    |> desc
-                        "Use with --suggest-layout-output. Also writes a PNG of each figure into a folder \
-                         beside the layout file (\"scan.layout.json\" -> \"scan.layout.images/p1-r3.png\"), \
-                         and gives the figure its path as \"image\", for someone (or an agent) to look at \
-                         when writing its \"alt\" edit. Each run empties the folder of the last run's images; \
-                         delete it with the layout file when done. --apply-layout doesn't use them."
-
-                and! applyLayout =
-                    optionMaybe "--apply-layout"
-                    |> desc
-                        "Tag an untagged file from the layout in path (implies --fix; one input file), as \
-                         --suggest-layout writes it, with the edits from --edits-from (or --edits) layered on: \
-                         its regions become the structure in their order, less those excluded, retagged, with \
-                         alt text, recognized text (as corrected) as replacement text, and a title. Needs no \
-                         layout model."
-                    |> helpName "path"
-
-                and! includeStructure =
-                    option<bool> "--structure"
-                    |> desc
-                        "Include each file's tagged logical structure tree (the semantic \
-                         heading/paragraph/list/table/link hierarchy that screen readers use) in the output. \
-                         In text format this prints an indented outline; in JSON (default) it's the full \
-                         tree, ideal for feeding to an AI agent or other tooling."
-
-                and! _ =
-                    option<bool> "--list-profiles"
-                    |> desc "Print supported profile names and exit 0."
-                    |> editOption (fun o -> o.Action <- InvokeAction listProfiles)
-
-                and! _ =
-                    option<bool> "--list-fixes"
-                    |> desc "Print the repairs --fixes can name, with what each does, and exit 0."
-                    |> editOption (fun o -> o.Action <- InvokeAction listFixes)
-
-                return
-                    { Files = files
-                      ProfileName = profileName
-                      Format = format
-                      OutputPath = outputPath
-                      Fix = fix
-                      Fixes = fixes
-                      Edits = edits
-                      EditsFrom = editsFrom
-                      SuggestLayout = suggestLayout
-                      SuggestLayoutOutput = suggestLayoutOutput
-                      FigureImages = figureImages
-                      ApplyLayout = applyLayout
-                      TitleFromFirstPage = titleFromFirstPage
-                      LinkTitlesFromWeb = linkTitlesFromWeb
-                      FixOutputPath = fixOutputPath
-                      IncludeStructure = includeStructure }
-            }
-
-            setAction run
+                "legibyl - PDF/UA & PDF/A validator and repairer (CLI), powered by veraPDF via IKVM.\n\n\
+                 Designed for scripting and AI-agent use: output is machine-readable JSON on stdout by default, and\n\
+                 the exit code tells you the outcome without needing to parse output."
+            noAction
+            addCommand validateCommand
+            addCommand fixCommand
+            addCommand structureCommand
+            addCommand layoutCommand
+            addCommand listCommand
         }
 
     for option in root.Options do
@@ -648,6 +795,7 @@ let main argv =
     let parseResult = root.Parse(argv, ParserConfiguration(ResponseFileTokenReplacer = null))
     match parseResult.Action with
     | :? ParseErrorAction -> reportParseError parseResult
+    | _ when argv.Length = 0 -> usageError "Name a command: validate, fix, structure, layout or list."
     | _ ->
-        // Let unexpected exceptions crash as before rather than exit 1, which means "non-compliant".
+        // Let unexpected exceptions crash rather than exit with a code that means something else.
         parseResult.Invoke(InvocationConfiguration(EnableDefaultExceptionHandler = false))

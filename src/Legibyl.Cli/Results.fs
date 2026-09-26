@@ -1,0 +1,116 @@
+namespace Legibyl.Cli
+
+open System
+open System.Collections.Generic
+open Legibyl.Validation
+
+type FailureDetail =
+    { Specification: string
+      Clause: string
+      TestNumber: int
+      Message: string
+      ErrorMessage: string | null
+      LocationContext: string | null
+      /// Page region the finding refers to, in PDF points (origin bottom-left), if known.
+      Region: StructureGeometry | null
+      IsFixable: bool
+      FixOptions: string | null }
+
+    static member Of(violation: RuleViolation) =
+        { Specification = violation.Specification
+          Clause = violation.Clause
+          TestNumber = violation.TestNumber
+          Message = violation.Message
+          ErrorMessage = violation.ErrorMessage
+          LocationContext = violation.LocationContext
+          Region = violation.Geometry
+          IsFixable = violation.IsFixable
+          FixOptions = if violation.IsFixable then violation.FixOptions.ToString() else null }
+
+/// `validate`'s result for one file. Field names are camelCased on output.
+type ValidationResult =
+    { File: string
+      Profile: string
+      /// The flavour id actually validated against (e.g. "ua1"), null if validation errored.
+      FlavourId: string | null
+      /// True/false if validation completed, null if it errored before a result was produced.
+      IsCompliant: Nullable<bool>
+      TotalAssertions: Nullable<int>
+      FailedCount: Nullable<int>
+      /// Only the failed rule checks; empty (not omitted) when compliant, null when errored.
+      Failures: IReadOnlyList<FailureDetail> | null
+      /// Legibyl warnings; empty (not omitted) when none, null when errored.
+      Warnings: IReadOnlyList<FailureDetail> | null
+      /// Non-null only if the file could not be validated (missing, corrupt, encrypted, etc).
+      Error: string | null
+      /// With --structure: the tagged structure tree; null if the file has none (untagged).
+      Structure: StructureNode | null
+      /// With --structure: why reading the tree failed, if it did.
+      StructureError: string | null }
+
+    /// A result with only the file and profile filled in.
+    static member Empty(file, profile) =
+        { File = file
+          Profile = profile
+          FlavourId = null
+          IsCompliant = Nullable()
+          TotalAssertions = Nullable()
+          FailedCount = Nullable()
+          Failures = null
+          Warnings = null
+          Error = null
+          Structure = null
+          StructureError = null }
+
+/// A document's standing against its profile: whether it complies, and how many checks failed.
+type Compliance = { IsCompliant: bool; FailedCount: int }
+
+/// What `fix` or `layout apply` did to one file.
+module FixStatus =
+    /// A repaired copy was written (OutputPath).
+    [<Literal>]
+    let Repaired = "repaired"
+
+    /// The repairs asked for had nothing to change; no copy was written.
+    [<Literal>]
+    let NothingToDo = "nothing-to-do"
+
+    /// `layout apply` on a file that already has a structure tree: a layout is for an untagged one.
+    [<Literal>]
+    let AlreadyTagged = "already-tagged"
+
+    /// The file couldn't be repaired (Error says why).
+    [<Literal>]
+    let Error = "error"
+
+/// `fix`'s or `layout apply`'s result for one file.
+type RepairResult =
+    { File: string
+      Profile: string
+      /// One of FixStatus.
+      Status: string
+      /// The repaired copy, if one was written.
+      OutputPath: string | null
+      /// What each repair changed, in plain words.
+      Applied: IReadOnlyList<string>
+      /// Repairs asked for that weren't kept or couldn't apply, and why.
+      NotApplied: IReadOnlyList<string>
+      Error: string | null
+      /// The file as it was, and the repaired copy (validated again), when there's one.
+      Before: Compliance option
+      After: Compliance option }
+
+/// `structure`'s result for one file: its tagged structure tree; null (and no error) if it has
+/// none, i.e. it's untagged.
+type StructureResult =
+    { File: string
+      Structure: StructureNode | null
+      Error: string | null }
+
+/// `layout suggest --output`'s summary: where the layout (and any figure images) went.
+type LayoutSuggestion =
+    { File: string
+      Layout: string
+      Images: string | null
+      Pages: int
+      Regions: int }
