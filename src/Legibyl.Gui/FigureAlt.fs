@@ -58,7 +58,7 @@ let merge (figures: Figure list) (imported: Figure list) : Figure list * int =
     let added = imported |> List.filter (fun f -> (find figures f.Page f.Tag f.Box).IsNone)
     figures @ added, added.Length
 
-let private ofSaved (saved: SavedFigure) : Figure option =
+let private ofSaved (saved: SavedEdit) : Figure option =
     match saved.Box with
     | [| left; bottom; right; top |] when not (String.IsNullOrWhiteSpace saved.Alt) ->
         let figure: Figure =
@@ -72,7 +72,7 @@ let private ofSaved (saved: SavedFigure) : Figure option =
 /// The figures in a .legibyl.json file, e.g. one saved next to an earlier version of the PDF.
 let fromFile (jsonPath: string) : Figure list =
     match readFile jsonPath with
-    | Some saved -> saved.Figures |> Option.ofObj |> Option.map (Array.choose ofSaved >> List.ofArray) |> Option.defaultValue []
+    | Some saved -> saved.Edits |> Option.ofObj |> Option.map (Array.choose ofSaved >> List.ofArray) |> Option.defaultValue []
     | None -> []
 
 /// The figures saved next to pdfPath.
@@ -81,10 +81,10 @@ let load (pdfPath: string) = fromFile (filePath pdfPath)
 /// Saves figures next to pdfPath, keeping any dismissals in the file. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
 let save (pdfPath: string) (figures: Figure list) =
-    let toSaved (f: Figure) : SavedFigure =
+    let toSaved (f: Figure) : SavedEdit =
         { Page = f.Page
           Tag = f.Tag
           Box = [| f.Box.Left; f.Box.Bottom; f.Box.Right; f.Box.Top |] |> Array.map (fun v -> Math.Round(v, 1))
           Alt = f.Alt }
     let saved = figures |> List.map toSaved |> Array.ofList
-    writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Figures = (if saved.Length = 0 then null else saved) }
+    writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Edits = (if saved.Length = 0 then null else saved) }
