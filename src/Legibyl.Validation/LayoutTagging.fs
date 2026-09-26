@@ -714,14 +714,14 @@ let tag
                   let linked = plural tally.QrLinks "QR code" "QR codes"
                   yield $"Linked {linked} to the web address they encode"
               match titled with
-              | Some title -> yield $"Titled the document \"{title}\", as set in Suggest Structure"
+              | Some title -> yield $"Titled the document \"{title}\", as reviewed"
               | None -> ()
               if tally.LinksDescribed > 0 then
                   let described = plural tally.LinksDescribed "link" "links"
-                  yield $"Described {described} as reviewed in Suggest Structure"
+                  yield $"Described {described} as reviewed"
               if tally.WrittenAlt > 0 then
                   let given = plural tally.WrittenAlt "figure" "figures"
-                  yield $"Gave {given} the alt text written in Suggest Structure"
+                  yield $"Gave {given} the alt text a person wrote"
               if tally.Figures > tally.QrCodes + tally.WrittenAlt then
                   let need = plural (tally.Figures - tally.QrCodes - tally.WrittenAlt) "figure needs" "figures need"
                   yield $"{need} alt text, written by a person"
