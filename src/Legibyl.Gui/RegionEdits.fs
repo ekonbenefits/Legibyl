@@ -6,6 +6,7 @@
 module Legibyl.Gui.RegionEdits
 
 open System
+open System.IO
 open Legibyl.Layout
 open Legibyl.Validation
 open Legibyl.Gui.Dismissals
@@ -117,6 +118,12 @@ let fromFile (jsonPath: string) : Edit list = editsOf (readFile jsonPath)
 
 /// The edits saved for pdfPath (see Dismissals.readFor).
 let load (pdfPath: string) = editsOf (readFor pdfPath)
+
+/// The edits to import from path: a .legibyl.json file, or a PDF, whose own edits are those
+/// saved for it (in the file next to it, or inside it; see load).
+let fromFileOrPdf (path: string) : Edit list =
+    if String.Equals(Path.GetExtension path, ".pdf", StringComparison.OrdinalIgnoreCase) then load path
+    else fromFile path
 
 /// The edits and document title saved for pdfPath, read once (reading a review embedded in the
 /// PDF opens it).

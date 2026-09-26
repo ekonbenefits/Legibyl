@@ -372,7 +372,8 @@ in again whenever the layout is suggested again, even for a regenerated PDF, as
 long as the region is in about the same place (same page and tag, boxes
 overlapping at least 60%). The file is read automatically when it's named after
 the PDF; **Import Edits…** takes one with another name, such as the one saved
-for an earlier version.
+for an earlier version, or another PDF: the edits saved for it, or inside it (a
+copy Legibyl saved, like the tagged copy of an earlier version).
 
 QR codes are read with [ZXing.Net](https://github.com/micjahn/ZXing.Net),
 following the approach of [qr-link-pdf](https://github.com/jbtule/qr-link-pdf):

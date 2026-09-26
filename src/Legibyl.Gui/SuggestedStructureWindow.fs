@@ -526,7 +526,7 @@ module SuggestedStructureView =
                 ]
 
             /// Adds edits (alt text, corrected text) from another .legibyl.json file, e.g. one saved for an earlier version
-            /// of this PDF under another name.
+            /// of this PDF under another name, or from another PDF: those saved for it, or inside it (a copy Legibyl saved).
             let importAlt _ =
                 task {
                     let! files =
@@ -534,12 +534,13 @@ module SuggestedStructureView =
                             Avalonia.Platform.Storage.FilePickerOpenOptions(
                                 Title = "Import edits",
                                 AllowMultiple = false,
-                                FileTypeFilter = [ Avalonia.Platform.Storage.FilePickerFileType("Legibyl files", Patterns = [ "*.legibyl.json"; "*.json" ]) ]
+                                FileTypeFilter =
+                                    [ Avalonia.Platform.Storage.FilePickerFileType("PDFs and Legibyl files", Patterns = [ "*.pdf"; "*.legibyl.json"; "*.json" ]) ]
                             )
                         )
                     match files |> Seq.tryHead |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath())) with
                     | Some path ->
-                        let imported = RegionEdits.fromFile path
+                        let! imported = Task.Run(fun () -> RegionEdits.fromFileOrPdf path)
                         let merged, added = RegionEdits.merge edits.Current imported
                         saveEdits merged
                         let found =
@@ -549,7 +550,10 @@ module SuggestedStructureView =
                         do!
                             Dialogs.showMessage
                                 window
-                                $"Imported {added} of {imported.Length} edits (alt text and corrected text) from {Path.GetFileName path}; the rest were already here. {found} regions found so far have edits."
+                                (if imported.IsEmpty then
+                                     $"{Path.GetFileName path} has no edits (alt text or corrected text) to import."
+                                 else
+                                     $"Imported {added} of {imported.Length} edits (alt text and corrected text) from {Path.GetFileName path}; the rest were already here. {found} regions found so far have edits.")
                                 "Import Edits"
                     | None -> ()
                 }
@@ -725,7 +729,7 @@ module SuggestedStructureView =
                                 Button.create [
                                     Button.content "Import Edits…"
                                     Button.margin (16.0, 0.0, 0.0, 0.0)
-                                    ToolTip.tip "Use the alt text and corrected text saved for another PDF, such as an earlier version of this one saved under another name."
+                                    ToolTip.tip "Use the alt text and corrected text saved for another PDF, such as an earlier version of this one: pick that PDF, or the .legibyl.json file saved for it."
                                     Button.onClick importAlt
                                 ]
                                 Button.create [

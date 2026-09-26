@@ -70,3 +70,16 @@ let ``with no review at all, nothing is carried`` () =
         Dismissals.reviewJson pdf (Some Map.empty) |> should equal (null: string | null)
         fixCarrying pdf output Map.empty
         EmbeddedReview.read output |> should equal None)
+
+[<Fact>]
+let ``edits can be imported from another PDF: from inside a saved copy, or the file next to one`` () =
+    withPdf (fun pdf output ->
+        RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" logo "The garden's logo")
+        fixCarrying pdf output Map.empty
+
+        // The saved copy carries them inside it...
+        RegionEdits.fromFileOrPdf output |> List.map _.Alt |> should equal [ Some "The garden's logo" ]
+        // ...and the original has them in the file next to it.
+        RegionEdits.fromFileOrPdf pdf |> List.map _.Alt |> should equal [ Some "The garden's logo" ]
+        // A .legibyl.json file still imports as before.
+        RegionEdits.fromFileOrPdf (Dismissals.filePath pdf) |> List.map _.Alt |> should equal [ Some "The garden's logo" ])
