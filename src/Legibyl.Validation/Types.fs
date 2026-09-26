@@ -123,6 +123,14 @@ type IPageLayoutSource =
     /// Suggest Structure: for the link at rectangle on pageNumber. Null to leave it without one.
     abstract LinkDescription: pdfPath: string * pageNumber: int * rectangle: StructureGeometry -> string | null
 
+    /// Titles already read for web pages (e.g. in Suggest Structure), by address, for QR codes'
+    /// descriptions; null for none.
+    abstract PageTitles: Collections.Generic.IReadOnlyDictionary<string, string> | null
+
+    /// A title to give the document (e.g. written or checked in Suggest Structure); null to
+    /// leave its title as it is.
+    abstract DocumentTitle: string | null
+
 /// A human-friendly interpretation of a veraPDF <c>locationContext</c> string
 /// (e.g. <c>root/document[0]/pages[1](7 0 obj PDPage)/annots[0](9 0 obj PDLinkAnnot)</c>),
 /// which otherwise requires knowledge of veraPDF's internal object model to read.

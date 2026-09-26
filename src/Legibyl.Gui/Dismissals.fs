@@ -78,7 +78,11 @@ type SavedFile =
       DismissedWarnings: SavedWarning array | null
       [<JsonPropertyName "edits">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Edits: SavedEdit array | null }
+      Edits: SavedEdit array | null
+      /// The document's title as set in Suggest Structure, if changed from what was prefilled.
+      [<JsonPropertyName "title">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Title: string | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf\u0027s") in a
 // file they may open by hand.
@@ -104,7 +108,7 @@ let writeFile (pdfPath: string) (file: SavedFile) =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    if isNull file.DismissedWarnings && empty file.Edits then
+    if isNull file.DismissedWarnings && empty file.Edits && isNull file.Title then
         if File.Exists path then File.Delete path
     else
         File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
@@ -112,7 +116,7 @@ let writeFile (pdfPath: string) (file: SavedFile) =
 /// The file next to pdfPath, or an empty one.
 let readOrEmpty (pdfPath: string) =
     readFile (filePath pdfPath)
-    |> Option.defaultValue { Version = 1; DismissedWarnings = null; Edits = null }
+    |> Option.defaultValue { Version = 1; DismissedWarnings = null; Edits = null; Title = null }
 
 /// The dismissals saved next to pdfPath, or None if none are (no file, or one holding only
 /// alt text).

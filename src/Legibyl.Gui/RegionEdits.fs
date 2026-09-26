@@ -127,3 +127,11 @@ let save (pdfPath: string) (edits: Edit list) =
           Text = Option.toObj e.Text }
     let saved = edits |> List.map toSaved |> Array.ofList
     writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Edits = (if saved.Length = 0 then null else saved) }
+
+/// The document title set in Suggest Structure and saved next to pdfPath, if any.
+let loadTitle (pdfPath: string) : string option =
+    readFile (filePath pdfPath) |> Option.bind (fun saved -> Option.ofObj saved.Title)
+
+/// Saves (or, with None, removes) the document title next to pdfPath, keeping the rest of the file.
+let saveTitle (pdfPath: string) (title: string option) =
+    writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Title = Option.toObj title }

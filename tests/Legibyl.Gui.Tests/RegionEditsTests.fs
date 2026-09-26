@@ -118,3 +118,14 @@ let ``edits can be read from a file saved for another PDF`` () =
         let renamed = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "old-name.pdf.legibyl.json")
         File.Move(Dismissals.filePath pdf, renamed)
         RegionEdits.fromFile renamed |> List.map _.Alt |> should equal [ Some "The pack's wolf logo" ])
+
+[<Fact>]
+let ``the document title is saved with the rest of the file, and removed without losing it`` () =
+    withPdfPath (fun pdf ->
+        RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" logo "The pack's wolf logo")
+        RegionEdits.saveTitle pdf (Some "Cub Scout Pack 721")
+        RegionEdits.loadTitle pdf |> should equal (Some "Cub Scout Pack 721")
+        RegionEdits.load pdf |> List.map _.Alt |> should equal [ Some "The pack's wolf logo" ]
+        RegionEdits.saveTitle pdf None
+        RegionEdits.loadTitle pdf |> should equal None
+        RegionEdits.load pdf |> should haveLength 1)

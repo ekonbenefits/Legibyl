@@ -175,7 +175,7 @@ let describeWebLinks (titles: IPageTitleSource) (document: PdfDocument) (_: Cont
 
 /// The document's XMP `dc:title`, if it has one. Best-effort: a malformed XMP packet
 /// should not stop the rest of the repairs.
-let private xmpTitle (document: PdfDocument) =
+let xmpTitle (document: PdfDocument) =
     try
         match document.GetXmpMetadata() with
         | null -> None
