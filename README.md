@@ -69,6 +69,13 @@ dotnet build Legibyl.slnx
 dotnet run --project src/Legibyl.Gui/Legibyl.Gui.fsproj
 ```
 
+Package versions are managed centrally in `Directory.Packages.props`, with
+transitive pinning: a version listed there also applies when a package only
+comes in as another's dependency (used to lift Newtonsoft.Json, from
+LanguageDetection, past a known vulnerability). Projects reference packages
+without versions. The WiX installer keeps its own, since it only builds on
+Windows.
+
 ## Testing
 
 ```powershell

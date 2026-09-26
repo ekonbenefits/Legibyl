@@ -34,16 +34,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="IKVM" Version="8.16.1" />
-    <PackageReference Include="itext" Version="9.7.0" />
+    <PackageReference Include="IKVM" />
+    <PackageReference Include="itext" />
     <!-- Detects the document's language from its text, for its /Lang (Apache 2.0). -->
-    <PackageReference Include="LanguageDetection.NETStandard" Version="1.3.1" />
-    <!-- LanguageDetection depends on Newtonsoft.Json 10.0.3, which has a known high-severity
-         vulnerability (GHSA-5crp-9r3c-p9vr); this lifts it to a fixed version. -->
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="LanguageDetection.NETStandard" />
     <!-- Used only to read marked-content text runs (by page + MCID) for structure-tree
          content extraction; pure managed, Apache 2.0, no native/PDFium dependency. -->
-    <PackageReference Include="PdfPig" Version="0.1.16" />
+    <PackageReference Include="PdfPig" />
   </ItemGroup>
 
   <!-- veraPDF fat jar: fetched from Maven Central on first build, pinned by

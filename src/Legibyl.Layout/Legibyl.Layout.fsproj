@@ -13,10 +13,10 @@
   <ItemGroup>
     <!-- A pure C# port of PaddleOCR's layout detector (PP-DocLayoutV3) - Apache 2.0. Its model is
          downloaded on first use, not shipped. -->
-    <PackageReference Include="PaddleOCR" Version="26.9.5517" />
+    <PackageReference Include="PaddleOCR" />
     <!-- Tesseract OCR (Apache 2.0) with native binaries for win-x64/arm64, linux-x64/arm64 and
          osx-arm64, for regions whose text is drawn as outlines or pixels. -->
-    <PackageReference Include="Tesseract.CrossPlatform" Version="5.5.2.200" />
+    <PackageReference Include="Tesseract.CrossPlatform" />
   </ItemGroup>
 
   <ItemGroup>

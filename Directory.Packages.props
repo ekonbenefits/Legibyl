@@ -1,0 +1,63 @@
+<Project>
+
+  <!-- Every NuGet package version, in one place (Central Package Management). Projects reference
+       packages without a Version. Transitive pinning means a PackageVersion here also pins that
+       package when it only comes in as another package's dependency, e.g. to lift one past a
+       known vulnerability. (The WiX installer opts out; see its project file.) -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="F#">
+    <!-- The SDK's implicit FSharp.Core reference has no version of its own under central
+         management; this is the one the .NET 10.0.400 SDK ships. -->
+    <PackageVersion Include="FSharp.Core" Version="10.1.400" />
+  </ItemGroup>
+
+  <ItemGroup Label="Validation and rendering">
+    <PackageVersion Include="IKVM" Version="8.16.1" />
+    <PackageVersion Include="itext" Version="9.7.0" />
+    <PackageVersion Include="LanguageDetection.NETStandard" Version="1.3.1" />
+    <PackageVersion Include="PdfPig" Version="0.1.16" />
+    <PackageVersion Include="PdfPig.Rendering.Skia" Version="0.1.16.4" />
+  </ItemGroup>
+
+  <ItemGroup Label="Layout detection and OCR">
+    <PackageVersion Include="PaddleOCR" Version="26.9.5517" />
+    <PackageVersion Include="Tesseract.CrossPlatform" Version="5.5.2.200" />
+  </ItemGroup>
+
+  <ItemGroup Label="GUI">
+    <PackageVersion Include="Avalonia" Version="12.1.3" />
+    <PackageVersion Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.3" />
+    <PackageVersion Include="Avalonia.FuncUI" Version="2.0.0" />
+    <PackageVersion Include="Avalonia.Headless" Version="12.1.3" />
+    <PackageVersion Include="Avalonia.Skia" Version="12.1.3" />
+    <PackageVersion Include="AvaloniaCommunity.FuncUI.Bindings.DataGrid" Version="12.0.0" />
+    <PackageVersion Include="Dotnet.Bundle" Version="0.9.13" />
+    <PackageVersion Include="Semi.Avalonia" Version="12.1.0.1" />
+    <PackageVersion Include="Semi.Avalonia.DataGrid" Version="12.1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="CLI">
+    <PackageVersion Include="FSharp.SystemCommandLine" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Tests">
+    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
+    <PackageVersion Include="FsUnit.xUnit" Version="7.1.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Transitive pins">
+    <!-- LanguageDetection.NETStandard depends on Newtonsoft.Json 10.0.3, which has a known
+         high-severity vulnerability (GHSA-5crp-9r3c-p9vr). -->
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>
