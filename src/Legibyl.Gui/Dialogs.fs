@@ -146,7 +146,7 @@ let private fixChoices =
       { Option = PdfFixOptions.JoinSplitParagraphs
         Title = "Join split paragraphs"
         Detail =
-          "Paragraphs tagged line by line become one where a layout detector finds one block of text (a line starting with a list marker stays apart); the page looks the same. "
+          "Paragraphs the split-paragraph warning flags become one where a layout detector confirms they're one block of text; the page looks the same. "
           + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time."
         OptIn = true }
       { Option = PdfFixOptions.ListsFromParagraphs

@@ -11,7 +11,8 @@ open iText.Kernel.Pdf.Canvas
 open Legibyl.Validation
 open Legibyl.Validation.Tests.TestSupport
 
-/// Two paragraphs of two lines each, then a line introducing a bulleted item.
+/// Two paragraphs of two lines each, a line introducing a bulleted item, then two sentences in
+/// one block that don't read as one broken off (the first ends with a full stop).
 let private createUntagged (path: string) =
     use document = new PdfDocument(new PdfWriter(path))
     let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
@@ -24,6 +25,8 @@ let private createUntagged (path: string) =
     text 636.0 "carries on to the next one."
     text 600.0 "You will need:"
     text 586.0 "• A completed form"
+    text 550.0 "The garden opens at eight every morning."
+    text 536.0 "Members lock the gate at dusk."
 
 let private region (bottom, top) : LayoutRegion =
     { Tag = "P"
@@ -45,10 +48,10 @@ type private FixedLayout(regions: LayoutRegion list) =
         member _.DocumentTitle = null
 
 /// Each line its own region, as a paragraph tagged line by line.
-let private lines = [ for y in [ 700.0; 686.0; 650.0; 636.0; 600.0; 586.0 ] -> region (y - 4.0, y + 11.0) ]
+let private lines = [ for y in [ 700.0; 686.0; 650.0; 636.0; 600.0; 586.0; 550.0; 536.0 ] -> region (y - 4.0, y + 11.0) ]
 
-/// How the page is laid out: a block per paragraph, the last holding the line and its item.
-let private blocks = [ region (682.0, 712.0); region (632.0, 662.0); region (582.0, 612.0) ]
+/// How the page is laid out: a block per paragraph, the third holding the line and its item.
+let private blocks = [ region (682.0, 712.0); region (632.0, 662.0); region (582.0, 612.0); region (532.0, 562.0) ]
 
 /// A PDF tagged line by line: a P per line.
 let private taggedLineByLine (path: string) =
@@ -80,11 +83,11 @@ let private parentTree (document: PdfDocument) =
     entries (root.GetAsDictionary PdfName.ParentTree |> notNull) |> Map.ofList
 
 [<Fact>]
-let ``paragraphs tagged line by line are joined where the layout shows one block, but not onto a list item`` () =
+let ``paragraphs the split warning flags are joined where the layout shows one block, and no others`` () =
     use input = new TempPdf()
     use output = new TempPdf()
     taggedLineByLine input.Path
-    paragraphs input.Path |> List.length |> should equal 6
+    paragraphs input.Path |> List.length |> should equal 8
 
     let result =
         VeraPdfValidator(LayoutSource = FixedLayout blocks).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.JoinSplitParagraphs)
@@ -98,7 +101,10 @@ let ``paragraphs tagged line by line are joined where the layout shows one block
         [ "P", "This handbook explains your benefits under the plan, and how you become a member of it."
           "P", "The second paragraph starts on this line and carries on to the next one."
           "P", "You will need:"
-          "P", "• A completed form" ]
+          "P", "• A completed form"
+          // One block, but the warning didn't flag them, so they're left as they are.
+          "P", "The garden opens at eight every morning."
+          "P", "Members lock the gate at dusk." ]
     failedRules output.Path |> should equal (failedRules input.Path)
 
 [<Fact>]
@@ -133,7 +139,7 @@ let ``joined paragraphs own their content in the parent tree`` () =
               let paragraph = paragraphs.GetAsDictionary i
               for mcid in mcids paragraph -> mcid, paragraph ]
 
-    pairs |> List.map fst |> List.sort |> should equal [ 0..5 ]
+    pairs |> List.map fst |> List.sort |> should equal [ 0..7 ]
     for mcid, paragraph in pairs do
         owners.GetAsDictionary mcid |> should be (sameAs paragraph)
 
