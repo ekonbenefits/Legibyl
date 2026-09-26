@@ -362,11 +362,14 @@ click target on a separate child link fragment. The **Tree** tab keeps the compa
 quickly, the Layout tab draws about 2,000 blocks up front: it shows whole
 levels while they fit and collapses the rest behind "▸ N child elements"
 buttons that expand on click (most documents fit and show in full). Layout
-blocks are selectable; when a selected node has same-page
-geometry (from marked-content text glyph/image/path bounds, `/A /BBox`
-layout attributes, or form widget rectangles), the side preview renders that
-page and highlights the best-effort area the node covers. Pure containers,
-content without a usable rectangle, or multi-page nodes show a note instead. Selecting
+blocks are selectable. The side preview shows a page overview: the page the
+selection is on (the first page, until something's selected) with every
+element that owns content there outlined in its tag's color and numbered in
+reading order, and the selection filled — for a container, the elements inside
+it. Where each element is comes from marked-content text glyph/image/path
+bounds, `/A /BBox` layout attributes, form widget rectangles and link
+annotations' rectangles. Content without a usable rectangle shows a note
+instead. Selecting
 a link (or a table-of-contents entry with one) that goes somewhere in the
 document also renders the page it goes to below, with the destination marked
 in blue: the line the view starts at, the rectangle a `/FitR` destination
