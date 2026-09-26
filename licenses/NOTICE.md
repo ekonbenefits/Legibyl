@@ -130,6 +130,15 @@ The **Declare the document's language** fix detects a document's language with
 Wikipedia abstracts), licensed under the Apache License, Version 2.0, used
 unmodified via a NuGet package reference.
 
+## ZXing.Net and qr-link-pdf
+
+QR codes are read with [ZXing.Net](https://github.com/micjahn/ZXing.Net),
+licensed under the Apache License, Version 2.0, used unmodified via a NuGet
+package reference. How pages are scanned for them (a pyramid of scales, each
+also inverted) and which payloads are linked (absolute http(s) addresses, and
+`www.` taken as https) follow [qr-link-pdf](https://github.com/jbtule/qr-link-pdf)
+by Jay Tuley (AGPL-3.0); no code is copied from it.
+
 ## iText Core
 
 Legibyl uses [iText Core for .NET](https://github.com/itext/itext-dotnet)

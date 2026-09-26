@@ -335,6 +335,24 @@ that needs OCR. Text drawn as outlines is tagged as its region's element, with
 the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
 and the report asks for it to be checked. It doesn't describe links outside a table of contents.
 
+QR codes are read with [ZXing.Net](https://github.com/micjahn/ZXing.Net),
+following the approach of [qr-link-pdf](https://github.com/jbtule/qr-link-pdf):
+each page is scanned whole at several scales (1, 0.6, 0.4 and 0.25 of about 300
+dpi), since ZXing can miss a code that's too small a part of the page and also
+one that's too large until the image is shrunk, and each scale is also scanned
+with its colours inverted, for light codes on a dark background. Each is scanned
+in two greys: ordinary luminance, and each pixel's darkest channel, because a
+styled code's coloured finder patterns (yellow rings, say) are nearly as light
+as white in ordinary luminance and ZXing can't find them. The detector's
+figures are tried on their own first. A code inside a figure describes it (alt
+text "QR code linking to …", or "QR code: …" for other content); one the
+detector didn't take for a figure becomes a figure of its own. The Suggest
+Structure preview marks them **QR:**. With the Fix dialog's **link each QR
+code** option (off by default, alongside tagging), a code that encodes a web
+address (absolute http(s), or `www.`, taken as https, as qr-link-pdf does) also
+gets a borderless link over it, tagged as a `Link` holding the figure, unless
+the page already has a link there.
+
 The Fix dialog's **Declare the document's language** option (off by default)
 sets the catalog's `/Lang` when a document has none, which PDF/UA needs for
 every piece of text (veraPDF's "natural language … shall be determined" rules,

@@ -17,6 +17,8 @@
     <!-- Tesseract OCR (Apache 2.0) with native binaries for win-x64/arm64, linux-x64/arm64 and
          osx-arm64, for regions whose text is drawn as outlines or pixels. -->
     <PackageReference Include="Tesseract.CrossPlatform" />
+    <!-- Decodes QR codes in figures, to describe them and link them (Apache 2.0). -->
+    <PackageReference Include="ZXing.Net" />
   </ItemGroup>
 
   <ItemGroup>

@@ -59,7 +59,8 @@ let private block order tag left text : SuggestedBlock =
       Geometry = { PageNumber = 1; Left = left; Bottom = 0.0; Right = 500.0; Top = 10.0 }
       Text = text
       ListNumbering = None
-      Recognized = false }
+      Recognized = false
+      QrText = None }
 
 [<Fact>]
 let ``runs of paragraphs starting with list markers become list items, like the lists fix`` () =
@@ -101,3 +102,79 @@ let ``OCR reads text in an image`` () =
         use image = SkiaSharp.SKImage.FromBitmap bitmap
         use png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
         TextRecognition.recognize engine (png.ToArray()) |> should equal "Scouting for Food"
+
+/// Draws a QR code for text into the canvas, size pixels square at (x, y).
+let private drawQrCodeIn (canvas: SkiaSharp.SKCanvas) (text: string) (x: float32) (y: float32) (size: int) (dark: SkiaSharp.SKColor) (light: SkiaSharp.SKColor) =
+    let matrix = ZXing.QrCode.QRCodeWriter().encode(text, ZXing.BarcodeFormat.QR_CODE, size, size)
+    use darkPaint = new SkiaSharp.SKPaint(Color = dark)
+    use lightPaint = new SkiaSharp.SKPaint(Color = light)
+    for row in 0 .. matrix.Height - 1 do
+        for column in 0 .. matrix.Width - 1 do
+            canvas.DrawRect(x + float32 column, y + float32 row, 1f, 1f, (if matrix[column, row] then darkPaint else lightPaint))
+
+let private drawQrCode canvas text x y size =
+    drawQrCodeIn canvas text x y size SkiaSharp.SKColors.Black SkiaSharp.SKColors.White
+
+[<Fact>]
+let ``QR codes large and small are found anywhere on a page`` () =
+    // A letter page at about 300 dpi, with a large code and a small one.
+    use page = new SkiaSharp.SKBitmap(2448, 3168)
+    use canvas = new SkiaSharp.SKCanvas(page)
+    canvas.Clear SkiaSharp.SKColors.White
+    drawQrCode canvas "https://example.com/large" 200f 300f 900
+    drawQrCode canvas "https://example.com/small" 1900f 2700f 140
+    // Light modules on a dark background, as in a brand-coloured box.
+    drawQrCodeIn canvas "https://example.com/inverted" 1600f 1400f 400 (SkiaSharp.SKColor(0xF0uy, 0xF0uy, 0xE0uy)) (SkiaSharp.SKColor(0x1Fuy, 0x4Duy, 0x2Cuy))
+
+    let found = QrCodes.decodeAll page
+
+    found |> List.map fst |> List.sort |> should equal [ "https://example.com/inverted"; "https://example.com/large"; "https://example.com/small" ]
+    let _, (left, top, right, bottom) = found |> List.find (fun (text, _) -> text = "https://example.com/small")
+    // Its bounds cover where it was drawn.
+    (left <= 1930.0 && top <= 2730.0 && right >= 2010.0 && bottom >= 2810.0) |> should be True
+
+[<Fact>]
+let ``a QR code describes the figure it's in, or becomes a figure where the layout missed it`` () =
+    let figure = { block 1 "Figure" 100.0 ""  with Geometry = { PageNumber = 1; Left = 100.0; Bottom = 500.0; Right = 200.0; Top = 600.0 } }
+    let heading = { block 2 "H" 100.0 "Scan to apply" with Geometry = { PageNumber = 1; Left = 100.0; Bottom = 300.0; Right = 400.0; Top = 320.0 } }
+    let paragraph = { block 3 "P" 100.0 "More below." with Geometry = { PageNumber = 1; Left = 100.0; Bottom = 100.0; Right = 400.0; Top = 120.0 } }
+    let codes =
+        [ "https://example.com/in-figure", { PageNumber = 1; Left = 120.0; Bottom = 520.0; Right = 180.0; Top = 580.0 }
+          "https://example.com/missed", { PageNumber = 1; Left = 100.0; Bottom = 200.0; Right = 160.0; Top = 260.0 } ]
+
+    LayoutSuggestions.placeQrCodes codes [ figure; heading; paragraph ]
+    |> List.map (fun b -> b.Order, b.Tag, b.QrText)
+    |> should
+        equal
+        [ 1, "Figure", Some "https://example.com/in-figure"
+          2, "H", None
+          3, "Figure", Some "https://example.com/missed"
+          4, "P", None ]
+
+[<Fact>]
+let ``a QR code with coloured finder patterns is found`` () =
+    // Green modules with yellow finder rings, as on a styled flyer. Yellow is nearly as light
+    // as white in ordinary luminance, which hides the rings the detector looks for.
+    let code = ZXing.QrCode.Internal.Encoder.encode("https://example.com/styled", ZXing.QrCode.Internal.ErrorCorrectionLevel.H)
+    let modules = code.Matrix
+    let cell = 12
+    let quiet = 4
+    let size = (modules.Width + 2 * quiet) * cell
+    use page = new SkiaSharp.SKBitmap(size + 400, size + 400)
+    use canvas = new SkiaSharp.SKCanvas(page)
+    canvas.Clear SkiaSharp.SKColors.White
+    use green = new SkiaSharp.SKPaint(Color = SkiaSharp.SKColor(0x1Fuy, 0x5Auy, 0x2Auy))
+    use yellow = new SkiaSharp.SKPaint(Color = SkiaSharp.SKColor(0xF5uy, 0xC5uy, 0x2Auy))
+    let inFinderRing x y =
+        let n = modules.Width
+        [ 0, 0; n - 7, 0; 0, n - 7 ]
+        |> List.exists (fun (fx, fy) ->
+            let dx, dy = x - fx, y - fy
+            dx >= 0 && dx < 7 && dy >= 0 && dy < 7 && (dx = 0 || dx = 6 || dy = 0 || dy = 6))
+    for y in 0 .. modules.Height - 1 do
+        for x in 0 .. modules.Width - 1 do
+            if modules[x, y] = 1 then
+                let paint = if inFinderRing x y then yellow else green
+                canvas.DrawRect(float32 (200 + (quiet + x) * cell), float32 (200 + (quiet + y) * cell), float32 cell, float32 cell, paint)
+
+    QrCodes.decodeAll page |> List.map fst |> should equal [ "https://example.com/styled" ]

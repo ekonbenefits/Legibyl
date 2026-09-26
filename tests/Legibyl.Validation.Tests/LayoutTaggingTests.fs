@@ -45,7 +45,8 @@ let private region tag (left, bottom, right, top) numbering : LayoutRegion =
     { Tag = tag
       Geometry = { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
       ListNumbering = numbering
-      ActualText = null }
+      ActualText = null
+      QrText = null }
 
 let private regions =
     [ region "Artifact" (70.0, 745.0, 200.0, 762.0) null
@@ -219,3 +220,55 @@ let ``a heading drawn in pieces is one marked sequence, and a wrapped line reads
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
     [ for node in (root.Children |> Seq.exactlyOne).Children -> node.Tag, node.Content, node.ContentLeafCount ]
     |> should equal [ "H1", "Our big events", 1; "P", "Arrow of Light", 1 ]
+
+let private withQrCode (regions: LayoutRegion list) =
+    regions |> List.map (fun r -> if r.Tag = "Figure" then { r with QrText = "https://example.com/apply" } else r)
+
+let private tagWithQrLinks (input: string) (output: string) (source: IPageLayoutSource) =
+    let validator = VeraPdfValidator()
+    validator.LayoutSource <- source
+    validator.Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.TagFromLayout ||| PdfFixOptions.QrCodeLinks)
+
+[<Fact>]
+let ``a figure that's a QR code is described by what it encodes`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout(withQrCode regions)))
+
+    result.AppliedFixes |> should contain "Described 1 QR code by what they encode"
+    result.AppliedFixes |> should not' (contain "1 figure needs alt text, written by a person")
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let figure = flatten root |> List.find (fun node -> node.Tag = "Figure")
+    figure.AlternateDescription |> should equal "QR code linking to https://example.com/apply"
+    failedRules output.Path |> should not' (contain "7.3-1")
+
+[<Fact>]
+let ``with QR code links, the figure is a link to what it encodes, and the page looks the same`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+
+    let result = tagWithQrLinks input.Path output.Path (FixedLayout(withQrCode regions))
+
+    result.AppliedFixes |> should contain "Linked 1 QR code to the web address they encode"
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let document = root.Children |> Seq.exactlyOne
+    let link = document.Children |> Seq.find (fun node -> node.Tag = "Link" && node.Children |> Seq.exists (fun child -> child.Tag = "Figure"))
+    link.LinkUri |> should equal "https://example.com/apply"
+    // The new link adds no failures: tagged, described, and in the tab order. (The page's
+    // own link, which has no description, fails the same either way.)
+    use plain = new TempPdf()
+    tagFromLayout input.Path plain.Path (Some(FixedLayout(withQrCode regions))) |> ignore
+    let failures (path: string) =
+        VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Findings
+        |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure)
+        |> Seq.countBy _.RuleId
+        |> Map.ofSeq
+    failures output.Path |> should equal (failures plain.Path)
+    use renderer = new PdfRegionRenderer()
+    let offPage = { PageNumber = 1; Left = -20.0; Bottom = -20.0; Right = -10.0; Top = -10.0 }
+    use before = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(input.Path, offPage).PngBytes)
+    use after = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(output.Path, offPage).PngBytes)
+    after.Pixels |> should equal before.Pixels
