@@ -557,7 +557,7 @@ module private MainView =
                                                     Task.Run(fun () ->
                                                         // The review (as the window has it) goes in the repaired copy.
                                                         // Reading it can mean opening the PDF, so it's done here too.
-                                                        validator.Review <- Dismissals.reviewJson sourcePath (Some dismissedNow)
+                                                        validator.Review <- RegionEdits.reviewFor sourcePath (Some dismissedNow)
                                                         validator.Edits <- edits
                                                         validator.Fix(sourcePath, profile, outputPath, options, progress))
                                                 return Ok fix

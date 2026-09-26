@@ -167,9 +167,12 @@ let forget (pdfPath: string) =
     | Some saved -> writeFile pdfPath { saved with DismissedWarnings = null }
     | None -> ()
 
-/// pdfPath's review as JSON, to embed in a copy of it (see EmbeddedReview), with dismissed in
-/// place of its saved dismissals if given; null if there's nothing to carry.
-let reviewJson (pdfPath: string) (dismissed: Dismissed option) : string | null =
+/// file as it's saved.
+let toJson (file: SavedFile) = JsonSerializer.Serialize({ file with Version = 1 }, jsonOptions)
+
+/// pdfPath's review, to embed in a copy of it (see EmbeddedReview), with dismissed in place of
+/// its saved dismissals if given; None if there's nothing to carry.
+let reviewFile (pdfPath: string) (dismissed: Dismissed option) : SavedFile option =
     let saved = readOrEmpty pdfPath
     let saved =
         match dismissed with
@@ -186,5 +189,10 @@ let reviewJson (pdfPath: string) (dismissed: Dismissed option) : string | null =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    if empty saved.DismissedWarnings && empty saved.Edits && isNull saved.Title then null
-    else JsonSerializer.Serialize({ saved with Version = 1 }, jsonOptions)
+    if empty saved.DismissedWarnings && empty saved.Edits && isNull saved.Title then None else Some saved
+
+/// reviewFile as JSON; null if there's nothing to carry.
+let reviewJson (pdfPath: string) (dismissed: Dismissed option) : string | null =
+    match reviewFile pdfPath dismissed with
+    | Some saved -> toJson saved
+    | None -> null

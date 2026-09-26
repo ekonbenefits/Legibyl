@@ -133,6 +133,14 @@ type IPageTitleSource =
     /// An address whose title couldn't be read is left out.
     abstract PageTitles: addresses: string seq -> Collections.Generic.IReadOnlyDictionary<string, string>
 
+/// A region tagging from the layout turned into an element: the tag it wrote, and the box of
+/// what the element holds (null if it holds nothing drawn). An edit made for the region belongs
+/// to that element in the tagged copy.
+type TaggedRegion =
+    { Region: LayoutRegion
+      Tag: string
+      Box: StructureGeometry | null }
+
 /// Where the TagFromLayout fix gets each page's regions.
 type IPageLayoutSource =
     /// pageNumber's regions (1-based), in reading order.

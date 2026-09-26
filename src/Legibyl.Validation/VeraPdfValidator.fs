@@ -395,19 +395,21 @@ open VeraPdf
 /// RuleViolation, etc).
 [<Sealed>]
 type VeraPdfValidator() =
-    // A plain field: an auto-property (member val) of type string | null reaches other
-    // assemblies as a non-nullable string.
-    let mutable review: string | null = null
+    // A plain field: an auto-property (member val) of a nullable type reaches other assemblies
+    // as non-nullable.
+    let mutable review: Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null> | null = null
     do ensureInitialised ()
 
     /// Where the TagFromLayout and JoinSplitParagraphs fixes get each page's regions (see
     /// Legibyl.Layout). Without one, those fixes do nothing.
     member val LayoutSource: IPageLayoutSource | null = null with get, set
 
-    /// A review to carry in the fixed copy (see EmbeddedReview), as JSON; null for none.
+    /// Builds the review to carry in the fixed copy (see EmbeddedReview), as JSON (null for none),
+    /// given where tagging from the layout put each region (none if it didn't tag), so edits made
+    /// for regions can be moved to the elements they became. Null for no review.
     member _.Review
-        with get (): string | null = review
-        and set (value: string | null) = review <- value
+        with get (): Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null> | null = review
+        and set (value: Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null> | null) = review <- value
 
     /// The edits the ApplyEdits fix writes (see ElementEdits).
     member val Edits: Collections.Generic.IReadOnlyList<ElementEdit> = [] with get, set
@@ -495,6 +497,8 @@ type VeraPdfValidator() =
         let mutable tempStructuralOutput: string | null = null
         let mutable tempTaggedOutput: string | null = null
         let mutable tempReviewOutput: string | null = null
+        // Where tagging put each region, for the review the copy carries.
+        let mutable taggedRegions: TaggedRegion list = []
         let mutable changed = false
         let mutable status = RepairStatus.NoAction
 
@@ -516,11 +520,12 @@ type VeraPdfValidator() =
                             (if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then Some this.PageTitleSource else None)
                             (report FixStage.Tagging)
                     with
-                    | [] ->
+                    | [], _ ->
                         tryDeleteTemporary tempOutput
                         tempTaggedOutput <- null
-                    | tagged ->
-                        appliedFixes.AddRange tagged
+                    | lines, regions ->
+                        taggedRegions <- regions
+                        appliedFixes.AddRange lines
                         currentInput <- tempOutput
                         changed <- true
                         status <- RepairStatus.Success
@@ -586,10 +591,13 @@ type VeraPdfValidator() =
                 else
                     match this.Review with
                     | NonNull review ->
-                        let tempOutput = createTemporaryPdfPath outputPath
-                        tempReviewOutput <- tempOutput
-                        EmbeddedReview.write currentInput tempOutput review
-                        currentInput <- tempOutput
+                        match review.Invoke taggedRegions with
+                        | NonNull review ->
+                            let tempOutput = createTemporaryPdfPath outputPath
+                            tempReviewOutput <- tempOutput
+                            EmbeddedReview.write currentInput tempOutput review
+                            currentInput <- tempOutput
+                        | Null -> ()
                     | Null -> ()
                     moveToOutput currentInput outputPath
                     { result with OutputPath = outputPath }

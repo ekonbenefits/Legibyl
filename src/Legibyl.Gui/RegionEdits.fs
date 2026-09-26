@@ -141,17 +141,46 @@ let loadWithTitle (pdfPath: string) : Edit list * string option =
     let saved = readFor pdfPath
     editsOf saved, saved |> Option.bind (fun saved -> Option.ofObj saved.Title)
 
+let private toSaved (e: Edit) : SavedEdit =
+    { Page = e.Page
+      Tag = e.Tag
+      Box = [| e.Box.Left; e.Box.Bottom; e.Box.Right; e.Box.Top |] |> Array.map (fun v -> Math.Round(v, 1))
+      Alt = Option.toObj e.Alt
+      Text = Option.toObj e.Text }
+
 /// Saves edits next to pdfPath, keeping any dismissals in the file. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
 let save (pdfPath: string) (edits: Edit list) =
-    let toSaved (e: Edit) : SavedEdit =
-        { Page = e.Page
-          Tag = e.Tag
-          Box = [| e.Box.Left; e.Box.Bottom; e.Box.Right; e.Box.Top |] |> Array.map (fun v -> Math.Round(v, 1))
-          Alt = Option.toObj e.Alt
-          Text = Option.toObj e.Text }
     let saved = edits |> List.map toSaved |> Array.ofList
     writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Edits = (if saved.Length = 0 then null else saved) }
+
+/// edits moved from the regions they were made for to the elements tagging made of them (the
+/// tag it wrote, the box of what the element holds), so in the tagged copy they're edits of its
+/// elements. Edits for regions that weren't tagged stay as they are.
+let rekey (edits: Edit list) (tagged: TaggedRegion seq) : Edit list =
+    let tagged = List.ofSeq tagged
+    [ for e in edits ->
+          tagged
+          |> List.choose (fun t ->
+              match t.Box with
+              | NonNull box when t.Region.Tag = e.Tag && t.Region.Geometry.PageNumber = e.Page ->
+                  Some(t.Tag, box, overlap t.Region.Geometry e.Box)
+              | _ -> None)
+          |> List.filter (fun (_, _, o) -> o >= SameRegionOverlap)
+          |> List.sortByDescending (fun (_, _, o) -> o)
+          |> List.tryHead
+          |> Option.map (fun (tag, box, _) -> { e with Tag = tag; Box = box })
+          |> Option.defaultValue e ]
+
+/// Builds the review a copy of pdfPath carries (see VeraPdfValidator.Review), with dismissed in
+/// place of its saved dismissals if given, and its edits moved to the elements tagging made.
+let reviewFor (pdfPath: string) (dismissed: Dismissed option) =
+    Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null>(fun tagged ->
+        match reviewFile pdfPath dismissed with
+        | Some saved ->
+            let moved = rekey (editsOf (Some saved)) tagged
+            toJson { saved with Edits = (if moved.IsEmpty then saved.Edits else moved |> List.map toSaved |> Array.ofList) }
+        | None -> null)
 
 /// The document title set in Suggest Structure and saved for pdfPath, if any.
 let loadTitle (pdfPath: string) : string option =
