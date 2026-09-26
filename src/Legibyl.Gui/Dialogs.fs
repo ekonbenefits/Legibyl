@@ -131,6 +131,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let tagFromLayout = ctx.useState false
             // So is the language, though it's rarely wrong with enough text.
             let languageFromText = ctx.useState false
+            // Adds links the document didn't have.
+            let qrCodeLinks = ctx.useState false
 
             let checkBox (state: IWritable<bool>) (content: IView) =
                 CheckBox.create [
@@ -164,6 +166,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let onContinue _ =
                 let options =
                     [ tagFromLayout.Current, PdfFixOptions.TagFromLayout
+                      qrCodeLinks.Current, PdfFixOptions.QrCodeLinks
                       languageFromText.Current, PdfFixOptions.LanguageFromText
                       metadata.Current, PdfFixOptions.Metadata
                       annotationTabs.Current, PdfFixOptions.AnnotationTabs
@@ -204,6 +207,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                                      + "found by a layout detector (the page looks the same; figures still need alt text). Takes several seconds a page, "
                                      + $"and downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time")
                                     PdfFixOptions.TagFromLayout)
+                            checkBox
+                                qrCodeLinks
+                                (label
+                                    "With tagging: link each QR code that encodes a web address to it (a borderless link over the code, so the page looks the same)"
+                                    PdfFixOptions.QrCodeLinks)
                             checkBox
                                 languageFromText
                                 (label

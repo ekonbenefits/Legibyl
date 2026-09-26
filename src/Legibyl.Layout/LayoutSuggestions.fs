@@ -35,7 +35,9 @@ type SuggestedBlock =
       ListNumbering: string option
       /// True when Text was recognised by OCR, because the region's text is drawn as
       /// outlines or pixels rather than as text.
-      Recognized: bool }
+      Recognized: bool
+      /// For a figure that's a QR code: what it encodes (often a web address).
+      QrText: string option }
 
 type PageSuggestion =
     { PageNumber: int
@@ -97,6 +99,38 @@ module LayoutSuggestions =
             |> List.tryHead
             |> Option.iter (fun (index, _) -> byRegion[index].Add text)
         [ for words in byRegion -> String.Join(" ", words) ]
+
+    let private centreOf (g: StructureGeometry) = (g.Left + g.Right) / 2.0, (g.Bottom + g.Top) / 2.0
+
+    /// Puts QR codes found on the page into the layout: a code inside a figure describes that
+    /// figure; one the detector didn't take for a figure becomes a figure of its own, in
+    /// reading order after the regions above it. Orders are renumbered.
+    let placeQrCodes (codes: (string * StructureGeometry) list) (blocks: SuggestedBlock list) : SuggestedBlock list =
+        let placed =
+            (blocks, codes)
+            ||> List.fold (fun blocks (text, geometry) ->
+                let point = centreOf geometry
+                let figure =
+                    blocks
+                    |> List.filter (fun b -> b.Tag = "Figure" && b.QrText.IsNone && contains b.Geometry point)
+                    |> List.sortBy (fun b -> area b.Geometry)
+                    |> List.tryHead
+                match figure with
+                | Some figure -> blocks |> List.map (fun b -> if obj.ReferenceEquals(b, figure) then { b with QrText = Some text } else b)
+                | None ->
+                    let code =
+                        { Order = 0
+                          Label = "qr_code"
+                          Tag = "Figure"
+                          Score = 1.0
+                          Geometry = geometry
+                          Text = ""
+                          ListNumbering = None
+                          Recognized = false
+                          QrText = Some text }
+                    let above = blocks |> List.takeWhile (fun b -> b.Geometry.Top >= geometry.Top) |> List.length
+                    List.insertAt above code blocks)
+        placed |> List.mapi (fun i b -> { b with Order = i + 1 })
 
     /// Whether a suggested tag is for text (so a region with none as text needs OCR).
     let holdsText (tag: string) = tag <> "Figure" && tag <> "Table" && tag <> "Artifact"
@@ -161,6 +195,88 @@ module TextRecognition =
         use page = engine.Process(pix, PageSegMode.SingleBlock)
         Regex.Replace(page.GetText(), @"\s+", " ").Trim()
 
+/// Reads QR codes, so a figure that is one can say what it encodes, and link to it.
+module QrCodes =
+    open ZXing
+    open ZXing.Common
+
+    let private reader =
+        BarcodeReaderGeneric(Options = DecodingOptions(PossibleFormats = [| BarcodeFormat.QR_CODE |], TryHarder = true))
+
+    /// The image in grey two ways: ordinary luminance, and each pixel's darkest channel. Codes
+    /// with coloured finder patterns (yellow rings, say) nearly vanish in ordinary luminance,
+    /// where yellow is almost as light as white; in the darkest channel any strong colour is
+    /// dark, as the code's design intends. Each is also given inverted, for light codes on a
+    /// dark background.
+    let private greyVersions (bitmap: SKBitmap) : LuminanceSource list =
+        use rgba = new SKBitmap(bitmap.Width, bitmap.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul)
+        if bitmap.CopyTo(rgba, SKColorType.Rgba8888) then
+            let pixels = rgba.GetPixelSpan()
+            let count = rgba.Width * rgba.Height
+            let luminance = Array.zeroCreate<byte> count
+            let darkest = Array.zeroCreate<byte> count
+            for i in 0 .. count - 1 do
+                let r, g, b = pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2]
+                luminance[i] <- byte ((299 * int r + 587 * int g + 114 * int b) / 1000)
+                darkest[i] <- min r (min g b)
+            [ for grey in [ luminance; darkest ] do
+                  let source = RGBLuminanceSource(grey, rgba.Width, rgba.Height, RGBLuminanceSource.BitmapFormat.Gray8) :> LuminanceSource
+                  yield source
+                  yield source.invert () ]
+        else
+            []
+
+    /// What the QR code in the bitmap encodes, if it holds one (dark on light, or light on dark).
+    let decode (bitmap: SKBitmap) : string option =
+            greyVersions bitmap
+            |> List.tryPick (fun colours ->
+                match lock reader (fun () -> reader.Decode colours) with
+                | null -> None
+                | result when String.IsNullOrWhiteSpace result.Text -> None
+                | result -> Some(result.Text.Trim()))
+
+    /// The QR codes ZXing finds in one image: what each encodes, and its bounds in the
+    /// image's pixels (left, top, right, bottom).
+    let private decodeIn (source: LuminanceSource) =
+        match lock reader (fun () -> reader.DecodeMultiple source) with
+        | null -> []
+        | results ->
+            [ for result in results do
+                  if not (String.IsNullOrWhiteSpace result.Text) && not (isNull result.ResultPoints) && result.ResultPoints.Length >= 3 then
+                      // The points are the finder patterns' centres, about 3.5 modules in from
+                      // the code's edges; widen by a sixth of their spread to cover it.
+                      let xs = result.ResultPoints |> Array.map (fun p -> float p.X)
+                      let ys = result.ResultPoints |> Array.map (fun p -> float p.Y)
+                      let margin = max (Array.max xs - Array.min xs) (Array.max ys - Array.min ys) / 6.0
+                      yield
+                          result.Text.Trim(),
+                          (Array.min xs - margin, Array.min ys - margin, Array.max xs + margin, Array.max ys + margin) ]
+
+    /// The scan pyramid, as in qr-link-pdf (github.com/jbtule/qr-link-pdf): ZXing can miss a
+    /// code that's too small a part of a large page, and also one that's too large until the
+    /// image is shrunk, so the page is scanned at each of these scales and the results merged.
+    let private scales = [ 1.0; 0.6; 0.4; 0.25 ]
+
+    /// Every QR code in a page image, scanned at several resolutions, each in both greys and
+    /// inverted (see greyVersions): what each encodes, and its bounds in the image's pixels.
+    let decodeAll (bitmap: SKBitmap) : (string * (float * float * float * float)) list =
+        let found = ResizeArray<string * (float * float * float * float)>()
+        let add (text: string, (left, top, right, bottom)) =
+            let x, y = (left + right) / 2.0, (top + bottom) / 2.0
+            let seen =
+                found
+                |> Seq.exists (fun (other, (l, t, r, b)) -> other = text && x >= l && x <= r && y >= t && y <= b)
+            if not seen then found.Add((text, (left, top, right, bottom)))
+        for scale in scales do
+            let width, height = int (float bitmap.Width * scale), int (float bitmap.Height * scale)
+            if width >= 64 && height >= 64 then
+                use scaled =
+                    if scale = 1.0 then bitmap.Copy() else bitmap.Resize(SKImageInfo(width, height), SKSamplingOptions(SKFilterMode.Linear))
+                for colours in greyVersions scaled do
+                    for text, (l, t, r, b) in decodeIn colours do
+                        add (text, (l / scale, t / scale, r / scale, b / scale))
+        List.ofSeq found
+
 /// The layout detector's model: whether it's downloaded, and downloading it.
 module LayoutModel =
     /// Roughly how much there is to download, for telling the user before they do.
@@ -215,17 +331,18 @@ type LayoutSuggester(pdfPath: string) =
     let ocr = lazy (TextRecognition.createEngine ())
     // OCR wants more pixels than the detector: about 300 dpi.
     let ocrScale = 4.0
+    // QR codes are scanned at 400 dpi, as qr-link-pdf does: stylised codes (rounded modules,
+    // a logo in the middle) need the detail.
+    let qrScale = 400.0 / 72.0
 
-    /// The text of regions that have none as text but look like they hold some.
-    let recognizeText pageNumber (crop: UglyToad.PdfPig.Core.PdfRectangle) (regions: (string * StructureGeometry) list) =
-        match ocr.Value with
-        | Some engine when regions |> List.exists (fun (tag, _) -> tag <> "") ->
-            use bitmap = document.GetPageAsSKBitmap(pageNumber, float32 ocrScale, SKColors.White)
-            [ for tag, geometry in regions ->
-                  if tag = "" then
-                      None
-                  else
-                      let pixels (value: float) = int (Math.Round(value * ocrScale))
+    /// Reads each region that's asked for (Some) from a high-resolution rendering of the page,
+    /// made at scale pixels per point.
+    let readRegions (bitmap: SKBitmap) (scale: float) (crop: UglyToad.PdfPig.Core.PdfRectangle) (regions: ((SKBitmap -> 'T option) option * StructureGeometry) list) =
+            [ for read, geometry in regions ->
+                  match read with
+                  | None -> None
+                  | Some read ->
+                      let pixels (value: float) = int (Math.Round(value * scale))
                       let area =
                           SKRectI(
                               max 0 (pixels (geometry.Left - crop.Left)),
@@ -237,15 +354,18 @@ type LayoutSuggester(pdfPath: string) =
                           None
                       else
                           use region = new SKBitmap()
-                          if bitmap.ExtractSubset(region, area) then
-                              use image = SKImage.FromBitmap region
-                              use png = image.Encode(SKEncodedImageFormat.Png, 100)
-                              match TextRecognition.recognize engine (png.ToArray()) with
-                              | "" -> None
-                              | text -> Some text
-                          else
-                              None ]
-        | _ -> regions |> List.map (fun _ -> None)
+                          if bitmap.ExtractSubset(region, area) then read region else None ]
+
+    /// OCR for one region's pixels.
+    let recognize (region: SKBitmap) =
+        match ocr.Value with
+        | Some engine ->
+            use image = SKImage.FromBitmap region
+            use png = image.Encode(SKEncodedImageFormat.Png, 100)
+            match TextRecognition.recognize engine (png.ToArray()) with
+            | "" -> None
+            | text -> Some text
+        | None -> None
 
     member _.PageCount = document.NumberOfPages
 
@@ -268,15 +388,52 @@ type LayoutSuggester(pdfPath: string) =
                       let centre = word.BoundingBox.Centroid
                       yield word.Text, (centre.X, centre.Y) ]
             let texts = LayoutSuggestions.assignText regions words
+            // A high-resolution rendering, for OCR and QR codes, once there's something to read.
+            use highResolution =
+                if boxes.Count = 0 then null else document.GetPageAsSKBitmap(pageNumber, float32 ocrScale, SKColors.White)
             // Regions that should hold text but have none as text: their text is drawn as
             // outlines or pixels, so read it with OCR.
             let recognized =
-                recognizeText
-                    pageNumber
-                    crop
-                    [ for box, region, text in List.zip3 (List.ofSeq boxes) regions texts ->
-                          let tag = LayoutSuggestions.tagFor box.Label
-                          (if text = "" && LayoutSuggestions.holdsText tag then tag else ""), region ]
+                match highResolution with
+                | null -> texts |> List.map (fun _ -> None)
+                | bitmap ->
+                    readRegions
+                        bitmap
+                        ocrScale
+                        crop
+                        [ for box, region, text in List.zip3 (List.ofSeq boxes) regions texts ->
+                              let tag = LayoutSuggestions.tagFor box.Label
+                              (if text = "" && LayoutSuggestions.holdsText tag then Some recognize else None), region ]
+            // QR codes: the detector's figures first (a region holding one decodes most
+            // reliably), then the whole page, scanned at several resolutions, for any it didn't
+            // take for a figure. In PDF points.
+            let qrCodes =
+                if boxes.Count = 0 then
+                    []
+                else
+                    use bitmap = document.GetPageAsSKBitmap(pageNumber, float32 qrScale, SKColors.White)
+                    let points (left, top, right, bottom) : StructureGeometry =
+                        { PageNumber = pageNumber
+                          Left = crop.Left + left / qrScale
+                          Right = crop.Left + right / qrScale
+                          Top = crop.Top - top / qrScale
+                          Bottom = crop.Top - bottom / qrScale }
+                    let inFigures =
+                        readRegions
+                            bitmap
+                            qrScale
+                            crop
+                            [ for box, region in List.zip (List.ofSeq boxes) regions ->
+                                  (if LayoutSuggestions.tagFor box.Label = "Figure" then Some QrCodes.decode else None), region ]
+                        |> List.zip regions
+                        |> List.choose (fun (region, text) -> text |> Option.map (fun text -> text, region))
+                    let onPage = [ for text, bounds in QrCodes.decodeAll bitmap -> text, points bounds ]
+                    // The page scan finds the figures' codes again; keep those only once.
+                    let known (text, geometry: StructureGeometry) =
+                        let x, y = (geometry.Left + geometry.Right) / 2.0, (geometry.Bottom + geometry.Top) / 2.0
+                        inFigures
+                        |> List.exists (fun (other, (r: StructureGeometry)) -> other = text && x >= r.Left && x <= r.Right && y >= r.Bottom && y <= r.Top)
+                    inFigures @ (onPage |> List.filter (not << known))
             { PageNumber = pageNumber
               HasText = not words.IsEmpty
               Rotated = rotated
@@ -289,7 +446,9 @@ type LayoutSuggester(pdfPath: string) =
                         Geometry = region
                         Text = defaultArg recognized text
                         ListNumbering = None
-                        Recognized = recognized.IsSome } ]
+                        Recognized = recognized.IsSome
+                        QrText = None } ]
+                |> LayoutSuggestions.placeQrCodes qrCodes
                 |> LayoutSuggestions.findLists })
 
     interface IDisposable with
@@ -323,7 +482,8 @@ type LayoutRegionSource(progress: IProgress<int * int> | null) =
                   { Tag = block.Tag
                     Geometry = block.Geometry
                     ListNumbering = Option.toObj block.ListNumbering
-                    ActualText = if block.Recognized then block.Text else null } ]
+                    ActualText = if block.Recognized then block.Text else null
+                    QrText = Option.toObj block.QrText } ]
 
     interface IDisposable with
         member _.Dispose() =

@@ -126,7 +126,7 @@ module SuggestedStructureView =
                 + "the tag each suggests, and their reading order (the numbers). This is a preview; nothing is written to the PDF. "
                 + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
                 + "list markers are list items (LI), and Artifact marks page furniture like running headers and page numbers. "
-                + "Text drawn as outlines or pixels rather than as text is read with OCR (marked OCR)."
+                + "Text drawn as outlines or pixels rather than as text is read with OCR (marked OCR), and QR codes are read (marked QR)."
 
             let downloadPanel =
                 StackPanel.create [
@@ -205,6 +205,9 @@ module SuggestedStructureView =
                                                     TextBlock.create [
                                                         TextBlock.textWrapping TextWrapping.Wrap
                                                         TextBlock.text (
+                                                            match block.QrText with
+                                                            | Some text -> $"QR: {snippet text}"
+                                                            | None ->
                                                             if block.Text = "" then "(no text)"
                                                             elif block.Recognized then $"OCR: {snippet block.Text}"
                                                             else snippet block.Text

@@ -244,7 +244,11 @@ type private Tally =
       mutable UntaggedAnnotations: int
       mutable PagesWithoutText: int
       /// Elements whose text is drawn as outlines or pixels, given an OCR'd /ActualText.
-      mutable Recognized: int }
+      mutable Recognized: int
+      /// Figures that are QR codes, described by what they encode.
+      mutable QrCodes: int
+      /// Of those, the ones given a link to the address they encode.
+      mutable QrLinks: int }
 
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
@@ -263,7 +267,17 @@ let private writtenTag (region: LayoutRegion) hasTitle =
 /// Tags pdfPath's pages from source's regions, writing the result to outputPath. Returns
 /// the report lines; empty (and nothing worth keeping written) if the document was already
 /// tagged.
-let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : string list =
+/// The web address QR text links to, if it's one: an absolute http(s) address, or one
+/// starting "www." (as qr-link-pdf treats them), taken to be https.
+let private webAddress (text: string) =
+    let candidate = if text.StartsWith("www.", StringComparison.OrdinalIgnoreCase) then "https://" + text else text
+    match Uri.TryCreate(candidate, UriKind.Absolute) with
+    | true, NonNull uri when uri.Scheme = Uri.UriSchemeHttps || uri.Scheme = Uri.UriSchemeHttp -> Some candidate
+    | _ -> None
+
+/// Tags pdfPath's pages from source's regions, writing the result to outputPath. With
+/// linkQrCodes, a QR code that encodes a web address also gets a link going there.
+let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (linkQrCodes: bool) : string list =
     use reader = new PdfReader(pdfPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
@@ -279,7 +293,7 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
 
         let parentTree = PdfArray()
         let tally =
-            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0 }
+            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0 }
         let pageCount = document.GetNumberOfPages()
         let regionsByPage = [| for page in 1 .. pageCount -> List.ofSeq (source.PageRegions(pdfPath, page)) |]
         let hasTitle = regionsByPage |> Array.exists (List.exists (fun region -> region.Tag = "H1"))
@@ -313,12 +327,14 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
             // The page's elements, made as content turns up for them, and added to the
             // document in reading order once the page is done.
             let elements = Dictionary<int, Element>()
+            // QR code figures to link: the region, the address, and the Link element holding it.
+            let qrLinks = List<int * string * Element>()
             let listItems = Dictionary<int, Element * string>()
             let mcids = List<PdfDictionary>()
             let regionAt index =
                 match index with
-                | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null }
-                | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null }
+                | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null }
+                | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null }
                 | index -> fst regions[index]
             let elementFor (index: int) =
                 match elements.TryGetValue index with
@@ -340,7 +356,39 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
                             match tag with
                             | "H1"
                             | "H2" -> tally.Headings <- tally.Headings + 1
-                            | "Figure" -> tally.Figures <- tally.Figures + 1
+                            | "Figure" ->
+                                tally.Figures <- tally.Figures + 1
+                                // A QR code says what it encodes, which is what its alt text should say.
+                                match region.QrText with
+                                | NonNull text ->
+                                    let address = webAddress text
+                                    let alt =
+                                        match address with
+                                        | Some address -> $"QR code linking to {address}"
+                                        | None -> $"QR code: {text}"
+                                    element.Dictionary.Put(PdfName.Alt, PdfString(alt, PdfEncodings.UNICODE_BIG)) |> ignore
+                                    // Legibyl writes these descriptions in English.
+                                    element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
+                                    tally.QrCodes <- tally.QrCodes + 1
+                                    // Unless the page already has a link over it.
+                                    let alreadyLinked () =
+                                        let point = centre (rectangleOf region.Geometry)
+                                        page.GetAnnotations()
+                                        |> Seq.exists (fun annotation ->
+                                            PdfName.Link.Equals(annotation.GetSubtype())
+                                            && not (isNull (annotation.GetRectangle()))
+                                            && containsPoint (annotation.GetRectangle().ToRectangle()) point)
+                                    match address with
+                                    | Some address when linkQrCodes && not (alreadyLinked ()) ->
+                                        // A Link holding the figure; its annotation is added with the page's.
+                                        let wrapper = newElement document "Link" documentElement.Dictionary (Some page)
+                                        // So is its annotation's /Contents.
+                                        wrapper.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
+                                        element.Dictionary.Put(PdfName.P, wrapper.Dictionary) |> ignore
+                                        wrapper.Kids.Add element.Dictionary
+                                        qrLinks.Add((index, address, wrapper))
+                                    | _ -> ()
+                                | Null -> ()
                             | "Note" ->
                                 // PDF/UA wants every Note to have an ID.
                                 noteIds <- noteIds + 1
@@ -469,7 +517,9 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
                     list.Kids.Add item.Dictionary
                 | _ ->
                     currentList <- None
-                    documentElement.Kids.Add elements[index].Dictionary
+                    match qrLinks |> Seq.tryFind (fun (i, _, _) -> i = index) with
+                    | Some(_, _, wrapper) -> documentElement.Kids.Add wrapper.Dictionary
+                    | None -> documentElement.Kids.Add elements[index].Dictionary
 
             let stream = PdfStream(output.ToArray())
             stream.SetCompressionLevel CompressionConstants.DEFAULT_COMPRESSION
@@ -511,6 +561,24 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
                     hasLinks <- true
                 elif not (PdfName.Popup.Equals(annotation.GetSubtype())) then
                     tally.UntaggedAnnotations <- tally.UntaggedAnnotations + 1
+            // Links over QR codes, added after the page's own were tagged. No border, so the
+            // page looks the same.
+            for index, address, wrapper in qrLinks do
+                let annotation = PdfLinkAnnotation(rectangleOf (fst regions[index]).Geometry)
+                annotation.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI address) |> ignore
+                annotation.SetBorder(PdfArray([| 0.0; 0.0; 0.0 |])) |> ignore
+                annotation.SetFlags PdfAnnotation.PRINT |> ignore
+                annotation.SetContents(PdfString($"QR code link to {address}", PdfEncodings.UNICODE_BIG)) |> ignore
+                page.AddAnnotation annotation |> ignore
+                let dictionary = annotation.GetPdfObject()
+                let reference = PdfDictionary()
+                reference.Put(PdfName.Type, PdfName.OBJR) |> ignore
+                reference.Put(PdfName.Obj, dictionary) |> ignore
+                reference.Put(PdfName.Pg, page.GetPdfObject()) |> ignore
+                wrapper.Kids.Add reference
+                objectReferences.Add((dictionary, wrapper.Dictionary))
+                tally.QrLinks <- tally.QrLinks + 1
+                hasLinks <- true
             if hasLinks then
                 page.GetPdfObject().Put(PdfName.Tabs, PdfName.S) |> ignore
 
@@ -542,8 +610,14 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
           if tally.Recognized > 0 then
               let recognized = plural tally.Recognized "element's text is" "elements' text is"
               yield $"{recognized} drawn as outlines or pixels: read with OCR into /ActualText, to check"
-          if tally.Figures > 0 then
-              let need = plural tally.Figures "figure needs" "figures need"
+          if tally.QrCodes > 0 then
+              let described = plural tally.QrCodes "QR code" "QR codes"
+              yield $"Described {described} by what they encode"
+          if tally.QrLinks > 0 then
+              let linked = plural tally.QrLinks "QR code" "QR codes"
+              yield $"Linked {linked} to the web address they encode"
+          if tally.Figures > tally.QrCodes then
+              let need = plural (tally.Figures - tally.QrCodes) "figure needs" "figures need"
               yield $"{need} alt text, written by a person"
           if tally.Tables > 0 then
               let were = plural tally.Tables "table was" "tables were"

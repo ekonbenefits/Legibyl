@@ -9,6 +9,7 @@ module PdfFixDescriptions =
     /// One description per option set in options, e.g. "Remove empty /P structure elements".
     let Describe (options: PdfFixOptions) : string list =
         [ PdfFixOptions.TagFromLayout, "Tag an untagged document from each page's layout"
+          PdfFixOptions.QrCodeLinks, "Link QR codes to the web addresses they encode"
           PdfFixOptions.LanguageFromText, "Declare the document's language, detected from its text"
           PdfFixOptions.Metadata, "Fix XMP metadata"
           PdfFixOptions.FontCidToGidMap, "Write the glyph mapping (/CIDToGIDMap /Identity) embedded TrueType CID fonts leave out"

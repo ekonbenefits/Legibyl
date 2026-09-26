@@ -34,7 +34,10 @@ type PdfFixOptions =
     /// Writes /CIDToGIDMap /Identity on embedded TrueType CID fonts that leave it out (the
     /// mapping readers already use then), which PDF/UA requires.
     | FontCidToGidMap = 4096
-    | All = 8191
+    /// With TagFromLayout: adds a link over each QR code that encodes a web address, going
+    /// there, tagged as a Link holding the figure.
+    | QrCodeLinks = 8192
+    | All = 16383
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
@@ -93,7 +96,10 @@ type LayoutRegion =
       /// The region's text when it's drawn as outlines or pixels rather than as text (read by
       /// OCR, in English): written as the element's /ActualText (with /Lang en), with the
       /// drawing as its content.
-      ActualText: string | null }
+      ActualText: string | null
+      /// For a "Figure" that's a QR code, what it encodes: its alt text says so, and the
+      /// QrCodeLinks fix links it when it's a web address.
+      QrText: string | null }
 
 /// Where the TagFromLayout fix gets each page's regions.
 type IPageLayoutSource =

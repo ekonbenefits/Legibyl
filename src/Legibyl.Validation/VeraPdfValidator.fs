@@ -455,7 +455,7 @@ type VeraPdfValidator() =
                 | NonNull source when options.HasFlag PdfFixOptions.TagFromLayout ->
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempTaggedOutput <- tempOutput
-                    match LayoutTagging.tag currentInput tempOutput source with
+                    match LayoutTagging.tag currentInput tempOutput source (options.HasFlag PdfFixOptions.QrCodeLinks) with
                     | [] ->
                         tryDeleteTemporary tempOutput
                         tempTaggedOutput <- null

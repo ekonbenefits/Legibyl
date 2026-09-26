@@ -26,6 +26,7 @@
   <ItemGroup Label="Layout detection and OCR">
     <PackageVersion Include="PaddleOCR" Version="26.9.5517" />
     <PackageVersion Include="Tesseract.CrossPlatform" Version="5.5.2.200" />
+    <PackageVersion Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
 
   <ItemGroup Label="GUI">
