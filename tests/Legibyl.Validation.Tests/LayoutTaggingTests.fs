@@ -44,7 +44,8 @@ let private createUntagged (path: string) =
 let private region tag (left, bottom, right, top) numbering : LayoutRegion =
     { Tag = tag
       Geometry = { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
-      ListNumbering = numbering }
+      ListNumbering = numbering
+      ActualText = null }
 
 let private regions =
     [ region "Artifact" (70.0, 745.0, 200.0, 762.0) null
@@ -169,3 +170,28 @@ let ``a tagged document, or no layout source, is left alone`` () =
     use output = new TempPdf()
     createUntagged input.Path
     tagFromLayout input.Path output.Path None |> _.OutputPath |> should be Null
+
+/// Text drawn as outlines: a filled shape where the words would be, and no text at all.
+let private createOutlined (path: string) =
+    use document = new PdfDocument(new PdfWriter(path))
+    let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
+    canvas.Rectangle(72.0, 700.0, 200.0, 12.0).Fill() |> ignore
+    canvas.MoveTo(72.0, 650.0).LineTo(540.0, 650.0).Stroke() |> ignore
+
+[<Fact>]
+let ``text drawn as outlines is tagged with its OCR text as ActualText`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createOutlined input.Path
+    let outlined = { region "P" (70.0, 695.0, 280.0, 715.0) null with ActualText = "Outlined words" }
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout [ outlined ]))
+
+    result.AppliedFixes |> should contain "1 element's text is drawn as outlines or pixels: read with OCR into /ActualText, to check"
+    let rules = failedRules output.Path
+    // All drawn: the outline as the paragraph, the rule as decoration; its text's language is known.
+    rules |> should not' (contain "7.1-3")
+    rules |> should not' (contain "7.2-21")
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let paragraph = (root.Children |> Seq.exactlyOne).Children |> Seq.exactlyOne
+    (paragraph.Tag, paragraph.ActualText, paragraph.ContentLeafCount) |> should equal ("P", "Outlined words", 1)

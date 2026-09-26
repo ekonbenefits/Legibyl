@@ -83,7 +83,11 @@ type LayoutRegion =
       Tag: string
       Geometry: StructureGeometry
       /// For an "LI", its list's /ListNumbering (e.g. "Disc"); consecutive items form one list.
-      ListNumbering: string | null }
+      ListNumbering: string | null
+      /// The region's text when it's drawn as outlines or pixels rather than as text (read by
+      /// OCR, in English): written as the element's /ActualText (with /Lang en), with the
+      /// drawing as its content.
+      ActualText: string | null }
 
 /// Where the TagFromLayout fix gets each page's regions.
 type IPageLayoutSource =

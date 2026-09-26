@@ -297,6 +297,15 @@ detected as they're shown. A page without a text layer (a scan) is flagged, sinc
 tagging it would need OCR first. The detector test is skipped unless the model
 has been downloaded.
 
+Some PDFs draw text as outlines (or pixels) rather than as text, so there's
+nothing for a screen reader to read. A text region with no text of its own is
+read with OCR ([Tesseract](https://www.nuget.org/packages/Tesseract.CrossPlatform)
+and its English `tessdata_fast` model, about 4 MB, fetched at build time pinned
+by `TessdataVersion`/`TessdataEngSha256` in `Directory.Build.props` and shipped
+in the app's `tessdata` folder). The preview marks that text **OCR:**. Tesseract
+has native libraries for Windows, Linux and Apple Silicon Macs; elsewhere (Intel
+Macs) OCR is skipped and those regions show no text.
+
 The Fix dialog's **Tag this untagged document from each page's layout** option
 (off by default, and only for a document with no structure tree) writes those
 regions as tags, before the other fixes run, so they can build on them
@@ -315,7 +324,9 @@ consecutive list items form an `L` with its `/ListNumbering`, notes get the
 `/StructParent` and the page's `/Tabs /S`). What it can't do is reported:
 figures still need alt text, tables are tagged as text (their rows and cells
 need tagging by hand), and a page without text (a scan) is tagged as a figure
-that needs OCR. It doesn't guess the document's language, or describe links
+that needs OCR. Text drawn as outlines is tagged as its region's element, with
+the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
+and the report asks for it to be checked. It doesn't guess the document's language, or describe links
 outside a table of contents.
 **Export JSON…** in that window saves the whole hierarchy — including each
 node's `content` text, geometry, link targets, and form field metadata — as

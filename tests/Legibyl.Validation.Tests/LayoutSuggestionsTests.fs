@@ -58,7 +58,8 @@ let private block order tag left text : SuggestedBlock =
       Score = 0.9
       Geometry = { PageNumber = 1; Left = left; Bottom = 0.0; Right = 500.0; Top = 10.0 }
       Text = text
-      ListNumbering = None }
+      ListNumbering = None
+      Recognized = false }
 
 [<Fact>]
 let ``runs of paragraphs starting with list markers become list items, like the lists fix`` () =
@@ -84,3 +85,19 @@ let ``runs of paragraphs starting with list markers become list items, like the 
           6, "P", None
           7, "P", None
           8, "P", None ]
+
+[<Fact>]
+let ``OCR reads text in an image`` () =
+    match TextRecognition.createEngine () with
+    | None -> Assert.Skip "Tesseract has no native library for this platform."
+    | Some engine ->
+        use engine = engine
+        use bitmap = new SkiaSharp.SKBitmap(900, 120)
+        use canvas = new SkiaSharp.SKCanvas(bitmap)
+        canvas.Clear SkiaSharp.SKColors.White
+        use font = new SkiaSharp.SKFont(SkiaSharp.SKTypeface.Default, 56f)
+        use paint = new SkiaSharp.SKPaint(Color = SkiaSharp.SKColors.Black, IsAntialias = true)
+        canvas.DrawText("Scouting for Food", 20f, 80f, font, paint)
+        use image = SkiaSharp.SKImage.FromBitmap bitmap
+        use png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
+        TextRecognition.recognize engine (png.ToArray()) |> should equal "Scouting for Food"
