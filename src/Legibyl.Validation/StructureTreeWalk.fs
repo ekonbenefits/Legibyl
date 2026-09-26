@@ -28,7 +28,27 @@ type private FormFieldInfo =
 type private LinkTargetInfo =
     { Uri: string | null
       DestinationPageNumber: int option
-      DestinationDescription: string | null }
+      DestinationDescription: string | null
+      Destination: LinkDestination option }
+
+/// A destination's kind and coordinates (from its entries after the page), read with `number`
+/// giving each entry as a number if it is one.
+let private linkDestination (pageNumber: int) (kind: string) (number: int -> float option) =
+    let at i = number i |> Option.toNullable
+    let none = Nullable()
+    let left, top, right, bottom =
+        match kind with
+        | "XYZ" -> at 2, at 3, none, none
+        | "FitH" | "FitBH" -> none, at 2, none, none
+        | "FitV" | "FitBV" -> at 2, none, none, none
+        | "FitR" -> at 2, at 5, at 4, at 3
+        | _ -> none, none, none, none
+    { PageNumber = pageNumber
+      Kind = kind
+      Left = left
+      Top = top
+      Right = right
+      Bottom = bottom }
 
 type private LinkAnnotationTarget = { Geometry: StructureGeometry; Target: LinkTargetInfo }
 
@@ -165,10 +185,21 @@ let private readDestination (destination: COSObject | null) context =
             match pageNumber with
             | None -> $"Internal destination: {destination}"
             | Some page -> $"Internal destination: page {page}{formatCosDestinationCoordinates destination}"
-        Some { Uri = null; DestinationPageNumber = pageNumber; DestinationDescription = description }
+        let kind = if cosSize destination > 1 then atomValue ((destination.at 1).getName ()) else null
+        Some
+            { Uri = null
+              DestinationPageNumber = pageNumber
+              DestinationDescription = description
+              Destination =
+                match pageNumber, kind with
+                | Some page, NonNull kind -> Some(linkDestination page kind (numberAt destination))
+                | _ -> None }
 
 let private uriTarget (uri: string) =
-    { Uri = uri; DestinationPageNumber = None; DestinationDescription = $"URI: {uri}" }
+    { Uri = uri
+      DestinationPageNumber = None
+      DestinationDescription = $"URI: {uri}"
+      Destination = None }
 
 let private readLinkTargetInfo (child: obj) context =
     referencedAnnotation child "Link"
@@ -221,7 +252,8 @@ let rec private firstDescendantLinkTarget (nodes: StructureNode seq) =
             Some
                 { Uri = node.LinkUri
                   DestinationPageNumber = Option.ofNullable node.LinkDestinationPageNumber
-                  DestinationDescription = node.LinkDestinationDescription }
+                  DestinationDescription = node.LinkDestinationDescription
+                  Destination = Option.ofObj node.LinkDestination }
         else
             firstDescendantLinkTarget node.Children)
 
@@ -271,7 +303,18 @@ let private readITextLinkTarget (annotation: PdfDictionary) (pageNumberByObject:
                 match pageNumber with
                 | None -> $"Internal destination: {destination}"
                 | Some page -> $"Internal destination: page {page}{formatDestinationCoordinates destination}"
-            Some { Uri = null; DestinationPageNumber = pageNumber; DestinationDescription = description }
+            let destinationOf page =
+                match destination with
+                | :? PdfArray as array when array.Size() > 1 && not (isNull (array.GetAsName 1)) ->
+                    let number i =
+                        if i < array.Size() then array.GetAsNumber i |> Option.ofObj |> Option.map _.DoubleValue() else None
+                    Some(linkDestination page ((array.GetAsName 1).GetValue()) number)
+                | _ -> None
+            Some
+                { Uri = null
+                  DestinationPageNumber = pageNumber
+                  DestinationDescription = description
+                  Destination = pageNumber |> Option.bind destinationOf }
 
 let private buildLinkAnnotationIndex (pdfPath: string) =
     use document = new PdfDocument(new PdfReader(pdfPath))
@@ -413,6 +456,7 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
       LinkUri = linkTarget |> Option.map _.Uri |> Option.toObj
       LinkDestinationPageNumber = linkTarget |> Option.bind _.DestinationPageNumber |> Option.toNullable
       LinkDestinationDescription = linkTarget |> Option.map _.DestinationDescription |> Option.toObj
+      LinkDestination = linkTarget |> Option.bind _.Destination |> Option.toObj
       Geometry = Option.toObj geometry
       Language = nullIfEmpty (elem.getLang () |?> _.toString())
       PageNumber = Option.toNullable displayPage
@@ -486,6 +530,7 @@ let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) :
               LinkUri = null
               LinkDestinationPageNumber = Nullable()
               LinkDestinationDescription = null
+              LinkDestination = null
               Geometry = children |> Seq.choose (fun child -> Option.ofObj child.Geometry) |> StructureTreeObjects.unionGeometry |> Option.toObj
               Language = null
               PageNumber = Nullable()

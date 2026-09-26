@@ -20,6 +20,7 @@ let private tree () =
       LinkUri = null
       LinkDestinationPageNumber = Nullable()
       LinkDestinationDescription = null
+      LinkDestination = null
       Geometry = null
       Language = null
       PageNumber = Nullable()

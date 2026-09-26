@@ -39,8 +39,18 @@ type IPdfRegionRenderer =
         pdfPath: string * geometry: StructureGeometry * [<Optional; DefaultParameterValue(2.0f)>] scale: float32 ->
             HighlightImageResult
 
+    /// Renders the page an internal link goes to, with the part of it the destination names
+    /// highlighted in a different color from a finding: its rectangle (/FitR), a band where the
+    /// view's top edge is (/XYZ, /FitH), a band at its left edge (/FitV), or the whole page.
+    abstract RenderPageWithTarget:
+        pdfPath: string * destination: LinkDestination * [<Optional; DefaultParameterValue(2.0f)>] scale: float32 ->
+            HighlightImageResult
+
 module private Rendering =
-    let private highlightColor = SKColor(0xE8uy, 0x1Buy, 0x23uy)
+    /// A finding or selected element.
+    let highlightColor = SKColor(0xE8uy, 0x1Buy, 0x23uy)
+    /// Where a link goes, so it reads differently from the link itself.
+    let targetColor = SKColor(0x1Auy, 0x73uy, 0xE8uy)
 
     let openDocument (pdfPath: string) =
         let document = PdfDocument.Open(pdfPath, SkiaRenderingParsingOptions.Instance)
@@ -57,7 +67,7 @@ module private Rendering =
         use encoded = image.Encode(SKEncodedImageFormat.Png, 100)
         encoded.ToArray()
 
-    let drawHighlight (bitmap: SKBitmap) (rect: PdfRectangle) (scale: float32) =
+    let drawHighlight (color: SKColor) (bitmap: SKBitmap) (rect: PdfRectangle) (scale: float32) =
         use canvas = new SKCanvas(bitmap)
 
         let left = min rect.Left rect.Right
@@ -72,8 +82,8 @@ module private Rendering =
         let box =
             SKRect(scaled left - padding, height - scaled top - padding, scaled right + padding, height - scaled bottom + padding)
 
-        use fill = new SKPaint(Color = highlightColor.WithAlpha 40uy, Style = SKPaintStyle.Fill, IsAntialias = true)
-        use stroke = new SKPaint(Color = highlightColor, Style = SKPaintStyle.Stroke, StrokeWidth = 3f, IsAntialias = true)
+        use fill = new SKPaint(Color = color.WithAlpha 40uy, Style = SKPaintStyle.Fill, IsAntialias = true)
+        use stroke = new SKPaint(Color = color, Style = SKPaintStyle.Stroke, StrokeWidth = 3f, IsAntialias = true)
         canvas.DrawRect(box, fill)
         canvas.DrawRect(box, stroke)
 
@@ -183,7 +193,7 @@ type PdfRegionRenderer() =
             geometry.PageNumber,
             scale,
             fun _ bitmap ->
-                drawHighlight bitmap (PdfRectangle(geometry.Left, geometry.Bottom, geometry.Right, geometry.Top)) scale
+                drawHighlight highlightColor bitmap (PdfRectangle(geometry.Left, geometry.Bottom, geometry.Right, geometry.Top)) scale
 
                 { PngBytes = encodePng bitmap
                   PageNumber = geometry.PageNumber
@@ -209,7 +219,7 @@ type PdfRegionRenderer() =
                 let hasPreciseRegion, note =
                     match tryFindAnnotationRect document pageNumber location with
                     | Some(rect, note) ->
-                        drawHighlight bitmap rect scale
+                        drawHighlight highlightColor bitmap rect scale
                         true, note
                     | None ->
                         false,
@@ -218,6 +228,43 @@ type PdfRegionRenderer() =
                 { PngBytes = encodePng bitmap
                   PageNumber = pageNumber
                   HasPreciseRegion = hasPreciseRegion
+                  Note = note }
+        )
+
+    member _.RenderPageWithTarget
+        (
+            pdfPath: string,
+            destination: LinkDestination,
+            [<Optional; DefaultParameterValue(2.0f)>] scale: float32
+        ) : HighlightImageResult =
+        cache.WithPage(
+            pdfPath,
+            destination.PageNumber,
+            scale,
+            fun _ bitmap ->
+                let width = float bitmap.Width / float scale
+                let height = float bitmap.Height / float scale
+                // How much of the page below a destination's top edge to mark.
+                let band = 28.0
+                let rect, note =
+                    if destination.Kind = "FitR" && destination.Left.HasValue && destination.Top.HasValue
+                       && destination.Right.HasValue && destination.Bottom.HasValue then
+                        PdfRectangle(destination.Left.Value, destination.Bottom.Value, destination.Right.Value, destination.Top.Value),
+                        "Highlighted the area the link shows."
+                    elif destination.Top.HasValue then
+                        let left = if destination.Left.HasValue then destination.Left.Value else 0.0
+                        PdfRectangle(left, destination.Top.Value - band, width, destination.Top.Value),
+                        "Highlighted where the link goes: the view starts at this line."
+                    elif destination.Left.HasValue then
+                        PdfRectangle(destination.Left.Value, 0.0, destination.Left.Value + band, height),
+                        "Highlighted where the link goes: the view starts at this edge."
+                    else
+                        PdfRectangle(0.0, 0.0, width, height), "The link goes to this page, without a position on it."
+                drawHighlight targetColor bitmap rect scale
+
+                { PngBytes = encodePng bitmap
+                  PageNumber = destination.PageNumber
+                  HasPreciseRegion = destination.Top.HasValue || destination.Left.HasValue
                   Note = note }
         )
 
@@ -233,3 +280,6 @@ type PdfRegionRenderer() =
 
         member this.RenderPageWithHighlight(pdfPath: string, geometry: StructureGeometry, scale) =
             this.RenderPageWithHighlight(pdfPath, geometry, scale)
+
+        member this.RenderPageWithTarget(pdfPath, destination, scale) =
+            this.RenderPageWithTarget(pdfPath, destination, scale)

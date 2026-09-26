@@ -30,14 +30,12 @@ let private setStructTreeRoot (document: PdfDocument) (kids: PdfObject) =
     structTreeRoot.Put(PdfName.K, kids) |> ignore
     document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, structTreeRoot) |> ignore
 
-/// Adds a link annotation on page 1 pointing at page 2 and returns an /OBJR referencing it.
-let private addInternalLinkAnnotation (document: PdfDocument) (page1: PdfPage) (page2: PdfPage) =
+/// Adds a link annotation on page 1 pointing at page 2 (by default at /XYZ 33 690 0) and
+/// returns an /OBJR referencing it.
+let private addInternalLinkAnnotationTo (view: PdfObject list) (document: PdfDocument) (page1: PdfPage) (page2: PdfPage) =
     let destination = PdfArray()
     destination.Add(page2.GetPdfObject())
-    destination.Add(PdfName.XYZ)
-    destination.Add(PdfNumber 33)
-    destination.Add(PdfNumber 690)
-    destination.Add(PdfNumber 0)
+    view |> List.iter destination.Add
 
     let annotation = PdfDictionary()
     annotation.Put(PdfName.Type, PdfName.Annot) |> ignore
@@ -55,15 +53,21 @@ let private addInternalLinkAnnotation (document: PdfDocument) (page1: PdfPage) (
     objr.Put(PdfName.Obj, annotation.GetIndirectReference()) |> ignore
     objr
 
-let private createPdfWithTaggedInternalLink (path: string) =
+let private addInternalLinkAnnotation =
+    addInternalLinkAnnotationTo [ PdfName.XYZ; PdfNumber 33; PdfNumber 690; PdfNumber 0 ]
+
+let private createPdfWithTaggedInternalLinkTo (view: PdfObject list) (path: string) =
     use document = new PdfDocument(new PdfWriter(path))
     let page1 = document.AddNewPage()
     let page2 = document.AddNewPage()
 
     let link = structElem PdfName.Link page1
-    link.Put(PdfName.K, addInternalLinkAnnotation document page1 page2) |> ignore
+    link.Put(PdfName.K, addInternalLinkAnnotationTo view document page1 page2) |> ignore
 
     setStructTreeRoot document link
+
+let private createPdfWithTaggedInternalLink =
+    createPdfWithTaggedInternalLinkTo [ PdfName.XYZ; PdfNumber 33; PdfNumber 690; PdfNumber 0 ]
 
 let private createPdfWithTaggedTocItemLink (path: string) =
     use document = new PdfDocument(new PdfWriter(path))
@@ -151,6 +155,9 @@ let ``ReadStructureTree link annotation reports internal destination`` () =
     link.LinkUri |> should be Null
     link.LinkDestinationPageNumber |> should equal (Nullable 2)
     link.LinkDestinationDescription |> should haveSubstring "page 2"
+    let destination = link.LinkDestination |> notNull
+    (destination.PageNumber, destination.Kind, destination.Left, destination.Top)
+    |> should equal (2, "XYZ", Nullable 33.0, Nullable 690.0)
 
 [<Fact>]
 let ``ReadStructureTree TOC item with child link destination reports destination on TOC item`` () =
@@ -162,6 +169,8 @@ let ``ReadStructureTree TOC item with child link destination reports destination
     let tocItem = root.Children |> single (fun n -> n.Tag = "TOCI")
     tocItem.LinkDestinationPageNumber |> should equal (Nullable 2)
     tocItem.LinkDestinationDescription |> should haveSubstring "page 2"
+    // A TOC entry takes its target from its child link.
+    (tocItem.LinkDestination |> notNull).Top |> should equal (Nullable 690.0)
 
 [<Fact>]
 let ``ReadStructureTree element without its own page takes the page of its marked content`` () =
@@ -173,3 +182,14 @@ let ``ReadStructureTree element without its own page takes the page of its marke
     let paragraph = root.Children |> single (fun n -> n.Tag = "P")
     paragraph.PageNumber |> should equal (Nullable 2)
     paragraph.Content |> should equal "Text on the second page"
+
+[<Fact>]
+let ``ReadStructureTree link to a rectangle reports the rectangle`` () =
+    use input = new TempPdf()
+    createPdfWithTaggedInternalLinkTo [ PdfName.FitR; PdfNumber 50; PdfNumber 400; PdfNumber 300; PdfNumber 500 ] input.Path
+
+    let root = reader.ReadStructureTree input.Path |> notNull
+
+    let destination = (root.Children |> single (fun n -> n.Tag = "Link")).LinkDestination |> notNull
+    (destination.Kind, destination.Left, destination.Bottom, destination.Right, destination.Top)
+    |> should equal ("FitR", Nullable 50.0, Nullable 400.0, Nullable 300.0, Nullable 500.0)

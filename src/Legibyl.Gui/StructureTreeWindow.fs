@@ -379,6 +379,9 @@ module private StructureView =
             // The highlighted border and the style to restore when the selection moves.
             let highlighted = ctx.useState ((None: (Border * (IBrush | null) * Thickness) option), false)
             let previewImage = ctx.useState (None: Bitmap option)
+            // For a link: the page it goes to, with its destination marked in blue.
+            let targetImage = ctx.useState (None: Bitmap option)
+            let targetNote = ctx.useState ""
             let previewNote =
                 ctx.useState "Select a structure block to highlight its best-effort page geometry when available."
             // Bumped on every selection so a slower preview for an earlier one can't overwrite it.
@@ -400,26 +403,44 @@ module private StructureView =
                     previewVersion.Set(previewVersion.Current + 1)
                     let version = previewVersion.Current
                     previewImage.Set None
-                    match node.Geometry with
-                    | null ->
+                    targetImage.Set None
+                    targetNote.Set ""
+                    let geometry = Option.ofObj node.Geometry
+                    let destination = Option.ofObj node.LinkDestination
+                    match geometry with
+                    | None ->
                         previewNote.Set(
                             $"Selected <{node.Tag}>. No same-page geometry is available for this node "
                             + "(it may be a pure container, non-text content without a rectangle, or span multiple pages)."
                         )
-                    | geometry ->
-                        previewNote.Set $"Rendering page {geometry.PageNumber} highlight for <{node.Tag}>…"
+                    | Some geometry -> previewNote.Set $"Rendering page {geometry.PageNumber} highlight for <{node.Tag}>…"
+                    if geometry.IsSome || destination.IsSome then
                         try
                             // Render and decode off the UI thread; a full page is a large image.
-                            let! result, image =
+                            let! source, target =
                                 Task.Run(fun () ->
-                                    let result = renderer.RenderPageWithHighlight(sourceFilePath, geometry)
-                                    use stream = new MemoryStream(result.PngBytes)
-                                    result, new Bitmap(stream))
+                                    let decode (result: HighlightImageResult) =
+                                        use stream = new MemoryStream(result.PngBytes)
+                                        result, new Bitmap(stream)
+                                    geometry |> Option.map (fun g -> decode (renderer.RenderPageWithHighlight(sourceFilePath, g))),
+                                    destination |> Option.map (fun d -> decode (renderer.RenderPageWithTarget(sourceFilePath, d))))
                             if version = previewVersion.Current then
-                                previewImage.Set(Some image)
-                                previewNote.Set $"{result.Note} Page {result.PageNumber}."
+                                match source with
+                                | Some(result, image) ->
+                                    previewImage.Set(Some image)
+                                    previewNote.Set(
+                                        if destination.IsSome then $"{result.Note} Page {result.PageNumber}; the link is marked in red."
+                                        else $"{result.Note} Page {result.PageNumber}."
+                                    )
+                                | None -> ()
+                                match target with
+                                | Some(result, image) ->
+                                    targetImage.Set(Some image)
+                                    targetNote.Set $"Where the link goes (marked in blue), page {result.PageNumber}: {result.Note}"
+                                | None -> ()
                             else
-                                image.Dispose()
+                                source |> Option.iter (snd >> _.Dispose())
+                                target |> Option.iter (snd >> _.Dispose())
                         with :? InvalidOperationException | :? IOException as ex ->
                             if version = previewVersion.Current then
                                 previewNote.Set $"Could not render highlight for <{node.Tag}>: {ex.Message}"
@@ -496,21 +517,39 @@ module private StructureView =
                                     Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                     TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                 ]
-                                Border.create [
+                                // The selected block's page, and for a link, the page it goes to below it.
+                                let imageBox (row: int) (image: Bitmap option) =
+                                    Border.create [
+                                        Grid.row row
+                                        Theme.resources
+                                            [ Border.BorderBrushProperty, Theme.Tokens.Border
+                                              Border.BackgroundProperty, Theme.Tokens.Fill ]
+                                        Border.borderThickness 1.0
+                                        Border.padding 6.0
+                                        Border.child (
+                                            Image.create [
+                                                match image with
+                                                | Some image -> Image.source image
+                                                | None -> ()
+                                                Image.stretch Stretch.Uniform
+                                            ]
+                                        )
+                                    ]
+                                Grid.create [
                                     Grid.row 2
-                                    Theme.resources
-                                        [ Border.BorderBrushProperty, Theme.Tokens.Border
-                                          Border.BackgroundProperty, Theme.Tokens.Fill ]
-                                    Border.borderThickness 1.0
-                                    Border.padding 6.0
-                                    Border.child (
-                                        Image.create [
-                                            match previewImage.Current with
-                                            | Some image -> Image.source image
-                                            | None -> ()
-                                            Image.stretch Stretch.Uniform
-                                        ]
-                                    )
+                                    Grid.rowDefinitions (if targetImage.Current.IsSome then "*,Auto,*" else "*")
+                                    Grid.children [
+                                        imageBox 0 previewImage.Current
+                                        if targetImage.Current.IsSome then
+                                            TextBlock.create [
+                                                Grid.row 1
+                                                TextBlock.text targetNote.Current
+                                                TextBlock.textWrapping TextWrapping.Wrap
+                                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                TextBlock.margin (0.0, 8.0, 0.0, 8.0)
+                                            ]
+                                            imageBox 2 targetImage.Current
+                                    ]
                                 ]
                             ]
                         ]

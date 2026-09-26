@@ -93,6 +93,19 @@ type PdfLocation =
         if this.PageNumber.HasValue then $"Page {this.PageNumber.Value} — {this.Breadcrumb}"
         else this.Breadcrumb
 
+/// Where an internal link sends the reader: a page, and the part of it its destination names.
+/// Which coordinates are set depends on the kind: /XYZ gives the view's left and top edges,
+/// /FitH its top, /FitV its left, /FitR a whole rectangle, and /Fit none. A null coordinate is
+/// left to the reader (e.g. /XYZ null 700 null keeps the current left edge).
+type LinkDestination =
+    { PageNumber: int
+      /// The destination's kind: "XYZ", "Fit", "FitH", "FitV", "FitR", "FitB", "FitBH" or "FitBV".
+      Kind: string
+      Left: Nullable<float>
+      Top: Nullable<float>
+      Right: Nullable<float>
+      Bottom: Nullable<float> }
+
 /// One node of a tagged PDF's logical structure tree (the Catalog's StructTreeRoot) —
 /// the same semantic hierarchy (headings, paragraphs, lists, tables, links, etc.) and
 /// reading order that assistive technology (screen readers) uses to present the
@@ -133,6 +146,8 @@ type StructureNode =
       LinkDestinationPageNumber: Nullable<int>
       /// For /Link structure elements, a human-readable internal destination summary, if any.
       LinkDestinationDescription: string | null
+      /// For /Link structure elements, where an internal destination goes on its page, if resolvable.
+      LinkDestination: LinkDestination | null
       /// Best-effort same-page geometry covered by this node's directly-owned content and
       /// child nodes, if determinable. Null when the node has no geometric content or
       /// spans multiple pages.
