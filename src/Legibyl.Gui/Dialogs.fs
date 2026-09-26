@@ -189,6 +189,12 @@ let private fixChoices =
 /// tagNote, if any, says what tagging from the layout will use (a review in Suggest Structure).
 let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) : Task<PdfFixOptions option> =
     let window = dialogWindow "Fix PDF" 560.0
+    // Never taller than the screen: the list scrolls in whatever room is left. (All the repairs
+    // at once are taller than a laptop screen.)
+    window.MaxHeight <-
+        match owner.Screens.ScreenFromWindow owner with
+        | NonNull screen -> float screen.WorkingArea.Height / screen.Scaling * 0.9
+        | Null -> 700.0
     let found (option: PdfFixOptions) = report.FixableCount option
     /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
     /// and so can describing them from the pages they go to.
@@ -312,7 +318,6 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                     ]
                     ScrollViewer.create [
                         Grid.row 2
-                        ScrollViewer.maxHeight 480.0
                         ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
                         ScrollViewer.content (
                             StackPanel.create [
