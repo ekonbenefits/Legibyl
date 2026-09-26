@@ -287,7 +287,9 @@ preview of the structure a layout detector finds on each page (PaddleOCR's
 PP-DocLayoutV3, via the pure C# [PaddleOCR](https://www.nuget.org/packages/PaddleOCR)
 port in `Legibyl.Layout`). Each region is outlined on the page with the tag it
 suggests (H1, H, P, Figure, Table, Caption, Note, or Artifact for page
-furniture) and its reading order; the list beside it shows each region's text.
+furniture) and its reading order. The detector has no list regions, so runs of
+paragraphs that start with list markers become list items (LI) by the same
+rules as the lists-from-paragraphs fix; the list beside it shows each region's text.
 It's a preview only: nothing is written to the PDF. The model (about 130 MB) is
 downloaded once, when asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`)
 and runs locally; each page takes several seconds on the CPU, so pages are

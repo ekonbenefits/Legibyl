@@ -25,6 +25,7 @@ module SuggestedStructureView =
         | "H1"
         | "H" -> 0xC2185Bu
         | "P" -> 0x1A73E8u
+        | "LI" -> 0x00838Fu
         | "Figure" -> 0x2E7D32u
         | "Table" -> 0xEF6C00u
         | "Artifact" -> 0x757575u
@@ -122,8 +123,8 @@ module SuggestedStructureView =
             let intro =
                 "Suggested structure for this untagged PDF, from what each page looks like: its regions, "
                 + "the tag each suggests, and their reading order (the numbers). This is a preview; nothing is written to the PDF. "
-                + "Headings are shown as H because their levels aren't known from one page, and Artifact marks page furniture "
-                + "like running headers and page numbers."
+                + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
+                + "list markers are list items (LI), and Artifact marks page furniture like running headers and page numbers."
 
             let downloadPanel =
                 StackPanel.create [
@@ -175,7 +176,12 @@ module SuggestedStructureView =
                                         else
                                             Button.background Brushes.Transparent
                                             Theme.resources [ Button.ForegroundProperty, Theme.Tokens.Text ]
-                                        ToolTip.tip $"Detected as {block.Label} ({block.Score:P0} confident)."
+                                        ToolTip.tip (
+                                            match block.ListNumbering with
+                                            | Some numbering ->
+                                                $"Detected as {block.Label} ({block.Score:P0} confident); starts with a list marker, like the items around it (/ListNumbering /{numbering})."
+                                            | None -> $"Detected as {block.Label} ({block.Score:P0} confident)."
+                                        )
                                         Button.onClick (fun _ -> select block)
                                         Button.content (
                                             DockPanel.create [

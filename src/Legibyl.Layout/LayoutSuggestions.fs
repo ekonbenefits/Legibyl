@@ -27,7 +27,9 @@ type SuggestedBlock =
       Score: float
       Geometry: StructureGeometry
       /// The page's own text inside the region (empty for a figure, or a page without a text layer).
-      Text: string }
+      Text: string
+      /// For a list item (LI): its list's /ListNumbering, e.g. "Disc" or "Decimal".
+      ListNumbering: string option }
 
 type PageSuggestion =
     { PageNumber: int
@@ -86,6 +88,32 @@ module LayoutSuggestions =
             |> List.tryHead
             |> Option.iter (fun (index, _) -> byRegion[index].Add text)
         [ for words in byRegion -> String.Join(" ", words) ]
+
+    // Items of one list start within this many points of each other.
+    [<Literal>]
+    let private SameIndent = 6.0
+
+    /// The detector has no list regions: a list's items come out as paragraphs. Like the
+    /// ListsFromParagraphs fix, runs of two or more consecutive paragraphs that start at the
+    /// same indent with markers forming one list ("•", "1.", "(a)") become list items.
+    let findLists (blocks: SuggestedBlock list) : SuggestedBlock list =
+        let isCandidate (block: SuggestedBlock) = block.Tag = "P" && ParagraphLists.startsWithMarker block.Text
+        let runs =
+            (blocks, [])
+            ||> List.foldBack (fun block runs ->
+                match runs with
+                | (next :: _ as run) :: rest when
+                    isCandidate block && isCandidate next
+                    && block.Geometry.PageNumber = next.Geometry.PageNumber
+                    && abs (block.Geometry.Left - next.Geometry.Left) <= SameIndent
+                    ->
+                    (block :: run) :: rest
+                | _ -> [ block ] :: runs)
+        [ for run in runs do
+              match ParagraphLists.numberingOfTexts (run |> List.map _.Text) with
+              | Some numbering when isCandidate run.Head ->
+                  for block in run -> { block with Tag = "LI"; ListNumbering = Some numbering }
+              | _ -> yield! run ]
 
     /// The bitmap's pixels as tightly packed RGB, which the detector takes.
     let internal rgbImage (bitmap: SKBitmap) =
@@ -176,7 +204,9 @@ type LayoutSuggester(pdfPath: string) =
                         Tag = LayoutSuggestions.tagFor box.Label
                         Score = float box.Score
                         Geometry = region
-                        Text = text } ] })
+                        Text = text
+                        ListNumbering = None } ]
+                |> LayoutSuggestions.findLists })
 
     interface IDisposable with
         member _.Dispose() =
