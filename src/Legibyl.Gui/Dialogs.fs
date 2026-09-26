@@ -186,7 +186,8 @@ let private fixChoices =
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
 /// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
 /// Returns None if the user cancelled.
-let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOptions option> =
+/// tagNote, if any, says what tagging from the layout will use (a review in Suggest Structure).
+let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) : Task<PdfFixOptions option> =
     let window = dialogWindow "Fix PDF" 560.0
     let found (option: PdfFixOptions) = report.FixableCount option
     /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
@@ -216,7 +217,9 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                     | 0 -> "none found"
                     | n -> $"{n} found"
                 let detail =
-                    if choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
+                    if choice.Option = PdfFixOptions.TagFromLayout && tagNote.IsSome then
+                        $"{choice.Detail} {tagNote.Value}"
+                    elif choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
                         $"{choice.Detail} Unticked: veraPDF only repairs metadata once every other failure is fixed, and some here can't be fixed automatically."
                     else
                         choice.Detail

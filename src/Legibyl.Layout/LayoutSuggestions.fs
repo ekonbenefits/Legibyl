@@ -131,6 +131,15 @@ module LayoutSuggestions =
                     List.insertAt above code blocks)
         placed |> List.mapi (fun i b -> { b with Order = i + 1 })
 
+    /// Suggested blocks as the regions the tag-from-layout fix writes.
+    let toRegions (blocks: SuggestedBlock list) : LayoutRegion list =
+        [ for block in blocks ->
+              { Tag = block.Tag
+                Geometry = block.Geometry
+                ListNumbering = Option.toObj block.ListNumbering
+                ActualText = if block.Recognized then block.Text else null
+                QrText = Option.toObj block.QrText } ]
+
     /// Whether a suggested tag is for text (so a region with none as text needs OCR).
     let holdsText (tag: string) = tag <> "Figure" && tag <> "Table" && tag <> "Artifact"
 
@@ -478,12 +487,7 @@ type LayoutRegionSource(progress: IProgress<int * int> | null) =
             match progress with
             | NonNull progress -> progress.Report((pageNumber, suggester.PageCount))
             | Null -> ()
-            [ for block in (suggester.Suggest pageNumber).Blocks ->
-                  { Tag = block.Tag
-                    Geometry = block.Geometry
-                    ListNumbering = Option.toObj block.ListNumbering
-                    ActualText = if block.Recognized then block.Text else null
-                    QrText = Option.toObj block.QrText } ]
+            LayoutSuggestions.toRegions (suggester.Suggest pageNumber).Blocks
 
     interface IDisposable with
         member _.Dispose() =

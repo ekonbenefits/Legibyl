@@ -145,3 +145,71 @@ let ``a QR code shows the alt text tagging would give it, and offers to read its
             offer.Value.IsChecked.GetValueOrDefault() |> should be False)
     finally
         Directory.Delete(folder, true)
+
+[<Fact>]
+let ``suggestions can be discarded and kept again, and discarded ones aren't tagged`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    let pdf = Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf")
+    onUiThread (fun () ->
+        let window = SuggestedStructureWindow(pdf)
+        window.Show()
+        let buttons () = descendants<Button> window
+        let toggles () = buttons () |> List.filter (fun b -> string b.Content = "Discard" || string b.Content = "Keep")
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (toggles().IsEmpty)) |> ignore
+        let count = toggles().Length
+
+        click (toggles().Head)
+        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+        let afterDiscarding = toggles () |> List.map (fun b -> string b.Content)
+        click (button window "Keep all")
+        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+        let afterKeepingAll = toggles () |> List.map (fun b -> string b.Content)
+        click (button window "Discard all")
+        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+        let afterDiscardingAll = toggles () |> List.map (fun b -> string b.Content)
+        window.Close()
+
+        count |> should be (greaterThan 0)
+        afterDiscarding |> should equal ("Keep" :: List.replicate (count - 1) "Discard")
+        afterKeepingAll |> should equal (List.replicate count "Discard")
+        afterDiscardingAll |> should equal (List.replicate count "Keep"))
+
+[<Fact>]
+let ``the reviewed layout leaves out discarded suggestions`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    use suggester = new LayoutSuggester(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"))
+    let prefetcher = LayoutPrefetcher(suggester, Collections.Concurrent.ConcurrentDictionary())
+    let all = (prefetcher.Find 1).Blocks
+    let reviewed = ReviewedLayout(prefetcher, set [ 1, all.Head.Order ]) :> Legibyl.Validation.IPageLayoutSource
+    let regions = reviewed.PageRegions("unused.pdf", 1)
+    regions.Count |> should equal (all.Length - 1)
+
+[<Fact>]
+let ``reopening Suggest Structure keeps what was found and discarded`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    let pdf = Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf")
+    let reviews = LayoutReviews()
+    onUiThread (fun () ->
+        let toggles (window: Window) =
+            descendants<Button> window |> List.filter (fun b -> string b.Content = "Discard" || string b.Content = "Keep")
+        let first = SuggestedStructureWindow(pdf, reviews.For pdf)
+        first.Show()
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (toggles first).IsEmpty) |> ignore
+        click (toggles first).Head
+        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+        first.Close()
+
+        let reopened = SuggestedStructureWindow(pdf, reviews.For pdf)
+        reopened.Show()
+        // Already found: shown without waiting for the detector.
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> not (toggles reopened).IsEmpty) |> ignore
+        let restored = toggles reopened |> List.map (fun b -> string b.Content)
+        reopened.Close()
+
+        restored |> should not' (be Empty)
+        restored.Head |> should equal "Keep"
+        restored.Tail |> List.forall ((=) "Discard") |> should be True
+        (reviews.For pdf).Discarded.Count |> should equal 1)
