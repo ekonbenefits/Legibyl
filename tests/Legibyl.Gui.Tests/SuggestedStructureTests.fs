@@ -67,10 +67,14 @@ let ``the suggested structure lists each region the detector finds`` () =
         HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (blocks().IsEmpty) && not (images().IsEmpty)) |> ignore
         let found = blocks().Length
         let texts = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
+        let tags = descendants<ComboBox> window |> List.map (fun c -> string c.SelectedItem)
         window.Close()
         found |> should be (greaterThan 0)
         texts |> List.exists (fun t -> t.StartsWith "Page 1 of 1") |> should be True
-        texts |> List.exists (fun t -> t.StartsWith " 1 ") |> should be True)
+        // Each region's reading order, and its tag in a picker beside it.
+        texts |> should contain " 1"
+        tags |> should haveLength found
+        tags |> List.forall (fun tag -> List.contains tag Legibyl.Validation.LayoutFile.tags) |> should be True)
 
 [<Fact>]
 let ``every page's layout is found in the background, so the next page shows at once`` () =
@@ -307,5 +311,39 @@ let ``the document title is prefilled from the document, and only a change is sa
             saved |> should haveSubstring "\"title\": \"Cub Scout Pack 721\""
             removed |> should be True
             (reviews.For pdf).DocumentTitle |> should equal (Some "Design"))
+    finally
+        Directory.Delete(folder, true)
+
+[<Fact>]
+let ``a region can be given another tag, which is kept and tagged`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "pass.pdf")
+    File.Copy(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), pdf)
+    let reviews = LayoutReviews()
+    try
+        onUiThread (fun () ->
+            let window = SuggestedStructureWindow(pdf, reviews.For pdf)
+            window.Show()
+            let pickers () = descendants<ComboBox> window
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (pickers().IsEmpty)) |> ignore
+            let first = pickers().Head
+            let before = string first.SelectedItem
+            let other = if before = "Caption" then "Note" else "Caption"
+            first.SelectedItem <- other
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            let shown = string (pickers().Head.SelectedItem)
+            window.Close()
+
+            shown |> should equal other
+            // Kept next to the PDF: a new session has it.
+            (LayoutReviews().For pdf).Pages[1].Blocks.Head.Tag |> should equal other
+            // And it's what tagging takes.
+            let reviewed = LayoutReviews().For pdf
+            use suggester = new LayoutSuggester(pdf)
+            let regions = (ReviewedLayout(LayoutPrefetcher(suggester, reviewed.Pages), reviewed) :> Legibyl.Validation.IPageLayoutSource).PageRegions(pdf, 1)
+            regions[0].Tag |> should equal other)
     finally
         Directory.Delete(folder, true)
