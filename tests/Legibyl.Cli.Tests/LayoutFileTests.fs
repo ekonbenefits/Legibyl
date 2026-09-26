@@ -65,7 +65,7 @@ let rec private nodes (node: StructureNode) : StructureNode list =
 let ``a suggested layout reads back as the regions it suggested`` () =
     let path = Path.GetTempFileName()
     try
-        File.WriteAllText(path, LayoutFile.toJson (LayoutFile.ofSuggestions "garden.pdf" [ suggestion ] (Some "The garden")))
+        File.WriteAllText(path, LayoutFile.toJson (LayoutSuggestions.toLayoutFile "garden.pdf" [ suggestion ] (Some "The garden")))
         let layout =
             match LayoutFile.read path with
             | Ok layout -> layout
@@ -81,7 +81,7 @@ let ``a suggested layout reads back as the regions it suggested`` () =
 let ``a layout with an unknown tag or a bad box says what's wrong`` () =
     let path = Path.GetTempFileName()
     try
-        let layout = LayoutFile.ofSuggestions "garden.pdf" [ suggestion ] None
+        let layout = LayoutSuggestions.toLayoutFile "garden.pdf" [ suggestion ] None
         let broken =
             { layout with
                 Pages =
@@ -100,7 +100,7 @@ let ``a layout with an unknown tag or a bad box says what's wrong`` () =
 [<Fact>]
 let ``--apply-layout tags the file from the layout, as changed`` () =
     withUntaggedPdf (fun pdf ->
-        let layout = LayoutFile.ofSuggestions pdf [ suggestion ] (Some "The garden")
+        let layout = LayoutSuggestions.toLayoutFile pdf [ suggestion ] (Some "The garden")
         let changed =
             { layout with
                 Pages =
@@ -124,7 +124,7 @@ let ``--apply-layout tags the file from the layout, as changed`` () =
 let ``--apply-layout on a tagged file says the layout wasn't applied`` () =
     withUntaggedPdf (fun pdf ->
         let path = pdf + ".layout.json"
-        File.WriteAllText(path, LayoutFile.toJson (LayoutFile.ofSuggestions pdf [ suggestion ] None))
+        File.WriteAllText(path, LayoutFile.toJson (LayoutSuggestions.toLayoutFile pdf [ suggestion ] None))
         let _, first = run [ pdf; "--apply-layout"; path ]
         let copy = first.Value.GetProperty("fixOutputPath").GetString() |> nonNull
 
@@ -185,12 +185,12 @@ let ``figure images go in a folder beside the layout, replacing the last run's``
         let rendered = ResizeArray<StructureGeometry>()
 
         let layout =
-            LayoutFile.ofSuggestions "garden.pdf" [ suggestion ] None
+            LayoutSuggestions.toLayoutFile "garden.pdf" [ suggestion ] None
             |> LayoutFile.withFigureImages layoutPath (fun geometry -> rendered.Add geometry; [| 1uy |])
 
         images |> should equal (Path.Combine(folder, "garden.layout.images"))
-        [ for region in layout.Pages[0].Regions -> region.Tag, region.Image ]
-        |> should equal [ "H", null; "Figure", "garden.layout.images/p1-r2.png" ]
+        [ for region in layout.Pages[0].Regions -> region.Tag, Option.ofObj region.Image ]
+        |> should equal [ "H", None; "Figure", Some "garden.layout.images/p1-r2.png" ]
         [ for g in rendered -> g.Left, g.Top ] |> should equal [ 70.0, 652.0 ]
         Directory.GetFiles images |> Array.map Path.GetFileName |> Array.sort |> should equal [| "notes.txt"; "p1-r2.png" |]
     finally
@@ -206,10 +206,57 @@ let ``a figure is given the text just before and after it`` () =
                   { block 3 "Figure" (70.0, 548.0, 175.0, 652.0) "" with Label = "image" }
                   block 4 "Caption" (70.0, 530.0, 175.0, 545.0) "Seedlings in a tray" ] }
 
-    let figure = (LayoutFile.ofSuggestions "garden.pdf" [ blocks ] None).Pages[0].Regions[2]
+    let figure = (LayoutSuggestions.toLayoutFile "garden.pdf" [ blocks ] None).Pages[0].Regions[2]
 
     (figure.TextBefore, figure.TextAfter) |> should equal ("The garden", "Seedlings in a tray")
 
 [<Fact>]
 let ``figure images need a layout file to go beside`` () =
     withUntaggedPdf (fun pdf -> fst (run [ pdf; "--suggest-layout"; "--figure-images" ]) |> should equal 64)
+
+let private fixedSource (regions: LayoutRegion list) =
+    { new IPageLayoutSource with
+        member _.PageRegions(_, _) = regions
+        member _.LinkDescription(_, _, _) = null
+        member _.PageTitles = null
+        member _.DocumentTitle = "From the model" }
+
+[<Fact>]
+let ``discarded regions aren't tagged, and pages a layout doesn't have come from the fallback`` () =
+    let layout = LayoutSuggestions.toLayoutFile "garden.pdf" [ suggestion ] None
+    let layout =
+        { layout with
+            Pages = [| { layout.Pages[0] with Regions = [| layout.Pages[0].Regions[0]; { layout.Pages[0].Regions[1] with Discarded = true } |] } |] }
+    let fromModel: LayoutRegion =
+        { Tag = "P"; Geometry = { PageNumber = 2; Left = 1.0; Bottom = 1.0; Right = 2.0; Top = 2.0 }; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
+    let source = LayoutFile.FileRegions(layout, Some(fixedSource [ fromModel ])) :> IPageLayoutSource
+
+    source.PageRegions("garden.pdf", 1) |> Seq.map _.Tag |> List.ofSeq |> should equal [ "H" ]
+    source.PageRegions("garden.pdf", 2) |> Seq.map _.Tag |> List.ofSeq |> should equal [ "P" ]
+    // No title of its own: the fallback's.
+    source.DocumentTitle |> should equal "From the model"
+    LayoutFile.covers layout 1 |> should be True
+    LayoutFile.covers layout 2 |> should be False
+
+[<Fact>]
+let ``a review keeps an untagged PDF's layout, and --edits tags from it`` () =
+    withUntaggedPdf (fun pdf ->
+        let layout = LayoutSuggestions.toLayoutFile pdf [ suggestion ] None
+        let layout =
+            { layout with
+                Pages =
+                    [| { layout.Pages[0] with
+                           Regions =
+                             [| { layout.Pages[0].Regions[0] with Tag = "H1" }
+                                { layout.Pages[0].Regions[1] with Alt = "Tomato seedlings" } |] } |] }
+        ReviewFile.writeFile pdf { Version = 1; DismissedWarnings = null; Edits = null; Title = "The garden"; Layout = layout }
+        (ReviewFile.readFor pdf |> Option.get).Layout |> should not' (be Null)
+
+        let _, result = run [ pdf; "--edits" ]
+
+        let copy = result.Value.GetProperty("fixOutputPath").GetString() |> nonNull
+        let tagged = VeraPdfValidator().ReadStructureTree copy |> nonNull |> nodes
+        tagged |> List.map _.Tag |> List.filter (fun t -> t = "H1" || t = "Figure") |> should equal [ "H1"; "Figure" ]
+        (tagged |> List.find (fun n -> n.Tag = "Figure")).AlternateDescription |> should equal "Tomato seedlings"
+        use document = new PdfDocument(new PdfReader(copy))
+        document.GetDocumentInfo().GetTitle() |> should equal "The garden")

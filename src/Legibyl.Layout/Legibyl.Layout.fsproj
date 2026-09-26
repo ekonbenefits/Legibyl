@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <Compile Include="LayoutSuggestions.fs" />
-    <Compile Include="LayoutFile.fs" />
   </ItemGroup>
 
   <ItemGroup>

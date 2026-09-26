@@ -1,13 +1,13 @@
 /// A document's suggested layout as JSON, to look over and change (a person or an agent: retag
 /// a region, drop it, reorder, write alt text, correct OCR'd text) and then tag the document from.
-/// The CLI writes it with --suggest-layout and tags from it with --apply-layout.
-module Legibyl.Layout.LayoutFile
+/// The CLI writes it with --suggest-layout and tags from it with --apply-layout; a review file
+/// keeps one for an untagged PDF (see ReviewFile). Suggesting one is Legibyl.Layout's.
+module Legibyl.Validation.LayoutFile
 
 open System
 open System.IO
 open System.Text.Json
 open System.Text.Json.Serialization
-open Legibyl.Validation
 
 // CLIMutable gives System.Text.Json the parameterless constructors it needs.
 
@@ -36,6 +36,11 @@ type SavedRegion =
       [<JsonPropertyName "qrText">] QrText: string | null
       /// For a Figure: its alt text, to write.
       [<JsonPropertyName "alt">] Alt: string | null
+      /// Left out of the structure (a person discarded it): its text joins the nearest region
+      /// kept, and anything else it holds is decoration. Kept so the choice can be undone.
+      [<JsonPropertyName "discarded">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
+      Discarded: bool
       /// For a Figure: a picture of it, a PNG file's path relative to the layout file (written
       /// with --figure-images), to look at when writing its alt text. Not used when tagging.
       [<JsonPropertyName "image">]
@@ -70,59 +75,6 @@ type SavedLayout =
 
 /// The tags a region can have.
 let tags = [ "H1"; "H"; "P"; "LI"; "Figure"; "Table"; "Caption"; "Note"; "Formula"; "Lbl"; "Artifact" ]
-
-let private boxOf (geometry: StructureGeometry) =
-    [| geometry.Left; geometry.Bottom; geometry.Right; geometry.Top |] |> Array.map (fun v -> Math.Round(v, 1))
-
-/// The text of the nearest region with some before (or after) index in blocks, skipping page
-/// furniture and other figures.
-let private nearbyText (blocks: SuggestedBlock list) (index: int) (step: int) =
-    let rec look i =
-        if i < 0 || i >= blocks.Length then
-            null
-        else
-            let block = blocks[i]
-            if LayoutSuggestions.holdsText block.Tag && not (String.IsNullOrWhiteSpace block.Text) then block.Text.Trim()
-            else look (i + step)
-    look (index + step)
-
-/// The layout suggested for pdfPath's pages, with title (e.g. its own, or its first H1's text).
-let ofSuggestions (pdfPath: string) (pages: PageSuggestion list) (title: string option) : SavedLayout =
-    { Version = 1
-      File = string (Path.GetFileName pdfPath)
-      Title = Option.toObj title
-      Pages =
-        [| for page in pages ->
-               { Page = page.PageNumber
-                 HasText = page.HasText
-                 Rotated = page.Rotated
-                 Regions =
-                   [| for index, block in List.indexed page.Blocks ->
-                          let figure = block.Tag = "Figure"
-                          { Order = block.Order
-                            Tag = block.Tag
-                            Box = boxOf block.Geometry
-                            Label = block.Label
-                            Score = Math.Round(block.Score, 3)
-                            Text = block.Text
-                            Recognized = block.Recognized
-                            ListNumbering = Option.toObj block.ListNumbering
-                            QrText = Option.toObj block.QrText
-                            Alt = null
-                            Image = null
-                            TextBefore = if figure then nearbyText page.Blocks index -1 else null
-                            TextAfter = if figure then nearbyText page.Blocks index 1 else null } |] } |] }
-
-/// A title for the layout: the document's own (or a short first page's), else the first H1
-/// the layout found; as Suggest Structure prefills it.
-let suggestedTitle (pdfPath: string) (pages: PageSuggestion list) =
-    match DocumentTitles.candidates pdfPath with
-    | first :: _ -> Some first.Title
-    | [] ->
-        pages
-        |> List.collect _.Blocks
-        |> List.tryFind (fun block -> block.Tag = "H1" && not (String.IsNullOrWhiteSpace block.Text))
-        |> Option.map _.Text.Trim()
 
 let private jsonOptions =
     JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
@@ -194,11 +146,13 @@ let read (path: string) : Result<SavedLayout, string> =
     | :? IOException
     | :? UnauthorizedAccessException as ex -> Error $"Couldn't read {path}: {ex.Message}"
 
-/// The regions to tag from: each page's, in reading order, with their alt text, replacement text
-/// (a recognized region's text) and the layout's title.
-type FileRegions(layout: SavedLayout) =
+/// The regions to tag from: each page's that's kept, in reading order, with their alt text,
+/// replacement text (a recognized region's text) and the layout's title. A page the layout
+/// doesn't have comes from fallback, if given (e.g. the layout model's, for pages a review
+/// hasn't reached), else has none.
+type FileRegions(layout: SavedLayout, fallback: IPageLayoutSource option) =
     let regions (page: SavedPage) : LayoutRegion list =
-        [ for region in page.Regions |> Array.sortBy _.Order ->
+        [ for region in page.Regions |> Array.filter (not << _.Discarded) |> Array.sortBy _.Order ->
               { Tag = region.Tag
                 Geometry =
                   { PageNumber = page.Page
@@ -211,12 +165,31 @@ type FileRegions(layout: SavedLayout) =
                 QrText = region.QrText
                 Alt = region.Alt } ]
 
-    interface IPageLayoutSource with
-        member _.PageRegions(_, pageNumber) =
-            match layout.Pages |> Array.tryFind (fun page -> page.Page = pageNumber) with
-            | Some page -> regions page :> Collections.Generic.IReadOnlyList<_>
-            | None -> [] :> Collections.Generic.IReadOnlyList<_>
+    new(layout: SavedLayout) = FileRegions(layout, None)
 
-        member _.LinkDescription(_, _, _) = null
-        member _.PageTitles = null
-        member _.DocumentTitle = layout.Title
+    interface IPageLayoutSource with
+        member _.PageRegions(pdfPath, pageNumber) =
+            match layout.Pages |> Array.tryFind (fun page -> page.Page = pageNumber), fallback with
+            | Some page, _ -> regions page :> Collections.Generic.IReadOnlyList<_>
+            | None, Some fallback -> fallback.PageRegions(pdfPath, pageNumber)
+            | None, None -> [] :> Collections.Generic.IReadOnlyList<_>
+
+        member _.LinkDescription(pdfPath, pageNumber, rectangle) =
+            match fallback with
+            | Some fallback -> fallback.LinkDescription(pdfPath, pageNumber, rectangle)
+            | None -> null
+
+        member _.PageTitles =
+            match fallback with
+            | Some fallback -> fallback.PageTitles
+            | None -> null
+
+        member _.DocumentTitle =
+            match layout.Title, fallback with
+            | NonNull title, _ -> title
+            | Null, Some fallback -> fallback.DocumentTitle
+            | Null, None -> null
+
+/// Whether layout has every one of pageCount pages (so tagging from it needs nothing else).
+let covers (layout: SavedLayout) (pageCount: int) =
+    [ 1..pageCount ] |> List.forall (fun page -> layout.Pages |> Array.exists (fun p -> p.Page = page))

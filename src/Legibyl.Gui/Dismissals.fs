@@ -58,7 +58,7 @@ let toJson = ReviewFile.toJson
 /// pdfPath's review (see readFor), or an empty one.
 let readOrEmpty (pdfPath: string) =
     readFor pdfPath
-    |> Option.defaultValue { Version = 1; DismissedWarnings = null; Edits = null; Title = null }
+    |> Option.defaultValue { Version = 1; DismissedWarnings = null; Edits = null; Title = null; Layout = null }
 
 /// The dismissals saved for pdfPath (see readFor), or None if none are (no review, or one
 /// holding only edits).
@@ -109,7 +109,7 @@ let reviewFile (pdfPath: string) (dismissed: Dismissed option) : SavedFile optio
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    if empty saved.DismissedWarnings && empty saved.Edits && isNull saved.Title then None else Some saved
+    if empty saved.DismissedWarnings && empty saved.Edits && isNull saved.Title && isNull saved.Layout then None else Some saved
 
 /// reviewFile as JSON; null if there's nothing to carry.
 let reviewJson (pdfPath: string) (dismissed: Dismissed option) : string | null =

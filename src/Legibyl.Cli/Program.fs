@@ -108,10 +108,10 @@ let private suggestLayout (file: string) =
         [ for page in 1 .. suggester.PageCount ->
               eprintfn $"Finding page {page} of {suggester.PageCount}'s layout…"
               suggester.Suggest page ]
-    Legibyl.Layout.LayoutFile.ofSuggestions file pages (Legibyl.Layout.LayoutFile.suggestedTitle file pages)
+    Legibyl.Layout.LayoutSuggestions.toLayoutFile file pages (Legibyl.Layout.LayoutSuggestions.suggestedTitle file pages)
 
 /// appliedLayout is --apply-layout's layout, read and checked.
-let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayout: Legibyl.Layout.LayoutFile.SavedLayout option) profile (file: string) =
+let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayout: LayoutFile.SavedLayout option) profile (file: string) =
     let result = FileValidationResult.Empty(file, args.ProfileName)
     match (try Ok(validator.Validate(file, profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) with
     | Error message -> { result with Error = message }
@@ -145,9 +145,11 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
                           match args.EditsFrom with
                           | Some path -> $"No edits were applied: {path} has no review to read them from."
                           | None -> $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
+                // A review of an untagged PDF can hold its reviewed layout, to tag from.
+                let reviewLayout = review |> Option.bind (fun review -> Option.ofObj review.Layout)
                 let options =
                     requestedFixes args
-                    ||| (if appliedLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
+                    ||| (if appliedLayout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
                     ||| (match review with
                          | Some review when not (ReviewFile.edits review).IsEmpty -> PdfFixOptions.ApplyEdits
                          | _ -> PdfFixOptions.None)
@@ -156,21 +158,32 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
                         FixStatus = RepairStatus.NoAction.ToString()
                         FixNotApplied = if noReview.IsEmpty then null else withNull (ResizeArray noReview) }
                 else
-                    // The layout given, or else the model's (only needed for the repairs that read it).
-                    let layout: IPageLayoutSource option =
-                        match appliedLayout with
-                        | Some saved -> Some(Legibyl.Layout.LayoutFile.FileRegions saved)
-                        | None when FixNames.usesLayout options ->
+                    // The layout model, for the repairs that read the page's layout, unless a layout
+                    // given or reviewed has every page.
+                    let pageCount () =
+                        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(file))
+                        document.GetNumberOfPages()
+                    let needsModel =
+                        FixNames.usesLayout options
+                        && (match appliedLayout |> Option.orElse reviewLayout with
+                            | Some layout -> not (LayoutFile.covers layout (pageCount ()))
+                            | None -> true)
+                    let model =
+                        if needsModel then
                             ensureLayoutModel ()
                             Some(new Legibyl.Layout.LayoutRegionSource(null))
-                        | None -> None
+                        else
+                            None
+                    let modelSource = model |> Option.map (fun model -> model :> IPageLayoutSource)
+                    let layout: IPageLayoutSource option =
+                        match appliedLayout, review with
+                        | Some saved, _ -> Some(LayoutFile.FileRegions(saved, modelSource))
+                        | None, Some review when FixNames.usesLayout options ->
+                            Some(ReviewFile.ReviewedRegions(modelSource |> Option.defaultValue ReviewFile.noRegions, review))
+                        | None, _ -> modelSource
                     try
                         try
-                            // Tagging from the layout uses the review too: its alt text, corrected text and title.
-                            match layout, review with
-                            | Some source, Some review -> validator.LayoutSource <- ReviewFile.ReviewedRegions(source, review)
-                            | Some source, None -> validator.LayoutSource <- source
-                            | None, _ -> ()
+                            layout |> Option.iter (fun source -> validator.LayoutSource <- source)
                             match review with
                             | Some review ->
                                 validator.Edits <- ReviewFile.edits review
@@ -194,9 +207,7 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
                         validator.LayoutSource <- null
                         validator.Edits <- []
                         validator.Review <- null
-                        match layout with
-                        | Some(:? IDisposable as source) -> source.Dispose()
-                        | _ -> ()
+                        model |> Option.iter (fun model -> (model :> IDisposable).Dispose())
 
         let result =
             if not args.IncludeStructure then
@@ -218,10 +229,10 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
                         let layout =
                             if args.FigureImages then
                                 use renderer = new Legibyl.Rendering.PdfRegionRenderer()
-                                Legibyl.Layout.LayoutFile.withFigureImages path (fun geometry -> renderer.RenderRegion(file, geometry)) layout
+                                LayoutFile.withFigureImages path (fun geometry -> renderer.RenderRegion(file, geometry)) layout
                             else
                                 layout
-                        File.WriteAllText(path, Legibyl.Layout.LayoutFile.toJson layout)
+                        File.WriteAllText(path, LayoutFile.toJson layout)
                         layout
                     | None -> layout
                 { result with SuggestedLayout = layout }
@@ -365,7 +376,7 @@ let private run (args: Args) =
         // The --profile validator has already rejected unknown names.
         let profile = (ProfileNames.tryParse args.ProfileName).Value
         let validator = VeraPdfValidator()
-        match args.ApplyLayout |> Option.map Legibyl.Layout.LayoutFile.read with
+        match args.ApplyLayout |> Option.map LayoutFile.read with
         | Some(Error message) -> usageError message
         | appliedLayout ->
             let appliedLayout = appliedLayout |> Option.bind Result.toOption

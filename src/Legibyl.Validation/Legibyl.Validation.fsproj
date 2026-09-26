@@ -36,6 +36,7 @@
     <Compile Include="MetadataTransfer.fs" />
     <Compile Include="CopyNames.fs" />
     <Compile Include="EmbeddedReview.fs" />
+    <Compile Include="LayoutFile.fs" />
     <Compile Include="ReviewFile.fs" />
     <Compile Include="VeraPdfValidator.fs" />
   </ItemGroup>
