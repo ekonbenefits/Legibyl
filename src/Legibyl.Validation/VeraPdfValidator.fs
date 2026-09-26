@@ -397,8 +397,8 @@ open VeraPdf
 type VeraPdfValidator() =
     do ensureInitialised ()
 
-    /// Where the TagFromLayout fix gets each page's regions (see Legibyl.Layout). Without one,
-    /// that fix does nothing.
+    /// Where the TagFromLayout and JoinSplitParagraphs fixes get each page's regions (see
+    /// Legibyl.Layout). Without one, those fixes do nothing.
     member val LayoutSource: IPageLayoutSource | null = null with get, set
 
     /// Where the LinkTitlesFromWeb fix reads the titles of the web pages links go to: the web
@@ -449,7 +449,7 @@ type VeraPdfValidator() =
             raise (VeraPdfValidationException "At least one fix option must be selected.")
 
         let structuralOptions =
-            StructureFixes.orderedFixes this.PageTitleSource |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
+            StructureFixes.orderedFixes this.PageTitleSource None |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
         let steps =
@@ -518,7 +518,12 @@ type VeraPdfValidator() =
                     report FixStage.Repairing 0 0
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempStructuralOutput <- tempOutput
-                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource with
+                    // Joining paragraphs asks the layout detector about pages, which takes a while.
+                    let layout =
+                        match this.LayoutSource with
+                        | NonNull source -> Some { StructureFixes.Source = source; StructureFixes.PdfPath = pdfPath; StructureFixes.Report = report FixStage.Repairing }
+                        | Null -> None
+                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout with
                     | [] ->
                         tryDeleteTemporary tempOutput
                         tempStructuralOutput <- null

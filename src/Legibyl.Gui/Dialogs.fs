@@ -143,6 +143,12 @@ let private fixChoices =
         Title = "Remove empty contents entries"
         Detail = "Empty table-of-contents entries (TOCI) (optional cleanup)."
         OptIn = true }
+      { Option = PdfFixOptions.JoinSplitParagraphs
+        Title = "Join split paragraphs"
+        Detail =
+          "Paragraphs tagged line by line become one where a layout detector finds one block of text (a line starting with a list marker stays apart); the page looks the same. "
+          + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time."
+        OptIn = true }
       { Option = PdfFixOptions.ListsFromParagraphs
         Title = "Tag lists"
         Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become L/LI; the page looks the same."

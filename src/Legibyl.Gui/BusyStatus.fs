@@ -41,6 +41,8 @@ let statusText (progress: BusyProgress) : string =
             | FixStage.CheckingOriginal -> $"{step}checking the original…"
             | FixStage.Tagging when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to tag it"
             | FixStage.Tagging -> $"{step}tagging from the layout…"
+            // Only joining split paragraphs reports pages while repairing.
+            | FixStage.Repairing when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to join split paragraphs"
             | FixStage.Repairing -> $"{step}applying the repairs…"
             | _ -> $"{step}repairing metadata with veraPDF…"
         status

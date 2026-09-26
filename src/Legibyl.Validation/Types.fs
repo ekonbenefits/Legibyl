@@ -41,7 +41,10 @@ type PdfFixOptions =
     /// addresses, by the titles of the pages they go to, fetched from the internet (safely;
     /// see LinkTitles). Needs an IPageTitleSource.
     | LinkTitlesFromWeb = 16384
-    | All = 32767
+    /// Joins neighbouring paragraphs whose text a layout detector finds in one block of text
+    /// (a paragraph tagged line by line); see ParagraphJoins. Needs an IPageLayoutSource.
+    | JoinSplitParagraphs = 32768
+    | All = 65535
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.

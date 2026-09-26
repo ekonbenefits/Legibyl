@@ -123,6 +123,7 @@ let ``showing all repairs lists the ones this PDF doesn't need too, still in ord
               "Headings from the table of contents"
               "Remove empty paragraphs"
               "Remove empty contents entries"
+              "Join split paragraphs"
               "Tag lists"
               "Add bookmarks"
               "Tab order for annotations"

@@ -34,6 +34,7 @@ let ``every progress line says what's happening first`` () =
       fixing FixStage.CheckingOriginal 1 4 12 40
       fixing FixStage.Tagging 2 4 3 10
       fixing FixStage.Repairing 3 4 0 0
+      fixing FixStage.Repairing 3 4 2 10
       fixing FixStage.RepairingMetadata 4 4 0 0 ]
     |> List.map statusText
     |> should
@@ -46,4 +47,5 @@ let ``every progress line says what's happening first`` () =
           "Fixing, step 1 of 4: checking the original, page 12 of 40"
           "Fixing, step 2 of 4: finding page 3 of 10's layout, to tag it"
           "Fixing, step 3 of 4: applying the repairs…"
+          "Fixing, step 3 of 4: finding page 2 of 10's layout, to join split paragraphs"
           "Fixing, step 4 of 4: repairing metadata with veraPDF…" ]
