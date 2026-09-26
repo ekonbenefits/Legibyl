@@ -476,10 +476,19 @@ module private MainView =
                         let review = layoutReviews.For sourcePath
                         let reviewNote =
                             let alt =
-                                match review.Figures.Length with
-                                | 0 -> ""
-                                | 1 -> " 1 figure has alt text written for it."
-                                | n -> $" {n} figures have alt text written for them."
+                                let written = review.Edits |> List.filter _.Alt.IsSome |> List.length
+                                let corrected = review.Edits |> List.filter _.Text.IsSome |> List.length
+                                let figures =
+                                    match written with
+                                    | 0 -> ""
+                                    | 1 -> " 1 figure has alt text written for it."
+                                    | n -> $" {n} figures have alt text written for them."
+                                let texts =
+                                    match corrected with
+                                    | 0 -> ""
+                                    | 1 -> " 1 region's OCR text is corrected."
+                                    | n -> $" {n} regions' OCR text is corrected."
+                                figures + texts
                             match review.Pages.Count, review.Discarded.Count with
                             | 0, 0 when alt = "" -> None
                             | 0, 0 -> Some(alt.Trim())
