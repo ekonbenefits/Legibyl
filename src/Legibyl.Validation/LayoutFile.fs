@@ -1,7 +1,10 @@
-/// A document's suggested layout as JSON, to look over and change (a person or an agent: retag
-/// a region, drop it, reorder, write alt text, correct OCR'd text) and then tag the document from.
-/// The CLI writes it with --suggest-layout and tags from it with --apply-layout; a review file
-/// keeps one for an untagged PDF (see ReviewFile). Suggesting one is Legibyl.Layout's.
+/// A document's suggested layout as JSON: the regions the layout model found, as found. Like a
+/// structure read from a tagged PDF, it's the thing a person's edits are layered on (see
+/// ElementEdits.onRegions): excluding a region, retagging it, writing alt text, correcting OCR'd
+/// text are edits, keyed by a region's page, tag and box, not changes to the layout. (A layout
+/// file can be changed by hand, and still tags, but edits are the way.) The CLI writes one with
+/// --suggest-layout and tags from it with --apply-layout; a review file records one for an
+/// untagged PDF (see ReviewFile). Suggesting one is Legibyl.Layout's.
 module Legibyl.Validation.LayoutFile
 
 open System
@@ -28,19 +31,12 @@ type SavedRegion =
       /// The page's text inside it; read by OCR when recognized.
       [<JsonPropertyName "text">] Text: string | null
       /// True when text was read by OCR (it's drawn as outlines or pixels): it's written as the
-      /// element's replacement text, so correct it here ("" for nothing to read).
+      /// element's replacement text (an edit's "text" corrects it).
       [<JsonPropertyName "recognized">] Recognized: bool
       /// For an LI: its list's /ListNumbering, e.g. "Disc" or "Decimal".
       [<JsonPropertyName "listNumbering">] ListNumbering: string | null
       /// For a Figure that's a QR code: what it encodes.
       [<JsonPropertyName "qrText">] QrText: string | null
-      /// For a Figure: its alt text, to write.
-      [<JsonPropertyName "alt">] Alt: string | null
-      /// Left out of the structure (a person discarded it): its text joins the nearest region
-      /// kept, and anything else it holds is decoration. Kept so the choice can be undone.
-      [<JsonPropertyName "discarded">]
-      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
-      Discarded: bool
       /// For a Figure: a picture of it, a PNG file's path relative to the layout file (written
       /// with --figure-images), to look at when writing its alt text. Not used when tagging.
       [<JsonPropertyName "image">]
@@ -185,13 +181,13 @@ let read (path: string) : Result<SavedLayout, string> =
     | :? IOException
     | :? UnauthorizedAccessException as ex -> Error $"Couldn't read {path}: {ex.Message}"
 
-/// The regions to tag from: each page's that's kept, in reading order, with their alt text,
-/// replacement text (a recognized region's text) and the layout's title. A page the layout
+/// The regions to tag from, as found: each page's in reading order, a recognized region's text as
+/// its replacement text, and the layout's title. A page the layout
 /// doesn't have comes from fallback, if given (e.g. the layout model's, for pages a review
 /// hasn't reached), else has none.
 type FileRegions(layout: SavedLayout, fallback: IPageLayoutSource option) =
     let regions (page: SavedPage) : LayoutRegion list =
-        [ for region in page.Regions |> Array.filter (not << _.Discarded) |> Array.sortBy _.Order ->
+        [ for region in page.Regions |> Array.sortBy _.Order ->
               { Tag = region.Tag
                 Geometry =
                   { PageNumber = page.Page
@@ -202,7 +198,7 @@ type FileRegions(layout: SavedLayout, fallback: IPageLayoutSource option) =
                 ListNumbering = region.ListNumbering
                 ActualText = (if region.Recognized then (match region.Text with NonNull "" | Null -> null | NonNull text -> text) else null)
                 QrText = region.QrText
-                Alt = region.Alt } ]
+                Alt = null } ]
 
     new(layout: SavedLayout) = FileRegions(layout, None)
 

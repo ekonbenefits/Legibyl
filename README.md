@@ -358,16 +358,23 @@ paragraphs that start with list markers become list items (LI) by the same
 rules as the lists-from-paragraphs fix; the list beside it shows each region's text,
 with a picker to give it another tag (H1, H, P, LI, Figure, Table, Caption,
 Note, Formula, Lbl, Artifact) — a heading the detector took for a paragraph,
-say. A region's alt text and corrected text go with it when it's retagged.
+say.
+
+The suggestions themselves are never changed: like a structure read from a
+tagged PDF, they're read-only, and what you decide is layered on top as edits
+(`ElementEdits.onRegions`), each naming the suggestion by its page, the tag it
+was found with, and its box — the same kind of edit View Structure makes on a
+tagged PDF's elements. Discarding a suggestion is an `exclude` edit, picking
+another tag a `retag` edit, and alt text and corrected text are edits too.
 Nothing is written to the PDF until **Save…** in the main window tags a copy
-from it. Once you've decided something (discarded or retagged a suggestion, written
-alt text or corrected text, changed the title), the review is kept in the file next to
-the PDF: the edits, and the layout as reviewed (`layout`, in the same format as
-the CLI's `--suggest-layout`, see `LayoutFile.fs`), each page found so far with
-its discarded suggestions marked. Reopening the PDF, even in a later session,
-shows those pages at once without the detector, as reviewed. Each saved page
-has a fingerprint of its size and text, so a page that's changed since (a
-regenerated PDF) is found again instead. The model (about 130 MB) is
+with the suggestions and the edits on them. Once you've decided something, the
+edits are kept in the file next to the PDF, with the layout they're on recorded
+as found (`layout`, in the same format as the CLI's `--suggest-layout`, see
+`LayoutFile.fs`): reopening the PDF, even in a later session, shows the pages
+found so far at once, without the detector, with your edits on them. Each
+recorded page has a fingerprint of its size and text, so a page that's changed
+since (a regenerated PDF) is found again instead; edits, matched by box, still
+apply to it. The model (about 130 MB) is
 downloaded once, when asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`)
 and runs locally; each page takes several seconds on the CPU, so pages are
 detected as they're shown. A page without a text layer (a scan) is flagged, since
@@ -623,12 +630,28 @@ Options:
   file's pages in the output, under `suggestedLayout` (`LayoutFile.fs`): each
   page's regions in reading order, with the tag each suggests (`H1`, `H`, `P`,
   `LI`, `Figure`, `Table`, `Caption`, `Note`, `Formula`, `Lbl`, `Artifact`), its
-  `box` (left, bottom, right, top, in points), its `text` (`recognized` when OCR
-  read it because it's drawn rather than written), a QR code's `qrText`, an
-  `alt` to fill in for a figure, and a `title`. It's the same review Suggest
-  Structure shows, as JSON for a person or an agent to change — retag, remove
-  or reorder regions, write alt text, correct OCR'd text — before tagging from
-  it. Downloads the layout model the first time; several seconds a page, with
+  `page` and `box` (left, bottom, right, top, in points), its `text`
+  (`recognized` when OCR read it because it's drawn rather than written), a QR
+  code's `qrText`, and a `title`. It's what Suggest Structure shows, and like a
+  structure read from a PDF it's meant to be left as found: write changes as
+  edits in a review file, each naming a region by its `page`, `tag` and `box`
+  (copied from the layout), with `exclude: true`, `retag` (e.g. `"H1"`), `alt`,
+  or `text` (a correction of recognized text), and tag with `--apply-layout`
+  and `--edits-from`:
+
+  ```json
+  { "version": 1, "title": "Joining the Community Garden",
+    "edits": [
+      { "page": 1, "tag": "H", "box": [68.5, 714, 372, 738], "retag": "H1" },
+      { "page": 1, "tag": "Figure", "box": [70, 518, 234, 642], "alt": "Seedlings in a tray" },
+      { "page": 1, "tag": "Artifact", "box": [70, 30, 300, 45], "exclude": true } ] }
+  ```
+
+  (A layout file changed by hand still tags; edits are the way that's kept
+  apart, re-appliable to another version of the PDF by box.) Structure nodes in
+  `--structure` output name themselves the same way, with `page` and `box`, so
+  an edit is written the same way for a tagged PDF. Downloads the layout model
+  the first time; several seconds a page, with
   progress on stderr. `--suggest-layout-output <path>` (one input file) also
   writes it to a file. Each figure also gets `textBefore` and `textAfter`, the
   text of the regions just before and after it (a caption, the paragraph about
@@ -638,14 +661,16 @@ Options:
   side) into a folder beside the layout file — `scan.layout.json` gets
   `scan.layout.images/p1-r3.png` for page 1's region 3 — and gives the figure
   that path as `image`, relative to the layout file. An agent reading the JSON
-  opens each image to see the figure (base64 inside the JSON would only be text
+  opens each image to see the figure, and writes its `alt` edit (base64 inside the JSON would only be text
   to it, and costly). Each run clears the folder of the last run's images (only
   files named like them); delete the folder with the layout file when done.
   `--apply-layout` doesn't use them.
 - `--apply-layout <path>` — tag an untagged file (one input file; implies
-  `--fix`) from the layout in path, as `--suggest-layout` writes it: its regions
-  become the structure in their order, with their alt text, recognized text as
-  replacement text, and its title. It needs no layout model. Other repairs can
+  `--fix`) from the layout in path, as `--suggest-layout` writes it, with the
+  edits from `--edits-from` (or `--edits`) layered on: its regions become the
+  structure in their order, less those excluded, retagged, with alt text,
+  recognized text (as corrected) as replacement text, and a title. It needs no
+  layout model. Other repairs can
   be named with `--fixes` alongside (e.g. `safe,qr-links`). A file that's
   already tagged isn't changed, and the result says so.
 - `--list-profiles` — print supported profile names and exit `0`.

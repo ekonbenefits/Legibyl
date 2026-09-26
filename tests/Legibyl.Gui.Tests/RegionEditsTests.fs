@@ -68,13 +68,30 @@ let ``edits apply to what's tagged: alt text to figures, corrected text to what 
         |> fun e -> RegionEdits.setText e 1 "P" blurb "Campouts, cavlng" "Campouts, caving"
     let figure = block "Figure" logo "" false
     let ocrText = block "P" blurb "Campouts, cavlng" true
-    RegionEdits.apply edits 1 figure (region "Figure" logo null) |> _.Alt |> should equal "The pack's wolf logo"
-    RegionEdits.apply edits 1 ocrText (region "P" blurb "Campouts, cavlng") |> _.ActualText |> should equal "Campouts, caving"
+    let only (regions: LayoutRegion list) = List.exactlyOne regions
+    (RegionEdits.onRegions edits [ figure ] |> only).Alt |> should equal "The pack's wolf logo"
+    (RegionEdits.onRegions edits [ ocrText ] |> only).ActualText |> should equal "Campouts, caving"
     // Cleared: nothing to read, so no ActualText.
     let cleared = RegionEdits.setText [] 1 "P" blurb "Campouts, cavlng" ""
-    RegionEdits.apply cleared 1 ocrText (region "P" blurb "Campouts, cavlng") |> _.ActualText |> should be Null
+    (RegionEdits.onRegions cleared [ ocrText ] |> only).ActualText |> should be Null
     // Text that was real text, not read by OCR, isn't changed.
-    RegionEdits.apply edits 1 (block "P" blurb "Campouts, caving" false) (region "P" blurb null) |> _.ActualText |> should be Null
+    (RegionEdits.onRegions edits [ block "P" blurb "Campouts, caving" false ] |> only).ActualText |> should be Null
+
+[<Fact>]
+let ``leaving out and retagging are edits on the suggestion, which stays as found`` () =
+    let heading = block "H" blurb "Campouts" false
+    let figure = block "Figure" logo "" false
+    let edits =
+        RegionEdits.setRetag [] 1 "H" blurb "H1"
+        |> fun e -> RegionEdits.setExcluded e 1 "Figure" logo true
+
+    RegionEdits.onRegions edits [ heading; figure ] |> List.map _.Tag |> should equal [ "H1" ]
+    RegionEdits.tagOf edits 1 heading |> should equal "H1"
+    RegionEdits.isExcluded edits 1 figure |> should be True
+    heading.Tag |> should equal "H"
+    // Its own tag again, and kept again: no edits left.
+    let undone = RegionEdits.setRetag edits 1 "H" blurb "H" |> fun e -> RegionEdits.setExcluded e 1 "Figure" logo false
+    undone |> should be Empty
 
 [<Fact>]
 let ``importing adds only the regions that have no edits here`` () =
@@ -150,18 +167,18 @@ let private found: PageSuggestion =
       Blocks = [ { block "P" blurb "Caving this spring" false with Order = 1 }; { block "Figure" logo "" false with Order = 2 } ] }
 
 [<Fact>]
-let ``a review's layout is kept next to the PDF, with what's discarded, and found again when it's reopened`` () =
+let ``a review's layout is recorded next to the PDF as found, with the edits on it, and found again when it's reopened`` () =
     withPdf "Caving this spring" (fun pdf ->
         let review = LayoutReview(File.GetLastWriteTimeUtc pdf)
         review.Pages[1] <- found
-        review.Discarded <- set [ 1, 2 ]
+        RegionEdits.save pdf (RegionEdits.setExcluded [] 1 "Figure" logo true)
         RegionEdits.saveLayout pdf (review.ToLayout pdf)
 
         let reopened = LayoutReviews().For pdf
 
         reopened.Pages.Keys |> List.ofSeq |> should equal [ 1 ]
         reopened.Pages[1].Blocks |> List.map (fun b -> b.Order, b.Tag, b.Text) |> should equal [ 1, "P", "Caving this spring"; 2, "Figure", "" ]
-        reopened.Discarded |> should equal (set [ 1, 2 ]))
+        reopened.Edits |> List.map (fun e -> e.Tag, e.Exclude) |> should equal [ "Figure", true ])
 
 [<Fact>]
 let ``a page that has changed since isn't taken from the saved layout`` () =

@@ -40,7 +40,7 @@ let private createTagged (path: string) =
 
 /// The figure's alt text, as given in View Structure: its box is about where the image is.
 let private altEdit =
-    { Page = 1; Tag = "Figure"; Box = box (73.0, 551.0, 171.0, 649.0); Alt = "Tomato seedlings in a tray"; Text = null; MergeWith = [] }
+    { Page = 1; Tag = "Figure"; Box = box (73.0, 551.0, 171.0, 649.0); Alt = "Tomato seedlings in a tray"; Text = null; MergeWith = []; Retag = null; Exclude = false }
 
 let private applyEdits (input: string) (output: string) (edits: ElementEdit list) =
     VeraPdfValidator(Edits = edits).Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.ApplyEdits)
@@ -118,7 +118,7 @@ let private createLines (path: string) =
 let private line y = box (72.0, y - 2.0, 236.0, y + 12.0)
 
 let private merge (boxes: StructureGeometry list) =
-    { Page = 1; Tag = "P"; Box = boxes.Head; Alt = null; Text = null; MergeWith = boxes.Tail }
+    { Page = 1; Tag = "P"; Box = boxes.Head; Alt = null; Text = null; MergeWith = boxes.Tail; Retag = null; Exclude = false }
 
 let private paragraphTexts (path: string) =
     VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P") |> List.map (fun n -> (string n.Content).Trim())
@@ -147,3 +147,68 @@ let ``paragraphs that aren't next to each other aren't merged`` () =
 
     ElementEdits.pending input.Path [ edit ] |> should equal 0
     (applyEdits input.Path output.Path [ edit ]).WasFixed |> should be False
+
+[<Fact>]
+let ``a retag gives an element another tag, and then counts as in the PDF`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path
+    let retag = { altEdit with Tag = "P"; Box = box (72.0, 697.0, 190.0, 711.0); Alt = null; Retag = "H1" }
+    ElementEdits.pending input.Path [ retag ] |> should equal 1
+
+    applyEdits input.Path output.Path [ retag ] |> ignore
+
+    VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.map _.Tag |> should contain "H1"
+    ElementEdits.pending output.Path [ retag ] |> should equal 0
+
+let private suggested tag (left, bottom, right, top) actualText numbering : LayoutRegion =
+    { Tag = tag
+      Geometry = box (left, bottom, right, top)
+      ListNumbering = numbering
+      ActualText = actualText
+      QrText = null
+      Alt = null }
+
+[<Fact>]
+let ``edits on suggested regions leave them out, retag them, and give them alt text and corrected text`` () =
+    let heading = suggested "H" (70.0, 700.0, 300.0, 720.0) null null
+    let item = suggested "LI" (70.0, 680.0, 300.0, 695.0) null "Disc"
+    let figure = suggested "P" (70.0, 500.0, 200.0, 600.0) null null
+    let scanned = suggested "P" (70.0, 450.0, 300.0, 470.0) "Campouts, cavlng" null
+    let footer = suggested "P" (70.0, 30.0, 300.0, 45.0) null null
+    let on (region: LayoutRegion) : ElementEdit = { altEdit with Tag = region.Tag; Box = region.Geometry; Alt = null }
+    let edits =
+        [ { on heading with Retag = "H1" }
+          { on item with Retag = "P" }
+          // Retagged as a figure, so its alt text counts.
+          { on figure with Retag = "Figure"; Alt = "A map of the campsite" }
+          { on scanned with Text = "Campouts, caving" }
+          { on footer with Exclude = true } ]
+
+    let regions = ElementEdits.onRegions edits [ heading; item; figure; scanned; footer ]
+
+    regions |> List.map (fun r -> r.Tag, Option.ofObj r.ListNumbering, Option.ofObj r.Alt, Option.ofObj r.ActualText)
+    |> should
+        equal
+        ([ "H1", None, None, None
+           "P", None, None, None
+           "Figure", None, Some "A map of the campsite", None
+           "P", None, None, Some "Campouts, caving" ]
+         : (string * string option * string option * string option) list)
+
+[<Fact>]
+let ``edits move to the elements tagging made, retags becoming their tag and exclusions going`` () =
+    let region = suggested "H" (70.0, 700.0, 300.0, 720.0) null null
+    let figure = suggested "Figure" (70.0, 500.0, 200.0, 600.0) null null
+    let written tag (source: LayoutRegion) (box': StructureGeometry) : TaggedRegion = { Region = source; Tag = tag; Box = box' }
+    let tagged =
+        [ // Tagging had the edits applied: the heading as H1.
+          written "H1" { region with Tag = "H1" } (box (72.0, 702.0, 250.0, 716.0))
+          written "Figure" { figure with Alt = "A map" } (box (72.0, 502.0, 198.0, 598.0)) ]
+    let edits: ElementEdit list =
+        [ { altEdit with Tag = "H"; Box = region.Geometry; Alt = null; Retag = "H1" }
+          { altEdit with Tag = "Figure"; Box = figure.Geometry; Alt = "A map" }
+          { altEdit with Tag = "P"; Box = box (70.0, 30.0, 300.0, 45.0); Alt = null; Exclude = true } ]
+
+    ReviewFile.rekey edits tagged |> List.map (fun e -> e.Tag, Option.ofObj e.Alt, Option.ofObj e.Retag, e.Box.Left)
+    |> should equal ([ "Figure", Some "A map", None, 72.0 ] : (string * string option * string option * float) list)

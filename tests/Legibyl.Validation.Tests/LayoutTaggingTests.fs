@@ -426,7 +426,7 @@ let ``tagging from regions with a review writes its alt text and title`` () =
     let review: ReviewFile.SavedFile =
         { Version = 1
           DismissedWarnings = null
-          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 70.0; 448.0; 175.0; 552.0 |]; Alt = "Red, green and blue squares"; Text = null; MergeWith = null } |]
+          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 70.0; 448.0; 175.0; 552.0 |]; Alt = "Red, green and blue squares"; Text = null; MergeWith = null; Retag = null; Exclude = false } |]
           Title = "Squares"
           Layout = null }
 

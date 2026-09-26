@@ -22,7 +22,11 @@ type Edit =
       /// A region's OCR text, corrected; "" for nothing to read.
       Text: string option
       /// Paragraphs merged into this one (a P), by box: its neighbours after it, in order.
-      MergeWith: StructureGeometry list }
+      MergeWith: StructureGeometry list
+      /// The tag to give it instead of the one it was found with.
+      Retag: string option
+      /// For a suggested region: leave it out.
+      Exclude: bool }
 
 /// How much two boxes must overlap to be the same region: their intersection over their
 /// union. A regenerated PDF can move things a little; different regions rarely overlap this much.
@@ -58,8 +62,12 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
         | Some e -> edits |> List.filter (fun other -> not (obj.ReferenceEquals(other, e)))
         | None -> edits
     let edited =
-        change (existing |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = [] })
-    if edited.Alt.IsNone && edited.Text.IsNone then others else others @ [ { edited with Box = box } ]
+        change (
+            existing
+            |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = []; Retag = None; Exclude = false }
+        )
+    if edited.Alt.IsNone && edited.Text.IsNone && edited.Retag.IsNone && not edited.Exclude then others
+    else others @ [ { edited with Box = box } ]
 
 /// A figure's alt text set, or removed if blank.
 let setAlt edits page tag box (alt: string) =
@@ -74,6 +82,22 @@ let setAltAgainst edits page tag box (prefilled: string) (alt: string) =
 let setText edits page tag box (ocr: string) (text: string) =
     update edits page tag box (fun e -> { e with Text = (if text = ocr then None else Some text) })
 
+/// A suggested region left out, or kept again.
+let setExcluded edits page tag box (exclude: bool) =
+    update edits page tag box (fun e -> { e with Exclude = exclude })
+
+/// A suggested region (found as tag) given another tag, or its own again.
+let setRetag edits page (tag: string) box (newTag: string) =
+    update edits page tag box (fun e -> { e with Retag = (if newTag = tag then None else Some newTag) })
+
+/// Whether the suggestion is left out.
+let isExcluded edits page (block: SuggestedBlock) =
+    find edits page block.Tag block.Geometry |> Option.exists _.Exclude
+
+/// The tag the suggestion gets: the one it's given, else the one it was found with.
+let tagOf edits page (block: SuggestedBlock) =
+    find edits page block.Tag block.Geometry |> Option.bind _.Retag |> Option.defaultValue block.Tag
+
 /// The figure's alt text, if written.
 let altFor edits page (block: SuggestedBlock) =
     find edits page block.Tag block.Geometry |> Option.bind _.Alt
@@ -83,16 +107,23 @@ let textFor edits page (block: SuggestedBlock) =
     if not block.Recognized then None
     else find edits page block.Tag block.Geometry |> Option.bind _.Text |> Option.orElse (Some block.Text)
 
-/// A suggested region as tagging writes it, with its edits: a figure's alt text, and corrected
-/// OCR text as its ActualText ("" meaning there's nothing to read, so none).
-let apply (edits: Edit list) (page: int) (block: SuggestedBlock) (region: LayoutRegion) : LayoutRegion =
-    let region =
-        match altFor edits page block with
-        | Some alt when block.Tag = "Figure" && not (String.IsNullOrWhiteSpace alt) -> { region with Alt = alt }
-        | _ -> region
-    match find edits page block.Tag block.Geometry |> Option.bind _.Text with
-    | Some text when block.Recognized -> { region with ActualText = (if String.IsNullOrWhiteSpace text then null else text) }
-    | _ -> region
+/// The edits as the ApplyEdits fix takes them.
+let toElementEdits (edits: Edit list) : ElementEdit list =
+    [ for e in edits ->
+          ({ Page = e.Page
+             Tag = e.Tag
+             Box = e.Box
+             Alt = Option.toObj e.Alt
+             Text = Option.toObj e.Text
+             MergeWith = e.MergeWith
+             Retag = Option.toObj e.Retag
+             Exclude = e.Exclude }
+          : ElementEdit) ]
+
+/// A page's suggestions as tagging takes them: with the edits layered on (see
+/// ElementEdits.onRegions).
+let onRegions (edits: Edit list) (blocks: SuggestedBlock list) : LayoutRegion list =
+    ElementEdits.onRegions (toElementEdits edits) (LayoutSuggestions.toRegions blocks)
 
 /// The merge of paragraphs (boxes, first to last) on page, added to edits. Merges it overlaps
 /// are replaced: a paragraph is merged once.
@@ -101,7 +132,7 @@ let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry lis
     let involves (e: Edit) =
         e.Page = page && not e.MergeWith.IsEmpty && (e.Box :: e.MergeWith) |> List.exists (fun box -> boxes |> List.exists (same box))
     (edits |> List.filter (not << involves))
-    @ [ { Page = page; Tag = "P"; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail } ]
+    @ [ { Page = page; Tag = "P"; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false } ]
 
 /// The merge that starts at box on page, if any.
 let findMerge (edits: Edit list) (page: int) (box: StructureGeometry) : Edit option =
@@ -114,46 +145,24 @@ let merge (edits: Edit list) (imported: Edit list) : Edit list * int =
     let added = imported |> List.filter isNew
     edits @ added, added.Length
 
-let private ofSaved (saved: SavedEdit) : Edit option =
-    let value (text: string | null) = Option.ofObj text
-    let geometry (box: float array) =
-        match box with
-        | [| left; bottom; right; top |] -> Some { PageNumber = saved.Page; Left = left; Bottom = bottom; Right = right; Top = top }
-        | _ -> None
-    match geometry saved.Box with
-    | Some box ->
-        let mergeWith =
-            match saved.MergeWith with
-            | NonNull boxes -> boxes |> Array.choose geometry |> List.ofArray
-            | Null -> []
-        let edit: Edit =
-            { Page = saved.Page
-              Tag = saved.Tag
-              Box = box
-              Alt = value saved.Alt
-              Text = value saved.Text
-              MergeWith = mergeWith }
-        if edit.Alt.IsNone && edit.Text.IsNone && edit.MergeWith.IsEmpty then None else Some edit
-    | None -> None
+/// An edit as the review file and the repairs have it (see ElementEdit), for the window.
+let ofElementEdit (e: ElementEdit) : Edit =
+    { Page = e.Page
+      Tag = e.Tag
+      Box = e.Box
+      Alt = Option.ofObj e.Alt
+      Text = Option.ofObj e.Text
+      MergeWith = e.MergeWith
+      Retag = Option.ofObj e.Retag
+      Exclude = e.Exclude }
 
 let private editsOf (saved: SavedFile option) : Edit list =
     match saved with
-    | Some saved -> saved.Edits |> Option.ofObj |> Option.map (Array.choose ofSaved >> List.ofArray) |> Option.defaultValue []
+    | Some saved -> ReviewFile.edits saved |> List.map ofElementEdit
     | None -> []
 
 /// The edits in a .legibyl.json file, e.g. one saved next to an earlier version of the PDF.
 let fromFile (jsonPath: string) : Edit list = editsOf (readFile jsonPath)
-
-/// The edits as the ApplyEdits fix takes them.
-let toElementEdits (edits: Edit list) : ElementEdit list =
-    [ for e in edits ->
-          ({ Page = e.Page
-             Tag = e.Tag
-             Box = e.Box
-             Alt = Option.toObj e.Alt
-             Text = Option.toObj e.Text
-             MergeWith = e.MergeWith }
-          : ElementEdit) ]
 
 /// The edits saved for pdfPath (see Dismissals.readFor).
 let load (pdfPath: string) = editsOf (readFor pdfPath)
@@ -176,19 +185,10 @@ let loadReview (pdfPath: string) : Edit list * string option * LayoutFile.SavedL
 let saveLayout (pdfPath: string) (layout: LayoutFile.SavedLayout option) =
     writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Layout = Option.toObj layout }
 
-let private toSaved (e: Edit) : SavedEdit =
-    let saved (box: StructureGeometry) = [| box.Left; box.Bottom; box.Right; box.Top |] |> Array.map (fun v -> Math.Round(v, 1))
-    { Page = e.Page
-      Tag = e.Tag
-      Box = saved e.Box
-      Alt = Option.toObj e.Alt
-      Text = Option.toObj e.Text
-      MergeWith = if e.MergeWith.IsEmpty then null else e.MergeWith |> List.map saved |> Array.ofList }
-
 /// Saves edits next to pdfPath, keeping any dismissals in the file. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
 let save (pdfPath: string) (edits: Edit list) =
-    let saved = edits |> List.map toSaved |> Array.ofList
+    let saved = toElementEdits edits |> List.map ReviewFile.ofElementEdit |> Array.ofList
     writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Edits = (if saved.Length = 0 then null else saved) }
 
 /// Builds the review a copy of pdfPath carries (see VeraPdfValidator.Review), with dismissed in

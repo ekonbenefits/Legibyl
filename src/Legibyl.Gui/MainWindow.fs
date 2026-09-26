@@ -385,7 +385,7 @@ module private MainView =
                     match selectedFile.Current, outcome.Current with
                     | Some path, Validated(report, _) when report.FixableCount PdfFixOptions.TagFromLayout > 0 ->
                         let review = layoutReviews.For path
-                        let changes = review.Edits.Length + review.Discarded.Count + (if review.Title.IsSome then 1 else 0)
+                        let changes = review.Edits.Length + (if review.Title.IsSome then 1 else 0)
                         pending.Set { Changes = changes; TagsFromReview = review.Pages.Count > 0 || changes > 0 }
                     | Some path, Validated _ ->
                         let! count =
@@ -570,7 +570,7 @@ module private MainView =
                                     | 1 -> " 1 region's OCR text is corrected."
                                     | n -> $" {n} regions' OCR text is corrected."
                                 figures + texts
-                            match review.Pages.Count, review.Discarded.Count with
+                            match review.Pages.Count, review.Edits |> List.filter _.Exclude |> List.length with
                             | _ when pending.Current.TagsFromReview ->
                                 Some("Save tags from your review in Suggest Structure, ticked or not." + alt)
                             | 0, 0 when alt = "" -> None

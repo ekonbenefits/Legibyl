@@ -97,21 +97,28 @@ let ``a layout with an unknown tag or a bad box says what's wrong`` () =
     finally
         File.Delete path
 
-[<Fact>]
-let ``--apply-layout tags the file from the layout, as changed`` () =
-    withUntaggedPdf (fun pdf ->
-        let layout = LayoutSuggestions.toLayoutFile pdf [ suggestion ] (Some "The garden")
-        let changed =
-            { layout with
-                Pages =
-                    [| { layout.Pages[0] with
-                           Regions =
-                             [| { layout.Pages[0].Regions[0] with Tag = "H1" }
-                                { layout.Pages[0].Regions[1] with Alt = "Tomato seedlings" } |] } |] }
-        let path = pdf + ".layout.json"
-        File.WriteAllText(path, LayoutFile.toJson changed)
+/// A review with edits on regions (by the page, tag and box the layout found them with).
+let private edits (title: string | null) (edits: ReviewFile.SavedEdit list) : ReviewFile.SavedFile =
+    { Version = 1; DismissedWarnings = null; Edits = Array.ofList edits; Title = title; Layout = null }
 
-        let _, result = run [ pdf; "--apply-layout"; path ]
+let private editOn tag box : ReviewFile.SavedEdit =
+    { Page = 1; Tag = tag; Box = box; Alt = null; Text = null; MergeWith = null; Retag = null; Exclude = false }
+
+let private heading = [| 70.0; 695.0; 300.0; 715.0 |]
+let private figure = [| 70.0; 548.0; 175.0; 652.0 |]
+
+[<Fact>]
+let ``--apply-layout tags the file from the layout as found, with the edits layered on`` () =
+    withUntaggedPdf (fun pdf ->
+        let path = pdf + ".layout.json"
+        File.WriteAllText(path, LayoutFile.toJson (LayoutSuggestions.toLayoutFile pdf [ suggestion ] None))
+        let review = pdf + ".edits.json"
+        File.WriteAllText(
+            review,
+            ReviewFile.toJson (edits "The garden" [ { editOn "H" heading with Retag = "H1" }; { editOn "Figure" figure with Alt = "Tomato seedlings" } ])
+        )
+
+        let _, result = run [ pdf; "--apply-layout"; path; "--edits-from"; review ]
 
         let copy = result.Value.GetProperty("fixOutputPath").GetString() |> nonNull
         let tagged = VeraPdfValidator().ReadStructureTree copy |> nonNull |> nodes
@@ -222,16 +229,13 @@ let private fixedSource (regions: LayoutRegion list) =
         member _.DocumentTitle = "From the model" }
 
 [<Fact>]
-let ``discarded regions aren't tagged, and pages a layout doesn't have come from the fallback`` () =
+let ``pages a layout doesn't have come from the fallback`` () =
     let layout = LayoutSuggestions.toLayoutFile "garden.pdf" [ suggestion ] None
-    let layout =
-        { layout with
-            Pages = [| { layout.Pages[0] with Regions = [| layout.Pages[0].Regions[0]; { layout.Pages[0].Regions[1] with Discarded = true } |] } |] }
     let fromModel: LayoutRegion =
         { Tag = "P"; Geometry = { PageNumber = 2; Left = 1.0; Bottom = 1.0; Right = 2.0; Top = 2.0 }; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
     let source = LayoutFile.FileRegions(layout, Some(fixedSource [ fromModel ])) :> IPageLayoutSource
 
-    source.PageRegions("garden.pdf", 1) |> Seq.map _.Tag |> List.ofSeq |> should equal [ "H" ]
+    source.PageRegions("garden.pdf", 1) |> Seq.map _.Tag |> List.ofSeq |> should equal [ "H"; "Figure" ]
     source.PageRegions("garden.pdf", 2) |> Seq.map _.Tag |> List.ofSeq |> should equal [ "P" ]
     // No title of its own: the fallback's.
     source.DocumentTitle |> should equal "From the model"
@@ -239,26 +243,23 @@ let ``discarded regions aren't tagged, and pages a layout doesn't have come from
     LayoutFile.covers layout 2 |> should be False
 
 [<Fact>]
-let ``a review keeps an untagged PDF's layout, and --edits tags from it`` () =
+let ``a review records an untagged PDF's layout as found, and --edits tags from it with its edits`` () =
     withUntaggedPdf (fun pdf ->
         let layout = LayoutSuggestions.toLayoutFile pdf [ suggestion ] None
-        let layout =
-            { layout with
-                Pages =
-                    [| { layout.Pages[0] with
-                           Regions =
-                             [| { layout.Pages[0].Regions[0] with Tag = "H1" }
-                                { layout.Pages[0].Regions[1] with Alt = "Tomato seedlings" } |] } |] }
-        ReviewFile.writeFile pdf { Version = 1; DismissedWarnings = null; Edits = null; Title = "The garden"; Layout = layout }
-        (ReviewFile.readFor pdf |> Option.get).Layout |> should not' (be Null)
+        ReviewFile.writeFile
+            pdf
+            { edits "The garden" [ { editOn "H" heading with Retag = "H1" }; { editOn "Figure" figure with Exclude = true } ] with
+                Layout = layout }
 
         let _, result = run [ pdf; "--edits" ]
 
         let copy = result.Value.GetProperty("fixOutputPath").GetString() |> nonNull
         let tagged = VeraPdfValidator().ReadStructureTree copy |> nonNull |> nodes
-        tagged |> List.map _.Tag |> List.filter (fun t -> t = "H1" || t = "Figure") |> should equal [ "H1"; "Figure" ]
-        (tagged |> List.find (fun n -> n.Tag = "Figure")).AlternateDescription |> should equal "Tomato seedlings"
+        tagged |> List.map _.Tag |> List.filter (fun t -> t = "H1" || t = "H2" || t = "Figure") |> should equal [ "H1" ]
         use document = new PdfDocument(new PdfReader(copy))
         document.GetDocumentInfo().GetTitle() |> should equal "The garden"
-        // The copy carries the review, but not the layout it was tagged from: it has elements now.
-        (ReviewFile.readFor copy |> Option.get).Layout |> should be Null)
+        // The copy carries the review, but not the layout it was tagged from (it has elements
+        // now), and the edits are in its elements: a retag is just its tag, an exclusion is gone.
+        let carried = ReviewFile.readFor copy |> Option.get
+        carried.Layout |> should be Null
+        carried.Edits |> should be Null)

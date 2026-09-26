@@ -29,16 +29,16 @@ type LinkTitlesChoice =
     | Read of except: Set<string>
 
 /// What's been found and decided about one file's suggested structure: each page's layout
-/// found so far, the suggestions discarded, and the page last looked at. Remembered while the
+/// found so far (as found: what a person decides is in Edits, on top), and the page last looked
+/// at. Remembered while the
 /// app is open, so reopening Suggest Structure (or tagging on Save) picks it up.
 [<Sealed>]
 type LayoutReview(modified: DateTime) =
     member _.Modified = modified
     member val Pages = Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>()
-    /// Discarded suggestions, by (page, order).
-    member val Discarded: Set<int * int> = Set.empty with get, set
     member val LastPage = 1 with get, set
-    /// Figures' alt text and corrected OCR text, as saved next to the PDF (see RegionEdits).
+    /// What a person decided about the suggestions, as saved next to the PDF (see RegionEdits):
+    /// suggestions left out or retagged, figures' alt text, corrected OCR text.
     member val Edits: RegionEdits.Edit list = [] with get, set
     member val LinkTitles = NotAsked with get, set
     /// The titles read for web addresses, by address.
@@ -55,29 +55,20 @@ type LayoutReview(modified: DateTime) =
     /// The title to give the document: as edited, else as shown prefilled; None to leave it.
     member this.DocumentTitle = this.Title |> Option.orElse this.ShownTitle
 
-    /// The layout as reviewed: each page found so far, its suggestions marked if discarded (see
-    /// LayoutFile); None before any page is found.
+    /// The layout as found (see LayoutFile): each page found so far, to record next to the PDF;
+    /// None before any page is found. Edits aren't in it; they're layered on top.
     member this.ToLayout(pdfPath: string) : LayoutFile.SavedLayout option =
         if this.Pages.IsEmpty then
             None
         else
-            let pages = this.Pages.Values |> Seq.sortBy _.PageNumber |> List.ofSeq
-            let layout = LayoutSuggestions.toLayoutFile pdfPath pages None
-            Some
-                { layout with
-                    Pages =
-                        [| for page in layout.Pages ->
-                               { page with
-                                   Regions =
-                                       [| for region in page.Regions ->
-                                              { region with Discarded = this.Discarded.Contains((page.Page, region.Order)) } |] } |] }
+            Some(LayoutSuggestions.toLayoutFile pdfPath (this.Pages.Values |> Seq.sortBy _.PageNumber |> List.ofSeq) None)
 
-    /// Whether a layout is kept next to the PDF: one was saved before, or a region was retagged.
+    /// Whether a layout was recorded next to the PDF before.
     member val LayoutKept = false with get, set
 
-    /// Whether a person has decided anything here (discarded a suggestion, retagged one, written
-    /// an edit or a title), so the layout is worth keeping next to the PDF.
-    member this.HasDecisions = this.LayoutKept || not this.Discarded.IsEmpty || not this.Edits.IsEmpty || this.Title.IsSome
+    /// Whether a person has decided anything here (an edit or a title), so the layout the edits
+    /// are on is worth recording next to the PDF.
+    member this.HasDecisions = this.LayoutKept || not this.Edits.IsEmpty || this.Title.IsSome
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
@@ -108,8 +99,8 @@ type LayoutReviews() =
         let fullPath = Path.GetFullPath pdfPath
         let modified = File.GetLastWriteTimeUtc fullPath
         let fresh () =
-            // Any alt text saved next to the PDF, written for it or an earlier version of it, and
-            // the layout as reviewed before: its pages count as found, with their discards.
+            // Any edits saved next to the PDF, made for it or an earlier version of it, and the
+            // layout recorded with them: its pages count as found.
             let review = LayoutReview modified
             let edits, title, layout = RegionEdits.loadReview fullPath
             review.Edits <- edits
@@ -119,10 +110,6 @@ type LayoutReviews() =
                 review.LayoutKept <- true
                 for page in layout.Pages do
                     review.Pages[page.Page] <- LayoutSuggestions.ofLayoutPage page
-                review.Discarded <-
-                    set [ for page in layout.Pages do
-                              for region in page.Regions do
-                                  if region.Discarded then page.Page, region.Order ]
             | None -> ()
             review
         reviews.AddOrUpdate(fullPath, (fun _ -> fresh ()), (fun _ existing -> if existing.Modified = modified then existing else fresh ()))
@@ -197,16 +184,12 @@ type LayoutPrefetcher(suggester: LayoutSuggester, results: Collections.Concurren
         cancel.Cancel()
         worker.Wait()
 
-/// The regions to tag: each page's suggestions, less the ones the user discarded.
+/// The regions to tag: each page's suggestions, with the review's edits layered on (left out,
+/// retagged, alt text, corrected text).
 type ReviewedLayout(prefetcher: LayoutPrefetcher, review: LayoutReview) =
     interface IPageLayoutSource with
         member _.PageRegions(_, page) =
-            let kept = (prefetcher.Find page).Blocks |> List.filter (fun block -> not (review.Discarded.Contains((page, block.Order))))
-            List.map2
-                (fun (block: SuggestedBlock) region -> RegionEdits.apply review.Edits page block region)
-                kept
-                (LayoutSuggestions.toRegions kept)
-            :> Collections.Generic.IReadOnlyList<_>
+            RegionEdits.onRegions review.Edits (prefetcher.Find page).Blocks :> Collections.Generic.IReadOnlyList<_>
 
         // QR codes' descriptions name the titles read in the window (as it showed them).
         member _.PageTitles = review.TitleLookup
@@ -262,8 +245,6 @@ module SuggestedStructureView =
             let image = ctx.useState (None: Bitmap option)
             let status = ctx.useState ""
             let readyCount = ctx.useState prefetcher.ReadyCount
-            // Suggestions the user discarded, by (page, order).
-            let discarded = ctx.useState review.Discarded
             // Bumped per page shown, so a rendering that finishes late doesn't replace a newer one.
             let version = ctx.useState (0, renderOnChange = false)
             // QR codes' page titles, read from the web only once asked for; and the addresses
@@ -303,10 +284,12 @@ module SuggestedStructureView =
                 task {
                     let regions =
                         [ for block in result.Blocks ->
-                              let isDiscarded = discarded.Current.Contains((result.PageNumber, block.Order))
+                              // As edited: review.Edits is kept up to date as edits are made.
+                              let isDiscarded = RegionEdits.isExcluded review.Edits result.PageNumber block
+                              let tag = RegionEdits.tagOf review.Edits result.PageNumber block
                               { Geometry = block.Geometry
-                                Label = if isDiscarded then $"× {block.Order} {block.Tag}" else $"{block.Order} {block.Tag}"
-                                Color = if isDiscarded then discardedColor else colorFor block.Tag
+                                Label = if isDiscarded then $"× {block.Order} {tag}" else $"{block.Order} {tag}"
+                                Color = if isDiscarded then discardedColor else colorFor tag
                                 Emphasised = (emphasised = Some block.Order) } ]
                     let! bitmap =
                         Task.Run(fun () ->
@@ -370,8 +353,8 @@ module SuggestedStructureView =
                     render result (Some block.Order) version.Current |> ignore
                 | None -> ()
 
-            /// Keeps the layout as reviewed (the pages found, and what's discarded) next to the PDF,
-            /// once a person has decided something here.
+            /// Records the layout as found (the pages found so far) next to the PDF, with the edits
+            /// on it, once a person has decided something here.
             let saveLayout () =
                 if review.HasDecisions then
                     try
@@ -379,19 +362,6 @@ module SuggestedStructureView =
                     with
                     | :? IOException
                     | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save the review next to the PDF: {ex.Message}"
-
-            /// Keeps or discards some of this page's suggestions, and redraws it.
-            let setDiscarded (orders: int list) (discard: bool) =
-                match suggestion.Current with
-                | Some result ->
-                    let keys = orders |> List.map (fun order -> result.PageNumber, order) |> Set.ofList
-                    let next = if discard then Set.union discarded.Current keys else Set.difference discarded.Current keys
-                    discarded.Set next
-                    review.Discarded <- next
-                    saveLayout ()
-                    onChanged ()
-                    render result selected.Current version.Current |> ignore
-                | None -> ()
 
             let download _ =
                 task {
@@ -470,35 +440,26 @@ module SuggestedStructureView =
                 | :? IOException
                 | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save edits next to the PDF: {ex.Message}"
 
-            /// Gives a region another tag. Its edits (alt text, corrected text) go with it, since
-            /// they're found by tag; a list item's numbering goes if it isn't one any more.
+            /// Keeps or leaves out some of this page's suggestions (an edit on each), and redraws it.
+            let setDiscarded (orders: int list) (discard: bool) =
+                match suggestion.Current with
+                | Some result ->
+                    result.Blocks
+                    |> List.filter (fun b -> List.contains b.Order orders)
+                    |> List.fold (fun all b -> RegionEdits.setExcluded all result.PageNumber b.Tag b.Geometry discard) edits.Current
+                    |> saveEdits
+                    saveLayout ()
+                    render result selected.Current version.Current |> ignore
+                | None -> ()
+
+            /// Gives a suggestion another tag (an edit on it; the suggestion stays as found, and its
+            /// other edits, found by the tag it was found with, stay with it), and redraws the page.
             let retag (block: SuggestedBlock) (tag: string) =
                 match suggestion.Current with
-                | Some result when tag <> block.Tag ->
-                    let updated =
-                        { result with
-                            Blocks =
-                                result.Blocks
-                                |> List.map (fun b ->
-                                    if b.Order = block.Order then
-                                        { b with Tag = tag; ListNumbering = (if tag = "LI" then b.ListNumbering else None) }
-                                    else
-                                        b) }
-                    review.Pages[result.PageNumber] <- updated
-                    review.LayoutKept <- true
-                    let moved =
-                        edits.Current
-                        |> List.map (fun e ->
-                            if e.MergeWith.IsEmpty && e.Page = result.PageNumber && e.Tag = block.Tag
-                               && RegionEdits.overlap e.Box block.Geometry >= RegionEdits.SameRegionOverlap then
-                                { e with Tag = tag }
-                            else
-                                e)
-                    if moved <> edits.Current then saveEdits moved
-                    suggestion.Set(Some updated)
+                | Some result when tag <> RegionEdits.tagOf edits.Current result.PageNumber block ->
+                    saveEdits (RegionEdits.setRetag edits.Current result.PageNumber block.Tag block.Geometry tag)
                     saveLayout ()
-                    onChanged ()
-                    render updated selected.Current version.Current |> ignore
+                    render result selected.Current version.Current |> ignore
                 | _ -> ()
 
             let currentPage () = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
@@ -613,8 +574,9 @@ module SuggestedStructureView =
                             StackPanel.spacing 2.0
                             StackPanel.children [
                                 for block in suggestion.Current |> Option.map _.Blocks |> Option.defaultValue [] do
-                                  let isDiscarded =
-                                      suggestion.Current |> Option.exists (fun result -> discarded.Current.Contains((result.PageNumber, block.Order)))
+                                  let pageNumber = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
+                                  let isDiscarded = RegionEdits.isExcluded edits.Current pageNumber block
+                                  let tag = RegionEdits.tagOf edits.Current pageNumber block
                                   StackPanel.create [
                                    StackPanel.opacity (if isDiscarded then 0.5 else 1.0)
                                    StackPanel.children [
@@ -648,7 +610,7 @@ module SuggestedStructureView =
                                                         Border.height 10.0
                                                         Border.margin (0.0, 4.0, 6.0, 0.0)
                                                         Border.verticalAlignment VerticalAlignment.Top
-                                                        Border.background (brushFor block.Tag)
+                                                        Border.background (brushFor tag)
                                                     ]
                                                     // Its reading order; its tag is in the picker beside it.
                                                     TextBlock.create [
@@ -683,7 +645,7 @@ module SuggestedStructureView =
                                         ComboBox.minWidth 92.0
                                         ComboBox.verticalAlignment VerticalAlignment.Top
                                         ComboBox.dataItems LayoutFile.tags
-                                        ComboBox.selectedItem block.Tag
+                                        ComboBox.selectedItem tag
                                         ComboBox.isEnabled (not isDiscarded)
                                         AttrBuilder<ComboBox>.CreateProperty<string | null>(
                                             Automation.AutomationProperties.NameProperty, $"Tag for region {block.Order}", ValueNone)
@@ -708,7 +670,7 @@ module SuggestedStructureView =
                                     ]
                                     ]
                                   ]
-                                  if block.Tag = "Figure" then altBox block
+                                  if tag = "Figure" then altBox block
                                   elif block.Recognized then ocrBox block
                                    ]
                                   ]
@@ -847,7 +809,7 @@ module SuggestedStructureView =
                 match review.Pages.TryGetValue 1 with
                 | true, first ->
                     first.Blocks
-                    |> List.tryFind (fun block -> block.Tag = "H1")
+                    |> List.tryFind (fun block -> RegionEdits.tagOf edits.Current 1 block = "H1")
                     |> Option.bind (fun block ->
                         RegionEdits.textFor edits.Current 1 block
                         |> Option.orElse (Some block.Text)

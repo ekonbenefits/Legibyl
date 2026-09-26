@@ -72,7 +72,7 @@ let private writeReview (path: string) (alt: string) =
     let review: ReviewFile.SavedFile =
         { Version = 1
           DismissedWarnings = null
-          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null } |]
+          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null; Retag = null; Exclude = false } |]
           Title = null
           Layout = null }
     File.WriteAllText(path, ReviewFile.toJson review)
@@ -122,3 +122,16 @@ let ``an unknown repair is a usage error`` () =
     withTaggedPdf (fun pdf ->
         let code, _ = run [ pdf; "--fixes"; "safe,nope" ]
         code |> should equal 64)
+
+[<Fact>]
+let ``structure nodes say where they are as edits do: page and box`` () =
+    withTaggedPdf (fun pdf ->
+        let _, result = run [ pdf; "--structure" ]
+
+        let rec withBox (node: JsonElement) : JsonElement list =
+            [ if node.GetProperty("box").ValueKind = JsonValueKind.Array then node
+              for child in node.GetProperty("children").EnumerateArray() do
+                  yield! withBox child ]
+        let figure = withBox (result.Value.GetProperty "structure") |> List.find (fun n -> n.GetProperty("tag").GetString() = "Figure")
+        figure.GetProperty("page").GetInt32() |> should equal 1
+        [ for v in figure.GetProperty("box").EnumerateArray() -> v.GetDouble() ] |> should haveLength 4)
