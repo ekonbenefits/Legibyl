@@ -361,7 +361,7 @@ module SuggestedStructureView =
                             try
                                 let! result =
                                     Task.Run(fun () ->
-                                        let validator = VeraPdfValidator(LayoutSource = source, Review = Dismissals.reviewJson pdfPath None)
+                                        let validator = VeraPdfValidator(LayoutSource = source, Review = RegionEdits.reviewFor pdfPath None)
                                         validator.Fix(pdfPath, PdfProfile.PdfUa1, outputPath, PdfFixOptions.TagFromLayout, progress))
                                 status.Set before
                                 let message =

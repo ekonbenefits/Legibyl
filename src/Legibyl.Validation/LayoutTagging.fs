@@ -282,13 +282,13 @@ let tag
     (linkQrCodes: bool)
     (titles: IPageTitleSource option)
     (onPage: int -> int -> unit)
-    : string list =
+    : string list * TaggedRegion list =
     use reader = new PdfReader(pdfPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let catalog = document.GetCatalog().GetPdfObject()
     if not (isNull (catalog.Get PdfName.StructTreeRoot)) then
-        []
+        [], []
     else
         let root = PdfDictionary()
         root.Put(PdfName.Type, PdfName.StructTreeRoot) |> ignore
@@ -324,6 +324,7 @@ let tag
         let mutable noteIds = 0
         // Annotations' /StructParent keys come after every page's.
         let objectReferences = List<PdfDictionary * PdfDictionary>()
+        let tagged = List<TaggedRegion>()
 
         for pageNumber in 1 .. pageCount do
             let page = document.GetPage pageNumber
@@ -527,6 +528,32 @@ let tag
             let last = if operations.Count > 0 then operations[operations.Count - 1].End else 0L
             output.Write(bytes, int last, int (length - last))
 
+            // Each region's element, with the box of what it holds.
+            let held = Dictionary<int, Rectangle>()
+            for k in 0 .. operations.Count - 1 do
+                match owners[k], drawn.TryGetValue k with
+                | Some(Region index), (true, pieces) when index >= 0 ->
+                    for piece in pieces do
+                        held[index] <-
+                            match held.TryGetValue index with
+                            | true, box -> Rectangle.GetCommonRectangle(box, piece.Box)
+                            | _ -> piece.Box
+                | _ -> ()
+            for KeyValue(index, element) in elements do
+                if index >= 0 then
+                    tagged.Add
+                        { Region = fst regions[index]
+                          Tag = (element.Dictionary.GetAsName PdfName.S).GetValue()
+                          Box =
+                            match held.TryGetValue index with
+                            | true, box ->
+                                { PageNumber = pageNumber
+                                  Left = float (box.GetLeft())
+                                  Bottom = float (box.GetBottom())
+                                  Right = float (box.GetRight())
+                                  Top = float (box.GetTop()) }
+                            | _ -> null }
+
             // The page's elements in reading order (leftover text last), consecutive list
             // items with the same numbering in one list.
             let mutable currentList: (Element * string) option = None
@@ -664,45 +691,47 @@ let tag
             | _ -> None
 
         let plural n (one: string) (many: string) = if n = 1 then $"1 {one}" else $"{n} {many}"
-        let headings = plural tally.Headings "heading" "headings"
-        let paragraphs = plural tally.Paragraphs "paragraph" "paragraphs"
-        let items = plural tally.ListItems "list item" "list items"
-        let figures = plural tally.Figures "figure" "figures"
-        let links = plural tally.Links "link" "links"
-        let pages = plural tally.Pages "page" "pages"
-        [ yield
-              $"Tagged {pages} from their layout: {headings}, {paragraphs}, {items}, {figures} "
-              + $"and {links}; page furniture marked as artifacts"
-          if tally.Recognized > 0 then
-              let recognized = plural tally.Recognized "element's text is" "elements' text is"
-              yield $"{recognized} drawn as outlines or pixels: read with OCR into /ActualText, to check"
-          if tally.QrCodes > 0 then
-              let described = plural tally.QrCodes "QR code" "QR codes"
-              yield $"Described {described} by what they encode"
-          if tally.QrTitles > 0 then
-              let named = plural tally.QrTitles "QR code's description names" "QR codes' descriptions name"
-              yield $"{named} the title of the web page it goes to, read from the web: to check"
-          if tally.QrLinks > 0 then
-              let linked = plural tally.QrLinks "QR code" "QR codes"
-              yield $"Linked {linked} to the web address they encode"
-          match titled with
-          | Some title -> yield $"Titled the document \"{title}\", as set in Suggest Structure"
-          | None -> ()
-          if tally.LinksDescribed > 0 then
-              let described = plural tally.LinksDescribed "link" "links"
-              yield $"Described {described} as reviewed in Suggest Structure"
-          if tally.WrittenAlt > 0 then
-              let given = plural tally.WrittenAlt "figure" "figures"
-              yield $"Gave {given} the alt text written in Suggest Structure"
-          if tally.Figures > tally.QrCodes + tally.WrittenAlt then
-              let need = plural (tally.Figures - tally.QrCodes - tally.WrittenAlt) "figure needs" "figures need"
-              yield $"{need} alt text, written by a person"
-          if tally.Tables > 0 then
-              let were = plural tally.Tables "table was" "tables were"
-              yield $"{were} tagged as text: rows and cells need tagging by hand"
-          if tally.UntaggedAnnotations > 0 then
-              let annotations = plural tally.UntaggedAnnotations "annotation" "annotations"
-              yield $"{annotations} other than links left untagged"
-          if tally.PagesWithoutText > 0 then
-              let scans = plural tally.PagesWithoutText "page has" "pages have"
-              yield $"{scans} no text (a scan?): it needs OCR before it can be read" ]
+        let lines =
+            let headings = plural tally.Headings "heading" "headings"
+            let paragraphs = plural tally.Paragraphs "paragraph" "paragraphs"
+            let items = plural tally.ListItems "list item" "list items"
+            let figures = plural tally.Figures "figure" "figures"
+            let links = plural tally.Links "link" "links"
+            let pages = plural tally.Pages "page" "pages"
+            [ yield
+                  $"Tagged {pages} from their layout: {headings}, {paragraphs}, {items}, {figures} "
+                  + $"and {links}; page furniture marked as artifacts"
+              if tally.Recognized > 0 then
+                  let recognized = plural tally.Recognized "element's text is" "elements' text is"
+                  yield $"{recognized} drawn as outlines or pixels: read with OCR into /ActualText, to check"
+              if tally.QrCodes > 0 then
+                  let described = plural tally.QrCodes "QR code" "QR codes"
+                  yield $"Described {described} by what they encode"
+              if tally.QrTitles > 0 then
+                  let named = plural tally.QrTitles "QR code's description names" "QR codes' descriptions name"
+                  yield $"{named} the title of the web page it goes to, read from the web: to check"
+              if tally.QrLinks > 0 then
+                  let linked = plural tally.QrLinks "QR code" "QR codes"
+                  yield $"Linked {linked} to the web address they encode"
+              match titled with
+              | Some title -> yield $"Titled the document \"{title}\", as set in Suggest Structure"
+              | None -> ()
+              if tally.LinksDescribed > 0 then
+                  let described = plural tally.LinksDescribed "link" "links"
+                  yield $"Described {described} as reviewed in Suggest Structure"
+              if tally.WrittenAlt > 0 then
+                  let given = plural tally.WrittenAlt "figure" "figures"
+                  yield $"Gave {given} the alt text written in Suggest Structure"
+              if tally.Figures > tally.QrCodes + tally.WrittenAlt then
+                  let need = plural (tally.Figures - tally.QrCodes - tally.WrittenAlt) "figure needs" "figures need"
+                  yield $"{need} alt text, written by a person"
+              if tally.Tables > 0 then
+                  let were = plural tally.Tables "table was" "tables were"
+                  yield $"{were} tagged as text: rows and cells need tagging by hand"
+              if tally.UntaggedAnnotations > 0 then
+                  let annotations = plural tally.UntaggedAnnotations "annotation" "annotations"
+                  yield $"{annotations} other than links left untagged"
+              if tally.PagesWithoutText > 0 then
+                  let scans = plural tally.PagesWithoutText "page has" "pages have"
+                  yield $"{scans} no text (a scan?): it needs OCR before it can be read" ]
+        lines, List.ofSeq tagged

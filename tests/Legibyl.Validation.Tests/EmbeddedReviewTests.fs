@@ -17,6 +17,10 @@ let private createNeedingTabs (path: string) =
 
 let private review = """{"version":1,"dismissedWarnings":[{"rule":"Legibyl Structure-2","location":"*","message":"Likely split paragraph"}],"title":"Café menu"}"""
 
+/// A review builder that carries review whatever tagging did.
+let private carrying (review: string) =
+    Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null>(fun _ -> review)
+
 let private failedRules (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Findings
     |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure)
@@ -30,7 +34,7 @@ let ``the fixed copy carries the review, compressed, out of readers' sight`` () 
     use without = new TempPdf()
     createNeedingTabs input.Path
 
-    VeraPdfValidator(Review = review).Fix(input.Path, PdfProfile.PdfUa1, withReview.Path, PdfFixOptions.AnnotationTabs) |> ignore
+    VeraPdfValidator(Review = carrying review).Fix(input.Path, PdfProfile.PdfUa1, withReview.Path, PdfFixOptions.AnnotationTabs) |> ignore
     VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, without.Path, PdfFixOptions.AnnotationTabs) |> ignore
 
     EmbeddedReview.read withReview.Path |> should equal (Some review)
@@ -49,7 +53,7 @@ let ``a review is only embedded when the fix saves a copy`` () =
     VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.AnnotationTabs) |> ignore
 
     // Already has its tab order: nothing to fix, so no copy.
-    let result = VeraPdfValidator(Review = review).Fix(output.Path, PdfProfile.PdfUa1, input.Path + ".again.pdf", PdfFixOptions.AnnotationTabs)
+    let result = VeraPdfValidator(Review = carrying review).Fix(output.Path, PdfProfile.PdfUa1, input.Path + ".again.pdf", PdfFixOptions.AnnotationTabs)
 
     result.WasFixed |> should be False
     File.Exists(input.Path + ".again.pdf") |> should be False

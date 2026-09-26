@@ -396,3 +396,24 @@ let ``a document's title candidates are its own title, then a title page's text`
         canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 24f).MoveText(72.0, 600.0).ShowText("Den Leader Guide").EndText() |> ignore
         document.AddNewPage() |> ignore
     DocumentTitles.candidates untitled.Path |> should equal [ { DocumentTitles.Title = "Den Leader Guide"; DocumentTitles.Source = "first page" } ]
+
+[<Fact>]
+let ``tagging says which element each region became, and the box of what it holds`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let mutable tagged: TaggedRegion list = []
+    let validator =
+        VeraPdfValidator(
+            LayoutSource = FixedLayout regions,
+            Review = Func<_, _>(fun regions -> tagged <- List.ofSeq regions; null)
+        )
+
+    validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout) |> ignore
+
+    tagged |> List.map (fun t -> t.Region.Tag, t.Tag) |> List.sort
+    |> should equal (List.sort [ "H1", "H1"; "P", "P"; "LI", "LBody"; "LI", "LBody"; "Figure", "Figure"; "P", "P" ])
+    // What the figure holds is the image, inside its looser region.
+    let figure = tagged |> List.find (fun t -> t.Tag = "Figure")
+    let box = figure.Box |> notNull
+    (box.Left, box.Bottom, box.Right, box.Top) |> should equal (72.0, 450.0, 172.0, 550.0)

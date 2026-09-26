@@ -286,6 +286,13 @@ yet, and removes ones you no longer want. **Apply your edits** in the Fix
 dialog (ticked when some aren't in the PDF yet) writes them to a new copy
 (`ElementEdits.fs`), each to the element with its tag in about the same place,
 so they still apply after other repairs have rearranged the tree.
+
+Edits made in Suggest Structure are the same kind of edit, keyed to the regions
+it suggested. A copy tagged from them carries them moved to the elements
+tagging made (the tag it wrote, like `H1` for a suggested `H`, and the box of
+what the element holds), so in View Structure they're edits of those elements:
+shown as in the PDF, and updated rather than duplicated when edited there. The
+original's file keeps them keyed to the regions, for Suggest Structure.
 The default **Layout** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
 (headings, lists, tables, links, figures, etc. use different colors).
