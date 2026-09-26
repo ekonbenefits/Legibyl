@@ -116,6 +116,16 @@ let private editsOf (saved: SavedFile option) : Edit list =
 /// The edits in a .legibyl.json file, e.g. one saved next to an earlier version of the PDF.
 let fromFile (jsonPath: string) : Edit list = editsOf (readFile jsonPath)
 
+/// The edits as the ApplyEdits fix takes them.
+let toElementEdits (edits: Edit list) : ElementEdit list =
+    [ for e in edits ->
+          ({ Page = e.Page
+             Tag = e.Tag
+             Box = e.Box
+             Alt = Option.toObj e.Alt
+             Text = Option.toObj e.Text }
+          : ElementEdit) ]
+
 /// The edits saved for pdfPath (see Dismissals.readFor).
 let load (pdfPath: string) = editsOf (readFor pdfPath)
 

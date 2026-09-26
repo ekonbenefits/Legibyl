@@ -26,6 +26,7 @@
     <Compile Include="ParagraphJoinsTests.fs" />
     <Compile Include="EmbeddedReviewTests.fs" />
     <Compile Include="CopyNamesTests.fs" />
+    <Compile Include="ElementEditsTests.fs" />
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
     <Compile Include="LayoutSuggestionsTests.fs" />

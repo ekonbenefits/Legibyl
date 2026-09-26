@@ -26,6 +26,7 @@
     <Compile Include="LinkTitles.fs" />
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="DocumentLanguage.fs" />
+    <Compile Include="ElementEdits.fs" />
     <Compile Include="StructureFixes.fs" />
     <Compile Include="DocumentTitles.fs" />
     <!-- Legibyl's own warnings; see the header of LegibylChecks.fs to add one. -->

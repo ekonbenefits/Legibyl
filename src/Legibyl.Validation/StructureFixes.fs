@@ -463,7 +463,8 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///   3. Paragraphs tagged line by line are joined, so a list item's second line is part of
 ///      the item before lists are found (a line starting with a marker is never joined on).
 ///   4. Lists.
-///   5. Bookmarks, after headings are recovered, so those get bookmarks too.
+///   5. Bookmarks, after headings are recovered, so those get bookmarks too. Then your edits,
+///      once nothing else will move the elements they're for.
 ///   6. The rest touch pages, annotations, fonts and the Info dictionary rather than
 ///      paragraphs, so their order among themselves doesn't matter (except that a contents
 ///      link is described from its own text before any is from a web page's title)...
@@ -472,9 +473,14 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
 /// result, and syncs XMP with the Info dictionary the title repair may have just set.
-/// titles is where LinkTitlesFromWeb reads the titles of the pages links go to, and layout where
-/// JoinSplitParagraphs finds the pages' regions (without one, it does nothing).
-let orderedFixes (titles: IPageTitleSource) (layout: PageLayout option) : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
+/// titles is where LinkTitlesFromWeb reads the titles of the pages links go to, layout where
+/// JoinSplitParagraphs finds the pages' regions (without one, it does nothing), and edits what
+/// ApplyEdits writes.
+let orderedFixes
+    (titles: IPageTitleSource)
+    (layout: PageLayout option)
+    (edits: ElementEdit list)
+    : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.LanguageFromText, setLanguageFromText
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
@@ -482,6 +488,7 @@ let orderedFixes (titles: IPageTitleSource) (layout: PageLayout option) : (PdfFi
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
       PdfFixOptions.BookmarksFromHeadings, addBookmarks
+      PdfFixOptions.ApplyEdits, (fun document context -> ElementEdits.apply document context edits)
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
       PdfFixOptions.LinkTitlesFromWeb, describeWebLinks titles
@@ -493,11 +500,18 @@ let orderedFixes (titles: IPageTitleSource) (layout: PageLayout option) : (PdfFi
 /// The structural repairs Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per repair that actually changed something, so a
 /// document that already had a given fix applied reports nothing for it.
-let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions) (titles: IPageTitleSource) (layout: PageLayout option) : string list =
+let applyFixes
+    (inputPath: string)
+    (outputPath: string)
+    (options: PdfFixOptions)
+    (titles: IPageTitleSource)
+    (layout: PageLayout option)
+    (edits: ElementEdit list)
+    : string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
-    [ for option, apply in orderedFixes titles layout do
+    [ for option, apply in orderedFixes titles layout edits do
           if options.HasFlag option then
               yield! apply document context ]

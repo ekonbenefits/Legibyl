@@ -409,6 +409,9 @@ type VeraPdfValidator() =
         with get (): string | null = review
         and set (value: string | null) = review <- value
 
+    /// The edits the ApplyEdits fix writes (see ElementEdits).
+    member val Edits: Collections.Generic.IReadOnlyList<ElementEdit> = [] with get, set
+
     /// Where the LinkTitlesFromWeb fix reads the titles of the web pages links go to: the web
     /// itself, safely (see LinkTitles), unless replaced.
     member val PageTitleSource: IPageTitleSource = LinkTitles.WebPageTitles() with get, set
@@ -457,7 +460,7 @@ type VeraPdfValidator() =
             raise (VeraPdfValidationException "At least one fix option must be selected.")
 
         let structuralOptions =
-            StructureFixes.orderedFixes this.PageTitleSource None |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
+            StructureFixes.orderedFixes this.PageTitleSource None [] |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
         let steps =
@@ -532,7 +535,7 @@ type VeraPdfValidator() =
                         match this.LayoutSource with
                         | NonNull source -> Some { StructureFixes.Source = source; StructureFixes.PdfPath = pdfPath; StructureFixes.Report = report FixStage.Repairing }
                         | Null -> None
-                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout with
+                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) with
                     | [] ->
                         tryDeleteTemporary tempOutput
                         tempStructuralOutput <- null

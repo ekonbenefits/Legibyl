@@ -77,8 +77,43 @@ module private StructureView =
 
     let brush (color: Color) : IBrush = SolidColorBrush(color)
 
-    /// Called with the clicked block's node and its border control.
-    type Selection = { Select: StructureNode -> Border -> unit }
+    /// What can be edited on an element: its alt text, or its replacement text (/ActualText).
+    type EditKind =
+        | AltText
+        | ReplacementText
+
+    /// What blocks can do: select (called with the clicked block's node and its border
+    /// control), show the user's edits, and edit an element.
+    type Selection =
+        { Select: StructureNode -> Border -> unit
+          Edits: IReadable<RegionEdits.Edit list>
+          Edit: StructureNode -> EditKind -> unit }
+
+    /// The edits an element can take. Alt text: figures and formulas, and anything that already
+    /// has alt text. Replacement text: only what already has it (like OCR'd text), since writing
+    /// it over real text would hide what the page says. Either needs the element's place on its
+    /// page, which is how an edit finds it again.
+    let editKinds (node: StructureNode) =
+        match node.Geometry with
+        | null -> []
+        | _ ->
+            [ if node.Tag = "Figure" || node.Tag = "Formula" || not (isNull node.AlternateDescription) then AltText
+              if not (isNull node.ActualText) then ReplacementText ]
+
+    /// The user's edit for node, if any.
+    let editFor (edits: RegionEdits.Edit list) (node: StructureNode) =
+        match node.Geometry with
+        | null -> None
+        | geometry -> RegionEdits.find edits geometry.PageNumber node.Tag geometry
+
+    /// What of edit isn't in the element yet: (label, text) lines.
+    let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
+        [ match edit.Alt with
+          | Some alt when alt <> string node.AlternateDescription -> "alt", alt
+          | _ -> ()
+          match edit.Text with
+          | Some text when text <> string node.ActualText -> "text", text
+          | _ -> () ]
 
     let detailLine (text: string) (italic: bool) =
         TextBlock.create [
@@ -127,6 +162,24 @@ module private StructureView =
             Border.borderThickness thickness
             Border.tag node
             ToolTip.tip tip
+            match editKinds node with
+            | [] -> ()
+            | kinds ->
+                Border.contextMenu (
+                    ContextMenu.create [
+                        ContextMenu.viewItems [
+                            for kind in kinds ->
+                                MenuItem.create [
+                                    MenuItem.header (
+                                        match kind with
+                                        | AltText -> "Edit Alt Text…"
+                                        | ReplacementText -> "Edit Replacement Text…"
+                                    )
+                                    MenuItem.onClick (fun _ -> selection.Edit node kind)
+                                ]
+                        ]
+                    ]
+                )
             Border.onPointerPressed (fun e ->
                 match e.Source with
                 // FuncUI also subscribes to the tunnel phase, where the outermost block would
@@ -220,6 +273,18 @@ module private StructureView =
                 StackPanel.children [
                     header
                     match node.AlternateDescription with NonNull alt -> detailLine $"alt: \"{alt}\"" true | Null -> ()
+                    if not (editKinds node).IsEmpty then
+                        // Its own component, so an edit re-renders just this line.
+                        Component.create("pending-edit", fun ctx ->
+                            let edits = ctx.usePassedRead selection.Edits
+                            let lines =
+                                editFor edits.Current node |> Option.map (fun edit -> pendingLines edit node) |> Option.defaultValue []
+                            StackPanel.create [
+                                StackPanel.children [
+                                    for label, text in lines ->
+                                        detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
+                                ]
+                            ])
                     match node.FormFieldDescription with NonNull tooltip -> detailLine $"tooltip: \"{tooltip}\"" true | Null -> ()
                     match node.FormFieldValue with NonNull value -> detailLine $"value: \"{value}\"" false | Null -> ()
                     match linkTarget with NonNull target -> detailLine $"↳ {target}" false | Null -> ()
@@ -447,7 +512,51 @@ module private StructureView =
                 }
                 |> ignore
 
-            let selection = { Select = select }
+            // The user's edits for this PDF (saved next to it, or inside a copy Legibyl saved).
+            let edits = ctx.useState (RegionEdits.load sourceFilePath)
+
+            let saveEdits (next: RegionEdits.Edit list) =
+                task {
+                    try
+                        RegionEdits.save sourceFilePath next
+                        edits.Set next
+                    with :? IOException | :? UnauthorizedAccessException as ex ->
+                        do! Dialogs.showMessage window $"Couldn't save the edit next to the PDF: {ex.Message}" "Edits"
+                }
+
+            let editNode (node: StructureNode) (kind: EditKind) =
+                match node.Geometry with
+                | null -> ()
+                | box ->
+                    task {
+                        let page = box.PageNumber
+                        let existing = editFor edits.Current node
+                        let title, prompt, current, placeholder =
+                            match kind with
+                            | AltText ->
+                                "Alt Text",
+                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. Fix → Apply your edits writes it to the PDF.",
+                                existing |> Option.bind _.Alt |> Option.defaultValue (string node.AlternateDescription),
+                                "Describe what it shows"
+                            | ReplacementText ->
+                                "Replacement Text",
+                                $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn. Fix → Apply your edits writes it to the PDF.",
+                                existing |> Option.bind _.Text |> Option.defaultValue (string node.ActualText),
+                                "Nothing to read here (cleared)"
+                        match! Dialogs.promptText window title prompt current placeholder with
+                        | Some text ->
+                            let next =
+                                match kind with
+                                // Blank drops the edit: an element's alt text can't be made empty.
+                                | AltText when String.IsNullOrWhiteSpace text -> RegionEdits.setAlt edits.Current page node.Tag box ""
+                                | AltText -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.AlternateDescription) text
+                                | ReplacementText -> RegionEdits.setText edits.Current page node.Tag box (string node.ActualText) text
+                            do! saveEdits next
+                        | None -> ()
+                    }
+                    |> ignore
+
+            let selection = { Select = select; Edits = edits; Edit = editNode }
 
             let exportJson _ =
                 task {
@@ -556,6 +665,98 @@ module private StructureView =
                     ]
                 ]
 
+            let allNodes =
+                let rec flatten (node: StructureNode) : StructureNode list =
+                    node :: (node.Children |> Seq.collect flatten |> List.ofSeq)
+                root.Children |> Seq.collect flatten |> List.ofSeq
+
+            /// Every edit for this PDF, and whether it's in the PDF yet.
+            let editsTab =
+                Component.create("structure-edits", fun ctx ->
+                    let edits = ctx.usePassedRead selection.Edits
+                    // The element each edit is for: its tag, in about the same place.
+                    let elementFor (edit: RegionEdits.Edit) =
+                        allNodes
+                        |> List.choose (fun node ->
+                            match node.Geometry with
+                            | NonNull geometry when node.Tag = edit.Tag && geometry.PageNumber = edit.Page ->
+                                Some(node, RegionEdits.overlap geometry edit.Box)
+                            | _ -> None)
+                        |> List.filter (fun (_, o) -> o >= RegionEdits.SameRegionOverlap)
+                        |> List.sortByDescending snd
+                        |> List.tryHead
+                        |> Option.map fst
+                    let row (edit: RegionEdits.Edit) =
+                        let status =
+                            match elementFor edit with
+                            | None -> $"No <{edit.Tag}> in about this place in this PDF, so Fix can't apply it."
+                            | Some node when (pendingLines edit node).IsEmpty -> "In this PDF."
+                            | Some _ -> "Not in this PDF yet: Fix → Apply your edits writes it."
+                        Border.create [
+                            Border.borderThickness (0.0, 0.0, 0.0, 1.0)
+                            Theme.resources [ Border.BorderBrushProperty, Theme.Tokens.Border ]
+                            Border.padding (0.0, 6.0)
+                            Border.child (
+                                Grid.create [
+                                    Grid.columnDefinitions "*,Auto"
+                                    Grid.children [
+                                        StackPanel.create [
+                                            StackPanel.children [
+                                                TextBlock.create [
+                                                    TextBlock.text $"<{edit.Tag}>  p.{edit.Page}"
+                                                    TextBlock.fontFamily Fonts.Monospace
+                                                    TextBlock.fontSize 12.0
+                                                ]
+                                                match edit.Alt with
+                                                | Some alt -> detailLine $"alt: \"{alt}\"" false
+                                                | None -> ()
+                                                match edit.Text with
+                                                | Some "" -> detailLine "text: (nothing to read)" false
+                                                | Some text -> detailLine $"text: \"{text}\"" false
+                                                | None -> ()
+                                                detailLine status true
+                                            ]
+                                        ]
+                                        Button.create [
+                                            Grid.column 1
+                                            Button.content "Remove"
+                                            Button.verticalAlignment VerticalAlignment.Top
+                                            ToolTip.tip "Drop this edit. What's already in the PDF stays."
+                                            Button.onClick (fun _ ->
+                                                saveEdits (edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, edit)))) |> ignore)
+                                        ]
+                                    ]
+                                ]
+                            )
+                        ]
+                    ScrollViewer.create [
+                        ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                        ScrollViewer.content (
+                            StackPanel.create [
+                                StackPanel.margin 8.0
+                                StackPanel.children [
+                                    TextBlock.create [
+                                        TextBlock.textWrapping TextWrapping.Wrap
+                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                        TextBlock.margin (0.0, 0.0, 0.0, 8.0)
+                                        TextBlock.text (
+                                            if edits.Current.IsEmpty then
+                                                "No edits yet. Right-click a figure in the Layout tab to write its alt text, or an element with replacement text to correct it."
+                                            else
+                                                let file = Path.GetFileName(Dismissals.filePath sourceFilePath)
+                                                let where =
+                                                    if File.Exists(Dismissals.filePath sourceFilePath) then $"saved in {file} next to the PDF"
+                                                    else $"carried inside this PDF (a copy Legibyl saved); a change saves them in {file} next to it"
+                                                $"Your edits, {where}. Fix → Apply your edits writes the ones not in it yet, to a new copy."
+                                        )
+                                    ]
+                                    for edit in edits.Current do
+                                        row edit
+                                ]
+                            ]
+                        )
+                    ])
+
             let treeTab =
                 TreeView.create [
                     TreeView.dataItems root.Children
@@ -588,6 +789,10 @@ module private StructureView =
                         TabControl.viewItems [
                             TabItem.create [ TabItem.header "Layout"; TabItem.content layoutTab ]
                             TabItem.create [ TabItem.header "Tree"; TabItem.content treeTab ]
+                            TabItem.create [
+                                TabItem.header (if edits.Current.IsEmpty then "Edits" else $"Edits ({edits.Current.Length})")
+                                TabItem.content editsTab
+                            ]
                         ]
                     ]
                     StackPanel.create [
