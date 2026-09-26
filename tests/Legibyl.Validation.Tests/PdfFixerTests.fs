@@ -284,7 +284,7 @@ let ``Fix LibreOffice role-mapped whitespace paragraph is removed`` () =
     |> should be True
 
 [<Fact>]
-let ``Validate likely split paragraph adds non-fixable warning`` () =
+let ``Validate likely split paragraph adds a warning the layout join can fix`` () =
     use input = new TempPdf()
     createPdfWithParagraphActualText
         input.Path
@@ -296,8 +296,8 @@ let ``Validate likely split paragraph adds non-fixable warning`` () =
 
     let warning = report.Assertions |> single isSplitParagraphWarning
     warning.Passed |> should be True
-    warning.IsFixable |> should be False
-    warning.FixOptions |> should equal PdfFixOptions.None
+    warning.IsFixable |> should be True
+    warning.FixOptions |> should equal PdfFixOptions.JoinSplitParagraphs
 
 [<Fact>]
 let ``Validate likely split paragraph has geometry covering both paragraphs`` () =

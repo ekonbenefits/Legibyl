@@ -108,8 +108,8 @@ let all: Check list =
         Inspect = emptyParagraph }
       { TestNumber = 2
         Message =
-          "Likely split paragraph: adjacent /P structure elements look like visual line fragments from the same sentence. This is best fixed in the source document if possible."
-        FixOptions = PdfFixOptions.None
+          "Likely split paragraph: adjacent /P structure elements look like visual line fragments from the same sentence. This is best fixed in the source document if possible; the Fix dialog can join them where the page layout shows one block of text."
+        FixOptions = PdfFixOptions.JoinSplitParagraphs
         Inspect = splitParagraph }
       { TestNumber = 8
         Message =

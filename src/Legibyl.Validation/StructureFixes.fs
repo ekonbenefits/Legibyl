@@ -321,6 +321,28 @@ let private tagParagraphLists (document: PdfDocument) context =
             ParagraphLists.tagAsList document run
         [ $"Tagged {runs.Length} run(s) of marked paragraphs as lists." ]
 
+/// Where JoinSplitParagraphs finds each page's regions: the source, the document to ask it about
+/// (the original: tagging doesn't change how its pages look), and what to tell as it asks for
+/// each page (its number, and the document's page count).
+type PageLayout =
+    { Source: IPageLayoutSource
+      PdfPath: string
+      Report: int -> int -> unit }
+
+let private joinSplitParagraphs (layout: PageLayout option) (document: PdfDocument) context =
+    match layout with
+    | None -> []
+    | Some layout ->
+        let pageCount = document.GetNumberOfPages()
+        let regions page =
+            layout.Report page pageCount
+            layout.Source.PageRegions(layout.PdfPath, page)
+        match ParagraphJoins.find document context regions with
+        | [] -> []
+        | runs ->
+            let joined = ParagraphJoins.join runs
+            [ $"Joined {joined + runs.Length} paragraphs tagged line by line into {runs.Length}, where the page layout shows one block of text." ]
+
 let private addBookmarks (document: PdfDocument) context =
     match Bookmarks.find document context with
     | Some missing when not missing.Bookmarkable.IsEmpty && missing.LanguageDeclared ->
@@ -438,22 +460,26 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///   2. Empty paragraphs and table-of-contents entries next, so blank lines between list items
 ///      are gone before lists are tagged. (The list repair copes with them either way, keeping
 ///      them in the item.)
-///   3. Lists.
-///   4. Bookmarks, after headings are recovered, so those get bookmarks too.
-///   5. The rest touch pages, annotations, fonts and the Info dictionary rather than
+///   3. Paragraphs tagged line by line are joined, so a list item's second line is part of
+///      the item before lists are found (a line starting with a marker is never joined on).
+///   4. Lists.
+///   5. Bookmarks, after headings are recovered, so those get bookmarks too.
+///   6. The rest touch pages, annotations, fonts and the Info dictionary rather than
 ///      paragraphs, so their order among themselves doesn't matter (except that a contents
 ///      link is described from its own text before any is from a web page's title)...
-///   6. ...except that a missing XMP stream is written last, from the Info dictionary the
+///   7. ...except that a missing XMP stream is written last, from the Info dictionary the
 ///      title repairs may have just filled in.
 ///
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
 /// result, and syncs XMP with the Info dictionary the title repair may have just set.
-/// titles is where LinkTitlesFromWeb reads the titles of the pages links go to.
-let orderedFixes (titles: IPageTitleSource) : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
+/// titles is where LinkTitlesFromWeb reads the titles of the pages links go to, and layout where
+/// JoinSplitParagraphs finds the pages' regions (without one, it does nothing).
+let orderedFixes (titles: IPageTitleSource) (layout: PageLayout option) : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.LanguageFromText, setLanguageFromText
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.RemoveEmptyTocEntries, removeEmptyTocEntries
+      PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
       PdfFixOptions.BookmarksFromHeadings, addBookmarks
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
@@ -467,11 +493,11 @@ let orderedFixes (titles: IPageTitleSource) : (PdfFixOptions * (PdfDocument -> C
 /// The structural repairs Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per repair that actually changed something, so a
 /// document that already had a given fix applied reports nothing for it.
-let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions) (titles: IPageTitleSource) : string list =
+let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions) (titles: IPageTitleSource) (layout: PageLayout option) : string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
-    [ for option, apply in orderedFixes titles do
+    [ for option, apply in orderedFixes titles layout do
           if options.HasFlag option then
               yield! apply document context ]

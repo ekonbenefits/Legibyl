@@ -521,20 +521,21 @@ module private MainView =
                                 busyProgress.Set None
                                 let! fixOutcome =
                                     task {
-                                        // Tagging from the layout runs the layout detector page by page,
-                                        // after downloading its model the first time.
-                                        let tagging = options.HasFlag PdfFixOptions.TagFromLayout
+                                        // Tagging from the layout and joining split paragraphs run the layout
+                                        // detector page by page, after downloading its model the first time.
+                                        let usesLayout =
+                                            options.HasFlag PdfFixOptions.TagFromLayout || options.HasFlag PdfFixOptions.JoinSplitParagraphs
                                         // The suggestions as reviewed in Suggest Structure (all of them if
                                         // it wasn't opened), reusing any pages it found.
                                         let source =
-                                            if tagging then
+                                            if usesLayout then
                                                 let suggester = new LayoutSuggester(sourcePath)
                                                 Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
                                             else
                                                 None
                                         try
                                             try
-                                                if tagging && not (LayoutModel.isDownloaded ()) then
+                                                if usesLayout && not (LayoutModel.isDownloaded ()) then
                                                     do!
                                                         LayoutModel.download
                                                             (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
