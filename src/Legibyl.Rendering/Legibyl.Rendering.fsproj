@@ -12,8 +12,8 @@
 
   <ItemGroup>
     <!-- Pure managed PDF parsing/rendering (no native PDFium/etc. binaries) - Apache 2.0. -->
-    <PackageReference Include="PdfPig" Version="0.1.16" />
-    <PackageReference Include="PdfPig.Rendering.Skia" Version="0.1.16.4" />
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="PdfPig.Rendering.Skia" />
   </ItemGroup>
 
   <ItemGroup>

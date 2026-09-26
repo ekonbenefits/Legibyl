@@ -1,5 +1,8 @@
 ﻿<Project Sdk="WixToolset.Sdk/6.0.2">
   <PropertyGroup>
+    <!-- Keeps its WiX extension versions here rather than in Directory.Packages.props: it only
+         builds on Windows, so central management isn't verified for it. -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <OutputName>LegibylSetup</OutputName>
     <OutputPath>..\..\artifacts\msi\</OutputPath>
     <InstallerPlatform>x64</InstallerPlatform>

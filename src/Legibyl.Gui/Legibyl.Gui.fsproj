@@ -28,16 +28,16 @@
 
   <ItemGroup>
     <!-- Cross-platform UI (Windows, macOS, Linux) - MIT. Views are written in F# with FuncUI. -->
-    <PackageReference Include="Avalonia" Version="12.1.3" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
     <!-- Semi Design theme (light and dark) - MIT. -->
-    <PackageReference Include="Semi.Avalonia" Version="12.1.0.1" />
-    <PackageReference Include="Semi.Avalonia.DataGrid" Version="12.1.0.1" />
-    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
-    <PackageReference Include="Avalonia.FuncUI" Version="2.0.0" />
-    <PackageReference Include="AvaloniaCommunity.FuncUI.Bindings.DataGrid" Version="12.0.0" />
+    <PackageReference Include="Semi.Avalonia" />
+    <PackageReference Include="Semi.Avalonia.DataGrid" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" />
+    <PackageReference Include="Avalonia.FuncUI" />
+    <PackageReference Include="AvaloniaCommunity.FuncUI.Bindings.DataGrid" />
     <!-- Builds Legibyl.app on `dotnet msbuild -t:BundleApp` (see README "macOS app") - MIT. Build-time only. -->
-    <PackageReference Include="Dotnet.Bundle" Version="0.9.13" PrivateAssets="all" />
+    <PackageReference Include="Dotnet.Bundle" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- macOS .app bundle (Info.plist values for Dotnet.Bundle). Unsigned for now. -->
