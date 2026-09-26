@@ -1,4 +1,4 @@
-/// Before Suggest Structure opens: if the PDF links to web pages without saying where (links
+/// Before the suggested structure opens: if the PDF links to web pages without saying where (links
 /// with no description, QR codes), offers to read those pages' titles to describe them.
 module Legibyl.Gui.LinkTitleOffer
 
@@ -105,7 +105,7 @@ let offer (owner: Window) (pdfPath: string) (review: LayoutReview) (titleSource:
                             TextBlock.textWrapping TextWrapping.Wrap
                             TextBlock.text (
                                 "This PDF links to web pages without saying where they go. Legibyl can read those pages' titles "
-                                + "to describe the links and QR codes, prefilled in Suggest Structure for you to check. "
+                                + "to describe the links and QR codes, prefilled on the suggested structure for you to check. "
                                 + "Only public web pages are visited, and only their titles read; the sites see the visit."
                             )
                         ]
@@ -152,7 +152,7 @@ let offer (owner: Window) (pdfPath: string) (review: LayoutReview) (titleSource:
                             secondary
                             TextBlock.fontSize 12.0
                             TextBlock.textWrapping TextWrapping.Wrap
-                            TextBlock.text "QR codes found later, in Suggest Structure, follow this answer."
+                            TextBlock.text "QR codes found later, as each page is looked at, follow this answer."
                         ]
                         StackPanel.create [
                             StackPanel.orientation Orientation.Horizontal

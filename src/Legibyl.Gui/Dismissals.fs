@@ -1,6 +1,6 @@
 /// Warnings the user has dismissed for a PDF, kept in memory and, if they choose, in a
 /// "<name>.pdf.legibyl.json" file next to the PDF so they stay dismissed when it's opened again.
-/// The same file holds the edits made in Suggest Structure and View Structure (see RegionEdits).
+/// The same file holds the edits made in View Structure, on a tagged PDF or a suggested structure (see RegionEdits).
 module Legibyl.Gui.Dismissals
 
 open System

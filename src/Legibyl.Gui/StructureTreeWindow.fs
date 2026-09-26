@@ -3,6 +3,7 @@ namespace Legibyl.Gui
 open System
 open System.IO
 open System.Text.Json
+open System.Threading
 open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
@@ -17,8 +18,15 @@ open Avalonia.Media
 open Avalonia.Media.Imaging
 open Avalonia.Platform.Storage
 open Avalonia.VisualTree
+open Legibyl.Layout
 open Legibyl.Rendering
 open Legibyl.Validation
+
+/// What View Structure shows: a tagged PDF's structure, or for an untagged one, the layout
+/// suggested for it (found page by page as the window is open), with the edits on it.
+type StructureSource =
+    | Tagged of StructureNode
+    | Suggested of LayoutReview
 
 /// Formats a StructureNode into a single-line summary for the structure TreeView.
 module StructureSummary =
@@ -79,8 +87,7 @@ module private StructureView =
 
     let brush (color: Color) : IBrush = SolidColorBrush(color)
 
-    /// A tag's outline color on a page overview (0xRRGGBB), strong enough to see on a page, as
-    /// Suggest Structure draws regions.
+    /// A tag's outline color on a page overview (0xRRGGBB), strong enough to see on a page.
     let outlineColor (tag: string) =
         match tag with
         | "H"
@@ -135,7 +142,9 @@ module private StructureView =
     type Selection =
         { Select: StructureNode -> Border -> bool -> unit
           Edits: IReadable<RegionEdits.Edit list>
-          Edit: StructureNode -> EditKind -> unit }
+          Edit: StructureNode -> EditKind -> unit
+          /// Whether it's a suggested layout, which nothing is in yet (not a tagged PDF).
+          Suggested: bool }
 
     /// The edits an element can take. Alt text: figures and formulas, and anything that already
     /// has alt text. Replacement text: only what already has it (like OCR'd text), since writing
@@ -152,10 +161,20 @@ module private StructureView =
     /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
     let retagTags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
 
-    /// Whether node is a block of text that can be given another tag (it needs its place on its
-    /// page, which is how the edit finds it again).
-    let canRetag (node: StructureNode) =
-        not (isNull node.Geometry) && (node.Tag = "H" || List.contains node.Tag retagTags)
+    /// Whether node can be given another tag: in a tagged PDF, a block of text; in a suggested
+    /// layout, any region (it needs its place on its page, which is how the edit finds it again).
+    let canRetag (suggested: bool) (node: StructureNode) =
+        not (isNull node.Geometry)
+        && (if suggested then node.Tag <> "Link" else node.Tag = "H" || List.contains node.Tag retagTags)
+
+    /// The suggested regions in the selection: those selected, and those inside a selected list
+    /// or document, to leave out or keep.
+    let regionsIn (nodes: StructureNode list) =
+        let rec regions (node: StructureNode) : StructureNode list =
+            if node.Tag = "Link" then []
+            elif not (isNull node.Geometry) then [ node ]
+            else [ for child in node.Children do yield! regions child ]
+        nodes |> List.collect regions
 
     /// The user's edit for node, if any.
     let editFor (edits: RegionEdits.Edit list) (node: StructureNode) =
@@ -371,7 +390,7 @@ module private StructureView =
                     header
                     match node.AlternateDescription with NonNull alt -> detailLine $"alt: \"{alt}\"" true | Null -> ()
                     match node.LinkDescription with NonNull description -> detailLine $"description: \"{description}\"" true | Null -> ()
-                    if not (editKinds node).IsEmpty || canRetag node then
+                    if not (editKinds node).IsEmpty || canRetag selection.Suggested node then
                         // Its own component, so an edit re-renders just this line.
                         Component.create("pending-edit", fun ctx ->
                             let edits = ctx.usePassedRead selection.Edits
@@ -380,7 +399,10 @@ module private StructureView =
                             StackPanel.create [
                                 StackPanel.children [
                                     for label, text in lines do
-                                        detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
+                                        if selection.Suggested then detailLine $"✎ your {label}: \"{text}\"" true
+                                        else detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
+                                    if editFor edits.Current node |> Option.exists _.Exclude then
+                                        detailLine "✎ left out: not tagged (its text joins the nearest region kept)" true
                                     match mergeLine edits.Current node with
                                     | Some line -> detailLine line true
                                     | None -> ()
@@ -540,25 +562,65 @@ module private StructureView =
                 ]
             ]
 
+    /// A suggested region left out is outlined grey.
+    let leftOutColor = 0x9E9E9Eu
+
     /// onEditsChanged is called once an edit has been saved (so the main window can count them).
-    let view (window: Window) (renderer: PdfRegionRenderer) (root: StructureNode) (sourceFilePath: string) (onEditsChanged: unit -> unit) =
+    /// For a suggested layout, suggested is its review and what finds its pages; tagged is unused.
+    let view
+        (window: Window)
+        (renderer: PdfRegionRenderer)
+        (tagged: StructureNode)
+        (suggested: (LayoutReview * LayoutPrefetcher) option)
+        (sourceFilePath: string)
+        (onEditsChanged: unit -> unit)
+        =
         Component(fun ctx ->
+            let isSuggested = suggested.IsSome
+            // A suggested layout's pages as elements, by page: each built once, so a selection
+            // stays with its elements as more pages are found.
+            let pageNodes = ctx.useState (Collections.Generic.Dictionary<int, StructureNode list>(), false)
+            let buildRoot () =
+                match suggested with
+                | Some(review, _) ->
+                    for KeyValue(number, page) in review.Pages do
+                        if not (pageNodes.Current.ContainsKey number) then
+                            pageNodes.Current[number] <- SuggestedTree.pageNodes review page
+                    SuggestedTree.build [ for number in Seq.sort pageNodes.Current.Keys -> pageNodes.Current[number] ]
+                | None -> tagged
+            let root = ctx.useStateLazy buildRoot
             // The highlighted borders and the styles to restore when the selection moves.
             let highlighted = ctx.useState (([]: (Border * (IBrush | null) * Thickness) list), false)
             // The selected blocks' nodes, in document order, and the one a shift-click extends from.
             let selected = ctx.useState ([]: StructureNode list)
             let anchor = ctx.useState ((None: StructureNode option), false)
-            // Each node's parent, to extend a selection over its siblings.
-            let parents =
-                ctx.useStateLazy(fun () ->
+            // Each node's parent, to extend a selection over its siblings (worked out again when a
+            // suggested layout's root changes).
+            let parentsCache =
+                ctx.useState ((None: (StructureNode * Collections.Generic.Dictionary<StructureNode, StructureNode>) option), false)
+            let parents () =
+                match parentsCache.Current with
+                | Some(forRoot, parents) when obj.ReferenceEquals(forRoot, root.Current) -> parents
+                | _ ->
                     let parents = Collections.Generic.Dictionary<StructureNode, StructureNode>(HashIdentity.Reference)
                     let rec add (node: StructureNode) =
                         for child in node.Children do
                             parents[child] <- node
                             add child
-                    add root
-                    parents)
-                    .Current
+                    add root.Current
+                    parentsCache.Set(Some(root.Current, parents))
+                    parents
+            // The user's edits for this PDF (saved next to it, or inside a copy Legibyl saved); for
+            // a suggested layout, the review's.
+            let edits =
+                ctx.useState (
+                    match suggested with
+                    | Some(review, _) -> review.Edits
+                    | None -> RegionEdits.load sourceFilePath
+                )
+            let modelReady = ctx.useState (not isSuggested || LayoutModel.isDownloaded ())
+            // The page the preview shows, if any.
+            let shownPage = ctx.useState ((None: int option), false)
             let previewImage = ctx.useState (None: Bitmap option)
             // For a link: the page it goes to, with its destination marked in blue.
             let targetImage = ctx.useState (None: Bitmap option)
@@ -575,19 +637,22 @@ module private StructureView =
                 task {
                     previewVersion.Set(previewVersion.Current + 1)
                     let version = previewVersion.Current
+                    let tree = root.Current
+                    let currentEdits = edits.Current
                     previewImage.Set None
                     targetImage.Set None
                     targetNote.Set ""
                     let within (node: StructureNode) =
                         let rec up (current: StructureNode) depth =
                             nodes |> List.exists (fun s -> obj.ReferenceEquals(s, current))
-                            || (depth < 200 && (match parents.TryGetValue current with | true, parent -> up parent (depth + 1) | _ -> false))
+                            || (depth < 200 && (match (parents ()).TryGetValue current with | true, parent -> up parent (depth + 1) | _ -> false))
                         up node 0
                     let page =
                         match nodes |> List.tryPick firstPage with
                         | Some page -> Some page
-                        | None when nodes.IsEmpty -> root.Children |> Seq.tryPick firstPage
+                        | None when nodes.IsEmpty -> tree.Children |> Seq.tryPick firstPage
                         | None -> None
+                    shownPage.Set page
                     let destination =
                         match nodes with
                         | [ node ] -> Option.ofObj node.LinkDestination
@@ -596,6 +661,8 @@ module private StructureView =
                     | None ->
                         previewNote.Set(
                             match nodes with
+                            | [] when isSuggested && not modelReady.Current -> "Each page's layout is found once the layout model is downloaded (above)."
+                            | [] when isSuggested -> "Finding each page's layout… (several seconds a page)"
                             | [ node ] ->
                                 $"Selected <{node.Tag}>. It has no place on a page to show (a container without content, or one across pages)."
                             | _ -> "Nothing here has a place on a page to show."
@@ -611,12 +678,16 @@ module private StructureView =
                                         new Bitmap(stream)
                                     page
                                     |> Option.map (fun page ->
-                                        let elements = pageElements root page
+                                        let elements = pageElements tree page
+                                        // As edited: given another tag, or left out.
                                         let outlined =
                                             [ for i, element in List.indexed elements ->
+                                                  let edit = editFor currentEdits element
+                                                  let tag = edit |> Option.bind _.Retag |> Option.defaultValue element.Tag
+                                                  let leftOut = edit |> Option.exists _.Exclude
                                                   { Geometry = nonNull element.Geometry
-                                                    Label = $"{i + 1} {element.Tag}"
-                                                    Color = outlineColor element.Tag
+                                                    Label = if leftOut then $"× {i + 1} {tag}" else $"{i + 1} {tag}"
+                                                    Color = if leftOut then leftOutColor else outlineColor tag
                                                     Emphasised = within element } ]
                                         // A selection that isn't one of them (a span in a paragraph, say) is filled too.
                                         let extra =
@@ -661,7 +732,7 @@ module private StructureView =
                 let nodes =
                     match anchor.Current with
                     | Some from when extend && not (obj.ReferenceEquals(from, node)) ->
-                        match parents.TryGetValue from, parents.TryGetValue node with
+                        match (parents ()).TryGetValue from, (parents ()).TryGetValue node with
                         | (true, parent), (true, other) when obj.ReferenceEquals(parent, other) ->
                             let siblings = List.ofSeq parent.Children
                             let i = siblings |> List.findIndex (fun s -> obj.ReferenceEquals(s, from))
@@ -693,18 +764,30 @@ module private StructureView =
                     b.BorderThickness <- Thickness 3.0
 
                 showPage nodes
-            // The user's edits for this PDF (saved next to it, or inside a copy Legibyl saved).
-            let edits = ctx.useState (RegionEdits.load sourceFilePath)
 
             let saveEdits (next: RegionEdits.Edit list) =
                 task {
                     try
                         RegionEdits.save sourceFilePath next
                         edits.Set next
+                        match suggested with
+                        | Some(review, _) ->
+                            review.Edits <- next
+                            // The layout the edits are on, recorded with them.
+                            if review.HasDecisions then
+                                RegionEdits.saveLayout sourceFilePath (review.ToLayout sourceFilePath)
+                        | None -> ()
                         onEditsChanged ()
+                        // The overview labels elements as edited.
+                        showPage selected.Current
                     with :? IOException | :? UnauthorizedAccessException as ex ->
                         do! Dialogs.showMessage window $"Couldn't save the edit next to the PDF: {ex.Message}" "Edits"
                 }
+
+            /// What Save does with an edit.
+            let savedHow =
+                if isSuggested then "Save… in the main window tags a copy with it."
+                else "Save… in the main window writes it to a copy."
 
             let editNode (node: StructureNode) (kind: EditKind) =
                 match node.Geometry with
@@ -717,18 +800,18 @@ module private StructureView =
                             match kind with
                             | AltText ->
                                 "Alt Text",
-                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. Save… in the main window writes it to a copy.",
+                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. {savedHow}",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.AlternateDescription),
                                 "Describe what it shows"
                             | LinkDescription ->
                                 let target = match node.LinkUri with NonNull uri -> $" (it goes to {uri})" | Null -> ""
                                 "Link Description",
-                                $"What a screen reader announces for this link on page {page}{target}: where it goes, e.g. \"Apply for benefits (example.com)\". Save… in the main window writes it to a copy.",
+                                $"What a screen reader announces for this link on page {page}{target}: where it goes, e.g. \"Apply for benefits (example.com)\". {savedHow}",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.LinkDescription),
                                 "Where the link goes"
                             | ReplacementText ->
                                 "Replacement Text",
-                                $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn. Save… in the main window writes it to a copy.",
+                                $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn. {savedHow}",
                                 existing |> Option.bind _.Text |> Option.defaultValue (string node.ActualText),
                                 "Nothing to read here (cleared)"
                         match! Dialogs.promptText window title prompt current placeholder with
@@ -746,7 +829,109 @@ module private StructureView =
                     }
                     |> ignore
 
-            let selection = { Select = select; Edits = edits; Edit = editNode }
+            let selection = { Select = select; Edits = edits; Edit = editNode; Suggested = isSuggested }
+
+            // For a suggested layout: how many pages are found, and the titles of the pages its QR
+            // codes link to, read as they're found (if the offer before the window allowed it).
+            let readyCount = ctx.useState (suggested |> Option.map (fun (review, _) -> review.Pages.Count) |> Option.defaultValue 0)
+            let failures = ctx.useState (Map.empty: Map<int, string>)
+            let readingTitles = ctx.useState 0
+            let asked = ctx.useState (Collections.Generic.HashSet<string>(), false)
+            let status = ctx.useState ""
+            let downloadProgress = ctx.useState (None: float option)
+
+            /// Reads the titles of the pages a found page's QR codes go to, if allowed and not read
+            /// yet; then builds the pages again, their alt text prefilled with them.
+            let readTitlesFor (review: LayoutReview) (page: PageSuggestion) =
+                match
+                    page.Blocks
+                    |> List.choose (fun block -> block.QrText |> Option.bind LinkTitles.webAddress)
+                    |> List.filter (fun address -> review.MayRead address && not (review.Titles.ContainsKey address))
+                    |> List.filter asked.Current.Add
+                with
+                | [] -> ()
+                | wanted ->
+                    readingTitles.Set(readingTitles.Current + 1)
+                    task {
+                        try
+                            let! found = Task.Run(fun () -> (LinkTitles.WebPageTitles() :> IPageTitleSource).PageTitles wanted)
+                            review.Titles <- found |> Seq.fold (fun all (KeyValue(address, title)) -> Map.add address title all) review.Titles
+                            pageNodes.Current.Clear()
+                            root.Set(buildRoot ())
+                            showPage selected.Current
+                        finally
+                            readingTitles.Set(readingTitles.Current - 1)
+                    }
+                    |> ignore
+
+            // Pages are found in the background; each is added to the structure as it is.
+            ctx.useEffect (
+                (fun () ->
+                    match suggested with
+                    | Some(review, prefetcher) ->
+                        let ready =
+                            prefetcher.PageReady.Subscribe(fun (_, page) ->
+                                Avalonia.Threading.Dispatcher.UIThread.Post(fun () ->
+                                    readyCount.Set review.Pages.Count
+                                    root.Set(buildRoot ())
+                                    if shownPage.Current.IsNone then showPage selected.Current
+                                    readTitlesFor review page))
+                        let failed =
+                            prefetcher.PageFailed.Subscribe(fun (number, reason) ->
+                                Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> failures.Set(failures.Current.Add(number, reason))))
+                        for page in review.Pages.Values do
+                            readTitlesFor review page
+                        if modelReady.Current then prefetcher.Start()
+                        { new IDisposable with
+                            member _.Dispose() =
+                                ready.Dispose()
+                                failed.Dispose() }
+                    | None -> { new IDisposable with member _.Dispose() = () }),
+                [ EffectTrigger.AfterInit ]
+            )
+
+            let download _ =
+                task {
+                    downloadProgress.Set(Some 0.0)
+                    try
+                        do! LayoutModel.download (Progress<float>(fun fraction -> downloadProgress.Set(Some fraction))) CancellationToken.None
+                        downloadProgress.Set None
+                        modelReady.Set true
+                        suggested |> Option.iter (fun (_, prefetcher) -> prefetcher.Start())
+                        showPage selected.Current
+                    with ex ->
+                        downloadProgress.Set None
+                        status.Set $"Couldn't download the layout model: {ex.Message}"
+                }
+                |> ignore
+
+            /// Adds edits from another .legibyl.json file, e.g. one saved for an earlier version of
+            /// this PDF under another name, or from another PDF: those saved for it, or inside it (a
+            /// copy Legibyl saved).
+            let importEdits _ =
+                task {
+                    let! files =
+                        window.StorageProvider.OpenFilePickerAsync(
+                            FilePickerOpenOptions(
+                                Title = "Import edits",
+                                AllowMultiple = false,
+                                FileTypeFilter = [ FilePickerFileType("PDFs and Legibyl files", Patterns = [ "*.pdf"; "*.legibyl.json"; "*.json" ]) ]
+                            )
+                        )
+                    match files |> Seq.tryHead |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath())) with
+                    | Some path ->
+                        let! imported = Task.Run(fun () -> RegionEdits.fromFileOrPdf path)
+                        let merged, added = RegionEdits.merge edits.Current imported
+                        if added > 0 then do! saveEdits merged
+                        do!
+                            Dialogs.showMessage
+                                window
+                                (if imported.IsEmpty then $"{Path.GetFileName path} has no edits to import."
+                                 else $"Imported {added} of {imported.Length} edits from {Path.GetFileName path}; the rest were already here. They're in the Edits tab.")
+                                "Import Edits"
+                    | None -> ()
+                }
+                |> ignore
 
             let exportJson _ =
                 task {
@@ -761,7 +946,7 @@ module private StructureView =
                             ))
                             sourceFilePath
                     match path with
-                    | Some path -> File.WriteAllText(path, JsonSerializer.Serialize(root, jsonOptions))
+                    | Some path -> File.WriteAllText(path, JsonSerializer.Serialize(root.Current, jsonOptions))
                     | None -> ()
                 }
                 |> ignore
@@ -777,7 +962,8 @@ module private StructureView =
                     ]
                     Grid.children [
                         // Its own component, so preview updates don't re-render (and re-diff) the layout.
-                        Component.create("structure-layout", fun _ ->
+                        Component.create("structure-layout", fun ctx ->
+                        let root = ctx.usePassedRead root
                         ScrollViewer.create [
                             ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
                             ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
@@ -786,8 +972,8 @@ module private StructureView =
                                 StackPanel.create [
                                     StackPanel.margin 8.0
                                     StackPanel.children [
-                                        let levels = levelsWithinBudget root.Children
-                                        for child in root.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
+                                        let levels = levelsWithinBudget root.Current.Children
+                                        for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
                                     ]
                                 ]
                             )
@@ -822,10 +1008,11 @@ module private StructureView =
                                   Grid.row 2
                                   StackPanel.children [
                                 match selected.Current with
-                                | [ single ] when canRetag single ->
+                                | [ single ] when canRetag isSuggested single ->
                                     let box = nonNull single.Geometry
                                     let tag =
                                         editFor edits.Current single |> Option.bind _.Retag |> Option.defaultValue single.Tag
+                                    let tags = if isSuggested then LayoutFile.tags else retagTags
                                     DockPanel.create [
                                         DockPanel.margin (0.0, 0.0, 0.0, 8.0)
                                         DockPanel.children [
@@ -838,21 +1025,63 @@ module private StructureView =
                                             ComboBox.create [
                                                 ComboBox.minWidth 120.0
                                                 ComboBox.horizontalAlignment HorizontalAlignment.Left
-                                                ComboBox.dataItems (if List.contains tag retagTags then retagTags else tag :: retagTags)
+                                                ComboBox.dataItems (if List.contains tag tags then tags else tag :: tags)
                                                 ComboBox.selectedItem tag
                                                 AttrBuilder<ComboBox>.CreateProperty<string | null>(
                                                     Automation.AutomationProperties.NameProperty, $"Tag for this <{single.Tag}>", ValueNone)
-                                                ToolTip.tip
-                                                    "Give this element another tag, e.g. a heading tagged as a paragraph (as an edit: Save… in the main window writes it to a copy)."
-                                                ComboBox.onSelectedItemChanged (fun item ->
-                                                    match item with
-                                                    | :? string as picked when picked <> tag ->
-                                                        saveEdits (RegionEdits.setRetag edits.Current box.PageNumber single.Tag box picked) |> ignore
-                                                    | _ -> ())
+                                                ToolTip.tip (
+                                                    if isSuggested then
+                                                        "The tag to give it: H1 (the title), H (a heading), P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read). An edit on the suggestion: Save… in the main window tags a copy with it."
+                                                    else
+                                                        "Give this element another tag, e.g. a heading tagged as a paragraph (as an edit: Save… in the main window writes it to a copy)."
+                                                )
+                                                // Each render's handler, for the element selected now; and
+                                                // only while it is (moving the selection sets the picker to
+                                                // the next element's tag before its handler replaces this).
+                                                ComboBox.onSelectedItemChanged (
+                                                    (fun item ->
+                                                        match item with
+                                                        | :? string as picked when
+                                                            picked <> tag
+                                                            && (match selected.Current with [ now ] -> obj.ReferenceEquals(now, single) | _ -> false)
+                                                            ->
+                                                            saveEdits (RegionEdits.setRetag edits.Current box.PageNumber single.Tag box picked) |> ignore
+                                                        | _ -> ()),
+                                                    SubPatchOptions.Always
+                                                )
                                             ]
                                         ]
                                     ]
                                 | _ -> ()
+                                // A suggested region can be left out, or kept again; several at once.
+                                match (if isSuggested then regionsIn selected.Current else []) with
+                                | [] -> ()
+                                | regions ->
+                                    let leftOut = regions |> List.forall (fun r -> editFor edits.Current r |> Option.exists _.Exclude)
+                                    let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"
+                                    Button.create [
+                                        Button.content (if leftOut then $"Keep{what}" else $"Leave Out{what}")
+                                        Button.margin (0.0, 0.0, 0.0, 8.0)
+                                        Button.horizontalAlignment HorizontalAlignment.Left
+                                        ToolTip.tip (
+                                            if leftOut then "Tag it after all."
+                                            else "Don't tag it: its text joins the nearest region kept; its images and lines are decoration."
+                                        )
+                                        Button.onClick (
+                                            (fun _ ->
+                                                regions
+                                                |> List.fold
+                                                    (fun all r ->
+                                                        let box = nonNull r.Geometry
+                                                        RegionEdits.setExcluded all box.PageNumber r.Tag box (not leftOut))
+                                                    edits.Current
+                                                |> saveEdits
+                                                |> ignore),
+                                            SubPatchOptions.Always
+                                        )
+                                    ]
+                                // Merging is for a tagged PDF's paragraphs.
+                                let mergeable nodes = if isSuggested then None else mergeable nodes
                                 let pendingMerge =
                                     match mergeable selected.Current with
                                     | Some(first :: rest) ->
@@ -866,21 +1095,26 @@ module private StructureView =
                                         Button.content "Don't Merge These"
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
                                         ToolTip.tip "Drop this merge: they stay separate paragraphs."
-                                        Button.onClick (fun _ ->
-                                            saveEdits (edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore)
+                                        Button.onClick (
+                                            (fun _ -> saveEdits (edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore),
+                                            SubPatchOptions.Always
+                                        )
                                     ]
                                 | Some paragraphs, None ->
                                     Button.create [
                                         Button.content $"Merge {paragraphs.Length} Paragraphs"
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
                                         ToolTip.tip "Make these paragraphs one, as an edit: Save… in the main window writes it to a copy."
-                                        Button.onClick (fun _ ->
-                                            let boxes = paragraphs |> List.map (fun p -> nonNull p.Geometry)
-                                            saveEdits (RegionEdits.mergeParagraphs edits.Current boxes.Head.PageNumber boxes) |> ignore)
+                                        Button.onClick (
+                                            (fun _ ->
+                                                let boxes = paragraphs |> List.map (fun p -> nonNull p.Geometry)
+                                                saveEdits (RegionEdits.mergeParagraphs edits.Current boxes.Head.PageNumber boxes) |> ignore),
+                                            SubPatchOptions.Always
+                                        )
                                     ]
                                 | None, _ ->
                                     match selected.Current with
-                                    | [ single ] when single.Tag = "P" ->
+                                    | [ single ] when single.Tag = "P" && not isSuggested ->
                                         TextBlock.create [
                                             TextBlock.text "Shift-click the paragraphs after it to merge them into one."
                                             TextBlock.textWrapping TextWrapping.Wrap
@@ -930,15 +1164,15 @@ module private StructureView =
                     ]
                 ]
 
-            let allNodes =
-                let rec flatten (node: StructureNode) : StructureNode list =
-                    node :: (node.Children |> Seq.collect flatten |> List.ofSeq)
-                root.Children |> Seq.collect flatten |> List.ofSeq
-
             /// Every edit for this PDF, and whether it's in the PDF yet.
             let editsTab =
                 Component.create("structure-edits", fun ctx ->
                     let edits = ctx.usePassedRead selection.Edits
+                    let root = ctx.usePassedRead root
+                    let allNodes =
+                        let rec flatten (node: StructureNode) : StructureNode list =
+                            node :: (node.Children |> Seq.collect flatten |> List.ofSeq)
+                        root.Current.Children |> Seq.collect flatten |> List.ofSeq
                     // The element each edit is for: its tag, in about the same place.
                     let elementFor (edit: RegionEdits.Edit) =
                         allNodes
@@ -962,6 +1196,13 @@ module private StructureView =
                                     RegionEdits.overlap own box >= RegionEdits.SameRegionOverlap
                                 | _ -> false)
                         let status =
+                            match suggested with
+                            | Some(review, _) ->
+                                match elementFor edit with
+                                | Some _ -> "Save… tags a copy with it."
+                                | None when not (review.Pages.ContainsKey edit.Page) -> $"Page {edit.Page}'s layout isn't found yet."
+                                | None -> $"No <{edit.Tag}> suggested in about this place, so tagging won't use it."
+                            | None ->
                             if not edit.MergeWith.IsEmpty then
                                 let boxes = edit.Box :: edit.MergeWith
                                 let all =
@@ -996,6 +1237,7 @@ module private StructureView =
                                                 match edit.Retag with
                                                 | Some tag -> detailLine $"tag: {tag}" false
                                                 | None -> ()
+                                                if edit.Exclude then detailLine "left out: not tagged" false
                                                 match edit.Alt with
                                                 | Some alt when edit.Tag = "Link" -> detailLine $"description: \"{alt}\"" false
                                                 | Some alt -> detailLine $"alt: \"{alt}\"" false
@@ -1045,7 +1287,12 @@ module private StructureView =
                                         Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                         TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                         TextBlock.text (
-                                            if edits.Current.IsEmpty then
+                                            if edits.Current.IsEmpty && isSuggested then
+                                                "No edits yet. In the Layout tab, select a region to give it another tag or leave it out (shift-click to select several); right-click a figure or a link to describe it, or text read with OCR to correct it."
+                                            elif isSuggested then
+                                                let file = Path.GetFileName(Dismissals.filePath sourceFilePath)
+                                                $"Your edits on the suggested layout, saved in {file} next to the PDF. Save… in the main window tags a copy with the layout and them."
+                                            elif edits.Current.IsEmpty then
                                                 "No edits yet. In the Layout tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs to merge them."
                                             else
                                                 let file = Path.GetFileName(Dismissals.filePath sourceFilePath)
@@ -1064,7 +1311,7 @@ module private StructureView =
 
             let treeTab =
                 TreeView.create [
-                    TreeView.dataItems root.Children
+                    TreeView.dataItems root.Current.Children
                     TreeView.itemTemplate (
                         DataTemplateView<_>.create (
                             Func<StructureNode, StructureNode seq>(fun node -> node.Children),
@@ -1078,16 +1325,180 @@ module private StructureView =
                     )
                 ]
 
+            // For a suggested layout, the document's title: prefilled as the title fixes would find
+            // it (the document's own, else a short first page), else the first H1 found. Only a
+            // change from what's prefilled is saved.
+            let titleEdit = ctx.useState (suggested |> Option.bind (fun (review, _) -> review.Title))
+            let documentCandidates =
+                ctx.useStateLazy(fun () -> if isSuggested then (try DocumentTitles.candidates sourceFilePath with _ -> []) else []).Current
+
+            let titleRow (review: LayoutReview) =
+                let headingCandidate =
+                    match review.Pages.TryGetValue 1 with
+                    | true, first ->
+                        first.Blocks
+                        |> List.tryFind (fun block -> RegionEdits.tagOf edits.Current 1 block = "H1")
+                        |> Option.bind (fun block ->
+                            RegionEdits.textFor edits.Current 1 block
+                            |> Option.orElse (Some block.Text)
+                            |> Option.map (fun text -> Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim())
+                            |> Option.filter (String.IsNullOrWhiteSpace >> not))
+                        |> Option.map (fun title -> { DocumentTitles.Title = title; DocumentTitles.Source = "first heading" })
+                    | _ -> None
+                let candidates = documentCandidates @ Option.toList headingCandidate |> List.distinctBy _.Title
+                let prefilled = candidates |> List.tryHead |> Option.map _.Title |> Option.defaultValue ""
+                review.ShownTitle <- (if prefilled = "" then None else Some prefilled)
+                let shownTitle = titleEdit.Current |> Option.defaultValue prefilled
+                let setTitle (text: string) =
+                    let next = if text = prefilled then None else Some text
+                    if next <> titleEdit.Current then
+                        titleEdit.Set next
+                        review.Title <- next
+                        onEditsChanged ()
+                        try
+                            RegionEdits.saveTitle sourceFilePath next
+                        with
+                        | :? IOException
+                        | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save the title next to the PDF: {ex.Message}"
+                Grid.create [
+                    Grid.columnDefinitions "Auto,*"
+                    Grid.rowDefinitions "Auto,Auto"
+                    Grid.children [
+                        TextBlock.create [
+                            TextBlock.text "Document title"
+                            TextBlock.fontWeight FontWeight.SemiBold
+                            TextBlock.verticalAlignment VerticalAlignment.Center
+                            TextBlock.margin (0.0, 0.0, 10.0, 0.0)
+                        ]
+                        TextBox.create [
+                            Grid.column 1
+                            TextBox.text shownTitle
+                            TextBox.placeHolderText "What a screen reader and the title bar call this document"
+                            ToolTip.tip "Given to the tagged copy as its title, shown in place of the file name. Saved next to the PDF if changed."
+                            // What's prefilled can change as the first page is found.
+                            TextBox.onTextChanged (setTitle, SubPatchOptions.Always)
+                        ]
+                        WrapPanel.create [
+                            Grid.row 1
+                            Grid.column 1
+                            WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
+                            WrapPanel.isVisible (candidates |> List.exists (fun c -> c.Title <> shownTitle))
+                            WrapPanel.children [
+                                yield
+                                    TextBlock.create [
+                                        TextBlock.text "Use:"
+                                        TextBlock.verticalAlignment VerticalAlignment.Center
+                                        TextBlock.margin (0.0, 0.0, 6.0, 0.0)
+                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                    ]
+                                    :> IView
+                                for candidate in candidates do
+                                    if candidate.Title <> shownTitle then
+                                        yield
+                                            Button.create [
+                                                Button.margin (0.0, 0.0, 6.0, 0.0)
+                                                Button.padding (8.0, 2.0)
+                                                Button.content $"{candidate.Title} · {candidate.Source}"
+                                                Button.onClick ((fun _ -> setTitle candidate.Title), SubPatchOptions.Always)
+                                            ]
+                                            :> IView
+                            ]
+                        ]
+                    ]
+                ]
+
+            /// For a suggested layout: that it isn't tagged yet, how far finding it has got, and
+            /// the layout model to download first if it isn't yet.
+            let banner (review: LayoutReview) (prefetcher: LayoutPrefetcher) =
+                let secondary (text: string) =
+                    TextBlock.create [
+                        TextBlock.text text
+                        TextBlock.textWrapping TextWrapping.Wrap
+                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                    ]
+                    :> IView
+                let progress =
+                    [ if readyCount.Current >= prefetcher.PageCount then "Every page's layout found."
+                      elif modelReady.Current then $"{readyCount.Current} of {prefetcher.PageCount} pages' layouts found; the rest are being found (several seconds a page)."
+                      else $"{readyCount.Current} of {prefetcher.PageCount} pages' layouts found."
+                      if readingTitles.Current > 0 then "Reading the titles of pages QR codes link to…"
+                      for page in review.Pages.Values |> Seq.sortBy _.PageNumber do
+                          if page.Rotated then $"Page {page.PageNumber} is rotated, and rotated pages aren't detected yet."
+                          elif page.Blocks.IsEmpty then $"Nothing was found on page {page.PageNumber}."
+                          elif not page.HasText then
+                              $"Page {page.PageNumber} has no text layer (it may be a scan), so tagging it would need OCR first."
+                      for KeyValue(page, reason) in failures.Current do
+                          $"Couldn't find page {page}'s layout: {reason}" ]
+                Border.create [
+                    Border.padding 10.0
+                    Border.cornerRadius 4.0
+                    Border.borderThickness 1.0
+                    Theme.resources
+                        [ Border.BorderBrushProperty, Theme.Tokens.Border
+                          Border.BackgroundProperty, Theme.Tokens.Fill ]
+                    Border.child (
+                        StackPanel.create [
+                            StackPanel.spacing 6.0
+                            StackPanel.children [
+                                TextBlock.create [
+                                    TextBlock.text "Not tagged yet: this is the structure suggested for it"
+                                    TextBlock.fontWeight FontWeight.SemiBold
+                                ]
+                                secondary (
+                                    "This PDF has no tags, so this is the structure a layout detector suggests from what each page looks like: "
+                                    + "its regions, the tag each suggests, and their reading order (the numbers on the page). The suggestions stay as found; "
+                                    + "what you change (another tag, leaving a region out, alt text, corrected text) is kept as edits on top, next to the PDF, "
+                                    + "and Save… in the main window tags a copy with them (a region left out has its text join the nearest region kept). "
+                                    + "Headings are H because their levels aren't known from one page, runs of paragraphs that start with list markers are "
+                                    + "list items (LI), and Artifact marks page furniture like running headers and page numbers."
+                                )
+                                secondary (String.Join(" ", progress))
+                                if not modelReady.Current then
+                                    secondary (
+                                        $"Finding the layout needs a layout detection model (PP-DocLayoutV3, about {LayoutModel.DownloadSizeMegabytes} MB). "
+                                        + $"It's downloaded once from {LayoutModel.source ()} into {LayoutModel.directory ()}, and runs on this computer: "
+                                        + "the PDF isn't sent anywhere."
+                                    )
+                                    match downloadProgress.Current with
+                                    | Some fraction ->
+                                        ProgressBar.create [ ProgressBar.minimum 0.0; ProgressBar.maximum 1.0; ProgressBar.value fraction ]
+                                    | None ->
+                                        Button.create [
+                                            Button.content "Download model"
+                                            Button.horizontalAlignment HorizontalAlignment.Left
+                                            Button.onClick download
+                                        ]
+                                if status.Current <> "" then
+                                    TextBlock.create [
+                                        TextBlock.text status.Current
+                                        TextBlock.textWrapping TextWrapping.Wrap
+                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Danger ]
+                                    ]
+                            ]
+                        ]
+                    )
+                ]
+
             Grid.create [
                 Grid.margin 12.0
                 Grid.rowDefinitions "Auto,*,Auto"
                 Grid.children [
-                    TextBlock.create [
-                        TextBlock.margin (0.0, 0.0, 0.0, 8.0)
-                        TextBlock.textWrapping TextWrapping.Wrap
-                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                        TextBlock.text
-                            "This is the tagged logical structure tree — the semantic heading/paragraph/list/table/link hierarchy that determines what content and reading order a screen reader presents to a user. Only elements that directly own page content show a page number."
+                    StackPanel.create [
+                        StackPanel.margin (0.0, 0.0, 0.0, 8.0)
+                        StackPanel.spacing 10.0
+                        StackPanel.children [
+                            match suggested with
+                            | Some(review, prefetcher) ->
+                                banner review prefetcher
+                                titleRow review
+                            | None ->
+                                TextBlock.create [
+                                    TextBlock.textWrapping TextWrapping.Wrap
+                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                    TextBlock.text
+                                        "This is the tagged logical structure tree — the semantic heading/paragraph/list/table/link hierarchy that determines what content and reading order a screen reader presents to a user. Only elements that directly own page content show a page number."
+                                ]
+                        ]
                     ]
                     TabControl.create [
                         Grid.row 1
@@ -1106,6 +1517,14 @@ module private StructureView =
                         StackPanel.horizontalAlignment HorizontalAlignment.Right
                         StackPanel.margin (0.0, 8.0, 0.0, 0.0)
                         StackPanel.children [
+                            Button.create [
+                                Button.content "Import Edits…"
+                                Button.padding (12.0, 4.0)
+                                Button.margin (0.0, 0.0, 8.0, 0.0)
+                                ToolTip.tip
+                                    "Use the edits made for another PDF, such as an earlier version of this one: pick that PDF (its edits saved next to it, or inside a copy Legibyl saved), or the .legibyl.json file saved for it."
+                                Button.onClick importEdits
+                            ]
                             Button.create [
                                 Button.content "Export JSON…"
                                 Button.padding (12.0, 4.0)
@@ -1126,13 +1545,47 @@ module private StructureView =
 
 open StructureView
 
-/// onEditsChanged, if given, is called once an edit has been saved.
-type StructureTreeWindow(root: StructureNode, sourceFilePath: string, ?onEditsChanged: unit -> unit) as this =
-    inherit HostWindow(Title = "Document Structure", Width = 820.0, Height = 700.0, MinWidth = 500.0, MinHeight = 400.0)
+/// onEditsChanged is called once an edit has been saved (or a suggested layout's title changed).
+type StructureTreeWindow(source: StructureSource, sourceFilePath: string, onEditsChanged: unit -> unit) as this =
+    inherit
+        HostWindow(
+            Title = (match source with Tagged _ -> "Document Structure" | Suggested _ -> "Suggested Structure"),
+            Width = 1000.0,
+            Height = 760.0,
+            MinWidth = 500.0,
+            MinHeight = 400.0
+        )
     // Keeps the PDF open and recent pages rendered while the window is open.
     let renderer = new PdfRegionRenderer()
-    do this.Content <- view this renderer root sourceFilePath (defaultArg onEditsChanged ignore)
+    // For a suggested layout: what finds each page's, in the background.
+    let finding =
+        match source with
+        | Suggested review ->
+            let suggester = new LayoutSuggester(sourceFilePath)
+            Some(review, suggester, LayoutPrefetcher(suggester, review.Pages))
+        | Tagged _ -> None
+    do
+        let tagged = match source with Tagged root -> root | Suggested _ -> SuggestedTree.build []
+        this.Content <- view this renderer tagged (finding |> Option.map (fun (review, _, prefetcher) -> review, prefetcher)) sourceFilePath onEditsChanged
+
+    new(root: StructureNode, sourceFilePath: string, onEditsChanged: unit -> unit) = new StructureTreeWindow(Tagged root, sourceFilePath, onEditsChanged)
+    new(root: StructureNode, sourceFilePath: string) = new StructureTreeWindow(Tagged root, sourceFilePath, ignore)
 
     override _.OnClosed(e) =
         base.OnClosed e
+        match finding with
+        | Some(review, suggester, prefetcher) ->
+            // The pages found since the last edit are worth keeping with the edits too.
+            if review.HasDecisions then
+                try
+                    RegionEdits.saveLayout sourceFilePath (review.ToLayout sourceFilePath)
+                with
+                | :? IOException
+                | :? UnauthorizedAccessException -> ()
+            // A page may still be being found: stop after it, then let go of the suggester.
+            Task.Run(fun () ->
+                prefetcher.Stop()
+                (suggester :> IDisposable).Dispose())
+            |> ignore
+        | None -> ()
         renderer.Dispose()

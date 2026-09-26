@@ -100,7 +100,7 @@ module private MainView =
     let noPreview = { Image = None; Note = ""; Loading = false }
 
     /// What Save writes besides the chosen auto fixes: how many of the user's changes aren't in
-    /// the PDF yet (edits of its elements; for an untagged PDF, its review in Suggest Structure),
+    /// the PDF yet (edits of its elements; for an untagged PDF, its edits on the suggested structure),
     /// and whether it tags an untagged PDF from that review.
     type PendingChanges = { Changes: int; TagsFromReview: bool }
 
@@ -378,7 +378,7 @@ module private MainView =
                 |> ignore
 
             /// Counts the user's changes Save would write for the selected file: for an untagged PDF,
-            /// its review in Suggest Structure (edits, discarded suggestions, a title); otherwise its
+            /// its edits on the suggested structure (regions left out, other edits, a title); otherwise its
             /// edits that aren't in it yet, which means reading it, off the UI thread.
             let refreshPending () =
                 task {
@@ -513,15 +513,15 @@ module private MainView =
                                         window
                                         ("This PDF has no structure tree at all — it is completely untagged, so there is no "
                                          + "semantic hierarchy for a screen reader to use.\n\n"
-                                         + "Suggest Structure shows what a layout detector finds on each page: headings, "
-                                         + "paragraphs, figures, tables and their reading order. It's a preview; the PDF isn't changed.")
+                                         + "Suggest Structure shows the structure a layout detector finds on each page: headings, "
+                                         + "paragraphs, figures, tables and their reading order. You can edit it; the PDF isn't changed until you Save a copy.")
                                         "Document Structure"
                                         "Suggest Structure…"
                                 if suggest then
                                     let review = layoutReviews.For filePath
                                     // Offer to read the titles of pages links go to, before the window opens.
                                     do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
-                                    SuggestedStructureWindow(filePath, review, refreshPending).Show window
+                                    StructureTreeWindow(Suggested review, filePath, refreshPending).Show window
                             | structure -> StructureTreeWindow(structure, filePath, refreshPending).Show window
                         }
 
@@ -572,12 +572,12 @@ module private MainView =
                                 figures + texts
                             match review.Pages.Count, review.Edits |> List.filter _.Exclude |> List.length with
                             | _ when pending.Current.TagsFromReview ->
-                                Some("Save tags from your review in Suggest Structure, ticked or not." + alt)
+                                Some("Save tags from your review on the suggested structure, ticked or not." + alt)
                             | 0, 0 when alt = "" -> None
                             | 0, 0 -> Some(alt.Trim())
-                            | _, 0 -> Some("Uses the layout found in Suggest Structure." + alt)
-                            | _, 1 -> Some("Uses your review in Suggest Structure: 1 region discarded." + alt)
-                            | _, discarded -> Some($"Uses your review in Suggest Structure: {discarded} regions discarded." + alt)
+                            | _, 0 -> Some("Uses the layout suggested in View Structure." + alt)
+                            | _, 1 -> Some("Uses your edits on the suggested structure: 1 region left out." + alt)
+                            | _, discarded -> Some($"Uses your edits on the suggested structure: {discarded} regions left out." + alt)
                         match! Dialogs.chooseFixOptions window report reviewNote autoFixes.Current with
                         | Some options -> autoFixes.Set(Some options)
                         | None -> ()
@@ -586,7 +586,7 @@ module private MainView =
                 |> ignore
 
             /// What Save writes: the chosen auto fixes, the user's edits not in the PDF yet, and for
-            /// an untagged PDF with a review in Suggest Structure, tags from that review.
+            /// an untagged PDF with edits on its suggested structure, tags from them.
             let saveOptions () =
                 let chosen = autoFixes.Current |> Option.defaultValue PdfFixOptions.None
                 chosen
@@ -623,7 +623,7 @@ module private MainView =
                                     // detector page by page, after downloading its model the first time.
                                     let usesLayout =
                                         options.HasFlag PdfFixOptions.TagFromLayout || options.HasFlag PdfFixOptions.JoinSplitParagraphs
-                                    // The suggestions as reviewed in Suggest Structure (all of them if
+                                    // The suggestions with the edits on them (all of them if
                                     // it wasn't opened), reusing any pages it found.
                                     let source =
                                         if usesLayout then

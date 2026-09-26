@@ -243,7 +243,7 @@ let private fixChoices =
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
 /// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
 /// Returns None if the user cancelled.
-/// tagNote, if any, says what tagging from the layout will use (a review in Suggest Structure).
+/// tagNote, if any, says what tagging from the layout will use (edits on a suggested structure).
 /// chosen is what was chosen before, if anything; the first time, the safe repairs this PDF
 /// needs start ticked. Save writes the chosen repairs (and the user's edits) to a copy.
 let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) (chosen: PdfFixOptions option) : Task<PdfFixOptions option> =
