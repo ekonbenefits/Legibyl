@@ -491,6 +491,8 @@ type LayoutRegionSource(progress: IProgress<int * int> | null) =
             LayoutSuggestions.toRegions (suggester.Suggest pageNumber).Blocks
 
         member _.LinkDescription(_, _, _) = null
+        member _.PageTitles = null
+        member _.DocumentTitle = null
 
     interface IDisposable with
         member _.Dispose() =

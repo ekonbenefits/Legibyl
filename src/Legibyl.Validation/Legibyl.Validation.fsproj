@@ -26,6 +26,7 @@
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="StructureFixes.fs" />
+    <Compile Include="DocumentTitles.fs" />
     <!-- Legibyl's own warnings; see the header of LegibylChecks.fs to add one. -->
     <Compile Include="LegibylChecks.fs" />
     <Compile Include="FindingGeometry.fs" />

@@ -233,7 +233,8 @@ let ``alt text typed for a figure is saved next to the PDF, filled in again late
     Directory.CreateDirectory folder |> ignore
     let pdf = Path.Combine(folder, "qr.pdf")
     createQrPdf pdf
-    let altBoxes (window: Window) = descendants<TextBox> window
+    let altBoxes (window: Window) =
+        descendants<TextBox> window |> List.filter (fun b -> b.PlaceholderText = "Alt text: what this figure shows, for someone who can't see it")
     try
         onUiThread (fun () ->
             let first = SuggestedStructureWindow(pdf, LayoutReviews().For pdf)
@@ -256,5 +257,39 @@ let ``alt text typed for a figure is saved next to the PDF, filled in again late
             use suggester = new LayoutSuggester(pdf)
             let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> Legibyl.Validation.IPageLayoutSource).PageRegions(pdf, 1)
             regions |> Seq.choose (fun r -> Option.ofObj r.Alt) |> List.ofSeq |> should equal [ "Scan to apply online" ])
+    finally
+        Directory.Delete(folder, true)
+
+[<Fact>]
+let ``the document title is prefilled from the document, and only a change is saved`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "flyer.pdf")
+    do
+        use document = new PdfDocument(new PdfWriter(pdf))
+        document.AddNewPage() |> ignore
+        document.GetDocumentInfo().SetTitle "Design" |> ignore
+    try
+        onUiThread (fun () ->
+            let reviews = LayoutReviews()
+            let window = SuggestedStructureWindow(pdf, reviews.For pdf)
+            window.Show()
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            let titleBox () = descendants<TextBox> window |> List.find (fun b -> b.PlaceholderText = "What a screen reader and the title bar call this document")
+            let prefilled = titleBox().Text
+            let savedAtFirst = File.Exists(pdf + ".legibyl.json")
+            titleBox().Text <- "Cub Scout Pack 721"
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            let saved = File.ReadAllText(pdf + ".legibyl.json")
+            titleBox().Text <- "Design"
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            let removed = not (File.Exists(pdf + ".legibyl.json"))
+            window.Close()
+
+            prefilled |> should equal "Design"
+            savedAtFirst |> should be False
+            saved |> should haveSubstring "\"title\": \"Cub Scout Pack 721\""
+            removed |> should be True
+            (reviews.For pdf).DocumentTitle |> should equal (Some "Design"))
     finally
         Directory.Delete(folder, true)

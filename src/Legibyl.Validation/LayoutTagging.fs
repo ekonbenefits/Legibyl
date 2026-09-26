@@ -315,7 +315,11 @@ let tag
                               match region.QrText with
                               | NonNull text -> yield! Option.toList (LinkTitles.webAddress text)
                               | Null -> () ]
-            | None -> Dictionary<string, string>()
+            | None ->
+                // Titles the source already has (read in Suggest Structure), if any.
+                match source.PageTitles with
+                | NonNull titles -> titles
+                | Null -> Dictionary<string, string>()
         let pageTitle address = LinkTitles.titleFor pageTitles address
         let mutable noteIds = 0
         // Annotations' /StructParent keys come after every page's.
@@ -643,6 +647,22 @@ let tag
         markInfo.Put(PdfName.Marked, PdfBoolean.TRUE) |> ignore
         catalog.Put(PdfName.MarkInfo, markInfo) |> ignore
 
+        // A title from the source, shown in place of the file name.
+        let titled =
+            match source.DocumentTitle with
+            | NonNull title when not (String.IsNullOrWhiteSpace title) && title.Trim() <> (document.GetDocumentInfo().GetTitle() |> Option.ofObj |> Option.defaultValue "") ->
+                document.GetDocumentInfo().SetTitle(title.Trim()) |> ignore
+                let preferences =
+                    match catalog.GetAsDictionary PdfName.ViewerPreferences with
+                    | null ->
+                        let preferences = PdfDictionary()
+                        catalog.Put(PdfName.ViewerPreferences, preferences) |> ignore
+                        preferences
+                    | preferences -> preferences
+                preferences.Put(PdfName.DisplayDocTitle, PdfBoolean.TRUE) |> ignore
+                Some(title.Trim())
+            | _ -> None
+
         let plural n (one: string) (many: string) = if n = 1 then $"1 {one}" else $"{n} {many}"
         let headings = plural tally.Headings "heading" "headings"
         let paragraphs = plural tally.Paragraphs "paragraph" "paragraphs"
@@ -665,6 +685,9 @@ let tag
           if tally.QrLinks > 0 then
               let linked = plural tally.QrLinks "QR code" "QR codes"
               yield $"Linked {linked} to the web address they encode"
+          match titled with
+          | Some title -> yield $"Titled the document \"{title}\", as set in Suggest Structure"
+          | None -> ()
           if tally.LinksDescribed > 0 then
               let described = plural tally.LinksDescribed "link" "links"
               yield $"Described {described} as reviewed in Suggest Structure"

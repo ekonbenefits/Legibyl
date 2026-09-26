@@ -46,6 +46,13 @@ type LayoutReview(modified: DateTime) =
     member val WebLinks: WebLink list = [] with get, set
 
     member this.TitleLookup = this.Titles :> Collections.Generic.IReadOnlyDictionary<string, string>
+    /// The document title as edited in Suggest Structure (saved next to the PDF), if it was.
+    member val Title: string option = None with get, set
+    /// The title the window prefilled and showed, if it was opened.
+    member val ShownTitle: string option = None with get, set
+
+    /// The title to give the document: as edited, else as shown prefilled; None to leave it.
+    member this.DocumentTitle = this.Title |> Option.orElse this.ShownTitle
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
@@ -79,6 +86,7 @@ type LayoutReviews() =
             // Any alt text saved next to the PDF, written for it or an earlier version of it.
             let review = LayoutReview modified
             review.Edits <- RegionEdits.load fullPath
+            review.Title <- RegionEdits.loadTitle fullPath
             review
         reviews.AddOrUpdate(fullPath, (fun _ -> fresh ()), (fun _ existing -> if existing.Modified = modified then existing else fresh ()))
 
@@ -158,16 +166,14 @@ type ReviewedLayout(prefetcher: LayoutPrefetcher, review: LayoutReview) =
         member _.PageRegions(_, page) =
             let kept = (prefetcher.Find page).Blocks |> List.filter (fun block -> not (review.Discarded.Contains((page, block.Order))))
             List.map2
-                (fun (block: SuggestedBlock) region ->
-                    let region = RegionEdits.apply review.Edits page block region
-                    // A QR code's alt text as the window showed it (with its page's title, if
-                    // read), unless it was edited.
-                    match block.QrText with
-                    | Some text when isNull region.Alt -> { region with Alt = review.QrAlt text }
-                    | _ -> region)
+                (fun (block: SuggestedBlock) region -> RegionEdits.apply review.Edits page block region)
                 kept
                 (LayoutSuggestions.toRegions kept)
             :> Collections.Generic.IReadOnlyList<_>
+
+        // QR codes' descriptions name the titles read in the window (as it showed them).
+        member _.PageTitles = review.TitleLookup
+        member _.DocumentTitle = review.DocumentTitle |> Option.toObj
 
         member _.LinkDescription(_, page, rectangle) =
             review.WebLinks
@@ -770,9 +776,90 @@ module SuggestedStructureView =
                     ]
                 ]
 
+            // The document's title: prefilled as the title fixes would find it (the document's
+            // own, else a short first page), else the first H1 the layout found. Only a change
+            // from what's prefilled is saved.
+            let titleEdit = ctx.useState review.Title
+            let documentCandidates = ctx.useStateLazy(fun () -> try DocumentTitles.candidates pdfPath with _ -> []).Current
+            let headingCandidate =
+                match review.Pages.TryGetValue 1 with
+                | true, first ->
+                    first.Blocks
+                    |> List.tryFind (fun block -> block.Tag = "H1")
+                    |> Option.bind (fun block ->
+                        RegionEdits.textFor edits.Current 1 block
+                        |> Option.orElse (Some block.Text)
+                        |> Option.map (fun text -> Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim())
+                        |> Option.filter (String.IsNullOrWhiteSpace >> not))
+                    |> Option.map (fun title -> { DocumentTitles.Title = title; DocumentTitles.Source = "first heading" })
+                | _ -> None
+            let candidates = documentCandidates @ Option.toList headingCandidate |> List.distinctBy _.Title
+            let prefilled = candidates |> List.tryHead |> Option.map _.Title |> Option.defaultValue ""
+            review.ShownTitle <- (if prefilled = "" then None else Some prefilled)
+            let shownTitle = titleEdit.Current |> Option.defaultValue prefilled
+            let setTitle (text: string) =
+                let next = if text = prefilled then None else Some text
+                if next <> titleEdit.Current then
+                    titleEdit.Set next
+                    review.Title <- next
+                    try
+                        RegionEdits.saveTitle pdfPath next
+                    with
+                    | :? IOException
+                    | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save the title next to the PDF: {ex.Message}"
+
+            let titleRow =
+                Grid.create [
+                    Grid.row 1
+                    Grid.margin (0.0, 0.0, 0.0, 10.0)
+                    Grid.columnDefinitions "Auto,*"
+                    Grid.rowDefinitions "Auto,Auto"
+                    Grid.children [
+                        TextBlock.create [
+                            TextBlock.text "Document title"
+                            TextBlock.fontWeight FontWeight.SemiBold
+                            TextBlock.verticalAlignment VerticalAlignment.Center
+                            TextBlock.margin (0.0, 0.0, 10.0, 0.0)
+                        ]
+                        TextBox.create [
+                            Grid.column 1
+                            TextBox.text shownTitle
+                            TextBox.placeHolderText "What a screen reader and the title bar call this document"
+                            ToolTip.tip "Given to the tagged copy as its title, shown in place of the file name. Saved next to the PDF if changed."
+                            TextBox.onTextChanged setTitle
+                        ]
+                        WrapPanel.create [
+                            Grid.row 1
+                            Grid.column 1
+                            WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
+                            WrapPanel.isVisible (candidates |> List.exists (fun c -> c.Title <> shownTitle))
+                            WrapPanel.children [
+                                yield
+                                    TextBlock.create [
+                                        TextBlock.text "Use:"
+                                        TextBlock.verticalAlignment VerticalAlignment.Center
+                                        TextBlock.margin (0.0, 0.0, 6.0, 0.0)
+                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                    ]
+                                    :> Types.IView
+                                for candidate in candidates do
+                                    if candidate.Title <> shownTitle then
+                                        yield
+                                            Button.create [
+                                                Button.margin (0.0, 0.0, 6.0, 0.0)
+                                                Button.padding (8.0, 2.0)
+                                                Button.content $"{candidate.Title} · {candidate.Source}"
+                                                Button.onClick (fun _ -> setTitle candidate.Title)
+                                            ]
+                                            :> Types.IView
+                            ]
+                        ]
+                    ]
+                ]
+
             Grid.create [
                 Grid.margin 12.0
-                Grid.rowDefinitions "Auto,*"
+                Grid.rowDefinitions "Auto,Auto,*"
                 Grid.children [
                     TextBlock.create [
                         TextBlock.margin (0.0, 0.0, 0.0, 10.0)
@@ -780,8 +867,9 @@ module SuggestedStructureView =
                         Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                         TextBlock.text intro
                     ]
+                    titleRow
                     ContentControl.create [
-                        Grid.row 1
+                        Grid.row 2
                         ContentControl.content (if modelReady.Current then pagePanel :> Types.IView else downloadPanel)
                     ]
                 ]

@@ -60,10 +60,12 @@ let private regions =
       region "Artifact" (295.0, 35.0, 360.0, 52.0) null ]
 
 /// Regions from a list, as a layout detector would give them.
-type private FixedLayout(regions: LayoutRegion list, ?linkDescription: string) =
+type private FixedLayout(regions: LayoutRegion list, ?linkDescription: string, ?title: string, ?pageTitles: Map<string, string>) =
     interface IPageLayoutSource with
         member _.PageRegions(_, _) = regions
         member _.LinkDescription(_, _, _) = Option.toObj linkDescription
+        member _.PageTitles = pageTitles |> Option.map (fun t -> t :> Collections.Generic.IReadOnlyDictionary<_, _>) |> Option.toObj
+        member _.DocumentTitle = Option.toObj title
 
 let private tagFromLayout (input: string) (output: string) (source: IPageLayoutSource option) =
     let validator = VeraPdfValidator()
@@ -349,3 +351,48 @@ let ``a link without a description gets the one the layout source has`` () =
         let link = document.GetPage(1).GetAnnotations() |> Seq.find (fun a -> PdfName.Link.Equals(a.GetSubtype()))
         link.GetContents().ToUnicodeString() |> should equal "Example Domain (example.com)"
     failedRules output.Path |> should not' (contain "7.18.5-2")
+
+[<Fact>]
+let ``a title from the layout source titles the document and shows it`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout(regions, title = "Cub Scout Pack 721")))
+
+    result.AppliedFixes |> should contain "Titled the document \"Cub Scout Pack 721\", as set in Suggest Structure"
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle() |> should equal "Cub Scout Pack 721"
+    document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.ViewerPreferences).GetAsBoolean(PdfName.DisplayDocTitle).GetValue() |> should be True
+
+[<Fact>]
+let ``QR codes named by titles the source already read are described as QR codes, not as written alt text`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let qr = regions |> List.map (fun r -> if r.Tag = "Figure" then { r with QrText = "https://example.com/apply" } else r)
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout(qr, pageTitles = Map [ "https://example.com/apply", "Apply online" ])))
+
+    result.AppliedFixes |> should contain "Described 1 QR code by what they encode"
+    result.AppliedFixes |> Seq.exists (fun line -> line.StartsWith "Gave ") |> should be False
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    (flatten root |> List.find (fun node -> node.Tag = "Figure")).AlternateDescription
+    |> should equal "QR code linking to Apply online (https://example.com/apply)"
+
+[<Fact>]
+let ``a document's title candidates are its own title, then a title page's text`` () =
+    use titled = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(titled.Path))
+        document.AddNewPage() |> ignore
+        document.GetDocumentInfo().SetTitle "Design" |> ignore
+    DocumentTitles.candidates titled.Path |> should equal [ { DocumentTitles.Title = "Design"; DocumentTitles.Source = "document info" } ]
+
+    use untitled = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(untitled.Path))
+        let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
+        canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 24f).MoveText(72.0, 600.0).ShowText("Den Leader Guide").EndText() |> ignore
+        document.AddNewPage() |> ignore
+    DocumentTitles.candidates untitled.Path |> should equal [ { DocumentTitles.Title = "Den Leader Guide"; DocumentTitles.Source = "first page" } ]
