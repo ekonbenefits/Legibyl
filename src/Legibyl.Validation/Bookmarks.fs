@@ -2,8 +2,8 @@
 /// let readers jump between sections from the navigation pane. LegibylChecks warns when they're
 /// missing; the BookmarksFromHeadings fix adds one per H1 and H2, H2s nested under the H1 before
 /// them. A document that already has any outline is left alone, and so is one that doesn't
-/// declare its language: PDF/UA needs the language of bookmark text to be known, and guessing
-/// one isn't ours to do.
+/// declare its language: PDF/UA needs the language of bookmark text to be known. (The
+/// LanguageFromText fix, which runs first, can declare one.)
 module internal Legibyl.Validation.Bookmarks
 
 open System

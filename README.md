@@ -326,8 +326,18 @@ figures still need alt text, tables are tagged as text (their rows and cells
 need tagging by hand), and a page without text (a scan) is tagged as a figure
 that needs OCR. Text drawn as outlines is tagged as its region's element, with
 the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
-and the report asks for it to be checked. It doesn't guess the document's language, or describe links
-outside a table of contents.
+and the report asks for it to be checked. It doesn't describe links outside a table of contents.
+
+The Fix dialog's **Declare the document's language** option (off by default)
+sets the catalog's `/Lang` when a document has none, which PDF/UA needs for
+every piece of text (veraPDF's "natural language … shall be determined" rules,
+which are marked fixable by it). The language is detected from the pages' text
+and any `/ActualText`/`/Alt` (so OCR'd outlines count) with
+[LanguageDetection](https://www.nuget.org/packages/LanguageDetection.NETStandard)
+(naive Bayes over 53 languages' Wikipedia profiles, `DocumentLanguage.fs`), and
+declared only when there are at least 100 letters and it's at least 90% sure. It
+runs first among the structural fixes, so the bookmarks fix (which needs a
+language) can follow it.
 **Export JSON…** in that window saves the whole hierarchy — including each
 node's `content` text, geometry, link targets, and form field metadata — as
 JSON, the same shape produced by the CLI's `--structure` flag. This is intended for AI agents
