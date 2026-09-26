@@ -40,7 +40,15 @@ type SavedEdit =
       /// For paragraphs merged into this one (in View Structure): their boxes, like Box.
       [<JsonPropertyName "mergeWith">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      MergeWith: float array array | null }
+      MergeWith: float array array | null
+      /// The tag to give it instead, e.g. "H1".
+      [<JsonPropertyName "retag">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Retag: string | null
+      /// For a suggested region: leave it out of the structure.
+      [<JsonPropertyName "exclude">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
+      Exclude: bool }
 
 /// The review: remembered dismissals and edits, either of which may be missing (null).
 [<CLIMutable>]
@@ -132,7 +140,7 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
             match saved.MergeWith with
             | NonNull boxes -> boxes |> Array.choose geometry |> List.ofArray
             | Null -> []
-        if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty then
+        if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude then
             None
         else
             Some
@@ -141,7 +149,9 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
                   Box = box
                   Alt = saved.Alt
                   Text = saved.Text
-                  MergeWith = mergeWith }
+                  MergeWith = mergeWith
+                  Retag = saved.Retag
+                  Exclude = saved.Exclude }
     | None -> None
 
 /// The edit as it's saved.
@@ -152,7 +162,9 @@ let ofElementEdit (e: ElementEdit) : SavedEdit =
       Box = saved e.Box
       Alt = e.Alt
       Text = e.Text
-      MergeWith = if e.MergeWith.IsEmpty then null else e.MergeWith |> List.map saved |> Array.ofList }
+      MergeWith = if e.MergeWith.IsEmpty then null else e.MergeWith |> List.map saved |> Array.ofList
+      Retag = e.Retag
+      Exclude = e.Exclude }
 
 /// The review's edits, as the ApplyEdits fix takes them.
 let edits (saved: SavedFile) : ElementEdit list =
@@ -162,21 +174,29 @@ let edits (saved: SavedFile) : ElementEdit list =
 
 /// edits moved from the regions they were made for to the elements tagging made of them (the
 /// tag it wrote, the box of what the element holds), so in the tagged copy they're edits of its
-/// elements. Edits for regions that weren't tagged stay as they are.
+/// elements; a retag is then just the element's tag. Exclusions go (there's no element), and
+/// edits for regions that weren't tagged stay as they are.
 let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit list =
     let tagged = List.ofSeq tagged
-    [ for e in edits ->
-          tagged
-          |> List.choose (fun t ->
-              match t.Box with
-              | NonNull box when t.Region.Tag = e.Tag && t.Region.Geometry.PageNumber = e.Page ->
-                  Some(t.Tag, box, ElementEdits.overlap t.Region.Geometry e.Box)
-              | _ -> None)
-          |> List.filter (fun (_, _, o) -> o >= ElementEdits.SameElementOverlap)
-          |> List.sortByDescending (fun (_, _, o) -> o)
-          |> List.tryHead
-          |> Option.map (fun (tag, box, _) -> { e with Tag = tag; Box = box })
-          |> Option.defaultValue e ]
+    [ for e in edits do
+          if not (e.Exclude && not tagged.IsEmpty) then
+              // Tagged regions have their edits applied: a retagged one has its new tag.
+              let regionTag = match e.Retag with NonNull tag -> tag | Null -> e.Tag
+              let moved =
+                  tagged
+                  |> List.choose (fun t ->
+                      match t.Box with
+                      | NonNull box when t.Region.Tag = regionTag && t.Region.Geometry.PageNumber = e.Page ->
+                          Some(t.Tag, box, ElementEdits.overlap t.Region.Geometry e.Box)
+                      | _ -> None)
+                  |> List.filter (fun (_, _, o) -> o >= ElementEdits.SameElementOverlap)
+                  |> List.sortByDescending (fun (_, _, o) -> o)
+                  |> List.tryHead
+                  |> Option.map (fun (tag, box, _) -> { e with Tag = tag; Box = box; Retag = null })
+              match moved with
+              | Some moved when isNull moved.Alt && isNull moved.Text && moved.MergeWith.IsEmpty -> ()
+              | Some moved -> yield moved
+              | None -> yield e ]
 
 /// Builds the review a copy carries (see VeraPdfValidator.Review): saved, with its edits moved to
 /// the elements tagging made (if it tagged), and without the layout it was tagged from (the copy
@@ -184,11 +204,13 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
 let forCopy (saved: SavedFile option) =
     Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null>(fun tagged ->
         match saved with
+        | Some saved when tagged.Count = 0 -> toJson saved
         | Some saved ->
-            let saved = if tagged.Count > 0 then { saved with Layout = null } else saved
-            match rekey (edits saved) tagged with
-            | [] -> toJson saved
-            | moved -> toJson { saved with Edits = moved |> List.map ofElementEdit |> Array.ofList }
+            let moved = rekey (edits saved) tagged
+            toJson
+                { saved with
+                    Layout = null
+                    Edits = (if moved.IsEmpty then null else moved |> List.map ofElementEdit |> Array.ofList) }
         | None -> null)
 
 /// No regions: a layout source for when there's nothing but a review to tag from.
@@ -199,42 +221,19 @@ let noRegions =
         member _.PageTitles = null
         member _.DocumentTitle = null }
 
-/// The regions to tag from, as a review has them: its layout's for the pages it has (see
-/// LayoutFile), inner's for the others, with its edits applied (alt text a person wrote for
-/// figures, corrected text for what OCR read; from a review before layouts were saved) and its
-/// title.
+/// The regions to tag from, as a review has them: the layout it recorded, for the pages it has
+/// (see LayoutFile), else inner's, with its edits layered on (see ElementEdits.onRegions) and
+/// its title.
 type ReviewedRegions(inner: IPageLayoutSource, saved: SavedFile) =
     let inner =
         match saved.Layout with
         | NonNull layout -> LayoutFile.FileRegions(layout, Some inner) :> IPageLayoutSource
         | Null -> inner
-    let edits = edits saved |> List.filter _.MergeWith.IsEmpty
-
-    /// The edit for region: same page and tag, overlapping most.
-    let editFor (region: LayoutRegion) =
-        edits
-        |> List.filter (fun e -> e.Page = region.Geometry.PageNumber && e.Tag = region.Tag)
-        |> List.map (fun e -> e, ElementEdits.overlap e.Box region.Geometry)
-        |> List.filter (fun (_, o) -> o >= ElementEdits.SameElementOverlap)
-        |> List.sortByDescending snd
-        |> List.tryHead
-        |> Option.map fst
+    let edits = edits saved
 
     interface IPageLayoutSource with
         member _.PageRegions(pdfPath, pageNumber) =
-            [ for region in inner.PageRegions(pdfPath, pageNumber) ->
-                  match editFor region with
-                  | Some edit ->
-                      let region =
-                          match edit.Alt with
-                          | NonNull alt when region.Tag = "Figure" && not (String.IsNullOrWhiteSpace alt) -> { region with Alt = alt }
-                          | _ -> region
-                      match edit.Text with
-                      | NonNull text when not (isNull region.ActualText) ->
-                          { region with ActualText = (if String.IsNullOrWhiteSpace text then null else text) }
-                      | _ -> region
-                  | None -> region ]
-            :> Collections.Generic.IReadOnlyList<_>
+            ElementEdits.onRegions edits (inner.PageRegions(pdfPath, pageNumber)) :> Collections.Generic.IReadOnlyList<_>
 
         member _.LinkDescription(pdfPath, pageNumber, rectangle) = inner.LinkDescription(pdfPath, pageNumber, rectangle)
         member _.PageTitles = inner.PageTitles

@@ -20,6 +20,40 @@ let overlap (a: StructureGeometry) (b: StructureGeometry) =
     let union = area a + area b - intersection
     if union <= 0.0 then 0.0 else intersection / union
 
+// ---- Suggested regions ----
+
+/// The edit for region (made for the suggestion as found: same page and tag, about the same box).
+let private editFor (edits: ElementEdit list) (region: LayoutRegion) =
+    edits
+    |> List.filter (fun e -> e.MergeWith.IsEmpty && e.Page = region.Geometry.PageNumber && e.Tag = region.Tag)
+    |> List.map (fun e -> e, overlap e.Box region.Geometry)
+    |> List.filter (fun (_, o) -> o >= SameElementOverlap)
+    |> List.sortByDescending snd
+    |> List.tryHead
+    |> Option.map fst
+
+/// Suggested regions with edits layered on: excluded ones left out, retagged ones given their
+/// new tag (a list item's numbering goes when it stops being one), alt text for what's then a
+/// figure, and corrected text for what OCR read (ActualText; blank for nothing to read).
+let onRegions (edits: ElementEdit list) (regions: LayoutRegion seq) : LayoutRegion list =
+    [ for region in regions do
+          match editFor edits region with
+          | Some edit when edit.Exclude -> ()
+          | Some edit ->
+              let region =
+                  match edit.Retag with
+                  | NonNull tag -> { region with Tag = tag; ListNumbering = (if tag = "LI" then region.ListNumbering else null) }
+                  | Null -> region
+              let region =
+                  match edit.Alt with
+                  | NonNull alt when region.Tag = "Figure" && not (String.IsNullOrWhiteSpace alt) -> { region with Alt = alt }
+                  | _ -> region
+              match edit.Text with
+              | NonNull text when not (isNull region.ActualText) ->
+                  yield { region with ActualText = (if String.IsNullOrWhiteSpace text then null else text) }
+              | _ -> yield region
+          | None -> yield region ]
+
 // ---- Merging paragraphs ----
 
 /// The paragraphs on page, each with its parent, its position in its parent's /K, and its box.
@@ -71,7 +105,9 @@ let internal find (document: PdfDocument) context (edits: ElementEdit list) : (E
     | null -> []
     | _ when edits.IsEmpty -> []
     | structTreeRoot ->
-        let wanted = edits |> List.map (fun e -> e.Page, e.Tag) |> set
+        // An element retagged already has its new tag.
+        let tagsOf (e: ElementEdit) = [ e.Tag; yield! Option.toList (Option.ofObj e.Retag) ]
+        let wanted = edits |> List.collect (fun e -> tagsOf e |> List.map (fun tag -> e.Page, tag)) |> set
         // Only elements an edit could be for, with their boxes.
         let candidates =
             [ for visit in walk structTreeRoot context do
@@ -84,7 +120,7 @@ let internal find (document: PdfDocument) context (edits: ElementEdit list) : (E
         edits
         |> List.choose (fun edit ->
             candidates
-            |> List.filter (fun (tag, box, _) -> tag = edit.Tag && box.PageNumber = edit.Page)
+            |> List.filter (fun (tag, box, _) -> List.contains tag (tagsOf edit) && box.PageNumber = edit.Page)
             |> List.map (fun (_, box, element) -> element, overlap box edit.Box)
             |> List.filter (fun (_, o) -> o >= SameElementOverlap)
             |> List.sortByDescending snd
@@ -96,7 +132,10 @@ let private textOf (element: PdfDictionary) (key: PdfName) =
 
 /// What edit changes on element: each key with its new value, where that differs from what it has.
 let private changes (edit: ElementEdit, element: PdfDictionary) =
-    [ match edit.Alt with
+    [ match edit.Retag with
+      | NonNull tag when (element.GetAsName PdfName.S |> Option.ofObj |> Option.map _.GetValue()) <> Some tag -> yield PdfName.S, tag
+      | _ -> ()
+      match edit.Alt with
       | NonNull alt when textOf element PdfName.Alt <> Some alt -> yield PdfName.Alt, alt
       | _ -> ()
       match edit.Text with
@@ -119,7 +158,8 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
         [ for pair in found do
               let changes = changes pair
               for key, value in changes do
-                  (snd pair).Put(key, textString value) |> ignore
+                  // A tag is a name; the rest are text.
+                  (snd pair).Put(key, (if key.Equals PdfName.S then PdfName value :> PdfObject else textString value)) |> ignore
               if not changes.IsEmpty then yield () ]
     let missing = edits.Length - found.Length
     let count = applied.Length + runs.Length

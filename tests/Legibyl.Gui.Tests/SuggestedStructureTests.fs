@@ -191,7 +191,7 @@ let ``the reviewed layout leaves out discarded suggestions`` () =
     use suggester = new LayoutSuggester(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"))
     let prefetcher = LayoutPrefetcher(suggester, Collections.Concurrent.ConcurrentDictionary())
     let all = (prefetcher.Find 1).Blocks
-    let review = LayoutReview(DateTime.UtcNow, Discarded = set [ 1, all.Head.Order ])
+    let review = LayoutReview(DateTime.UtcNow, Edits = RegionEdits.setExcluded [] 1 all.Head.Tag all.Head.Geometry true)
     let reviewed = ReviewedLayout(prefetcher, review) :> Legibyl.Validation.IPageLayoutSource
     let regions = reviewed.PageRegions("unused.pdf", 1)
     regions.Count |> should equal (all.Length - 1)
@@ -227,9 +227,10 @@ let ``reopening Suggest Structure keeps what was found and discarded`` () =
         restored |> should not' (be Empty)
         restored.Head |> should equal "Keep"
         restored.Tail |> List.forall ((=) "Discard") |> should be True
-        (reviews.For pdf).Discarded.Count |> should equal 1
+        let excluded (review: LayoutReview) = review.Edits |> List.filter _.Exclude |> List.length
+        excluded (reviews.For pdf) |> should equal 1
         // Kept next to the PDF too: a new session finds it again.
-        (LayoutReviews().For pdf).Discarded.Count |> should equal 1)
+        excluded (LayoutReviews().For pdf) |> should equal 1)
     finally
         Directory.Delete(folder, true)
 
@@ -339,7 +340,10 @@ let ``a region can be given another tag, which is kept and tagged`` () =
 
             shown |> should equal other
             // Kept next to the PDF: a new session has it.
-            (LayoutReviews().For pdf).Pages[1].Blocks.Head.Tag |> should equal other
+            // An edit on the suggestion, which stays as found.
+            let later = LayoutReviews().For pdf
+            later.Pages[1].Blocks.Head.Tag |> should equal before
+            later.Edits |> List.map (fun e -> e.Tag, e.Retag) |> should equal [ before, Some other ]
             // And it's what tagging takes.
             let reviewed = LayoutReviews().For pdf
             use suggester = new LayoutSuggester(pdf)

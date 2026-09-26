@@ -184,7 +184,10 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
                     let modelSource = model |> Option.map (fun model -> model :> IPageLayoutSource)
                     let layout: IPageLayoutSource option =
                         match appliedLayout, review with
-                        | Some saved, _ -> Some(LayoutFile.FileRegions(saved, modelSource))
+                        // The layout given, with the review's edits layered on (not its own layout).
+                        | Some saved, Some review ->
+                            Some(ReviewFile.ReviewedRegions(LayoutFile.FileRegions(saved, modelSource), { review with Layout = null }))
+                        | Some saved, None -> Some(LayoutFile.FileRegions(saved, modelSource))
                         | None, Some review when FixNames.usesLayout options ->
                             Some(ReviewFile.ReviewedRegions(modelSource |> Option.defaultValue ReviewFile.noRegions, review))
                         | None, _ -> modelSource
@@ -419,7 +422,7 @@ EXAMPLES:
   legibyl document.pdf --fixes all --edits
   legibyl flyer.v3.pdf --edits-from flyer.v2.pdf
   legibyl scan.pdf --suggest-layout --suggest-layout-output scan.layout.json --figure-images
-  legibyl scan.pdf --apply-layout scan.layout.json
+  legibyl scan.pdf --apply-layout scan.layout.json --edits-from scan.edits.json
   legibyl document.pdf --fix --fix-output document-repaired.pdf
   legibyl document.pdf --structure --output structure.json
 """
@@ -552,12 +555,13 @@ let main argv =
                     |> desc
                         "Include the layout the layout model suggests for each file's pages in the output, \
                          under \"suggestedLayout\": each page's regions in reading order, with the tag each \
-                         suggests (H1, H, P, LI, Figure, Table, Caption, Note, Formula, Lbl, Artifact), its box, \
-                         its text (read by OCR where it's drawn rather than written), what a QR code encodes, an \
-                         \"alt\" to fill in for a figure, and a title. Change it as needed (retag, remove or \
-                         reorder regions, write alt text, correct OCR'd text) and tag the file from it with \
-                         --apply-layout. Downloads the layout model (about 130 MB) the first time; several \
-                         seconds a page."
+                         suggests (H1, H, P, LI, Figure, Table, Caption, Note, Formula, Lbl, Artifact), its \
+                         page and box, its text (read by OCR where it's drawn rather than written), what a QR \
+                         code encodes, a figure's surrounding text, and a title. Leave it as found, like a \
+                         structure read from a PDF, and write your changes as edits in a review file (each \
+                         naming a region's page, tag and box: \"exclude\", \"retag\", \"alt\", \"text\"), \
+                         then tag the file with --apply-layout and --edits-from. Downloads the layout model \
+                         (about 130 MB) the first time; several seconds a page."
 
                 and! suggestLayoutOutput =
                     optionMaybe "--suggest-layout-output"
@@ -570,16 +574,17 @@ let main argv =
                         "Use with --suggest-layout-output. Also writes a PNG of each figure into a folder \
                          beside the layout file (\"scan.layout.json\" -> \"scan.layout.images/p1-r3.png\"), \
                          and gives the figure its path as \"image\", for someone (or an agent) to look at \
-                         when writing its alt text. Each run empties the folder of the last run's images; \
+                         when writing its \"alt\" edit. Each run empties the folder of the last run's images; \
                          delete it with the layout file when done. --apply-layout doesn't use them."
 
                 and! applyLayout =
                     optionMaybe "--apply-layout"
                     |> desc
                         "Tag an untagged file from the layout in path (implies --fix; one input file), as \
-                         --suggest-layout writes it: its regions become the structure, in their order, with \
-                         their alt text, recognized text as replacement text, and its title. Needs no layout \
-                         model."
+                         --suggest-layout writes it, with the edits from --edits-from (or --edits) layered on: \
+                         its regions become the structure in their order, less those excluded, retagged, with \
+                         alt text, recognized text (as corrected) as replacement text, and a title. Needs no \
+                         layout model."
                     |> helpName "path"
 
                 and! includeStructure =

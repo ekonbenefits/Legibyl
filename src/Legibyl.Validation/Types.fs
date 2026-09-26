@@ -95,8 +95,10 @@ type StructureGeometry =
       Right: float
       Top: float }
 
-/// A change a person made to a structure element (in View Structure) or to a region to tag (in
-/// Suggest Structure): its alt text, its replacement text, or paragraphs merged into it. The element is found again by its page, its tag and about the same box,
+/// A change a person made to a structure element (in View Structure) or to a suggested region
+/// (in Suggest Structure, or a layout's edits): its alt text, its replacement text, its tag,
+/// paragraphs merged into it, or (for a region) leaving it out. What it changes is left as it
+/// was found; the edit is layered on top. The element is found again by its page, its tag and about the same box,
 /// so the edit still applies after repairs have rearranged the structure tree.
 type ElementEdit =
     { Page: int
@@ -109,7 +111,12 @@ type ElementEdit =
       Text: string | null
       /// Paragraphs to merge into this one (a P), by box: its neighbours after it, in order.
       /// Empty for none.
-      MergeWith: StructureGeometry list }
+      MergeWith: StructureGeometry list
+      /// The tag to give it instead (e.g. "H1" for a heading found as "H"); null to leave it.
+      Retag: string | null
+      /// For a suggested region: leave it out of the structure (its text joins the nearest region
+      /// kept; anything else it holds is decoration).
+      Exclude: bool }
 
 /// A region of a page to tag, e.g. one a layout detector found (see Legibyl.Layout).
 type LayoutRegion =
@@ -250,3 +257,15 @@ type StructureNode =
       ContentLeafCount: int
       /// Child structure elements, in document (reading) order.
       Children: Collections.Generic.IReadOnlyList<StructureNode> }
+
+    /// Where it is, as an edit names it (with its Tag): the page its geometry is on...
+    member this.Page =
+        match this.Geometry with
+        | NonNull geometry -> Nullable geometry.PageNumber
+        | Null -> Nullable()
+
+    /// ...and that geometry as [left, bottom, right, top], in points, as layouts and edits have it.
+    member this.Box: float array | null =
+        match this.Geometry with
+        | NonNull g -> [| g.Left; g.Bottom; g.Right; g.Top |] |> Array.map (fun v -> Math.Round(v, 1))
+        | Null -> null
