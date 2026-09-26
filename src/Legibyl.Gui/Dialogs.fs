@@ -106,81 +106,172 @@ let showMessageWithAction (owner: Window) (message: string) (title: string) (act
         return chosen
     }
 
+/// A repair the Fix dialog offers.
+type private FixChoice =
+    { Option: PdfFixOptions
+      Title: string
+      Detail: string
+      /// Stays unticked even when found: it changes what the document says it is, or guesses.
+      OptIn: bool }
+
+/// The repairs, in the order they run: tagging first, then StructureFixes.orderedFixes, then
+/// veraPDF's metadata fix.
+let private fixChoices =
+    [ { Option = PdfFixOptions.TagFromLayout
+        Title = "Tag from the page layout"
+        Detail =
+          "Headings, paragraphs, lists, figures and reading order, found by a layout detector; the page looks the same. "
+          + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time."
+        OptIn = true }
+      { Option = PdfFixOptions.QrCodeLinks
+        Title = "Link QR codes"
+        Detail = "With tagging: a borderless link over each QR code that encodes a web address."
+        OptIn = true }
+      { Option = PdfFixOptions.LanguageFromText
+        Title = "Declare the language"
+        Detail = "Set /Lang from the language the text is in, when there's enough text to be sure."
+        OptIn = true }
+      { Option = PdfFixOptions.HeadingsFromToc
+        Title = "Headings from the table of contents"
+        Detail = "Tag paragraphs a contents entry names as headings (H1–H6, from its indent), and point its links at them."
+        OptIn = true }
+      { Option = PdfFixOptions.RemoveEmptyParagraphs
+        Title = "Remove empty paragraphs"
+        Detail = "Empty /P structure elements (optional cleanup)."
+        OptIn = true }
+      { Option = PdfFixOptions.RemoveEmptyTocEntries
+        Title = "Remove empty contents entries"
+        Detail = "Empty table-of-contents entries (TOCI) (optional cleanup)."
+        OptIn = true }
+      { Option = PdfFixOptions.ListsFromParagraphs
+        Title = "Tag lists"
+        Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become L/LI; the page looks the same."
+        OptIn = true }
+      { Option = PdfFixOptions.BookmarksFromHeadings
+        Title = "Add bookmarks"
+        Detail = "Bookmarks for the H1 and H2 headings, when the document has none."
+        OptIn = false }
+      { Option = PdfFixOptions.AnnotationTabs
+        Title = "Tab order for annotations"
+        Detail = "Set /Tabs /S on pages that contain annotations, so keyboard order follows the structure."
+        OptIn = false }
+      { Option = PdfFixOptions.FontCidToGidMap
+        Title = "Font glyph mapping"
+        Detail = "Write the /CIDToGIDMap /Identity embedded TrueType CID fonts leave out; readers already use it, so nothing changes on the page."
+        OptIn = false }
+      { Option = PdfFixOptions.LinkContents
+        Title = "Describe contents links"
+        Detail = "Give table-of-contents links without a description the entry's own text (/Contents)."
+        OptIn = false }
+      { Option = PdfFixOptions.DocumentTitle
+        Title = "Document title"
+        Detail = "Use the title the document carries, and show it in place of the file name (/DisplayDocTitle)."
+        OptIn = false }
+      { Option = PdfFixOptions.TitleFromFirstPage
+        Title = "Title from the first page"
+        Detail = "If the document has no title anywhere, use the text of a short first page (a title page)."
+        OptIn = true }
+      { Option = PdfFixOptions.Metadata
+        Title = "Repair XMP metadata"
+        Detail = "veraPDF's repair: metadata stream, PDF/UA identifier, Info sync."
+        OptIn = false } ]
+
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
-/// one addresses. Returns None if the user cancelled.
+/// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
+/// Returns None if the user cancelled.
 let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOptions option> =
-    let window = dialogWindow "Fix PDF" 520.0
+    let window = dialogWindow "Fix PDF" 560.0
     let found (option: PdfFixOptions) = report.FixableCount option
+    /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging.
+    let applies (choice: FixChoice) =
+        if choice.Option = PdfFixOptions.QrCodeLinks then found PdfFixOptions.TagFromLayout > 0 else found choice.Option > 0
+    // veraPDF only repairs metadata (adding the PDF/UA identifier) when the document would then
+    // conform, so it's only worth ticking when every failure can be fixed here.
+    let everyFailureFixable =
+        report.Findings |> Seq.forall (fun f -> f.Passed || f.Severity <> FindingSeverity.Failure || f.IsFixable)
+    let tickedAtFirst (choice: FixChoice) =
+        applies choice && not choice.OptIn && (choice.Option <> PdfFixOptions.Metadata || everyFailureFixable)
     window.Content <-
         Component(fun ctx ->
-            // Repairs start ticked only if this PDF has something for them to fix.
-            let metadata = ctx.useState (found PdfFixOptions.Metadata > 0)
-            let annotationTabs = ctx.useState (found PdfFixOptions.AnnotationTabs > 0)
-            let fontGlyphMaps = ctx.useState (found PdfFixOptions.FontCidToGidMap > 0)
-            let linkContents = ctx.useState (found PdfFixOptions.LinkContents > 0)
-            let documentTitle = ctx.useState (found PdfFixOptions.DocumentTitle > 0)
-            let bookmarks = ctx.useState (found PdfFixOptions.BookmarksFromHeadings > 0)
-            // These change what the document says it is, so they stay opt-in even when found.
-            let emptyParagraphs = ctx.useState false
-            let emptyTocEntries = ctx.useState false
-            let tocHeadings = ctx.useState false
-            let paragraphLists = ctx.useState false
-            // The page's text may not be the title an author would give it.
-            let titleFromFirstPage = ctx.useState false
-            // Its tags are a detector's best guess, to check before relying on them.
-            let tagFromLayout = ctx.useState false
-            // So is the language, though it's rarely wrong with enough text.
-            let languageFromText = ctx.useState false
-            // Adds links the document didn't have.
-            let qrCodeLinks = ctx.useState false
+            let selected =
+                ctx.useState (fixChoices |> List.filter tickedAtFirst |> List.fold (fun all c -> all ||| c.Option) PdfFixOptions.None)
+            let showAll = ctx.useState false
+            let needed = fixChoices |> List.filter applies
 
-            let checkBox (state: IWritable<bool>) (content: IView) =
+            /// The repair's title and detail, with how many findings it addresses on the right.
+            let row (choice: FixChoice) =
+                let count =
+                    match found choice.Option with
+                    | _ when choice.Option = PdfFixOptions.QrCodeLinks && applies choice -> "with tagging"
+                    | 0 -> "none found"
+                    | n -> $"{n} found"
+                let detail =
+                    if choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
+                        $"{choice.Detail} Unticked: veraPDF only repairs metadata once every other failure is fixed, and some here can't be fixed automatically."
+                    else
+                        choice.Detail
                 CheckBox.create [
-                    CheckBox.margin (0.0, 0.0, 0.0, 10.0)
-                    CheckBox.isChecked state.Current
+                    CheckBox.margin (0.0, 0.0, 0.0, 8.0)
+                    CheckBox.horizontalAlignment HorizontalAlignment.Stretch
+                    CheckBox.horizontalContentAlignment HorizontalAlignment.Stretch
+                    CheckBox.isChecked (selected.Current.HasFlag choice.Option)
                     CheckBox.onIsCheckedChanged (fun e ->
                         match e.Source with
-                        | :? CheckBox as checkBox -> state.Set(checkBox.IsChecked.GetValueOrDefault())
+                        | :? CheckBox as checkBox ->
+                            let isChecked = checkBox.IsChecked.GetValueOrDefault()
+                            if isChecked <> selected.Current.HasFlag choice.Option then
+                                selected.Set(if isChecked then selected.Current ||| choice.Option else selected.Current &&& ~~~choice.Option)
                         | _ -> ())
-                    CheckBox.content content
-                ]
-
-            /// The repair's description, with how many findings it addresses beneath it.
-            let label (text: string) (option: PdfFixOptions) =
-                let count =
-                    match found option with
-                    | 0 -> "None found in this PDF"
-                    | 1 -> "1 found"
-                    | n -> $"{n} found"
-                StackPanel.create [
-                    StackPanel.children [
-                        TextBlock.create [ TextBlock.text text; TextBlock.textWrapping TextWrapping.Wrap ]
-                        TextBlock.create [
-                            TextBlock.text count
-                            TextBlock.fontSize 12.0
-                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                    CheckBox.content (
+                        Grid.create [
+                            Grid.columnDefinitions "*,Auto"
+                            Grid.children [
+                                StackPanel.create [
+                                    StackPanel.children [
+                                        WrapPanel.create [
+                                            WrapPanel.children [
+                                                TextBlock.create [ TextBlock.text choice.Title; TextBlock.fontWeight FontWeight.SemiBold ]
+                                                if choice.OptIn then
+                                                    TextBlock.create [
+                                                        TextBlock.text "opt-in"
+                                                        TextBlock.fontSize 11.0
+                                                        TextBlock.margin (8.0, 2.0, 0.0, 0.0)
+                                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                    ]
+                                            ]
+                                        ]
+                                        TextBlock.create [
+                                            TextBlock.text detail
+                                            TextBlock.fontSize 12.0
+                                            TextBlock.textWrapping TextWrapping.Wrap
+                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                        ]
+                                    ]
+                                ]
+                                Border.create [
+                                    Grid.column 1
+                                    Border.margin (12.0, 1.0, 0.0, 0.0)
+                                    Border.padding (8.0, 1.0)
+                                    Border.cornerRadius 8.0
+                                    Border.verticalAlignment VerticalAlignment.Top
+                                    Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Fill ]
+                                    Border.child (
+                                        TextBlock.create [
+                                            TextBlock.text count
+                                            TextBlock.fontSize 12.0
+                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                        ]
+                                    )
+                                ]
+                            ]
                         ]
-                    ]
+                    )
                 ]
 
             let onContinue _ =
-                let options =
-                    [ tagFromLayout.Current, PdfFixOptions.TagFromLayout
-                      qrCodeLinks.Current, PdfFixOptions.QrCodeLinks
-                      languageFromText.Current, PdfFixOptions.LanguageFromText
-                      metadata.Current, PdfFixOptions.Metadata
-                      annotationTabs.Current, PdfFixOptions.AnnotationTabs
-                      fontGlyphMaps.Current, PdfFixOptions.FontCidToGidMap
-                      emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
-                      emptyTocEntries.Current, PdfFixOptions.RemoveEmptyTocEntries
-                      linkContents.Current, PdfFixOptions.LinkContents
-                      documentTitle.Current, PdfFixOptions.DocumentTitle
-                      tocHeadings.Current, PdfFixOptions.HeadingsFromToc
-                      paragraphLists.Current, PdfFixOptions.ListsFromParagraphs
-                      titleFromFirstPage.Current, PdfFixOptions.TitleFromFirstPage
-                      bookmarks.Current, PdfFixOptions.BookmarksFromHeadings ]
-                    |> List.fold (fun all (isChecked, option) -> if isChecked then all ||| option else all) PdfFixOptions.None
-
+                // Only what's shown: a repair ticked under "all" and then hidden again isn't run.
+                let shown = if showAll.Current then fixChoices else needed
+                let options = shown |> List.fold (fun all c -> if selected.Current.HasFlag c.Option then all ||| c.Option else all) PdfFixOptions.None
                 if options = PdfFixOptions.None then
                     showMessage window "Select at least one fix to apply." "Fix PDF" |> ignore
                 else
@@ -188,91 +279,56 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
 
             Grid.create [
                 Grid.margin 14.0
-                Grid.rowDefinitions "Auto,*,Auto"
+                Grid.rowDefinitions "Auto,Auto,*,Auto,Auto"
                 Grid.children [
                     TextBlock.create [
                         TextBlock.text "Choose the repairs to apply to a copy of this PDF:"
                         TextBlock.textWrapping TextWrapping.Wrap
-                        TextBlock.margin (0.0, 0.0, 0.0, 12.0)
+                        TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                     ]
-                    StackPanel.create [
+                    ToggleSwitch.create [
                         Grid.row 1
-                        StackPanel.children [
-                            // In the order the repairs run (tagging first, StructureFixes.orderedFixes,
-                            // then veraPDF's metadata fix).
-                            checkBox
-                                tagFromLayout
-                                (label
-                                    ("Tag this untagged document from each page's layout: headings, paragraphs, lists, figures and reading order, "
-                                     + "found by a layout detector (the page looks the same; figures still need alt text). Takes several seconds a page, "
-                                     + $"and downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time")
-                                    PdfFixOptions.TagFromLayout)
-                            checkBox
-                                qrCodeLinks
-                                (label
-                                    "With tagging: link each QR code that encodes a web address to it (a borderless link over the code, so the page looks the same)"
-                                    PdfFixOptions.QrCodeLinks)
-                            checkBox
-                                languageFromText
-                                (label
-                                    "Declare the document's language (/Lang), detected from its text, when it has none (only when there's enough text to be sure)"
-                                    PdfFixOptions.LanguageFromText)
-                            checkBox
-                                tocHeadings
-                                (label
-                                    "Tag headings the table of contents lists, where an entry's text and page match exactly one paragraph (H1–H6, from its indent), and point its links at them"
-                                    PdfFixOptions.HeadingsFromToc)
-                            checkBox
-                                emptyParagraphs
-                                (label "Remove empty semantic /P structure elements (optional cleanup)" PdfFixOptions.RemoveEmptyParagraphs)
-                            checkBox
-                                emptyTocEntries
-                                (label "Remove empty table-of-contents entries (TOCI) (optional cleanup)" PdfFixOptions.RemoveEmptyTocEntries)
-                            checkBox
-                                paragraphLists
-                                (label
-                                    "Tag runs of paragraphs that start with list markers (•, (1), a.) as lists (L/LI; the page looks the same)"
-                                    PdfFixOptions.ListsFromParagraphs)
-                            checkBox
-                                bookmarks
-                                (label
-                                    "Add bookmarks for the H1 and H2 headings, when the document has none"
-                                    PdfFixOptions.BookmarksFromHeadings)
-                            checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations" PdfFixOptions.AnnotationTabs)
-                            checkBox
-                                fontGlyphMaps
-                                (label
-                                    "Write the glyph mapping embedded TrueType CID fonts leave out (/CIDToGIDMap /Identity, what readers already use)"
-                                    PdfFixOptions.FontCidToGidMap)
-                            checkBox
-                                linkContents
-                                (label
-                                    "Describe table-of-contents links that have no description, using the entry's own text (/Contents)"
-                                    PdfFixOptions.LinkContents)
-                            checkBox
-                                documentTitle
-                                (label
-                                    "Give the document a title, and show it in place of the file name (/DisplayDocTitle)"
-                                    PdfFixOptions.DocumentTitle)
-                            checkBox
-                                titleFromFirstPage
-                                (label
-                                    "If the document has no title anywhere, use the text of a short first page (a title page) as its title"
-                                    PdfFixOptions.TitleFromFirstPage)
-                            checkBox
-                                metadata
-                                (label "Fix XMP metadata using veraPDF (metadata stream, PDF/UA identifier, Info sync)" PdfFixOptions.Metadata)
-                            TextBlock.create [
-                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                TextBlock.textWrapping TextWrapping.Wrap
-                                TextBlock.margin (0.0, 8.0, 0.0, 16.0)
-                                TextBlock.text
-                                    "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't add missing alt text or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
+                        ToggleSwitch.margin (0.0, 0.0, 0.0, 10.0)
+                        ToggleSwitch.isChecked showAll.Current
+                        ToggleSwitch.onContent $"Showing all {fixChoices.Length} repairs"
+                        ToggleSwitch.offContent $"Showing the {needed.Length} this PDF needs"
+                        ToggleSwitch.onIsCheckedChanged (fun e ->
+                            match e.Source with
+                            | :? ToggleSwitch as toggle -> showAll.Set(toggle.IsChecked.GetValueOrDefault())
+                            | _ -> ())
+                    ]
+                    ScrollViewer.create [
+                        Grid.row 2
+                        ScrollViewer.maxHeight 480.0
+                        ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                        ScrollViewer.content (
+                            StackPanel.create [
+                                StackPanel.children [
+                                    let shown = if showAll.Current then fixChoices else needed
+                                    if shown.IsEmpty then
+                                        yield
+                                            TextBlock.create [
+                                                TextBlock.textWrapping TextWrapping.Wrap
+                                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                TextBlock.text "Nothing in these results can be repaired automatically. Show all repairs to choose one anyway."
+                                            ]
+                                            :> IView
+                                    for choice in shown do
+                                        yield row choice :> IView
+                                ]
                             ]
-                        ]
+                        )
+                    ]
+                    TextBlock.create [
+                        Grid.row 3
+                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                        TextBlock.textWrapping TextWrapping.Wrap
+                        TextBlock.margin (0.0, 8.0, 0.0, 16.0)
+                        TextBlock.text
+                            "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't add missing alt text or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
                     ]
                     StackPanel.create [
-                        Grid.row 2
+                        Grid.row 4
                         StackPanel.orientation Orientation.Horizontal
                         StackPanel.horizontalAlignment HorizontalAlignment.Right
                         StackPanel.children [
