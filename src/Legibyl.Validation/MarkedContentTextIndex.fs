@@ -89,7 +89,8 @@ let private geometryFromMarkedContent pageNumber (element: MarkedContentElement)
 /// were painted. Inserts a space wherever there's a noticeable horizontal gap
 /// between consecutive glyphs that isn't already whitespace — many PDF writers
 /// position words apart via spacing operators rather than an explicit space glyph,
-/// so naive concatenation alone would run words together.
+/// so naive concatenation alone would run words together — and where the text moves
+/// to a new line, which ends a word just the same ("Arrow of" / "Light").
 let private concatenateLetters (letters: IReadOnlyList<Letter>) =
     let sb = StringBuilder()
     let mutable previous: Letter option = None
@@ -99,7 +100,9 @@ let private concatenateLetters (letters: IReadOnlyList<Letter>) =
             let previousEndsWithSpace =
                 previous.Value.Length > 0 && Char.IsWhiteSpace previous.Value[previous.Value.Length - 1]
             let gap = letter.StartBaseLine.X - previous.EndBaseLine.X
-            if not previousEndsWithSpace && gap > previous.Width * 0.15 then
+            let lineHeight = max previous.PointSize previous.GlyphRectangle.Height
+            let newLine = abs (letter.StartBaseLine.Y - previous.StartBaseLine.Y) > lineHeight * 0.5
+            if not previousEndsWithSpace && (gap > previous.Width * 0.15 || newLine) then
                 sb.Append ' ' |> ignore
         | _ -> ()
         sb.Append letter.Value |> ignore

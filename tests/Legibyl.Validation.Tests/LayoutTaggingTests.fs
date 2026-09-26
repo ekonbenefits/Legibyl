@@ -195,3 +195,27 @@ let ``text drawn as outlines is tagged with its OCR text as ActualText`` () =
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
     let paragraph = (root.Children |> Seq.exactlyOne).Children |> Seq.exactlyOne
     (paragraph.Tag, paragraph.ActualText, paragraph.ContentLeafCount) |> should equal ("P", "Outlined words", 1)
+
+[<Fact>]
+let ``a heading drawn in pieces is one marked sequence, and a wrapped line reads with a space`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        // "Our big events" in three text objects, each in its own saved state, as Quartz writes it.
+        let mutable x = 72.0
+        for piece in [ "Our big e"; "v"; "ents" ] do
+            canvas.SaveState().BeginText().SetFontAndSize(font, 20f).MoveText(x, 700.0).ShowText(piece).EndText().RestoreState() |> ignore
+            x <- x + float (font.GetWidth(piece, 20f))
+        // "Arrow of Light" wrapped onto two lines in one text object.
+        canvas.BeginText().SetFontAndSize(font, 12f).SetLeading(14f).MoveText(72.0, 650.0).ShowText("Arrow of").NewlineShowText("Light").EndText()
+        |> ignore
+    let regions = [ region "H1" (70.0, 695.0, 300.0, 720.0) null; region "P" (70.0, 630.0, 300.0, 665.0) null ]
+
+    tagFromLayout input.Path output.Path (Some(FixedLayout regions)) |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    [ for node in (root.Children |> Seq.exactlyOne).Children -> node.Tag, node.Content, node.ContentLeafCount ]
+    |> should equal [ "H1", "Our big events", 1; "P", "Arrow of Light", 1 ]
