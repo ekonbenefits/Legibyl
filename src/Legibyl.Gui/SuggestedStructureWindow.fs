@@ -14,15 +14,41 @@ open Avalonia.Layout
 open Avalonia.Media
 open Avalonia.Media.Imaging
 open Legibyl.Layout
+open Legibyl.Validation
 open Legibyl.Rendering
 open Legibyl.Validation
+
+/// What's been found and decided about one file's suggested structure: each page's layout
+/// found so far, the suggestions discarded, and the page last looked at. Remembered while the
+/// app is open, so reopening Suggest Structure (or tagging from the Fix dialog) picks it up.
+[<Sealed>]
+type LayoutReview(modified: DateTime) =
+    member _.Modified = modified
+    member val Pages = Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>()
+    /// Discarded suggestions, by (page, order).
+    member val Discarded: Set<int * int> = Set.empty with get, set
+    member val LastPage = 1 with get, set
+
+/// The layout reviews of the files opened this session, each forgotten if its file changes.
+[<Sealed>]
+type LayoutReviews() =
+    let reviews = Collections.Concurrent.ConcurrentDictionary<string, LayoutReview>()
+
+    /// This file's review, a new one if there's none or the file has changed since.
+    member _.For(pdfPath: string) =
+        let fullPath = Path.GetFullPath pdfPath
+        let modified = File.GetLastWriteTimeUtc fullPath
+        reviews.AddOrUpdate(
+            fullPath,
+            (fun _ -> LayoutReview modified),
+            (fun _ existing -> if existing.Modified = modified then existing else LayoutReview modified)
+        )
 
 /// Finds every page's layout in the background, one page at a time (each takes seconds): the
 /// page being viewed first, then the pages after it, then any before. So moving to another page
 /// usually shows it at once.
 [<Sealed>]
-type LayoutPrefetcher(suggester: LayoutSuggester) =
-    let results = Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>()
+type LayoutPrefetcher(suggester: LayoutSuggester, results: Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>) =
     let failures = Collections.Concurrent.ConcurrentDictionary<int, string>()
     let cancel = new CancellationTokenSource()
     let pageReady = Event<int * PageSuggestion>()
@@ -69,6 +95,15 @@ type LayoutPrefetcher(suggester: LayoutSuggester) =
         | true, reason -> Some reason
         | _ -> None
 
+    /// A page's layout: found already, or found now (waiting for the page in progress).
+    member _.Find(page: int) =
+        match results.TryGetValue page with
+        | true, result -> result
+        | _ ->
+            let result = suggester.Suggest page
+            results[page] <- result
+            result
+
     /// Starts finding pages, once (the model must be downloaded).
     member _.Start() =
         if worker.IsCompleted && results.Count + failures.Count < suggester.PageCount then
@@ -79,8 +114,17 @@ type LayoutPrefetcher(suggester: LayoutSuggester) =
         cancel.Cancel()
         worker.Wait()
 
+/// The regions to tag: each page's suggestions, less the ones the user discarded.
+type ReviewedLayout(prefetcher: LayoutPrefetcher, discarded: Set<int * int>) =
+    interface IPageLayoutSource with
+        member _.PageRegions(_, page) =
+            (prefetcher.Find page).Blocks
+            |> List.filter (fun block -> not (discarded.Contains((page, block.Order))))
+            |> LayoutSuggestions.toRegions
+            :> Collections.Generic.IReadOnlyList<_>
+
 /// For an untagged PDF: the structure a layout detector suggests for each page, drawn over the
-/// page. A preview only; nothing is written to the PDF.
+/// page. Each suggestion can be kept or discarded, and the kept ones saved as a tagged copy.
 module SuggestedStructureView =
     /// 0xRRGGBB per suggested tag.
     let colorFor (tag: string) : uint32 =
@@ -101,16 +145,22 @@ module SuggestedStructureView =
     let private snippet (text: string) =
         if text.Length > 90 then text[..89] + "…" else text
 
-    let view (prefetcher: LayoutPrefetcher) (renderer: PdfRegionRenderer) (pdfPath: string) =
+    /// Discarded regions are drawn grey.
+    let discardedColor = 0x9E9E9Eu
+
+    let view (window: Window) (prefetcher: LayoutPrefetcher) (review: LayoutReview) (renderer: PdfRegionRenderer) (pdfPath: string) =
         Component(fun ctx ->
             let modelReady = ctx.useState (LayoutModel.isDownloaded ())
             let downloadProgress = ctx.useState (None: float option)
-            let page = ctx.useState 1
+            let page = ctx.useState review.LastPage
             let selected = ctx.useState (None: int option)
             let suggestion = ctx.useState (None: PageSuggestion option)
             let image = ctx.useState (None: Bitmap option)
             let status = ctx.useState ""
             let readyCount = ctx.useState prefetcher.ReadyCount
+            // Suggestions the user discarded, by (page, order).
+            let discarded = ctx.useState review.Discarded
+            let saving = ctx.useState false
             // Bumped per page shown, so a rendering that finishes late doesn't replace a newer one.
             let version = ctx.useState (0, renderOnChange = false)
             // QR codes' page titles, read from the web only once asked for; and the addresses
@@ -144,9 +194,10 @@ module SuggestedStructureView =
                 task {
                     let regions =
                         [ for block in result.Blocks ->
+                              let isDiscarded = discarded.Current.Contains((result.PageNumber, block.Order))
                               { Geometry = block.Geometry
-                                Label = $"{block.Order} {block.Tag}"
-                                Color = colorFor block.Tag
+                                Label = if isDiscarded then $"× {block.Order} {block.Tag}" else $"{block.Order} {block.Tag}"
+                                Color = if isDiscarded then discardedColor else colorFor block.Tag
                                 Emphasised = (emphasised = Some block.Order) } ]
                     let! bitmap =
                         Task.Run(fun () ->
@@ -175,6 +226,7 @@ module SuggestedStructureView =
             let showPage (number: int) =
                 version.Set(version.Current + 1)
                 page.Set number
+                review.LastPage <- number
                 selected.Set None
                 suggestion.Set None
                 prefetcher.Want number
@@ -209,6 +261,59 @@ module SuggestedStructureView =
                     render result (Some block.Order) version.Current |> ignore
                 | None -> ()
 
+            /// Keeps or discards some of this page's suggestions, and redraws it.
+            let setDiscarded (orders: int list) (discard: bool) =
+                match suggestion.Current with
+                | Some result ->
+                    let keys = orders |> List.map (fun order -> result.PageNumber, order) |> Set.ofList
+                    let next = if discard then Set.union discarded.Current keys else Set.difference discarded.Current keys
+                    discarded.Set next
+                    review.Discarded <- next
+                    render result selected.Current version.Current |> ignore
+                | None -> ()
+
+            /// Tags a copy of the PDF with the kept suggestions (every page's, found now if need be).
+            let save _ =
+                task {
+                    let! path =
+                        Dialogs.pickSavePath
+                            window
+                            (Avalonia.Platform.Storage.FilePickerSaveOptions(
+                                Title = "Save tagged copy",
+                                SuggestedFileName = $"{Path.GetFileNameWithoutExtension pdfPath}.tagged.pdf",
+                                DefaultExtension = "pdf"
+                            ))
+                            pdfPath
+                    match path with
+                    | None -> ()
+                    | Some outputPath ->
+                        saving.Set true
+                        let before = status.Current
+                        let progress =
+                            Progress<FixProgress>(fun p -> status.Set(Legibyl.Gui.BusyStatus.statusText (Legibyl.Gui.BusyStatus.Fixing p)))
+                        let source = ReviewedLayout(prefetcher, discarded.Current)
+                        try
+                            try
+                                let! result =
+                                    Task.Run(fun () ->
+                                        let validator = VeraPdfValidator(LayoutSource = source)
+                                        validator.Fix(pdfPath, PdfProfile.PdfUa1, outputPath, PdfFixOptions.TagFromLayout, progress))
+                                status.Set before
+                                let message =
+                                    match result.OutputPath with
+                                    | NonNull saved ->
+                                        let applied = String.Join("\n", result.AppliedFixes |> Seq.map (fun line -> "• " + line))
+                                        $"Saved a tagged copy to {saved}.\n\n{applied}"
+                                    | Null -> "Nothing was tagged: the document already has a structure tree."
+                                do! Dialogs.showMessage window message "Save Tagged Copy"
+                            with ex ->
+                                status.Set before
+                                do! Dialogs.showMessage window $"Couldn't save a tagged copy: {ex.Message}" "Save Tagged Copy"
+                        finally
+                            saving.Set false
+                }
+                |> ignore
+
             let download _ =
                 task {
                     downloadProgress.Set(Some 0.0)
@@ -227,14 +332,16 @@ module SuggestedStructureView =
             ctx.useEffect (
                 (fun () ->
                     if modelReady.Current then
-                        showPage 1
+                        showPage page.Current
                         prefetcher.Start()),
                 [ EffectTrigger.AfterInit ]
             )
 
             let intro =
                 "Suggested structure for this untagged PDF, from what each page looks like: its regions, "
-                + "the tag each suggests, and their reading order (the numbers). This is a preview; nothing is written to the PDF. "
+                + "the tag each suggests, and their reading order (the numbers). Keep or discard each suggestion, then Save Tagged Copy "
+                + "to tag a copy with the kept ones (a discarded region's text joins the nearest kept one; its images and lines are "
+                + "decoration). The original isn't changed. "
                 + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
                 + "list markers are list items (LI), and Artifact marks page furniture like running headers and page numbers. "
                 + "Text drawn as outlines or pixels rather than as text is read with OCR (marked OCR), and QR codes are read "
@@ -279,6 +386,12 @@ module SuggestedStructureView =
                             StackPanel.spacing 2.0
                             StackPanel.children [
                                 for block in suggestion.Current |> Option.map _.Blocks |> Option.defaultValue [] ->
+                                  let isDiscarded =
+                                      suggestion.Current |> Option.exists (fun result -> discarded.Current.Contains((result.PageNumber, block.Order)))
+                                  Grid.create [
+                                    Grid.columnDefinitions "*,Auto"
+                                    Grid.opacity (if isDiscarded then 0.5 else 1.0)
+                                    Grid.children [
                                     Button.create [
                                         Button.horizontalAlignment HorizontalAlignment.Stretch
                                         Button.horizontalContentAlignment HorizontalAlignment.Left
@@ -329,6 +442,20 @@ module SuggestedStructureView =
                                             ]
                                         )
                                     ]
+                                    Button.create [
+                                        Grid.column 1
+                                        Button.margin (4.0, 0.0, 0.0, 0.0)
+                                        Button.padding (8.0, 2.0)
+                                        Button.verticalAlignment VerticalAlignment.Top
+                                        Button.content (if isDiscarded then "Keep" else "Discard")
+                                        ToolTip.tip (
+                                            if isDiscarded then "Tag this region as suggested."
+                                            else "Don't tag this region: its text joins the nearest kept region; its images and lines are decoration."
+                                        )
+                                        Button.onClick (fun _ -> setDiscarded [ block.Order ] (not isDiscarded))
+                                    ]
+                                    ]
+                                  ]
                             ]
                         ]
                     )
@@ -389,6 +516,28 @@ module SuggestedStructureView =
                                     Button.isEnabled (page.Current < prefetcher.PageCount)
                                     Button.onClick (fun _ -> showPage (page.Current + 1))
                                 ]
+                                Button.create [
+                                    Button.content "Keep all"
+                                    Button.margin (16.0, 0.0, 0.0, 0.0)
+                                    Button.isEnabled suggestion.Current.IsSome
+                                    ToolTip.tip "Keep every suggestion on this page."
+                                    Button.onClick (fun _ ->
+                                        suggestion.Current |> Option.iter (fun result -> setDiscarded [ for b in result.Blocks -> b.Order ] false))
+                                ]
+                                Button.create [
+                                    Button.content "Discard all"
+                                    Button.isEnabled suggestion.Current.IsSome
+                                    ToolTip.tip "Discard every suggestion on this page."
+                                    Button.onClick (fun _ ->
+                                        suggestion.Current |> Option.iter (fun result -> setDiscarded [ for b in result.Blocks -> b.Order ] true))
+                                ]
+                                Button.create [
+                                    Button.content "Save Tagged Copy…"
+                                    Button.margin (16.0, 0.0, 0.0, 0.0)
+                                    Button.isEnabled (not saving.Current)
+                                    ToolTip.tip "Tag a copy of the PDF with the kept suggestions, on every page. The original isn't changed."
+                                    Button.onClick save
+                                ]
                             ]
                         ]
                         titlesPanel
@@ -448,13 +597,16 @@ module SuggestedStructureView =
                 ]
             ])
 
-type SuggestedStructureWindow(pdfPath: string) as this =
+type SuggestedStructureWindow(pdfPath: string, review: LayoutReview) as this =
     inherit
         HostWindow(Title = "Suggested Structure", Width = 1000.0, Height = 760.0, MinWidth = 600.0, MinHeight = 420.0)
     let suggester = new LayoutSuggester(pdfPath)
-    let prefetcher = LayoutPrefetcher(suggester)
+    let prefetcher = LayoutPrefetcher(suggester, review.Pages)
     let renderer = new PdfRegionRenderer()
-    do this.Content <- SuggestedStructureView.view prefetcher renderer pdfPath
+    do this.Content <- SuggestedStructureView.view this prefetcher review renderer pdfPath
+
+    /// A window with a review of its own, not remembered anywhere.
+    new(pdfPath: string) = new SuggestedStructureWindow(pdfPath, LayoutReview(File.GetLastWriteTimeUtc pdfPath))
 
     override _.OnClosed(e) =
         base.OnClosed e

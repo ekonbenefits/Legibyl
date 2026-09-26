@@ -55,9 +55,9 @@ let private rowText (dialog: Window) (title: string) =
 
 /// Opens the dialog for these findings, runs test on it, then closes it with Cancel unless
 /// the test already closed it; returns the dialog's result.
-let private withDialog (findings: RuleViolation list) (test: Window -> unit) =
+let private withDialogNoted (tagNote: string option) (findings: RuleViolation list) (test: Window -> unit) =
     let owner = HeadlessWindow.show 800.0 600.0
-    let pending = Dialogs.chooseFixOptions owner (report findings)
+    let pending = Dialogs.chooseFixOptions owner (report findings) tagNote
     HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
     let dialog = owner.OwnedWindows |> Seq.exactlyOne
     test dialog
@@ -65,6 +65,8 @@ let private withDialog (findings: RuleViolation list) (test: Window -> unit) =
     HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> pending.IsCompleted) |> ignore
     owner.Close()
     pending.Result
+
+let private withDialog findings test = withDialogNoted None findings test
 
 let private pump () = HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
 
@@ -163,3 +165,13 @@ let ``continuing applies the ticked repairs`` () =
                 ||| PdfFixOptions.DocumentTitle
                 ||| PdfFixOptions.Metadata
             )))
+
+[<Fact>]
+let ``tagging from the layout says when it uses a review from Suggest Structure`` () =
+    onUiThread (fun () ->
+        let mutable text = ""
+        withDialogNoted (Some "Uses your review in Suggest Structure: 2 suggestions discarded.") findings (fun dialog ->
+            text <- rowText dialog "Tag from the page layout")
+        |> ignore
+
+        text |> should haveSubstring "Uses your review in Suggest Structure: 2 suggestions discarded.")

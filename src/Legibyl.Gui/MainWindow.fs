@@ -268,6 +268,7 @@ module private MainView =
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
             let renderer = ctx.useStateLazy(fun () -> new PdfRegionRenderer()).Current
             let structureCache = ctx.useStateLazy(fun () -> StructureCache()).Current
+            let layoutReviews = ctx.useStateLazy(fun () -> LayoutReviews()).Current
             let selectedFile = ctx.useState (None: string option)
             let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
@@ -440,7 +441,7 @@ module private MainView =
                                         "Document Structure"
                                         "Suggest Structure…"
                                 if suggest then
-                                    SuggestedStructureWindow(filePath).Show window
+                                    SuggestedStructureWindow(filePath, layoutReviews.For filePath).Show window
                             | structure -> StructureTreeWindow(structure, filePath).Show window
                         }
 
@@ -472,7 +473,14 @@ module private MainView =
                 task {
                     match selectedFile.Current, report with
                     | Some sourcePath, Some report ->
-                        match! Dialogs.chooseFixOptions window report with
+                        let review = layoutReviews.For sourcePath
+                        let reviewNote =
+                            match review.Pages.Count, review.Discarded.Count with
+                            | 0, 0 -> None
+                            | _, 0 -> Some "Uses the suggestions found in Suggest Structure."
+                            | _, 1 -> Some "Uses your review in Suggest Structure: 1 suggestion discarded."
+                            | _, discarded -> Some $"Uses your review in Suggest Structure: {discarded} suggestions discarded."
+                        match! Dialogs.chooseFixOptions window report reviewNote with
                         | None -> ()
                         | Some options ->
                             let! outputPath =
@@ -498,7 +506,14 @@ module private MainView =
                                         // Tagging from the layout runs the layout detector page by page,
                                         // after downloading its model the first time.
                                         let tagging = options.HasFlag PdfFixOptions.TagFromLayout
-                                        let source = if tagging then Some(new LayoutRegionSource(null)) else None
+                                        // The suggestions as reviewed in Suggest Structure (all of them if
+                                        // it wasn't opened), reusing any pages it found.
+                                        let source =
+                                            if tagging then
+                                                let suggester = new LayoutSuggester(sourcePath)
+                                                Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review.Discarded))
+                                            else
+                                                None
                                         try
                                             try
                                                 if tagging && not (LayoutModel.isDownloaded ()) then
@@ -506,7 +521,7 @@ module private MainView =
                                                         LayoutModel.download
                                                             (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
                                                             CancellationToken.None
-                                                source |> Option.iter (fun source -> validator.LayoutSource <- source)
+                                                source |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
                                                 let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
                                                 let! fix = Task.Run(fun () -> validator.Fix(sourcePath, profile, outputPath, options, progress))
                                                 return Ok fix
@@ -515,7 +530,7 @@ module private MainView =
                                             | :? Net.Http.HttpRequestException as ex -> return Error $"Couldn't download the layout model: {ex.Message}"
                                         finally
                                             validator.LayoutSource <- null
-                                            source |> Option.iter (fun source -> (source :> IDisposable).Dispose())
+                                            source |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
                                             busyProgress.Set None
                                             isBusy.Set false
                                     }
