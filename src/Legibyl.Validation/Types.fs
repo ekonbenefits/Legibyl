@@ -96,7 +96,7 @@ type StructureGeometry =
       Top: float }
 
 /// A change a person made to a structure element (in View Structure) or to a region to tag (in
-/// Suggest Structure). The element is found again by its page, its tag and about the same box,
+/// Suggest Structure): its alt text, its replacement text, or paragraphs merged into it. The element is found again by its page, its tag and about the same box,
 /// so the edit still applies after repairs have rearranged the structure tree.
 type ElementEdit =
     { Page: int
@@ -106,7 +106,10 @@ type ElementEdit =
       /// Alt text to write (/Alt); null to leave it.
       Alt: string | null
       /// Replacement text to write (/ActualText); "" for nothing to read, null to leave it.
-      Text: string | null }
+      Text: string | null
+      /// Paragraphs to merge into this one (a P), by box: its neighbours after it, in order.
+      /// Empty for none.
+      MergeWith: StructureGeometry list }
 
 /// A region of a page to tag, e.g. one a layout detector found (see Legibyl.Layout).
 type LayoutRegion =

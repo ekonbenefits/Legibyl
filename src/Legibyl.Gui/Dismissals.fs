@@ -66,7 +66,11 @@ type SavedEdit =
       /// The text of a region read with OCR, corrected ("" for none to read).
       [<JsonPropertyName "text">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Text: string | null }
+      Text: string | null
+      /// For paragraphs merged into this one (in View Structure): their boxes, like Box.
+      [<JsonPropertyName "mergeWith">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      MergeWith: float array array | null }
 
 /// The file next to a PDF: its remembered dismissals and the edits made in Suggest Structure,
 /// either of which may be missing (null).

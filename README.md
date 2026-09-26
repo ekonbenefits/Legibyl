@@ -300,7 +300,12 @@ already have `/ActualText`, like OCR'd text, since writing it over real text
 would hide what the page says). An edit is saved with the rest of the review
 (`<name>.pdf.legibyl.json`, and inside copies Legibyl saves), keyed by page,
 tag and box like the edits in Suggest Structure, and the block shows it as not
-in the PDF yet. The **Edits** tab lists every edit and whether it's in the PDF
+in the PDF yet. Paragraphs can be merged too: shift-click extends the selection
+over a block's siblings (the page preview outlines and numbers each one), and
+when two or more neighbouring paragraphs on one page are selected (none with alt
+text or replacement text), **Merge N Paragraphs** records the merge as an edit,
+keyed by each paragraph's box; **Don't Merge These** drops it again. Save joins
+them into the first, as **Join split paragraphs** does. The **Edits** tab lists every edit and whether it's in the PDF
 yet, and removes ones you no longer want. **Save…** writes the ones not in it
 yet to a copy (`ElementEdits.fs`), each to the element with its tag in about the
 same place, so they still apply after other repairs have rearranged the tree.
