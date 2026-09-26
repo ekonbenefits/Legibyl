@@ -35,7 +35,20 @@ type SavedRegion =
       /// For a Figure that's a QR code: what it encodes.
       [<JsonPropertyName "qrText">] QrText: string | null
       /// For a Figure: its alt text, to write.
-      [<JsonPropertyName "alt">] Alt: string | null }
+      [<JsonPropertyName "alt">] Alt: string | null
+      /// For a Figure: a picture of it, a PNG file's path relative to the layout file (written
+      /// with --figure-images), to look at when writing its alt text. Not used when tagging.
+      [<JsonPropertyName "image">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Image: string | null
+      /// For a Figure: the text just before it and just after it in reading order (a caption, the
+      /// paragraph about it), since good alt text says why it's there. Not used when tagging.
+      [<JsonPropertyName "textBefore">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      TextBefore: string | null
+      [<JsonPropertyName "textAfter">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      TextAfter: string | null }
 
 [<CLIMutable>]
 type SavedPage =
@@ -61,6 +74,18 @@ let tags = [ "H1"; "H"; "P"; "LI"; "Figure"; "Table"; "Caption"; "Note"; "Formul
 let private boxOf (geometry: StructureGeometry) =
     [| geometry.Left; geometry.Bottom; geometry.Right; geometry.Top |] |> Array.map (fun v -> Math.Round(v, 1))
 
+/// The text of the nearest region with some before (or after) index in blocks, skipping page
+/// furniture and other figures.
+let private nearbyText (blocks: SuggestedBlock list) (index: int) (step: int) =
+    let rec look i =
+        if i < 0 || i >= blocks.Length then
+            null
+        else
+            let block = blocks[i]
+            if LayoutSuggestions.holdsText block.Tag && not (String.IsNullOrWhiteSpace block.Text) then block.Text.Trim()
+            else look (i + step)
+    look (index + step)
+
 /// The layout suggested for pdfPath's pages, with title (e.g. its own, or its first H1's text).
 let ofSuggestions (pdfPath: string) (pages: PageSuggestion list) (title: string option) : SavedLayout =
     { Version = 1
@@ -72,7 +97,8 @@ let ofSuggestions (pdfPath: string) (pages: PageSuggestion list) (title: string 
                  HasText = page.HasText
                  Rotated = page.Rotated
                  Regions =
-                   [| for block in page.Blocks ->
+                   [| for index, block in List.indexed page.Blocks ->
+                          let figure = block.Tag = "Figure"
                           { Order = block.Order
                             Tag = block.Tag
                             Box = boxOf block.Geometry
@@ -82,7 +108,10 @@ let ofSuggestions (pdfPath: string) (pages: PageSuggestion list) (title: string 
                             Recognized = block.Recognized
                             ListNumbering = Option.toObj block.ListNumbering
                             QrText = Option.toObj block.QrText
-                            Alt = null } |] } |] }
+                            Alt = null
+                            Image = null
+                            TextBefore = if figure then nearbyText page.Blocks index -1 else null
+                            TextAfter = if figure then nearbyText page.Blocks index 1 else null } |] } |] }
 
 /// A title for the layout: the document's own (or a short first page's), else the first H1
 /// the layout found; as Suggest Structure prefills it.
@@ -99,6 +128,40 @@ let private jsonOptions =
     JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
 
 let toJson (layout: SavedLayout) = JsonSerializer.Serialize(layout, jsonOptions)
+
+/// The folder a layout file's figure images go in: "scan.layout.json" -> "scan.layout.images",
+/// beside it, so deleting the two removes everything.
+let imagesFolder (layoutPath: string) =
+    let folder = Path.GetDirectoryName(Path.GetFullPath layoutPath) |> string
+    Path.Combine(folder, string (Path.GetFileNameWithoutExtension layoutPath) + ".images")
+
+/// Writes a PNG of each figure in layout (rendered by render) into its images folder, emptied of
+/// an earlier run's first, and says where each is. Only files named like these are removed.
+let withFigureImages (layoutPath: string) (render: StructureGeometry -> byte array) (layout: SavedLayout) : SavedLayout =
+    let folder = imagesFolder layoutPath
+    if Directory.Exists folder then
+        for old in Directory.GetFiles(folder, "p*-r*.png") do
+            File.Delete old
+    let name = Path.GetFileName folder
+    { layout with
+        Pages =
+            [| for page in layout.Pages ->
+                   { page with
+                       Regions =
+                           [| for region in page.Regions ->
+                                  if region.Tag = "Figure" && region.Box.Length = 4 then
+                                      Directory.CreateDirectory folder |> ignore
+                                      let file = $"p{page.Page}-r{region.Order}.png"
+                                      let geometry =
+                                          { PageNumber = page.Page
+                                            Left = region.Box[0]
+                                            Bottom = region.Box[1]
+                                            Right = region.Box[2]
+                                            Top = region.Box[3] }
+                                      File.WriteAllBytes(Path.Combine(folder, file), render geometry)
+                                      { region with Image = $"{name}/{file}" }
+                                  else
+                                      region |] } |] }
 
 /// What's wrong with layout, if anything: one line per problem.
 let problems (layout: SavedLayout) : string list =

@@ -619,7 +619,18 @@ Options:
   or reorder regions, write alt text, correct OCR'd text — before tagging from
   it. Downloads the layout model the first time; several seconds a page, with
   progress on stderr. `--suggest-layout-output <path>` (one input file) also
-  writes it to a file.
+  writes it to a file. Each figure also gets `textBefore` and `textAfter`, the
+  text of the regions just before and after it (a caption, the paragraph about
+  it), since good alt text says why a figure is there.
+- `--figure-images` — with `--suggest-layout-output`, also writes a PNG of each
+  figure (its region with a little margin, at 144 dpi, at most 1024 pixels a
+  side) into a folder beside the layout file — `scan.layout.json` gets
+  `scan.layout.images/p1-r3.png` for page 1's region 3 — and gives the figure
+  that path as `image`, relative to the layout file. An agent reading the JSON
+  opens each image to see the figure (base64 inside the JSON would only be text
+  to it, and costly). Each run clears the folder of the last run's images (only
+  files named like them); delete the folder with the layout file when done.
+  `--apply-layout` doesn't use them.
 - `--apply-layout <path>` — tag an untagged file (one input file; implies
   `--fix`) from the layout in path, as `--suggest-layout` writes it: its regions
   become the structure in their order, with their alt text, recognized text as
