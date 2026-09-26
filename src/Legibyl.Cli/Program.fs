@@ -58,6 +58,7 @@ let private defaultFixOptions =
     ||| PdfFixOptions.AnnotationTabs
     ||| PdfFixOptions.LinkContents
     ||| PdfFixOptions.DocumentTitle
+    ||| PdfFixOptions.FontCidToGidMap
 
 let private deriveFixOutputPath (file: string) =
     let fixedName = $"{Path.GetFileNameWithoutExtension file}.fixed{Path.GetExtension file}"

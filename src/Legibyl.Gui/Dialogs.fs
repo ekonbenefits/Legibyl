@@ -116,6 +116,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             // Repairs start ticked only if this PDF has something for them to fix.
             let metadata = ctx.useState (found PdfFixOptions.Metadata > 0)
             let annotationTabs = ctx.useState (found PdfFixOptions.AnnotationTabs > 0)
+            let fontGlyphMaps = ctx.useState (found PdfFixOptions.FontCidToGidMap > 0)
             let linkContents = ctx.useState (found PdfFixOptions.LinkContents > 0)
             let documentTitle = ctx.useState (found PdfFixOptions.DocumentTitle > 0)
             let bookmarks = ctx.useState (found PdfFixOptions.BookmarksFromHeadings > 0)
@@ -166,6 +167,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                       languageFromText.Current, PdfFixOptions.LanguageFromText
                       metadata.Current, PdfFixOptions.Metadata
                       annotationTabs.Current, PdfFixOptions.AnnotationTabs
+                      fontGlyphMaps.Current, PdfFixOptions.FontCidToGidMap
                       emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
                       emptyTocEntries.Current, PdfFixOptions.RemoveEmptyTocEntries
                       linkContents.Current, PdfFixOptions.LinkContents
@@ -229,6 +231,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                                     "Add bookmarks for the H1 and H2 headings, when the document has none"
                                     PdfFixOptions.BookmarksFromHeadings)
                             checkBox annotationTabs (label "Set /Tabs /S on pages that contain annotations" PdfFixOptions.AnnotationTabs)
+                            checkBox
+                                fontGlyphMaps
+                                (label
+                                    "Write the glyph mapping embedded TrueType CID fonts leave out (/CIDToGIDMap /Identity, what readers already use)"
+                                    PdfFixOptions.FontCidToGidMap)
                             checkBox
                                 linkContents
                                 (label

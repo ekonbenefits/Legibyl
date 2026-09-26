@@ -76,6 +76,8 @@ module internal VeraPdf =
             PdfFixOptions.AnnotationTabs
         elif contains "Contents key" then
             PdfFixOptions.LinkContents
+        elif contains "CIDToGIDMap" then
+            PdfFixOptions.FontCidToGidMap
         elif contains "dc:title" then
             PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle
         elif contains "DisplayDocTitle" then
