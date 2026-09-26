@@ -45,3 +45,37 @@ let ``the detector finds the page's text regions and their words`` () =
         page.Blocks |> should not' (be Empty)
         page.Blocks |> List.map _.Order |> should equal [ 1 .. page.Blocks.Length ]
         page.Blocks |> List.exists (fun block -> block.Tag = "P" && block.Text <> "") |> should be True)
+
+let private block order tag left text : SuggestedBlock =
+    { Order = order
+      Label = "text"
+      Tag = tag
+      Score = 0.9
+      Geometry = { PageNumber = 1; Left = left; Bottom = 0.0; Right = 500.0; Top = 10.0 }
+      Text = text
+      ListNumbering = None }
+
+[<Fact>]
+let ``runs of paragraphs starting with list markers become list items, like the lists fix`` () =
+    let blocks =
+        [ block 1 "P" 70.0 "It is expected that:"
+          block 2 "P" 86.0 "• all car construction will be done by the Scout"
+          block 3 "P" 86.0 "• No prebuilt cars will be used."
+          block 4 "P" 87.0 "• Cars will be tuned only by the Scout."
+          block 5 "H" 70.0 "1. General Rules"
+          block 6 "P" 70.0 "1. A lone numbered paragraph"
+          block 7 "P" 70.0 "1. Steps that don't count"
+          block 8 "P" 70.0 "3. up by one" ]
+
+    LayoutSuggestions.findLists blocks
+    |> List.map (fun b -> b.Order, b.Tag, b.ListNumbering)
+    |> should
+        equal
+        [ 1, "P", None
+          2, "LI", Some "Disc"
+          3, "LI", Some "Disc"
+          4, "LI", Some "Disc"
+          5, "H", None
+          6, "P", None
+          7, "P", None
+          8, "P", None ]

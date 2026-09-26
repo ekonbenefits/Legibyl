@@ -129,6 +129,19 @@ let private numberingOf (markers: Marker list) : PdfName option =
                     None)
     | _ -> None
 
+/// The /ListNumbering texts would have as one list (e.g. "Disc"), if there are at least two,
+/// each starts with a marker, and the markers form one list. For layout suggestions, which
+/// have paragraphs' text but no structure tree yet.
+let numberingOfTexts (texts: string list) : string option =
+    let markers = texts |> List.map markerOf
+    if texts.Length >= 2 && markers |> List.forall Option.isSome then
+        numberingOf (markers |> List.choose (Option.map fst)) |> Option.map _.GetValue()
+    else
+        None
+
+/// Whether text starts with a list marker.
+let startsWithMarker (text: string) = (markerOf text).IsSome
+
 // ---- Finding runs ----
 
 // Items of one list share an indent, within this many points.

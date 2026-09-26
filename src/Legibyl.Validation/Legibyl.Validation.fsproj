@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Layout suggestions reuse the list marker rules (ParagraphLists). -->
+    <InternalsVisibleTo Include="Legibyl.Layout" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="Types.fs" />
     <Compile Include="PdfLocationParser.fs" />
     <Compile Include="Results.fs" />
