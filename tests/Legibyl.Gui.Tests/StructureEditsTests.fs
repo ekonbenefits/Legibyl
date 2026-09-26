@@ -125,7 +125,7 @@ let ``an edit is saved next to the PDF, shown as not in it yet, and listed on th
             layout |> should contain "✎ your alt, not in the PDF yet: \"Tomato seedlings in a tray\""
             layout |> should contain "✎ your text, not in the PDF yet: \"Garden opens at 8\""
             header |> should contain "Edits (2)"
-            editsTab |> List.filter ((=) "Not in this PDF yet: Fix → Apply your edits writes it.") |> List.length |> should equal 2))
+            editsTab |> List.filter ((=) "Not in this PDF yet: Save… writes it to a copy.") |> List.length |> should equal 2))
 
 [<Fact>]
 let ``an edit the PDF already has shows as in it, and can be removed`` () =
@@ -145,3 +145,16 @@ let ``an edit the PDF already has shows as in it, and can be removed`` () =
             status |> should contain "In this PDF."
             RegionEdits.load pdf |> should be Empty
             header |> should contain "Edits"))
+
+[<Fact>]
+let ``saving an edit tells whoever opened the window, so it can count them`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let mutable told = 0
+            let window = StructureTreeWindow(structure null, pdf, (fun () -> told <- told + 1), Width = 900.0, Height = 700.0)
+            window.Show()
+            pump ()
+            editVia window "Figure" "Edit Alt Text…" "Tomato seedlings in a tray"
+            window.Close()
+
+            told |> should equal 1))

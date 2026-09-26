@@ -116,7 +116,7 @@ let ``a copy tagged from the layout carries its edits as edits of the elements t
         let edits =
             RegionEdits.setAlt (RegionEdits.setText [] 1 "H" heading "Joinng the garden" "Joining the garden") 1 "Figure" figure "Seedlings"
         RegionEdits.save pdf edits
-        let region tag geometry alt text : LayoutRegion =
+        let region tag geometry (alt: string | null) (text: string | null) : LayoutRegion =
             { Tag = tag; Geometry = geometry; ListNumbering = null; ActualText = text; QrText = null; Alt = alt }
         let layout =
             FixedLayout [ region "H" heading null "Joining the garden"; region "P" (rect (60.0, 684.0, 300.0, 704.0)) null null; region "Figure" figure "Seedlings" null ]

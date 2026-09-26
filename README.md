@@ -196,7 +196,7 @@ paragraph does. Each such paragraph gets a fixable warning (Structure-3);
 entries that match nothing or several paragraphs are reported (Structure-4);
 and if the indents don't form clear levels, or the headings that could be
 matched would start below H1 or skip a level, nothing is recovered and one
-warning says why (Structure-5). The retagging is a separate Fix dialog option,
+warning says why (Structure-5). The retagging is a separate Auto Fixes dialog option,
 off by default. It also points each recovered heading's table-of-contents links
 at the heading: the page destination goes to the heading's position (just above
 it), rather than wherever the link landed before. In a PDF 2.0 file the link
@@ -208,7 +208,7 @@ Structure-6): two or more sibling paragraphs on one page, at one indent, that
 each start with a list marker — the same bullet (`•`, `◦`, `▪`, or a dash
 followed by a space), or ordinals of one style and punctuation that count up by
 one (`(1)` `(2)`, `a.` `b.`, `(i)` `(ii)`). Paragraphs in a table of contents are
-left alone. The matching Fix dialog option (off by default) wraps each run in
+left alone. The matching Auto Fixes dialog option (off by default) wraps each run in
 `L` > `LI` > `LBody` around the original paragraphs and sets `/ListNumbering`
 from the markers. Only the structure tree changes, never the drawn page, so the
 document looks exactly the same; the marker stays part of each item's text
@@ -236,8 +236,27 @@ to `<name>.pdf.legibyl.json` next to it, which is loaded automatically when the
 PDF is opened again (turning it off deletes that file). Failures can't be
 dismissed. The CLI doesn't read these files.
 
-A copy the GUI saves (**Fix**, or **Save Tagged Copy** in Suggest Structure)
-carries the review it was made with — dismissals as the window has them, edits
+### Saving: Structure, Auto Fixes and Save
+
+Changes are chosen first and written together. Three buttons under the details:
+
+- **Structure…** opens View Structure (or, for an untagged PDF, offers Suggest
+  Structure), where alt text and replacement text are edited. Its badge counts
+  your changes that aren't in this PDF yet: edits whose element doesn't say
+  them yet, or for an untagged PDF, its review in Suggest Structure (edits,
+  discarded suggestions, a changed title). Edits already in the PDF are
+  reference, and for importing into another version of it; they don't count.
+- **Auto Fixes…** chooses repairs (the dialog doesn't save). Nothing is chosen
+  when a PDF is opened; the first time the dialog opens, the safe repairs the PDF
+  needs start ticked, and after that it shows what was chosen. Its badge counts
+  the chosen ones.
+- **Save…** writes the next version of the PDF (`flyer.v2.pdf`) with the chosen
+  auto fixes and your changes: your edits are always applied (not an auto fix),
+  and an untagged PDF with a review is tagged from it. Then the saved copy is
+  opened and validated, and shown against the original. It's enabled when
+  there's something to write.
+
+A copy the GUI saves carries the review it was made with — dismissals as the window has them, edits
 and the title from Suggest Structure — inside it: a compressed stream the
 catalog points to under a private key (`/LBYL_Review`), added as an incremental
 update, which PDF readers don't show. Opening a PDF uses the file next to it if
@@ -265,7 +284,7 @@ available.
 
 ## Document structure (semantic hierarchy)
 
-**View Structure…** shows the PDF's tagged logical structure tree — the
+**Structure…** (View Structure) shows the PDF's tagged logical structure tree — the
 same heading/paragraph/list/table/link hierarchy and reading order that a
 screen reader uses to present the document (the Catalog's `StructTreeRoot`).
 It's read directly from veraPDF's own PD model (independent of a
@@ -282,10 +301,9 @@ would hide what the page says). An edit is saved with the rest of the review
 (`<name>.pdf.legibyl.json`, and inside copies Legibyl saves), keyed by page,
 tag and box like the edits in Suggest Structure, and the block shows it as not
 in the PDF yet. The **Edits** tab lists every edit and whether it's in the PDF
-yet, and removes ones you no longer want. **Apply your edits** in the Fix
-dialog (ticked when some aren't in the PDF yet) writes them to a new copy
-(`ElementEdits.fs`), each to the element with its tag in about the same place,
-so they still apply after other repairs have rearranged the tree.
+yet, and removes ones you no longer want. **Save…** writes the ones not in it
+yet to a copy (`ElementEdits.fs`), each to the element with its tag in about the
+same place, so they still apply after other repairs have rearranged the tree.
 
 Edits made in Suggest Structure are the same kind of edit, keyed to the regions
 it suggested. A copy tagged from them carries them moved to the elements
@@ -347,7 +365,7 @@ in the app's `tessdata` folder). The preview marks that text **OCR:**. Tesseract
 has native libraries for Windows, Linux and Apple Silicon Macs; elsewhere (Intel
 Macs) OCR is skipped and those regions show no text.
 
-The Fix dialog's **Tag from the page layout** option
+The Auto Fixes dialog's **Tag from the page layout** option
 (off by default, and only for a document with no structure tree) writes those
 regions as tags, before the other fixes run, so they can build on them
 (`PdfFixOptions.TagFromLayout`, `LayoutTagging.fs`; the fixer gets the regions
@@ -376,13 +394,13 @@ offered beside it with where they came from (e.g. "Cub Scout Pack 721 · first
 heading" when the document's own title is just "Design"). A title that's changed
 is saved as `title` in the file next to the PDF; tagging gives the document the
 title as edited, or as shown prefilled if the window was opened, with
-`/DisplayDocTitle`. (The Fix dialog, tagging a file never reviewed, doesn't take
+`/DisplayDocTitle`. (The Auto Fixes dialog, tagging a file never reviewed, doesn't take
 a title from a heading.)
 
 Figures can be given alt text, and OCR'd text corrected, right in Suggest
 Structure: each Figure has an alt text box (a QR code's own description shows
 as its hint), and each region read with OCR has its text in a box to correct.
-When tagging (**Save Tagged Copy** or the Fix dialog), alt text is written as the
+When tagging (**Save…** with a review, or the Auto Fixes option), alt text is written as the
 figure's `/Alt`, and corrected text as the region's `/ActualText` (cleared
 meaning there's nothing to read there). Edits are saved as they're typed in the
 `edits` section of the `<name>.pdf.legibyl.json` file next to the PDF, alongside
@@ -420,13 +438,13 @@ undescribed link's description ("Apply online (example.com)", under **Links on
 this page without a description**) are prefilled from what was read, and can be
 edited; like OCR corrections, only a change from what was prefilled is saved
 (as `alt` on the region's or link's entry in `edits`). Tagging writes them as
-the figure's `/Alt` and the link's `/Contents`. With the Fix dialog's **Link QR
+the figure's `/Alt` and the link's `/Contents`. With the Auto Fixes dialog's **Link QR
 codes** option (off by default, alongside tagging), a code that encodes a web
 address (absolute http(s), or `www.`, taken as https, as qr-link-pdf does) also
 gets a borderless link over it, tagged as a `Link` holding the figure, unless
 the page already has a link there.
 
-The Fix dialog's **Describe web links from their pages** option (off by
+The Auto Fixes dialog's **Describe web links from their pages** option (off by
 default; `--link-titles-from-web` with `--fix`) describes each link to a web
 page that has no description (`/Contents`) by the title of the page it goes
 to, with the link's own site: "Apply for benefits (example.com)". It works on
@@ -458,7 +476,7 @@ The addresses come from the document, so they are fetched defensively:
 
 The sites do see the visit, which is why it's opt-in.
 
-The Fix dialog's **Declare the language** option (off by default)
+The Auto Fixes dialog's **Declare the language** option (off by default)
 sets the catalog's `/Lang` when a document has none, which PDF/UA needs for
 every piece of text (veraPDF's "natural language … shall be determined" rules,
 which are marked fixable by it). The language is detected from the pages' text
@@ -528,10 +546,10 @@ Options:
   user, so Legibyl does not do it at all. A file with no title anywhere
   therefore still reports the `dc:title` failure after `--fix`, rather than
   being quietly given a made-up one — unless you opt in with
-  `--title-from-first-page` (or the matching Fix dialog option, off by
+  `--title-from-first-page` (or the matching Auto Fixes dialog option, off by
   default): then a document with no title in Info or XMP is titled from the
   text of its first page, as long as more pages follow and that page is short
-  enough to be a title page (at most 30 words and 200 characters). The GUI's Fix dialog
+  enough to be a title page (at most 30 words and 200 characters). The GUI's Auto Fixes dialog
   lists the same repairs, in the order they run, showing only those the PDF
   needs unless asked for all ("Repair XMP metadata" starts ticked only when
   every failure is automatically fixable, since veraPDF otherwise won't fix it), plus removal of empty
