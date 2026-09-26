@@ -439,7 +439,8 @@ module private StructureView =
                 ]
             ]
 
-    let view (window: Window) (renderer: PdfRegionRenderer) (root: StructureNode) (sourceFilePath: string) =
+    /// onEditsChanged is called once an edit has been saved (so the main window can count them).
+    let view (window: Window) (renderer: PdfRegionRenderer) (root: StructureNode) (sourceFilePath: string) (onEditsChanged: unit -> unit) =
         Component(fun ctx ->
             // The highlighted border and the style to restore when the selection moves.
             let highlighted = ctx.useState ((None: (Border * (IBrush | null) * Thickness) option), false)
@@ -520,6 +521,7 @@ module private StructureView =
                     try
                         RegionEdits.save sourceFilePath next
                         edits.Set next
+                        onEditsChanged ()
                     with :? IOException | :? UnauthorizedAccessException as ex ->
                         do! Dialogs.showMessage window $"Couldn't save the edit next to the PDF: {ex.Message}" "Edits"
                 }
@@ -535,12 +537,12 @@ module private StructureView =
                             match kind with
                             | AltText ->
                                 "Alt Text",
-                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. Fix → Apply your edits writes it to the PDF.",
+                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. Save… in the main window writes it to a copy.",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.AlternateDescription),
                                 "Describe what it shows"
                             | ReplacementText ->
                                 "Replacement Text",
-                                $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn. Fix → Apply your edits writes it to the PDF.",
+                                $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn. Save… in the main window writes it to a copy.",
                                 existing |> Option.bind _.Text |> Option.defaultValue (string node.ActualText),
                                 "Nothing to read here (cleared)"
                         match! Dialogs.promptText window title prompt current placeholder with
@@ -691,7 +693,7 @@ module private StructureView =
                             match elementFor edit with
                             | None -> $"No <{edit.Tag}> in about this place in this PDF, so Fix can't apply it."
                             | Some node when (pendingLines edit node).IsEmpty -> "In this PDF."
-                            | Some _ -> "Not in this PDF yet: Fix → Apply your edits writes it."
+                            | Some _ -> "Not in this PDF yet: Save… writes it to a copy."
                         Border.create [
                             Border.borderThickness (0.0, 0.0, 0.0, 1.0)
                             Theme.resources [ Border.BorderBrushProperty, Theme.Tokens.Border ]
@@ -747,7 +749,7 @@ module private StructureView =
                                                 let where =
                                                     if File.Exists(Dismissals.filePath sourceFilePath) then $"saved in {file} next to the PDF"
                                                     else $"carried inside this PDF (a copy Legibyl saved); a change saves them in {file} next to it"
-                                                $"Your edits, {where}. Fix → Apply your edits writes the ones not in it yet, to a new copy."
+                                                $"Your edits, {where}. Save… in the main window writes the ones not in it yet to a copy."
                                         )
                                     ]
                                     for edit in edits.Current do
@@ -821,11 +823,12 @@ module private StructureView =
 
 open StructureView
 
-type StructureTreeWindow(root: StructureNode, sourceFilePath: string) as this =
+/// onEditsChanged, if given, is called once an edit has been saved.
+type StructureTreeWindow(root: StructureNode, sourceFilePath: string, ?onEditsChanged: unit -> unit) as this =
     inherit HostWindow(Title = "Document Structure", Width = 820.0, Height = 700.0, MinWidth = 500.0, MinHeight = 400.0)
     // Keeps the PDF open and recent pages rendered while the window is open.
     let renderer = new PdfRegionRenderer()
-    do this.Content <- view this renderer root sourceFilePath
+    do this.Content <- view this renderer root sourceFilePath (defaultArg onEditsChanged ignore)
 
     override _.OnClosed(e) =
         base.OnClosed e

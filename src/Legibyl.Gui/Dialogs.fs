@@ -208,11 +208,6 @@ let private fixChoices =
         Title = "Add bookmarks"
         Detail = "Bookmarks for the H1 and H2 headings, when the document has none."
         OptIn = false }
-      { Option = PdfFixOptions.ApplyEdits
-        Title = "Apply your edits"
-        Detail =
-          "Write the alt text and replacement text you edited (in View Structure's Edits tab) to the elements they're for, found by page, tag and place."
-        OptIn = false }
       { Option = PdfFixOptions.AnnotationTabs
         Title = "Tab order for annotations"
         Detail = "Set /Tabs /S on pages that contain annotations, so keyboard order follows the structure."
@@ -248,18 +243,18 @@ let private fixChoices =
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
 /// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
 /// Returns None if the user cancelled.
-/// tagNote, if any, says what tagging from the layout will use (a review in Suggest Structure),
-/// and editCount how many of the user's edits aren't in the PDF yet.
-let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) (editCount: int) : Task<PdfFixOptions option> =
-    let window = dialogWindow "Fix PDF" 560.0
+/// tagNote, if any, says what tagging from the layout will use (a review in Suggest Structure).
+/// chosen is what was chosen before, if anything; the first time, the safe repairs this PDF
+/// needs start ticked. Save writes the chosen repairs (and the user's edits) to a copy.
+let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) (chosen: PdfFixOptions option) : Task<PdfFixOptions option> =
+    let window = dialogWindow "Auto Fixes" 560.0
     // Never taller than the screen: the list scrolls in whatever room is left. (All the repairs
     // at once are taller than a laptop screen.)
     window.MaxHeight <-
         match owner.Screens.ScreenFromWindow owner with
         | NonNull screen -> float screen.WorkingArea.Height / screen.Scaling * 0.9
         | Null -> 700.0
-    let found (option: PdfFixOptions) =
-        if option = PdfFixOptions.ApplyEdits then editCount else report.FixableCount option
+    let found (option: PdfFixOptions) = report.FixableCount option
     /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
     /// and so can describing them from the pages they go to.
     let withTagging (choice: FixChoice) =
@@ -275,7 +270,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
     window.Content <-
         Component(fun ctx ->
             let selected =
-                ctx.useState (fixChoices |> List.filter tickedAtFirst |> List.fold (fun all c -> all ||| c.Option) PdfFixOptions.None)
+                ctx.useState (
+                    match chosen with
+                    | Some chosen -> chosen
+                    | None -> fixChoices |> List.filter tickedAtFirst |> List.fold (fun all c -> all ||| c.Option) PdfFixOptions.None
+                )
             let showAll = ctx.useState false
             let needed = fixChoices |> List.filter applies
 
@@ -284,9 +283,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                 let count =
                     match found choice.Option with
                     | 0 when withTagging choice -> "with tagging"
-                    | 0 when choice.Option = PdfFixOptions.ApplyEdits -> "none to apply"
                     | 0 -> "none found"
-                    | n when choice.Option = PdfFixOptions.ApplyEdits -> $"{n} to apply"
                     | n -> $"{n} found"
                 let detail =
                     if choice.Option = PdfFixOptions.TagFromLayout && tagNote.IsSome then
@@ -353,21 +350,17 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                     )
                 ]
 
-            let onContinue _ =
+            let onDone _ =
                 // Only what's shown: a repair ticked under "all" and then hidden again isn't run.
                 let shown = if showAll.Current then fixChoices else needed
-                let options = shown |> List.fold (fun all c -> if selected.Current.HasFlag c.Option then all ||| c.Option else all) PdfFixOptions.None
-                if options = PdfFixOptions.None then
-                    showMessage window "Select at least one fix to apply." "Fix PDF" |> ignore
-                else
-                    window.Close(Some options)
+                window.Close(Some(shown |> List.fold (fun all c -> if selected.Current.HasFlag c.Option then all ||| c.Option else all) PdfFixOptions.None))
 
             Grid.create [
                 Grid.margin 14.0
                 Grid.rowDefinitions "Auto,Auto,*,Auto,Auto"
                 Grid.children [
                     TextBlock.create [
-                        TextBlock.text "Choose the repairs to apply to a copy of this PDF:"
+                        TextBlock.text "Choose the repairs Save applies to a copy of this PDF:"
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                     ]
@@ -409,7 +402,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 8.0, 0.0, 16.0)
                         TextBlock.text
-                            "Counts are findings in the current results, dismissed warnings included (and, for your edits, the ones not in the PDF yet). These repairs are best-effort: they don't write alt text themselves (only the alt text you wrote) or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
+                            "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't write alt text themselves (Save writes the alt text you wrote, with your other edits) or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
                     ]
                     StackPanel.create [
                         Grid.row 4
@@ -425,11 +418,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                                 Button.onClick (fun _ -> window.Close(None: PdfFixOptions option))
                             ]
                             Button.create [
-                                Button.content "Continue…"
+                                Button.content "Done"
                                 Button.minWidth 96.0
                                 Button.isDefault true
                                 Button.horizontalContentAlignment HorizontalAlignment.Center
-                                Button.onClick onContinue
+                                Button.onClick onDone
                             ]
                         ]
                     ]
@@ -452,8 +445,8 @@ let private statusStyle (outcome: Result<FixResult, string>) =
     | Ok fix ->
         match fix.Status with
         | RepairStatus.Success ->
-            { Title = "Repaired"
-              Detail = "The selected fixes changed the file, and a repaired copy was saved."
+            { Title = "Saved"
+              Detail = "Your edits and the chosen fixes changed the file, and a copy was saved with them."
               Glyph = "✓"
               ColorToken = Theme.Tokens.Success }
         | RepairStatus.IdRemoved ->
@@ -465,8 +458,8 @@ let private statusStyle (outcome: Result<FixResult, string>) =
               Glyph = "!"
               ColorToken = Theme.Tokens.Warning }
         | RepairStatus.NoAction ->
-            { Title = "Nothing to repair"
-              Detail = "The selected fixes had nothing to change in this file, so no copy was saved."
+            { Title = "Nothing to change"
+              Detail = "Your edits and the chosen fixes had nothing to change in this file, so no copy was saved."
               Glyph = "i"
               ColorToken = Theme.Tokens.Primary }
         | RepairStatus.WontFix ->
@@ -534,7 +527,7 @@ let private comparison (before: ValidationReport) (after: ValidationReport) : IV
 /// Shows the outcome of a Fix: a plain-language status, what changed, how the
 /// repaired copy validates compared with the original, and where it was saved.
 let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: ValidationReport option) : Task =
-    let window = dialogWindow "Fix PDF" 540.0
+    let window = dialogWindow "Save" 540.0
     let style = statusStyle outcome
 
     let savedPath =

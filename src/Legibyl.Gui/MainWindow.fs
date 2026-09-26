@@ -99,6 +99,38 @@ module private MainView =
 
     let noPreview = { Image = None; Note = ""; Loading = false }
 
+    /// What Save writes besides the chosen auto fixes: how many of the user's changes aren't in
+    /// the PDF yet (edits of its elements; for an untagged PDF, its review in Suggest Structure),
+    /// and whether it tags an untagged PDF from that review.
+    type PendingChanges = { Changes: int; TagsFromReview: bool }
+
+    let noChanges = { Changes = 0; TagsFromReview = false }
+
+    /// A button's label with a count beside it (none when it's 0).
+    let badged (label: string) (count: int) : IView =
+        StackPanel.create [
+            StackPanel.orientation Orientation.Horizontal
+            StackPanel.children [
+                TextBlock.create [ TextBlock.text label; TextBlock.verticalAlignment VerticalAlignment.Center ]
+                if count > 0 then
+                    Border.create [
+                        Border.margin (6.0, 0.0, 0.0, 0.0)
+                        Border.padding (6.0, 0.0)
+                        Border.cornerRadius 8.0
+                        Border.verticalAlignment VerticalAlignment.Center
+                        Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Primary ]
+                        Border.child (
+                            TextBlock.create [
+                                TextBlock.text (string count)
+                                TextBlock.fontSize 11.0
+                                TextBlock.fontWeight FontWeight.SemiBold
+                                TextBlock.foreground Brushes.White
+                            ]
+                        )
+                    ]
+            ]
+        ]
+
     let createBitmap (pngBytes: byte array) =
         use stream = new MemoryStream(pngBytes)
         new Bitmap(stream)
@@ -284,6 +316,13 @@ module private MainView =
             let dismissed = ctx.useState (Map.empty: Dismissals.Dismissed)
             let rememberDismissals = ctx.useState false
             let showDismissed = ctx.useState false
+            // The repairs chosen in Auto Fixes for the selected file (None until they're chosen),
+            // and the user's changes Save writes too.
+            let autoFixes = ctx.useState (None: PdfFixOptions option)
+            let pending = ctx.useState noChanges
+            // The last count of edits not in a tagged PDF: (path, its last write, edits, count).
+            // Counting reads the PDF, so it's only done again when one of those changes.
+            let pendingCount = ctx.useStateLazy(fun () -> ref (None: (string * DateTime * ElementEdit list * int) option)).Current
 
             let currentProfile () = snd profiles[profileIndex.Current]
 
@@ -338,6 +377,41 @@ module private MainView =
                 }
                 |> ignore
 
+            /// Counts the user's changes Save would write for the selected file: for an untagged PDF,
+            /// its review in Suggest Structure (edits, discarded suggestions, a title); otherwise its
+            /// edits that aren't in it yet, which means reading it, off the UI thread.
+            let refreshPending () =
+                task {
+                    match selectedFile.Current, outcome.Current with
+                    | Some path, Validated(report, _) when report.FixableCount PdfFixOptions.TagFromLayout > 0 ->
+                        let review = layoutReviews.For path
+                        let changes = review.Edits.Length + review.Discarded.Count + (if review.Title.IsSome then 1 else 0)
+                        pending.Set { Changes = changes; TagsFromReview = review.Pages.Count > 0 || changes > 0 }
+                    | Some path, Validated _ ->
+                        let! count =
+                            Task.Run(fun () ->
+                                try
+                                    let edits = RegionEdits.toElementEdits (RegionEdits.load path)
+                                    let written = File.GetLastWriteTimeUtc path
+                                    match pendingCount.Value with
+                                    | Some(p, w, e, count) when p = path && w = written && e = edits -> count
+                                    | _ ->
+                                        let count = ElementEdits.pending path edits
+                                        pendingCount.Value <- Some(path, written, edits, count)
+                                        count
+                                with
+                                | :? iText.Commons.Exceptions.ITextException
+                                | :? IOException
+                                | :? UnauthorizedAccessException -> 0)
+                        if selectedFile.Current = Some path then
+                            pending.Set { Changes = count; TagsFromReview = false }
+                    | _ -> pending.Set noChanges
+                }
+                |> ignore
+
+            // Edits are made in other windows; count them again whenever this one is back in front.
+            ctx.useEffect ((fun () -> window.Activated.Add(fun _ -> refreshPending ())), [ EffectTrigger.AfterInit ])
+
             /// Validates the selected file, returning its report (None if it couldn't be validated).
             /// activity names it in the progress row ("Validating", "Validating the repaired copy").
             let runValidation (activity: string) : Task<ValidationReport option> =
@@ -361,6 +435,7 @@ module private MainView =
                                     |> Seq.map (fun row -> { row with Dismissed = Dismissals.isDismissed dismissed.Current row.Violation })
                                     |> List.ofSeq
                                 outcome.Set(Validated(report, rows))
+                                refreshPending ()
                                 selectRow (rows |> List.tryFind (fun row -> showDismissed.Current || not row.Dismissed))
                                 return Some report
                             with :? VeraPdfValidationException as ex ->
@@ -375,6 +450,8 @@ module private MainView =
             let openFileAs (activity: string) (path: string) =
                 selectedFile.Set(Some path)
                 clearResults ()
+                autoFixes.Set None
+                pending.Set noChanges
                 match Dismissals.load path with
                 | Some saved ->
                     dismissed.Set saved
@@ -444,8 +521,8 @@ module private MainView =
                                     let review = layoutReviews.For filePath
                                     // Offer to read the titles of pages links go to, before the window opens.
                                     do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
-                                    SuggestedStructureWindow(filePath, review).Show window
-                            | structure -> StructureTreeWindow(structure, filePath).Show window
+                                    SuggestedStructureWindow(filePath, review, refreshPending).Show window
+                            | structure -> StructureTreeWindow(structure, filePath, refreshPending).Show window
                         }
 
                     match selectedFile.Current with
@@ -472,7 +549,8 @@ module private MainView =
                 }
                 |> ignore
 
-            let fix _ =
+            /// Chooses the repairs Save applies (it doesn't save).
+            let chooseAutoFixes _ =
                 task {
                     match selectedFile.Current, report with
                     | Some sourcePath, Some report ->
@@ -493,97 +571,107 @@ module private MainView =
                                     | n -> $" {n} regions' OCR text is corrected."
                                 figures + texts
                             match review.Pages.Count, review.Discarded.Count with
+                            | _ when pending.Current.TagsFromReview ->
+                                Some("Save tags from your review in Suggest Structure, ticked or not." + alt)
                             | 0, 0 when alt = "" -> None
                             | 0, 0 -> Some(alt.Trim())
                             | _, 0 -> Some("Uses the suggestions found in Suggest Structure." + alt)
                             | _, 1 -> Some("Uses your review in Suggest Structure: 1 suggestion discarded." + alt)
                             | _, discarded -> Some($"Uses your review in Suggest Structure: {discarded} suggestions discarded." + alt)
-                        // The edits made for it (in View Structure) that aren't in it yet. Finding their
-                        // elements means reading the PDF, so off the UI thread.
-                        let edits = RegionEdits.toElementEdits (RegionEdits.load sourcePath)
-                        let! pendingEdits =
-                            Task.Run(fun () ->
-                                try
-                                    ElementEdits.pending sourcePath edits
-                                with
-                                | :? iText.Commons.Exceptions.ITextException
-                                | :? IOException
-                                | :? UnauthorizedAccessException -> 0)
-                        match! Dialogs.chooseFixOptions window report reviewNote pendingEdits with
+                        match! Dialogs.chooseFixOptions window report reviewNote autoFixes.Current with
+                        | Some options -> autoFixes.Set(Some options)
                         | None -> ()
-                        | Some options ->
-                            let! outputPath =
-                                Dialogs.pickSavePath
-                                    window
-                                    (FilePickerSaveOptions(
-                                        Title = "Save repaired PDF",
-                                        SuggestedFileName = CopyNames.nextVersion sourcePath,
-                                        DefaultExtension = "pdf",
-                                        FileTypeChoices = [ pdfFileType; FilePickerFileTypes.All ]
-                                    ))
-                                    sourcePath
+                    | _ -> ()
+                }
+                |> ignore
 
-                            match outputPath with
-                            | None -> ()
-                            | Some outputPath ->
-                                let profile = currentProfile ()
-                                isBusy.Set true
-                                busyProgress.Set None
-                                let! fixOutcome =
-                                    task {
-                                        // Tagging from the layout and joining split paragraphs run the layout
-                                        // detector page by page, after downloading its model the first time.
-                                        let usesLayout =
-                                            options.HasFlag PdfFixOptions.TagFromLayout || options.HasFlag PdfFixOptions.JoinSplitParagraphs
-                                        // The suggestions as reviewed in Suggest Structure (all of them if
-                                        // it wasn't opened), reusing any pages it found.
-                                        let source =
-                                            if usesLayout then
-                                                let suggester = new LayoutSuggester(sourcePath)
-                                                Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
-                                            else
-                                                None
+            /// What Save writes: the chosen auto fixes, the user's edits not in the PDF yet, and for
+            /// an untagged PDF with a review in Suggest Structure, tags from that review.
+            let saveOptions () =
+                let chosen = autoFixes.Current |> Option.defaultValue PdfFixOptions.None
+                chosen
+                ||| (if pending.Current.TagsFromReview then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
+                ||| (if pending.Current.Changes > 0 && not pending.Current.TagsFromReview then PdfFixOptions.ApplyEdits else PdfFixOptions.None)
+
+            /// Writes the next version of the PDF with saveOptions, then opens it.
+            let save _ =
+                task {
+                    match selectedFile.Current with
+                    | Some sourcePath when saveOptions () <> PdfFixOptions.None ->
+                        let options = saveOptions ()
+                        let review = layoutReviews.For sourcePath
+                        let! outputPath =
+                            Dialogs.pickSavePath
+                                window
+                                (FilePickerSaveOptions(
+                                    Title = "Save a copy with your changes",
+                                    SuggestedFileName = CopyNames.nextVersion sourcePath,
+                                    DefaultExtension = "pdf",
+                                    FileTypeChoices = [ pdfFileType; FilePickerFileTypes.All ]
+                                ))
+                                sourcePath
+
+                        match outputPath with
+                        | None -> ()
+                        | Some outputPath ->
+                            let profile = currentProfile ()
+                            isBusy.Set true
+                            busyProgress.Set None
+                            let! fixOutcome =
+                                task {
+                                    // Tagging from the layout and joining split paragraphs run the layout
+                                    // detector page by page, after downloading its model the first time.
+                                    let usesLayout =
+                                        options.HasFlag PdfFixOptions.TagFromLayout || options.HasFlag PdfFixOptions.JoinSplitParagraphs
+                                    // The suggestions as reviewed in Suggest Structure (all of them if
+                                    // it wasn't opened), reusing any pages it found.
+                                    let source =
+                                        if usesLayout then
+                                            let suggester = new LayoutSuggester(sourcePath)
+                                            Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
+                                        else
+                                            None
+                                    try
                                         try
-                                            try
-                                                if usesLayout && not (LayoutModel.isDownloaded ()) then
-                                                    do!
-                                                        LayoutModel.download
-                                                            (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
-                                                            CancellationToken.None
-                                                source |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
-                                                let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
-                                                let dismissedNow = dismissed.Current
-                                                let! fix =
-                                                    Task.Run(fun () ->
-                                                        // The review (as the window has it) goes in the repaired copy.
-                                                        // Reading it can mean opening the PDF, so it's done here too.
-                                                        validator.Review <- RegionEdits.reviewFor sourcePath (Some dismissedNow)
-                                                        validator.Edits <- edits
-                                                        validator.Fix(sourcePath, profile, outputPath, options, progress))
-                                                return Ok fix
-                                            with
-                                            | :? VeraPdfValidationException as ex -> return Error ex.Message
-                                            | :? Net.Http.HttpRequestException as ex -> return Error $"Couldn't download the layout model: {ex.Message}"
-                                        finally
-                                            validator.LayoutSource <- null
-                                            validator.Review <- null
-                                            validator.Edits <- []
-                                            source |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
-                                            busyProgress.Set None
-                                            isBusy.Set false
-                                    }
+                                            if usesLayout && not (LayoutModel.isDownloaded ()) then
+                                                do!
+                                                    LayoutModel.download
+                                                        (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
+                                                        CancellationToken.None
+                                            source |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
+                                            let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
+                                            let dismissedNow = dismissed.Current
+                                            let! fix =
+                                                Task.Run(fun () ->
+                                                    // The review (as the window has it) goes in the repaired copy.
+                                                    // Reading it can mean opening the PDF, so it's done here too.
+                                                    validator.Review <- RegionEdits.reviewFor sourcePath (Some dismissedNow)
+                                                    validator.Edits <- RegionEdits.toElementEdits (RegionEdits.load sourcePath)
+                                                    validator.Fix(sourcePath, profile, outputPath, options, progress))
+                                            return Ok fix
+                                        with
+                                        | :? VeraPdfValidationException as ex -> return Error ex.Message
+                                        | :? Net.Http.HttpRequestException as ex -> return Error $"Couldn't download the layout model: {ex.Message}"
+                                    finally
+                                        validator.LayoutSource <- null
+                                        validator.Review <- null
+                                        validator.Edits <- []
+                                        source |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
+                                        busyProgress.Set None
+                                        isBusy.Set false
+                                }
 
-                                // Switch to the repaired copy and validate it (after clearing the busy
-                                // flag, so the validation can start) to show what improved.
-                                let! repairedReport =
-                                    match fixOutcome with
-                                    | Ok fix when fix.WasFixed ->
-                                        match fix.OutputPath with
-                                        | NonNull path -> openFileAs "Validating the repaired copy" path
-                                        | Null -> Task.FromResult None
-                                    | _ -> Task.FromResult None
+                            // Switch to the repaired copy and validate it (after clearing the busy
+                            // flag, so the validation can start) to show what improved.
+                            let! repairedReport =
+                                match fixOutcome with
+                                | Ok fix when fix.WasFixed ->
+                                    match fix.OutputPath with
+                                    | NonNull path -> openFileAs "Validating the saved copy" path
+                                    | Null -> Task.FromResult None
+                                | _ -> Task.FromResult None
 
-                                do! Dialogs.showFixResult window fixOutcome repairedReport
+                            do! Dialogs.showFixResult window fixOutcome repairedReport
                     | _ -> ()
                 }
                 |> ignore
@@ -917,7 +1005,7 @@ module private MainView =
                                         if row.Violation.IsFixable then
                                             fixableHeading (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
                                             |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
-                                            detailText $"{row.Fixable}. Use Fix… to repair a copy of this PDF." false []
+                                            detailText $"{row.Fixable}. Choose it in Auto Fixes…, then Save… a copy of this PDF." false []
                                         TextBlock.create [
                                             TextBlock.text "Location"
                                             TextBlock.fontWeight FontWeight.SemiBold
@@ -1081,23 +1169,46 @@ module private MainView =
                         StackPanel.horizontalAlignment HorizontalAlignment.Right
                         StackPanel.margin (0.0, 8.0, 0.0, 0.0)
                         StackPanel.children [
+                            let changes = pending.Current.Changes
+                            let chosen =
+                                autoFixes.Current
+                                |> Option.map (fun options -> Enum.GetValues<PdfFixOptions>() |> Seq.filter (fun o -> o <> PdfFixOptions.None && o <> PdfFixOptions.All && options.HasFlag o) |> Seq.length)
+                                |> Option.defaultValue 0
+                            // The counts are part of what a screen reader says for the buttons.
+                            let structureName =
+                                match changes with
+                                | 0 -> "Structure…"
+                                | 1 -> "Structure…, 1 change to save"
+                                | n -> $"Structure…, {n} changes to save"
+                            let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
                             Button.create [
-                                Button.content "View Structure…"
+                                Button.content (badged "Structure…" changes)
+                                AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, structureName, ValueNone)
                                 Button.padding (12.0, 4.0)
                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                 Button.isEnabled (not busy && selectedFile.Current.IsSome)
                                 ToolTip.tip
-                                    "Shows the tagged logical structure tree (the semantic heading/paragraph/list/table/link hierarchy a screen reader uses) and lets you export it as JSON."
+                                    "Shows the tagged logical structure tree (the semantic heading/paragraph/list/table/link hierarchy a screen reader uses), where alt text and replacement text can be edited, or for an untagged PDF, suggests one. The count is your changes Save writes."
                                 Button.onClick viewStructure
                             ]
                             Button.create [
-                                Button.content "Fix…"
+                                Button.content (badged "Auto Fixes…" chosen)
+                                AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, autoFixesName, ValueNone)
                                 Button.padding (12.0, 4.0)
                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                 Button.isEnabled (not busy && canAttemptFix)
                                 ToolTip.tip
-                                    "Opens a dialog of selectable best-effort repairs, including XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
-                                Button.onClick fix
+                                    "Choose best-effort repairs for Save to apply, like XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
+                                Button.onClick chooseAutoFixes
+                            ]
+                            Button.create [
+                                Button.content "Save…"
+                                Button.padding (12.0, 4.0)
+                                Button.margin (0.0, 0.0, 8.0, 0.0)
+                                Button.isEnabled (not busy && selectedFile.Current.IsSome && saveOptions () <> PdfFixOptions.None)
+                                ToolTip.tip
+                                    "Saves the next version of the PDF (flyer.v2.pdf) with your changes and the chosen auto fixes, and opens it. The original isn't changed."
+                                Button.onClick save
                             ]
                         ]
                     ]

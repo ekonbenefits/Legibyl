@@ -25,6 +25,7 @@
     <Compile Include="LinkTitleOfferTests.fs" />
     <Compile Include="DismissWarningsTests.fs" />
     <Compile Include="FixDialogTests.fs" />
+    <Compile Include="SaveWorkflowTests.fs" />
     <Compile Include="BusyStatusTests.fs" />
     <Compile Include="SuggestedStructureTests.fs" />
   </ItemGroup>

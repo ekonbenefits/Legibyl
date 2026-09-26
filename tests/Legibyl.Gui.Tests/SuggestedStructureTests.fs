@@ -42,7 +42,7 @@ let ``an untagged PDF's structure offers to suggest one`` () =
         onUiThread (fun () ->
             let window = HeadlessWindow.show 1200.0 720.0
             HeadlessWindow.openPdf window pdf
-            click (button window "View Structure…")
+            click (descendants<Button> window |> List.find (fun b -> Automation.AutomationProperties.GetName b = "Structure…"))
             HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> window.OwnedWindows.Count = 1) |> ignore
             let dialog = window.OwnedWindows |> Seq.exactlyOne
             click (button dialog "Suggest Structure…")

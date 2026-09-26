@@ -207,7 +207,16 @@ module SuggestedStructureView =
     /// Discarded regions are drawn grey.
     let discardedColor = 0x9E9E9Eu
 
-    let view (window: Window) (prefetcher: LayoutPrefetcher) (review: LayoutReview) (renderer: PdfRegionRenderer) (pdfPath: string) =
+    /// onChanged is called when the review changes (a suggestion kept or discarded, an edit, the
+    /// title), so the main window can count it.
+    let view
+        (window: Window)
+        (prefetcher: LayoutPrefetcher)
+        (review: LayoutReview)
+        (renderer: PdfRegionRenderer)
+        (pdfPath: string)
+        (onChanged: unit -> unit)
+        =
         Component(fun ctx ->
             let modelReady = ctx.useState (LayoutModel.isDownloaded ())
             let downloadProgress = ctx.useState (None: float option)
@@ -219,7 +228,6 @@ module SuggestedStructureView =
             let readyCount = ctx.useState prefetcher.ReadyCount
             // Suggestions the user discarded, by (page, order).
             let discarded = ctx.useState review.Discarded
-            let saving = ctx.useState false
             // Bumped per page shown, so a rendering that finishes late doesn't replace a newer one.
             let version = ctx.useState (0, renderOnChange = false)
             // QR codes' page titles, read from the web only once asked for; and the addresses
@@ -334,50 +342,9 @@ module SuggestedStructureView =
                     let next = if discard then Set.union discarded.Current keys else Set.difference discarded.Current keys
                     discarded.Set next
                     review.Discarded <- next
+                    onChanged ()
                     render result selected.Current version.Current |> ignore
                 | None -> ()
-
-            /// Tags a copy of the PDF with the kept suggestions (every page's, found now if need be).
-            let save _ =
-                task {
-                    let! path =
-                        Dialogs.pickSavePath
-                            window
-                            (Avalonia.Platform.Storage.FilePickerSaveOptions(
-                                Title = "Save tagged copy",
-                                SuggestedFileName = CopyNames.nextVersion pdfPath,
-                                DefaultExtension = "pdf"
-                            ))
-                            pdfPath
-                    match path with
-                    | None -> ()
-                    | Some outputPath ->
-                        saving.Set true
-                        let before = status.Current
-                        let progress =
-                            Progress<FixProgress>(fun p -> status.Set(Legibyl.Gui.BusyStatus.statusText (Legibyl.Gui.BusyStatus.Fixing p)))
-                        let source = ReviewedLayout(prefetcher, review)
-                        try
-                            try
-                                let! result =
-                                    Task.Run(fun () ->
-                                        let validator = VeraPdfValidator(LayoutSource = source, Review = RegionEdits.reviewFor pdfPath None)
-                                        validator.Fix(pdfPath, PdfProfile.PdfUa1, outputPath, PdfFixOptions.TagFromLayout, progress))
-                                status.Set before
-                                let message =
-                                    match result.OutputPath with
-                                    | NonNull saved ->
-                                        let applied = String.Join("\n", result.AppliedFixes |> Seq.map (fun line -> "• " + line))
-                                        $"Saved a tagged copy to {saved}.\n\n{applied}"
-                                    | Null -> "Nothing was tagged: the document already has a structure tree."
-                                do! Dialogs.showMessage window message "Save Tagged Copy"
-                            with ex ->
-                                status.Set before
-                                do! Dialogs.showMessage window $"Couldn't save a tagged copy: {ex.Message}" "Save Tagged Copy"
-                        finally
-                            saving.Set false
-                }
-                |> ignore
 
             let download _ =
                 task {
@@ -404,9 +371,9 @@ module SuggestedStructureView =
 
             let intro =
                 "Suggested structure for this untagged PDF, from what each page looks like: its regions, "
-                + "the tag each suggests, and their reading order (the numbers). Keep or discard each suggestion, then Save Tagged Copy "
-                + "to tag a copy with the kept ones (a discarded region's text joins the nearest kept one; its images and lines are "
-                + "decoration). The original isn't changed. "
+                + "the tag each suggests, and their reading order (the numbers). Keep or discard each suggestion, then Save… in the main "
+                + "window tags a copy with the kept ones (a discarded region's text joins the nearest kept one; its images and lines are "
+                + "decoration), on every page. The original isn't changed. "
                 + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
                 + "list markers are list items (LI), and Artifact marks page furniture like running headers and page numbers. "
                 + "Text drawn as outlines or pixels rather than as text is read with OCR, and can be corrected; figures can be given alt text. Both are saved next to the PDF, and QR codes are read "
@@ -449,6 +416,7 @@ module SuggestedStructureView =
             let saveEdits (next: RegionEdits.Edit list) =
                 edits.Set next
                 review.Edits <- next
+                onChanged ()
                 try
                     RegionEdits.save pdfPath next
                 with
@@ -732,13 +700,6 @@ module SuggestedStructureView =
                                     ToolTip.tip "Use the alt text and corrected text saved for another PDF, such as an earlier version of this one: pick that PDF, or the .legibyl.json file saved for it."
                                     Button.onClick importAlt
                                 ]
-                                Button.create [
-                                    Button.content "Save Tagged Copy…"
-                                    Button.margin (16.0, 0.0, 0.0, 0.0)
-                                    Button.isEnabled (not saving.Current)
-                                    ToolTip.tip "Tag a copy of the PDF with the kept suggestions, on every page. The original isn't changed."
-                                    Button.onClick save
-                                ]
                             ]
                         ]
                         titlesPanel
@@ -807,6 +768,7 @@ module SuggestedStructureView =
                 if next <> titleEdit.Current then
                     titleEdit.Set next
                     review.Title <- next
+                    onChanged ()
                     try
                         RegionEdits.saveTitle pdfPath next
                     with
@@ -880,13 +842,16 @@ module SuggestedStructureView =
                 ]
             ])
 
-type SuggestedStructureWindow(pdfPath: string, review: LayoutReview) as this =
+/// onChanged is called when the review changes.
+type SuggestedStructureWindow(pdfPath: string, review: LayoutReview, onChanged: unit -> unit) as this =
     inherit
         HostWindow(Title = "Suggested Structure", Width = 1000.0, Height = 760.0, MinWidth = 600.0, MinHeight = 420.0)
     let suggester = new LayoutSuggester(pdfPath)
     let prefetcher = LayoutPrefetcher(suggester, review.Pages)
     let renderer = new PdfRegionRenderer()
-    do this.Content <- SuggestedStructureView.view this prefetcher review renderer pdfPath
+    do this.Content <- SuggestedStructureView.view this prefetcher review renderer pdfPath onChanged
+
+    new(pdfPath: string, review: LayoutReview) = new SuggestedStructureWindow(pdfPath, review, ignore)
 
     /// A window with a review of its own, not remembered anywhere.
     new(pdfPath: string) = new SuggestedStructureWindow(pdfPath, LayoutReview(File.GetLastWriteTimeUtc pdfPath))
