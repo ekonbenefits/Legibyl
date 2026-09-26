@@ -122,6 +122,14 @@ The app also ships Tesseract's English model, `eng.traineddata` from
 [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache License
 2.0), unmodified.
 
+## LanguageDetection
+
+The **Declare the document's language** fix detects a document's language with
+[LanguageDetection.NETStandard](https://github.com/TechnikEmpire/language-detection)
+(a .NET port of Nakatani Shuyo's language-detection, with profiles generated from
+Wikipedia abstracts), licensed under the Apache License, Version 2.0, used
+unmodified via a NuGet package reference.
+
 ## iText Core
 
 Legibyl uses [iText Core for .NET](https://github.com/itext/itext-dotnet)

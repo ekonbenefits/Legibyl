@@ -300,10 +300,22 @@ let private setDocumentTitle fromFirstPage (document: PdfDocument) _ =
       | None -> ()
       if displayDocTitleSet then "Set /DisplayDocTitle so readers show the document title rather than the file name." ]
 
+let private setLanguageFromText (document: PdfDocument) context =
+    if DocumentLanguage.isDeclared document then
+        []
+    else
+        match DocumentLanguage.detect (DocumentLanguage.sample document context) with
+        | Some language ->
+            document.GetCatalog().GetPdfObject().Put(PdfName.Lang, PdfString language) |> ignore
+            let name = Globalization.CultureInfo.GetCultureInfo(language).EnglishName
+            [ $"Declared the document's language as {language} ({name}), detected from its text." ]
+        | None -> []
+
 /// Legibyl's own repairs, in the order they run. Each takes the open document and returns a
 /// line per change it made. The order matters where one repair changes what another sees:
 ///
-///   1. Headings from the table of contents first. Its analysis has to see the tree the
+///   0. The document's language first: it only sets /Lang, and bookmarks need it.
+///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list repair could take it for a list item.
 ///   2. Empty paragraphs and table-of-contents entries next, so blank lines between list items
@@ -317,7 +329,8 @@ let private setDocumentTitle fromFirstPage (document: PdfDocument) _ =
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
 /// result, and syncs XMP with the Info dictionary the title repair may have just set.
 let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
-    [ PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
+    [ PdfFixOptions.LanguageFromText, setLanguageFromText
+      PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.RemoveEmptyTocEntries, removeEmptyTocEntries
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists

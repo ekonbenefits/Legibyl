@@ -9,6 +9,7 @@ module PdfFixDescriptions =
     /// One description per option set in options, e.g. "Remove empty /P structure elements".
     let Describe (options: PdfFixOptions) : string list =
         [ PdfFixOptions.TagFromLayout, "Tag an untagged document from each page's layout"
+          PdfFixOptions.LanguageFromText, "Declare the document's language, detected from its text"
           PdfFixOptions.Metadata, "Fix XMP metadata"
           PdfFixOptions.AnnotationTabs, "Set /Tabs /S on pages that contain annotations"
           PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements"

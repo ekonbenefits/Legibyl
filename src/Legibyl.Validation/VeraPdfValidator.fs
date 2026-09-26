@@ -138,6 +138,7 @@ module internal VeraPdf =
                 let tocLinkAnnotations = lazy (StructureFixes.tocLinkAnnotationNumbers document context)
                 let hasTitlePage = lazy (StructureFixes.titlePageText document |> Option.isSome)
                 let untagged = isNull (document.GetCatalog().GetPdfObject().Get iText.Kernel.Pdf.PdfName.StructTreeRoot)
+                let languageUndeclared = not (DocumentLanguage.isDeclared document)
                 let fixOptionsFor (assertion: RuleViolation) =
                     let isTocLink () =
                         match assertion.Location with
@@ -157,8 +158,14 @@ module internal VeraPdf =
                         else
                             options
                     // What tagging an untagged document from its layout addresses.
-                    if untagged && tagFromLayoutRules.Contains assertion.RuleId then
-                        options ||| PdfFixOptions.TagFromLayout
+                    let options =
+                        if untagged && tagFromLayoutRules.Contains assertion.RuleId then
+                            options ||| PdfFixOptions.TagFromLayout
+                        else
+                            options
+                    // Every "natural language ... shall be determined" rule falls back on /Lang.
+                    if languageUndeclared && assertion.Message.Contains("Natural language", StringComparison.OrdinalIgnoreCase) then
+                        options ||| PdfFixOptions.LanguageFromText
                     else
                         options
                 let located =

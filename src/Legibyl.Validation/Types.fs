@@ -28,7 +28,10 @@ type PdfFixOptions =
     /// Tags an untagged document from each page's layout (regions found by a layout detector),
     /// before the other fixes run; see LayoutTagging. Needs an IPageLayoutSource.
     | TagFromLayout = 1024
-    | All = 2047
+    /// Declares the document's language (/Lang), detected from its text, when it has none;
+    /// see DocumentLanguage.
+    | LanguageFromText = 2048
+    | All = 4095
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.

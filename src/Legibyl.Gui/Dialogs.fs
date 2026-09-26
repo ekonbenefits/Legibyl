@@ -128,6 +128,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let titleFromFirstPage = ctx.useState false
             // Its tags are a detector's best guess, to check before relying on them.
             let tagFromLayout = ctx.useState false
+            // So is the language, though it's rarely wrong with enough text.
+            let languageFromText = ctx.useState false
 
             let checkBox (state: IWritable<bool>) (content: IView) =
                 CheckBox.create [
@@ -161,6 +163,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let onContinue _ =
                 let options =
                     [ tagFromLayout.Current, PdfFixOptions.TagFromLayout
+                      languageFromText.Current, PdfFixOptions.LanguageFromText
                       metadata.Current, PdfFixOptions.Metadata
                       annotationTabs.Current, PdfFixOptions.AnnotationTabs
                       emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
@@ -199,6 +202,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                                      + "found by a layout detector (the page looks the same; figures still need alt text). Takes several seconds a page, "
                                      + $"and downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time")
                                     PdfFixOptions.TagFromLayout)
+                            checkBox
+                                languageFromText
+                                (label
+                                    "Declare the document's language (/Lang), detected from its text, when it has none (only when there's enough text to be sure)"
+                                    PdfFixOptions.LanguageFromText)
                             checkBox
                                 tocHeadings
                                 (label
