@@ -5,8 +5,9 @@ open System
 open System.IO
 open System.Text.RegularExpressions
 
-/// A version at the end of a name: "flyer.v2", "flyer-v2", "flyer_v2", "flyer v2".
-let private versioned = Regex(@"^(?<name>.*?)(?<separator>[.\-_ ])[vV](?<version>\d+)$", RegexOptions.Compiled)
+/// A version at the end of a name: "flyer.v2", "flyer-v2", "flyer_v2", "flyer v2". Only ASCII
+/// digits, few enough to be an int; a longer run of digits is part of the name.
+let private versioned = Regex(@"^(?<name>.*?)(?<separator>[.\-_ ])[vV](?<version>[0-9]{1,9})$", RegexOptions.Compiled)
 
 /// The file name for the next version of pdfPath: "flyer.pdf" -> "flyer.v2.pdf" (the original
 /// counts as version 1), "flyer v2.pdf" -> "flyer v3.pdf", skipping versions whose file already
