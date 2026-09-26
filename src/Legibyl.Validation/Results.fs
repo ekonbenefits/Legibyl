@@ -101,6 +101,9 @@ type FixResult =
       OutputPath: string | null
       Status: RepairStatus
       AppliedFixes: IReadOnlyList<string>
+      /// Requested repairs that were attempted but not kept, and why: e.g. veraPDF's metadata
+      /// fixer answering Won't fix. Empty when every attempt either applied or had nothing to do.
+      NotApplied: IReadOnlyList<string>
       /// The validation report for the original (unfixed) file, for reference.
       OriginalReport: ValidationReport }
 

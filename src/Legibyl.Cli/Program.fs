@@ -96,7 +96,8 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
                     { result with
                         FixStatus = fix.Status.ToString()
                         FixOutputPath = fix.OutputPath
-                        FixAppliedFixes = if fix.AppliedFixes.Count > 0 then withNull fix.AppliedFixes else null }
+                        FixAppliedFixes = if fix.AppliedFixes.Count > 0 then withNull fix.AppliedFixes else null
+                        FixNotApplied = if fix.NotApplied.Count > 0 then withNull fix.NotApplied else null }
                 with :? VeraPdfValidationException as ex ->
                     { result with FixError = ex.Message }
 
@@ -177,6 +178,9 @@ let private renderText (results: FileValidationResult list) =
                 | Null -> line $"  fix: {status} (no output written)"
                 match r.FixAppliedFixes with
                 | NonNull applied -> for fix in applied do line $"    - {fix}"
+                | Null -> ()
+                match r.FixNotApplied with
+                | NonNull notApplied -> for fix in notApplied do line $"    ! {fix}"
                 | Null -> ()
             | Null, Null -> ()
 

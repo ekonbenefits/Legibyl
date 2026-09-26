@@ -414,6 +414,7 @@ type VeraPdfValidator() =
 
         let originalReport = this.Validate(pdfPath, profile)
         let appliedFixes = ResizeArray<string>()
+        let notApplied = ResizeArray<string>()
         let mutable currentInput = pdfPath
         let mutable tempMetadataOutput: string | null = null
         let mutable tempStructuralOutput: string | null = null
@@ -443,12 +444,21 @@ type VeraPdfValidator() =
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempMetadataOutput <- tempOutput
                     let metadataFix = fixMetadataOnly currentInput profile tempOutput
-                    appliedFixes.AddRange metadataFix.AppliedFixes
                     if metadataFix.Changed then
+                        appliedFixes.AddRange metadataFix.AppliedFixes
                         currentInput <- tempOutput
                         changed <- true
                         status <- metadataFix.Status
                     else
+                        // Its changes aren't kept, so they aren't applied fixes; say why, so a
+                        // repaired copy saved for other fixes doesn't look like it fixed metadata too.
+                        match metadataFix.Status with
+                        | RepairStatus.WontFix ->
+                            notApplied.Add
+                                "The metadata wasn't repaired: veraPDF's metadata fixer found no way to make it conform (Won't fix), so its changes weren't kept."
+                        | RepairStatus.FixError ->
+                            notApplied.Add "The metadata wasn't repaired: veraPDF's metadata fixer failed, so its changes weren't kept."
+                        | _ -> ()
                         if not changed then
                             status <- metadataFix.Status
                         tryDeleteTemporary tempOutput
@@ -461,6 +471,7 @@ type VeraPdfValidator() =
                       OutputPath = null
                       Status = status
                       AppliedFixes = appliedFixes
+                      NotApplied = notApplied
                       OriginalReport = originalReport }
 
                 if not changed then
