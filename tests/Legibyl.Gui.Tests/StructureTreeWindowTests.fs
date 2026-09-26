@@ -112,3 +112,27 @@ let ``selecting a link also shows the page it goes to`` () =
         window.Close()
         shown |> should equal 2
         texts |> List.exists (fun t -> t.StartsWith "Where the link goes (marked in blue), page 1") |> should be True)
+
+[<Fact>]
+let ``the preview shows the page with every element outlined, and the selection filled`` () =
+    onUiThread (fun () ->
+        let pdf = Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "libreoffice-empty-paragraph.pdf")
+        let paragraph top =
+            { node "P" [] with
+                Geometry = { PageNumber = 1; Left = 72.0; Bottom = top - 14.0; Right = 300.0; Top = top }
+                PageNumber = Nullable 1
+                ContentLeafCount = 1 }
+        let window = StructureTreeWindow(node "StructTreeRoot" [ node "Document" [ paragraph 700.0; paragraph 680.0; paragraph 660.0 ] ], pdf)
+        window.Show()
+        let note () = descendants<TextBlock> window |> List.map (fun t -> string t.Text) |> List.tryFind (fun t -> t.StartsWith "Page 1:")
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> (note ()).IsSome) |> ignore
+        let overview = note ()
+        let block = blocks window |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "P" | _ -> false) |> List.item 1
+        let properties = PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed)
+        block.RaiseEvent(PointerPressedEventArgs(block, new Pointer(0, PointerType.Mouse, true), block, Point(4.0, 4.0), 0UL, properties, KeyModifiers.None))
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> note () |> Option.exists (fun t -> t.EndsWith "the selection filled.")) |> ignore
+        let selected = note ()
+        window.Close()
+
+        overview |> should equal (Some "Page 1: its 3 elements, outlined and numbered in reading order.")
+        selected |> should equal (Some "Page 1: its 3 elements, outlined and numbered in reading order; the selection filled."))

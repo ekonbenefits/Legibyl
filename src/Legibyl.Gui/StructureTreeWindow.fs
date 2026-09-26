@@ -79,6 +79,49 @@ module private StructureView =
 
     let brush (color: Color) : IBrush = SolidColorBrush(color)
 
+    /// A tag's outline color on a page overview (0xRRGGBB), strong enough to see on a page, as
+    /// Suggest Structure draws regions.
+    let outlineColor (tag: string) =
+        match tag with
+        | "H"
+        | "H1"
+        | "H2"
+        | "H3"
+        | "H4"
+        | "H5"
+        | "H6" -> 0xC2185Bu
+        | "P"
+        | "Span" -> 0x1A73E8u
+        | "L"
+        | "LI"
+        | "Lbl"
+        | "LBody" -> 0x00838Fu
+        | "Figure" -> 0x2E7D32u
+        | "Table"
+        | "TR"
+        | "TH"
+        | "TD" -> 0xEF6C00u
+        | "Artifact" -> 0x757575u
+        | _ -> 0x6A1B9Au
+
+    /// The elements a page's overview outlines, in reading order: those that own content on it,
+    /// outermost first (one inside another that does is within that one's outline).
+    let pageElements (root: StructureNode) (page: int) : StructureNode list =
+        let owns (node: StructureNode) =
+            node.ContentLeafCount > 0
+            && (match node.Geometry with
+                | NonNull geometry -> geometry.PageNumber = page
+                | Null -> false)
+        let rec collect (node: StructureNode) : StructureNode list =
+            if owns node then [ node ] else [ for child in node.Children do yield! collect child ]
+        [ for child in root.Children do yield! collect child ]
+
+    /// The first page node's content is on: its own, else its first descendant's.
+    let rec firstPage (node: StructureNode) : int option =
+        match node.Geometry with
+        | NonNull geometry -> Some geometry.PageNumber
+        | Null -> node.Children |> Seq.tryPick firstPage
+
     /// What can be edited on an element: its alt text, or its replacement text (/ActualText).
     type EditKind =
         | AltText
@@ -525,6 +568,93 @@ module private StructureView =
             // Bumped on every selection so a slower preview for an earlier one can't overwrite it.
             let previewVersion = ctx.useState (0, false)
 
+            /// Shows the page the selection is on, every element on it outlined and numbered in
+            /// reading order, the selected ones (or those inside a selected container) filled; and
+            /// for a link, the page it goes to. With nothing selected, the first page.
+            let showPage (nodes: StructureNode list) =
+                task {
+                    previewVersion.Set(previewVersion.Current + 1)
+                    let version = previewVersion.Current
+                    previewImage.Set None
+                    targetImage.Set None
+                    targetNote.Set ""
+                    let within (node: StructureNode) =
+                        let rec up (current: StructureNode) depth =
+                            nodes |> List.exists (fun s -> obj.ReferenceEquals(s, current))
+                            || (depth < 200 && (match parents.TryGetValue current with | true, parent -> up parent (depth + 1) | _ -> false))
+                        up node 0
+                    let page =
+                        match nodes |> List.tryPick firstPage with
+                        | Some page -> Some page
+                        | None when nodes.IsEmpty -> root.Children |> Seq.tryPick firstPage
+                        | None -> None
+                    let destination =
+                        match nodes with
+                        | [ node ] -> Option.ofObj node.LinkDestination
+                        | _ -> None
+                    match page with
+                    | None ->
+                        previewNote.Set(
+                            match nodes with
+                            | [ node ] ->
+                                $"Selected <{node.Tag}>. It has no place on a page to show (a container without content, or one across pages)."
+                            | _ -> "Nothing here has a place on a page to show."
+                        )
+                    | Some page -> previewNote.Set $"Rendering page {page}…"
+                    if page.IsSome || destination.IsSome then
+                        try
+                            // Render and decode off the UI thread; a full page is a large image.
+                            let! source, target =
+                                Task.Run(fun () ->
+                                    let decode (bytes: byte array) =
+                                        use stream = new MemoryStream(bytes)
+                                        new Bitmap(stream)
+                                    page
+                                    |> Option.map (fun page ->
+                                        let elements = pageElements root page
+                                        let outlined =
+                                            [ for i, element in List.indexed elements ->
+                                                  { Geometry = nonNull element.Geometry
+                                                    Label = $"{i + 1} {element.Tag}"
+                                                    Color = outlineColor element.Tag
+                                                    Emphasised = within element } ]
+                                        // A selection that isn't one of them (a span in a paragraph, say) is filled too.
+                                        let extra =
+                                            [ for node in nodes do
+                                                  match node.Geometry with
+                                                  | NonNull geometry when geometry.PageNumber = page && not (elements |> List.exists (fun e -> obj.ReferenceEquals(e, node))) ->
+                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true }
+                                                  | _ -> () ]
+                                        let note =
+                                            let count = elements.Length
+                                            let what = if count = 1 then "its element" else $"its {count} elements"
+                                            if nodes.IsEmpty then $"Page {page}: {what}, outlined and numbered in reading order."
+                                            else $"Page {page}: {what}, outlined and numbered in reading order; the selection filled."
+                                        page, decode (renderer.RenderPageWithRegions(sourceFilePath, page, outlined @ extra)), note),
+                                    destination |> Option.map (fun d -> let result = renderer.RenderPageWithTarget(sourceFilePath, d) in result, decode result.PngBytes))
+                            if version = previewVersion.Current then
+                                match source with
+                                | Some(_, image, note) ->
+                                    previewImage.Set(Some image)
+                                    previewNote.Set(if destination.IsSome then $"{note} Where the link goes is below." else note)
+                                | None -> ()
+                                match target with
+                                | Some(result, image) ->
+                                    targetImage.Set(Some image)
+                                    targetNote.Set $"Where the link goes (marked in blue), page {result.PageNumber}: {result.Note}"
+                                | None -> ()
+                            else
+                                source |> Option.iter (fun (_, image, _) -> image.Dispose())
+                                target |> Option.iter (snd >> _.Dispose())
+                        with :? InvalidOperationException | :? IOException as ex ->
+                            if version = previewVersion.Current then
+                                previewNote.Set $"Could not render the page: {ex.Message}"
+                }
+                |> ignore
+
+            // The first page's overview, to start with.
+            ctx.useEffect ((fun () -> showPage []), [ EffectTrigger.AfterInit ])
+
             let select (node: StructureNode) (border: Border) (extend: bool) =
                 // Extending: every sibling from the anchor to this one (a shift-click on a block
                 // with another parent selects just it).
@@ -562,84 +692,7 @@ module private StructureView =
                     b.BorderBrush <- Brushes.DodgerBlue
                     b.BorderThickness <- Thickness 3.0
 
-                task {
-                    previewVersion.Set(previewVersion.Current + 1)
-                    let version = previewVersion.Current
-                    previewImage.Set None
-                    targetImage.Set None
-                    targetNote.Set ""
-                    // Several blocks on one page: all of them.
-                    let geometry =
-                        match nodes |> List.map (fun n -> Option.ofObj n.Geometry) with
-                        | [ single ] -> single
-                        | boxes when boxes |> List.forall Option.isSome ->
-                            match boxes |> List.choose id with
-                            | first :: _ as boxes when boxes |> List.forall (fun b -> b.PageNumber = first.PageNumber) ->
-                                Some
-                                    { first with
-                                        Left = boxes |> List.map _.Left |> List.min
-                                        Bottom = boxes |> List.map _.Bottom |> List.min
-                                        Right = boxes |> List.map _.Right |> List.max
-                                        Top = boxes |> List.map _.Top |> List.max }
-                            | _ -> None
-                        | _ -> None
-                    let destination = if nodes.Length = 1 then Option.ofObj node.LinkDestination else None
-                    match geometry with
-                    | None ->
-                        previewNote.Set(
-                            $"Selected <{node.Tag}>. No same-page geometry is available for this node "
-                            + "(it may be a pure container, non-text content without a rectangle, or span multiple pages)."
-                        )
-                    | Some geometry -> previewNote.Set $"Rendering page {geometry.PageNumber} highlight for <{node.Tag}>…"
-                    if geometry.IsSome || destination.IsSome then
-                        try
-                            // Render and decode off the UI thread; a full page is a large image.
-                            let! source, target =
-                                Task.Run(fun () ->
-                                    let decode (result: HighlightImageResult) =
-                                        use stream = new MemoryStream(result.PngBytes)
-                                        result, new Bitmap(stream)
-                                    geometry
-                                    |> Option.map (fun g ->
-                                        if nodes.Length = 1 then
-                                            decode (renderer.RenderPageWithHighlight(sourceFilePath, g))
-                                        else
-                                            // Several blocks: each outlined and numbered, in order.
-                                            let regions =
-                                                [ for i, n in List.indexed nodes ->
-                                                      { Geometry = nonNull n.Geometry
-                                                        Label = string (i + 1)
-                                                        Color = 0xD32F2Fu
-                                                        Emphasised = false } ]
-                                            decode
-                                                { PngBytes = renderer.RenderPageWithRegions(sourceFilePath, g.PageNumber, regions)
-                                                  PageNumber = g.PageNumber
-                                                  HasPreciseRegion = true
-                                                  Note = $"Outlined the {nodes.Length} selected elements, numbered in order." }),
-                                    destination |> Option.map (fun d -> decode (renderer.RenderPageWithTarget(sourceFilePath, d))))
-                            if version = previewVersion.Current then
-                                match source with
-                                | Some(result, image) ->
-                                    previewImage.Set(Some image)
-                                    previewNote.Set(
-                                        if destination.IsSome then $"{result.Note} Page {result.PageNumber}; the link is marked in red."
-                                        else $"{result.Note} Page {result.PageNumber}."
-                                    )
-                                | None -> ()
-                                match target with
-                                | Some(result, image) ->
-                                    targetImage.Set(Some image)
-                                    targetNote.Set $"Where the link goes (marked in blue), page {result.PageNumber}: {result.Note}"
-                                | None -> ()
-                            else
-                                source |> Option.iter (snd >> _.Dispose())
-                                target |> Option.iter (snd >> _.Dispose())
-                        with :? InvalidOperationException | :? IOException as ex ->
-                            if version = previewVersion.Current then
-                                previewNote.Set $"Could not render highlight for <{node.Tag}>: {ex.Message}"
-                }
-                |> ignore
-
+                showPage nodes
             // The user's edits for this PDF (saved next to it, or inside a copy Legibyl saved).
             let edits = ctx.useState (RegionEdits.load sourceFilePath)
 
