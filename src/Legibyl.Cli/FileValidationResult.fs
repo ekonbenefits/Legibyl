@@ -53,6 +53,9 @@ type FileValidationResult =
       FixOutputPath: string | null
       /// Human-readable descriptions of the fixes actually applied, if any.
       FixAppliedFixes: IReadOnlyList<string> | null
+      /// Requested repairs that were attempted but not kept, and why (e.g. veraPDF's metadata
+      /// fixer answering Won't fix), if any.
+      FixNotApplied: IReadOnlyList<string> | null
       /// Non-null only if --fix was requested but the fix attempt itself errored.
       FixError: string | null
       /// The tagged logical structure tree (semantic hierarchy used by screen readers),
@@ -78,6 +81,7 @@ type FileValidationResult =
           FixStatus = null
           FixOutputPath = null
           FixAppliedFixes = null
+          FixNotApplied = null
           FixError = null
           Structure = null
           StructureError = null }

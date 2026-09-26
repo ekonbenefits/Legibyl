@@ -409,6 +409,33 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                         ]
                     | _ -> ()
 
+                    // Attempted but not kept
+                    match outcome with
+                    | Ok fix when fix.NotApplied.Count > 0 ->
+                        sectionHeading "Not repaired"
+                        StackPanel.create [
+                            StackPanel.spacing 4.0
+                            StackPanel.children [
+                                for reason in fix.NotApplied ->
+                                    Grid.create [
+                                        Grid.columnDefinitions "Auto,*"
+                                        Grid.children [
+                                            TextBlock.create [
+                                                TextBlock.text "!"
+                                                TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+                                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Warning ]
+                                            ]
+                                            TextBlock.create [
+                                                Grid.column 1
+                                                TextBlock.text reason
+                                                TextBlock.textWrapping TextWrapping.Wrap
+                                            ]
+                                        ]
+                                    ]
+                            ]
+                        ]
+                    | _ -> ()
+
                     // Saved as
                     match savedPath with
                     | Some path ->

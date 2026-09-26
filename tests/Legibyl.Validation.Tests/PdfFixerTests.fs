@@ -600,6 +600,13 @@ let ``Fix writes output when a structural fix applies but the metadata fixer cha
     result.WasFixed |> should be True
     File.Exists output.Path |> should be True
     linkContentsOf output.Path |> should equal [ Some "Our privacy policy" ]
+    // veraPDF's metadata changes weren't kept, so they aren't reported as made; that they
+    // weren't is.
+    List.ofSeq result.AppliedFixes |> should equal [ "Described 1 link annotation(s) from their own text." ]
+    List.ofSeq result.NotApplied
+    |> should
+        equal
+        [ "The metadata wasn't repaired: veraPDF's metadata fixer found no way to make it conform (Won't fix), so its changes weren't kept." ]
 
 /// A document whose first page draws lines, one under another, followed by
 /// extraPages blank pages.
