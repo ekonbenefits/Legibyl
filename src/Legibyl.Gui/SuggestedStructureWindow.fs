@@ -85,8 +85,9 @@ type LayoutReviews() =
         let fresh () =
             // Any alt text saved next to the PDF, written for it or an earlier version of it.
             let review = LayoutReview modified
-            review.Edits <- RegionEdits.load fullPath
-            review.Title <- RegionEdits.loadTitle fullPath
+            let edits, title = RegionEdits.loadWithTitle fullPath
+            review.Edits <- edits
+            review.Title <- title
             review
         reviews.AddOrUpdate(fullPath, (fun _ -> fresh ()), (fun _ existing -> if existing.Modified = modified then existing else fresh ()))
 

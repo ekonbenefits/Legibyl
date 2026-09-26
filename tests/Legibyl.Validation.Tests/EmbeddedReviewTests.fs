@@ -1,5 +1,6 @@
 module Legibyl.Validation.Tests.EmbeddedReviewTests
 
+open System
 open System.IO
 open Xunit
 open FsUnit.Xunit
@@ -76,3 +77,14 @@ let ``a PDF without a review, or a file that isn't a PDF, reads as none`` () =
     File.WriteAllText(notPdf.Path, "not a PDF")
     EmbeddedReview.read notPdf.Path |> should equal None
     EmbeddedReview.read (input.Path + ".missing") |> should equal None
+
+[<Fact>]
+let ``a PDF that can't be opened reads as none`` () =
+    use input = new TempPdf()
+    createNeedingTabs input.Path
+    if not (OperatingSystem.IsWindows()) then
+        File.SetUnixFileMode(input.Path, UnixFileMode.None)
+        try
+            EmbeddedReview.read input.Path |> should equal None
+        finally
+            File.SetUnixFileMode(input.Path, UnixFileMode.UserRead ||| UnixFileMode.UserWrite)

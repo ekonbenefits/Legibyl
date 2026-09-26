@@ -2,8 +2,8 @@
 /// warnings, edits made in Suggest Structure, the title) carried inside a copy Legibyl saves, so
 /// the review travels with the PDF. It's a compressed (FlateDecode) stream of the JSON that the
 /// document catalog points to under a private key; readers ignore keys they don't know, so it
-/// isn't shown anywhere, and it's added as an incremental update, leaving the rest of the file
-/// as it was.
+/// isn't shown anywhere, and it's added as an incremental update, leaving what's before it as it
+/// was (iText's update also sets the modification date and producer).
 module Legibyl.Validation.EmbeddedReview
 
 open System
@@ -25,9 +25,12 @@ let read (pdfPath: string) : string option =
     with
     // iText's own exceptions (not a PDF, damaged, encrypted), and files that can't be read.
     | :? iText.Commons.Exceptions.ITextException
-    | :? IOException -> None
+    | :? IOException
+    | :? UnauthorizedAccessException -> None
 
 /// Writes inputPath to outputPath with json embedded as its review (replacing any it had).
+/// inputPath must read without errors (iText only appends to such a file): in Fix it's always
+/// one iText has just written.
 let write (inputPath: string) (outputPath: string) (json: string) =
     use document =
         new PdfDocument(new PdfReader(inputPath), new PdfWriter(outputPath), StampingProperties().UseAppendMode())

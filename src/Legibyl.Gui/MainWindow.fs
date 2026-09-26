@@ -541,10 +541,14 @@ module private MainView =
                                                             (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
                                                             CancellationToken.None
                                                 source |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
-                                                // The review (as the window has it) goes in the repaired copy.
-                                                validator.Review <- Dismissals.reviewJson sourcePath (Some dismissed.Current)
                                                 let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
-                                                let! fix = Task.Run(fun () -> validator.Fix(sourcePath, profile, outputPath, options, progress))
+                                                let dismissedNow = dismissed.Current
+                                                let! fix =
+                                                    Task.Run(fun () ->
+                                                        // The review (as the window has it) goes in the repaired copy.
+                                                        // Reading it can mean opening the PDF, so it's done here too.
+                                                        validator.Review <- Dismissals.reviewJson sourcePath (Some dismissedNow)
+                                                        validator.Fix(sourcePath, profile, outputPath, options, progress))
                                                 return Ok fix
                                             with
                                             | :? VeraPdfValidationException as ex -> return Error ex.Message

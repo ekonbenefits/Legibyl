@@ -236,6 +236,16 @@ to `<name>.pdf.legibyl.json` next to it, which is loaded automatically when the
 PDF is opened again (turning it off deletes that file). Failures can't be
 dismissed. The CLI doesn't read these files.
 
+A copy the GUI saves (**Fix**, or **Save Tagged Copy** in Suggest Structure)
+carries the review it was made with — dismissals as the window has them, edits
+and the title from Suggest Structure — inside it: a compressed stream the
+catalog points to under a private key (`/LBYL_Review`), added as an incremental
+update, which PDF readers don't show. Opening a PDF uses the file next to it if
+there is one (it holds any changes made since), and otherwise the review inside
+it, so a repaired copy opens with its warnings still dismissed. Turning off
+**Remember dismissals** on such a copy leaves a file without them next to it, so
+the ones inside don't come back. The CLI's `--fix` doesn't embed a review.
+
 When a finding has a known region — its marked content, the structure
 element's content, or an annotation's `/Rect` (see `RuleViolation.Geometry`
 above; Legibyl's own warnings carry one too) — the details panel

@@ -118,6 +118,12 @@ let fromFile (jsonPath: string) : Edit list = editsOf (readFile jsonPath)
 /// The edits saved for pdfPath (see Dismissals.readFor).
 let load (pdfPath: string) = editsOf (readFor pdfPath)
 
+/// The edits and document title saved for pdfPath, read once (reading a review embedded in the
+/// PDF opens it).
+let loadWithTitle (pdfPath: string) : Edit list * string option =
+    let saved = readFor pdfPath
+    editsOf saved, saved |> Option.bind (fun saved -> Option.ofObj saved.Title)
+
 /// Saves edits next to pdfPath, keeping any dismissals in the file. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
 let save (pdfPath: string) (edits: Edit list) =
