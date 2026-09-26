@@ -608,6 +608,24 @@ Options:
   `tooltip="..."` details instead.
   Absent/`null` `structure` with no `structureError` means the file has no
   structure tree at all (it's completely untagged).
+- `--suggest-layout` — include the layout the layout model suggests for each
+  file's pages in the output, under `suggestedLayout` (`LayoutFile.fs`): each
+  page's regions in reading order, with the tag each suggests (`H1`, `H`, `P`,
+  `LI`, `Figure`, `Table`, `Caption`, `Note`, `Formula`, `Lbl`, `Artifact`), its
+  `box` (left, bottom, right, top, in points), its `text` (`recognized` when OCR
+  read it because it's drawn rather than written), a QR code's `qrText`, an
+  `alt` to fill in for a figure, and a `title`. It's the same review Suggest
+  Structure shows, as JSON for a person or an agent to change — retag, remove
+  or reorder regions, write alt text, correct OCR'd text — before tagging from
+  it. Downloads the layout model the first time; several seconds a page, with
+  progress on stderr. `--suggest-layout-output <path>` (one input file) also
+  writes it to a file.
+- `--apply-layout <path>` — tag an untagged file (one input file; implies
+  `--fix`) from the layout in path, as `--suggest-layout` writes it: its regions
+  become the structure in their order, with their alt text, recognized text as
+  replacement text, and its title. It needs no layout model. Other repairs can
+  be named with `--fixes` alongside (e.g. `safe,qr-links`). A file that's
+  already tagged isn't changed, and the result says so.
 - `--list-profiles` — print supported profile names and exit `0`.
 - `--list-fixes` — print the repairs `--fixes` can name, with what each does
   (and which are in `safe`), and exit `0`.

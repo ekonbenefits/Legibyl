@@ -331,7 +331,7 @@ let ``alt text written for a figure is its alt text, ahead of a QR code's own`` 
 
     let result = tagFromLayout input.Path output.Path (Some(FixedLayout written))
 
-    result.AppliedFixes |> should contain "Gave 1 figure the alt text written in Suggest Structure"
+    result.AppliedFixes |> should contain "Gave 1 figure the alt text a person wrote"
     result.AppliedFixes |> Seq.exists (fun line -> line.Contains "need alt text" || line.Contains "needs alt text") |> should be False
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
     (flatten root |> List.find (fun node -> node.Tag = "Figure")).AlternateDescription |> should equal "Our pack's colour swatch"
@@ -345,7 +345,7 @@ let ``a link without a description gets the one the layout source has`` () =
 
     let result = tagFromLayout input.Path output.Path (Some(FixedLayout(regions, "Example Domain (example.com)")))
 
-    result.AppliedFixes |> should contain "Described 1 link as reviewed in Suggest Structure"
+    result.AppliedFixes |> should contain "Described 1 link as reviewed"
     do
         use document = new PdfDocument(new PdfReader(output.Path))
         let link = document.GetPage(1).GetAnnotations() |> Seq.find (fun a -> PdfName.Link.Equals(a.GetSubtype()))
@@ -360,7 +360,7 @@ let ``a title from the layout source titles the document and shows it`` () =
 
     let result = tagFromLayout input.Path output.Path (Some(FixedLayout(regions, title = "Cub Scout Pack 721")))
 
-    result.AppliedFixes |> should contain "Titled the document \"Cub Scout Pack 721\", as set in Suggest Structure"
+    result.AppliedFixes |> should contain "Titled the document \"Cub Scout Pack 721\", as reviewed"
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetDocumentInfo().GetTitle() |> should equal "Cub Scout Pack 721"
     document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.ViewerPreferences).GetAsBoolean(PdfName.DisplayDocTitle).GetValue() |> should be True

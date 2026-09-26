@@ -45,6 +45,12 @@ type Args =
       Edits: bool
       /// Apply the edits in this review (a .legibyl.json file, or a PDF's own review).
       EditsFrom: string option
+      /// Suggest each file's layout, in the output.
+      SuggestLayout: bool
+      /// Also write the suggested layout here (one input file).
+      SuggestLayoutOutput: string option
+      /// Tag the file from the layout in this file (see --suggest-layout).
+      ApplyLayout: string option
       TitleFromFirstPage: bool
       LinkTitlesFromWeb: bool
       FixOutputPath: string option
@@ -57,7 +63,7 @@ let private usageError (message: string) =
 
 /// Whether the arguments ask for a repaired copy: --fix, or what implies it.
 let private fixing (args: Args) =
-    args.Fix || args.Fixes.IsSome || args.Edits || args.EditsFrom.IsSome
+    args.Fix || args.Fixes.IsSome || args.Edits || args.EditsFrom.IsSome || args.ApplyLayout.IsSome
 
 /// The repairs asked for: those --fixes names (the safe ones with just --fix), and the ones
 /// their own flags ask for. Edits are added per file, when it has some.
@@ -91,7 +97,19 @@ let private deriveFixOutputPath (file: string) =
     | NonNull dir when dir <> "" -> Path.Combine(dir, fixedName)
     | _ -> fixedName
 
-let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file: string) =
+/// The layout the model suggests for each of file's pages, with a title, saying which page it's
+/// on as it goes (each takes seconds).
+let private suggestLayout (file: string) =
+    ensureLayoutModel ()
+    use suggester = new Legibyl.Layout.LayoutSuggester(file)
+    let pages =
+        [ for page in 1 .. suggester.PageCount ->
+              eprintfn $"Finding page {page} of {suggester.PageCount}'s layout…"
+              suggester.Suggest page ]
+    Legibyl.Layout.LayoutFile.ofSuggestions file pages (Legibyl.Layout.LayoutFile.suggestedTitle file pages)
+
+/// appliedLayout is --apply-layout's layout, read and checked.
+let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayout: Legibyl.Layout.LayoutFile.SavedLayout option) profile (file: string) =
     let result = FileValidationResult.Empty(file, args.ProfileName)
     match (try Ok(validator.Validate(file, profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) with
     | Error message -> { result with Error = message }
@@ -127,6 +145,7 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
                           | None -> $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
                 let options =
                     requestedFixes args
+                    ||| (if appliedLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
                     ||| (match review with
                          | Some review when not (ReviewFile.edits review).IsEmpty -> PdfFixOptions.ApplyEdits
                          | _ -> PdfFixOptions.None)
@@ -135,12 +154,14 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
                         FixStatus = RepairStatus.NoAction.ToString()
                         FixNotApplied = if noReview.IsEmpty then null else withNull (ResizeArray noReview) }
                 else
-                    let layout =
-                        if FixNames.usesLayout options then
+                    // The layout given, or else the model's (only needed for the repairs that read it).
+                    let layout: IPageLayoutSource option =
+                        match appliedLayout with
+                        | Some saved -> Some(Legibyl.Layout.LayoutFile.FileRegions saved)
+                        | None when FixNames.usesLayout options ->
                             ensureLayoutModel ()
                             Some(new Legibyl.Layout.LayoutRegionSource(null))
-                        else
-                            None
+                        | None -> None
                     try
                         try
                             // Tagging from the layout uses the review too: its alt text, corrected text and title.
@@ -154,7 +175,11 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
                                 validator.Review <- ReviewFile.forCopy (Some review)
                             | None -> ()
                             let fix = validator.Fix(file, profile, targetPath, options)
-                            let notApplied = List.ofSeq fix.NotApplied @ noReview
+                            let tagged = fix.AppliedFixes |> Seq.exists (fun line -> line.StartsWith "Tagged ")
+                            let layoutUnused =
+                                [ if appliedLayout.IsSome && not tagged then
+                                      "The layout wasn't applied: the file already has a structure tree, and tagging from a layout is for an untagged file." ]
+                            let notApplied = List.ofSeq fix.NotApplied @ noReview @ layoutUnused
                             { result with
                                 FixStatus = fix.Status.ToString()
                                 FixOutputPath = fix.OutputPath
@@ -167,15 +192,30 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
                         validator.LayoutSource <- null
                         validator.Edits <- []
                         validator.Review <- null
-                        layout |> Option.iter (fun source -> (source :> IDisposable).Dispose())
+                        match layout with
+                        | Some(:? IDisposable as source) -> source.Dispose()
+                        | _ -> ()
 
-        if not args.IncludeStructure then
+        let result =
+            if not args.IncludeStructure then
+                result
+            else
+                try
+                    { result with Structure = validator.ReadStructureTree file }
+                with :? VeraPdfValidationException as ex ->
+                    { result with StructureError = ex.Message }
+
+        if not args.SuggestLayout then
             result
         else
             try
-                { result with Structure = validator.ReadStructureTree file }
-            with :? VeraPdfValidationException as ex ->
-                { result with StructureError = ex.Message }
+                let layout = suggestLayout file
+                args.SuggestLayoutOutput |> Option.iter (fun path -> File.WriteAllText(path, Legibyl.Layout.LayoutFile.toJson layout))
+                { result with SuggestedLayout = layout }
+            with
+            | :? Net.Http.HttpRequestException as ex -> { result with SuggestedLayoutError = $"Couldn't download the layout model: {ex.Message}" }
+            | :? IOException
+            | :? UnauthorizedAccessException as ex -> { result with SuggestedLayoutError = ex.Message }
 
 let private renderJson (results: FileValidationResult list) =
     let options =
@@ -252,6 +292,25 @@ let private renderText (results: FileValidationResult list) =
                 | Null -> ()
             | Null, Null -> ()
 
+            match r.SuggestedLayoutError, r.SuggestedLayout with
+            | NonNull error, _ -> line $"  suggested layout: ERROR — {error}"
+            | Null, NonNull layout ->
+                line "  suggested layout:"
+                match layout.Title with
+                | NonNull title -> line $"    title: \"{title}\""
+                | Null -> ()
+                for page in layout.Pages do
+                    line $"    page {page.Page}:"
+                    for region in page.Regions do
+                        let text =
+                            match region.QrText, region.Text with
+                            | NonNull qr, _ -> $" QR: {qr}"
+                            | _, NonNull text when text <> "" -> $" \"{text}\""
+                            | _ -> ""
+                        let recognized = if region.Recognized then " (OCR)" else ""
+                        line $"      {region.Order} {region.Tag}{recognized}{text}"
+            | Null, Null -> ()
+
             match r.StructureError, r.Structure with
             | NonNull error, _ -> line $"  structure: ERROR — {error}"
             | Null, NonNull structure ->
@@ -276,22 +335,32 @@ let private run (args: Args) =
         | Ok _ -> ExitCodes.UsageError
     elif args.Edits && args.EditsFrom.IsSome then
         usageError "Use --edits or --edits-from, not both."
+    elif args.SuggestLayoutOutput.IsSome && not args.SuggestLayout then
+        usageError "--suggest-layout-output requires --suggest-layout."
+    elif args.SuggestLayoutOutput.IsSome && args.Files.Length > 1 then
+        usageError "--suggest-layout-output can only be used with a single input file."
+    elif args.ApplyLayout.IsSome && args.Files.Length > 1 then
+        usageError "--apply-layout can only be used with a single input file: a layout is for one document."
     elif args.FixOutputPath.IsSome && args.Files.Length > 1 then
         usageError "--fix-output can only be used with a single input file."
     else
         // The --profile validator has already rejected unknown names.
         let profile = (ProfileNames.tryParse args.ProfileName).Value
         let validator = VeraPdfValidator()
-        let results = [ for file in args.Files -> validateOne validator args profile file ]
-        let rendered = if args.Format = "json" then renderJson results else renderText results
+        match args.ApplyLayout |> Option.map Legibyl.Layout.LayoutFile.read with
+        | Some(Error message) -> usageError message
+        | appliedLayout ->
+            let appliedLayout = appliedLayout |> Option.bind Result.toOption
+            let results = [ for file in args.Files -> validateOne validator args appliedLayout profile file ]
+            let rendered = if args.Format = "json" then renderJson results else renderText results
 
-        match args.OutputPath with
-        | Some path -> File.WriteAllText(path, rendered)
-        | None -> Console.WriteLine rendered
+            match args.OutputPath with
+            | Some path -> File.WriteAllText(path, rendered)
+            | None -> Console.WriteLine rendered
 
-        if results |> List.exists (fun r -> not (isNull r.Error)) then ExitCodes.ValidationError
-        elif results |> List.exists (fun r -> r.IsCompliant = Nullable false) then ExitCodes.NonCompliant
-        else ExitCodes.Success
+            if results |> List.exists (fun r -> not (isNull r.Error)) then ExitCodes.ValidationError
+            elif results |> List.exists (fun r -> r.IsCompliant = Nullable false) then ExitCodes.NonCompliant
+            else ExitCodes.Success
 
 /// Runs a function in place of a command's action, e.g. for --list-profiles or --version.
 type private InvokeAction(invoke: ParseResult -> int) =
@@ -313,6 +382,8 @@ EXAMPLES:
   legibyl document.pdf --fixes safe,lists,headings-from-toc
   legibyl document.pdf --fixes all --edits
   legibyl flyer.v3.pdf --edits-from flyer.v2.pdf
+  legibyl scan.pdf --suggest-layout --suggest-layout-output scan.layout.json
+  legibyl scan.pdf --apply-layout scan.layout.json
   legibyl document.pdf --fix --fix-output document-repaired.pdf
   legibyl document.pdf --structure --output structure.json
 """
@@ -440,6 +511,32 @@ let main argv =
                          path instead of the auto-derived name."
                     |> helpName "path"
 
+                and! suggestLayout =
+                    option<bool> "--suggest-layout"
+                    |> desc
+                        "Include the layout the layout model suggests for each file's pages in the output, \
+                         under \"suggestedLayout\": each page's regions in reading order, with the tag each \
+                         suggests (H1, H, P, LI, Figure, Table, Caption, Note, Formula, Lbl, Artifact), its box, \
+                         its text (read by OCR where it's drawn rather than written), what a QR code encodes, an \
+                         \"alt\" to fill in for a figure, and a title. Change it as needed (retag, remove or \
+                         reorder regions, write alt text, correct OCR'd text) and tag the file from it with \
+                         --apply-layout. Downloads the layout model (about 130 MB) the first time; several \
+                         seconds a page."
+
+                and! suggestLayoutOutput =
+                    optionMaybe "--suggest-layout-output"
+                    |> desc "Use with --suggest-layout and one input file to also write the suggested layout to path, ready for --apply-layout."
+                    |> helpName "path"
+
+                and! applyLayout =
+                    optionMaybe "--apply-layout"
+                    |> desc
+                        "Tag an untagged file from the layout in path (implies --fix; one input file), as \
+                         --suggest-layout writes it: its regions become the structure, in their order, with \
+                         their alt text, recognized text as replacement text, and its title. Needs no layout \
+                         model."
+                    |> helpName "path"
+
                 and! includeStructure =
                     option<bool> "--structure"
                     |> desc
@@ -467,6 +564,9 @@ let main argv =
                       Fixes = fixes
                       Edits = edits
                       EditsFrom = editsFrom
+                      SuggestLayout = suggestLayout
+                      SuggestLayoutOutput = suggestLayoutOutput
+                      ApplyLayout = applyLayout
                       TitleFromFirstPage = titleFromFirstPage
                       LinkTitlesFromWeb = linkTitlesFromWeb
                       FixOutputPath = fixOutputPath
