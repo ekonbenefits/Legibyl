@@ -24,6 +24,9 @@ let private inFolder (existing: string list) (test: string -> unit) =
 [<InlineData("flyer_v2.pdf", "flyer_v3.pdf")>]
 [<InlineData("Report 2024.pdf", "Report 2024.v2.pdf")>]
 [<InlineData("move.pdf", "move.v2.pdf")>]
+[<InlineData("flyer.v99999999999.pdf", "flyer.v99999999999.v2.pdf")>]
+[<InlineData("flyer v\u0662.pdf", "flyer v\u0662.v2.pdf")>]
+[<InlineData("flyer", "flyer.v2")>]
 let ``a copy is named as the next version`` (name: string, expected: string) =
     inFolder [] (fun folder -> CopyNames.nextVersion (Path.Combine(folder, name)) |> should equal expected)
 
