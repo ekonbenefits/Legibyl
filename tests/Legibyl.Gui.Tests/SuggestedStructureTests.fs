@@ -14,6 +14,7 @@ open iText.Kernel.Font
 open iText.IO.Font.Constants
 open Legibyl.Gui
 open Legibyl.Layout
+open Legibyl.Validation
 open Legibyl.Screenshots
 open Legibyl.Gui.Tests.HeadlessSession
 
@@ -36,8 +37,71 @@ let private withUntaggedPdf (test: string -> unit) =
         canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 12f).MoveText(72.0, 720.0).ShowText("Hello").EndText() |> ignore
     try test path finally Directory.Delete(folder, true)
 
+let private pump () = HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+
+let private box (l, b, r, t) : StructureGeometry = { PageNumber = 1; Left = l; Bottom = b; Right = r; Top = t }
+
+let private block order tag bounds text : SuggestedBlock =
+    { Order = order; Label = "text"; Tag = tag; Score = 0.9; Geometry = box bounds; Text = text
+      ListNumbering = None; Recognized = false; QrText = None }
+
+/// A review of pdf with its first page's layout found already (so no model is needed): a
+/// heading and a paragraph with a link in it.
+let private reviewOf (pdf: string) =
+    let review = LayoutReview(File.GetLastWriteTimeUtc pdf)
+    review.Pages[1] <-
+        { PageNumber = 1
+          Blocks = [ block 1 "H" (72.0, 715.0, 300.0, 735.0) "Hello"; block 2 "P" (72.0, 600.0, 400.0, 700.0) "Apply online today." ]
+          HasText = true
+          Rotated = false }
+    review.WebLinks <- [ { Page = 1; Box = box (100.0, 640.0, 200.0, 655.0); Address = "https://example.com/apply" } ]
+    review
+
+let private show (pdf: string) (review: LayoutReview) =
+    let window = StructureTreeWindow(Suggested review, pdf, ignore)
+    window.Show()
+    pump ()
+    window
+
+let private texts (root: Visual) = descendants<TextBlock> root |> List.map (fun t -> string t.Text)
+
+let private blockFor (window: Window) (tag: string) =
+    descendants<Border> window |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = tag | _ -> false)
+
+/// Clicks a block, selecting it.
+let private select (block: Border) =
+    let properties = Input.PointerPointProperties(Input.RawInputModifiers.LeftMouseButton, Input.PointerUpdateKind.LeftButtonPressed)
+    block.RaiseEvent(
+        Input.PointerPressedEventArgs(block, new Input.Pointer(0, Input.PointerType.Mouse, true), block, Point(4.0, 4.0), 0UL, properties, Input.KeyModifiers.None)
+    )
+    pump ()
+
 [<Fact>]
-let ``an untagged PDF's structure offers to suggest one`` () =
+let ``a page's suggestions are elements: list items in a list, links in the region they're in`` () =
+    let review = LayoutReview(DateTime.UtcNow)
+    review.WebLinks <- [ { Page = 1; Box = box (100.0, 640.0, 200.0, 655.0); Address = "https://example.com/apply" } ]
+    review.Titles <- Map [ "https://example.com/apply", "Apply" ]
+    let page =
+        { PageNumber = 1
+          Blocks =
+            [ block 1 "P" (72.0, 600.0, 400.0, 700.0) "Apply online today."
+              block 2 "LI" (72.0, 560.0, 400.0, 580.0) "One"
+              block 3 "LI" (72.0, 540.0, 400.0, 558.0) "Two"
+              { block 4 "Figure" (72.0, 300.0, 216.0, 444.0) "" with QrText = Some "https://example.com/apply" } ]
+          HasText = true
+          Rotated = false }
+
+    let nodes = SuggestedTree.pageNodes review page
+
+    nodes |> List.map _.Tag |> should equal [ "P"; "L"; "Figure" ]
+    [ for item in nodes[1].Children -> item.Content ] |> should equal [ "One"; "Two" ]
+    let link = nodes[0].Children |> Seq.exactlyOne
+    // Named by its page's title, and where it is.
+    (link.Tag, link.LinkUri, link.LinkDescription) |> should equal ("Link", "https://example.com/apply", "Apply (example.com)")
+    nodes[2].AlternateDescription |> should haveSubstring "https://example.com/apply"
+
+[<Fact>]
+let ``an untagged PDF's structure offers to suggest one, shown in View Structure`` () =
     withUntaggedPdf (fun pdf ->
         onUiThread (fun () ->
             let window = HeadlessWindow.show 1200.0 720.0
@@ -46,38 +110,147 @@ let ``an untagged PDF's structure offers to suggest one`` () =
             HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> window.OwnedWindows.Count = 1) |> ignore
             let dialog = window.OwnedWindows |> Seq.exactlyOne
             click (button dialog "Suggest Structure…")
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 5.0) (fun () ->
-                window.OwnedWindows |> Seq.exists (fun w -> w :? SuggestedStructureWindow))
-            |> ignore
-            let opened = window.OwnedWindows |> Seq.filter (fun w -> w :? SuggestedStructureWindow) |> List.ofSeq
+            let suggested () = window.OwnedWindows |> Seq.filter (fun w -> w :? StructureTreeWindow) |> List.ofSeq
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 5.0) (fun () -> not (suggested ()).IsEmpty) |> ignore
+            let opened = suggested () |> List.map _.Title
             for owned in List.ofSeq window.OwnedWindows do owned.Close()
             window.Close()
-            opened |> should haveLength 1))
+            opened |> should equal [ "Suggested Structure" ]))
 
 [<Fact>]
-let ``the suggested structure lists each region the detector finds`` () =
-    if not (LayoutModel.isDownloaded ()) then
-        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    onUiThread (fun () ->
-        let window = SuggestedStructureWindow(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"))
-        window.Show()
-        let blocks () =
-            descendants<Button> window |> List.filter (fun b -> match b.Content with :? DockPanel -> true | _ -> false)
-        let images () = descendants<Image> window |> List.filter (fun image -> not (isNull image.Source))
-        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (blocks().IsEmpty) && not (images().IsEmpty)) |> ignore
-        let found = blocks().Length
-        let texts = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
-        let tags = descendants<ComboBox> window |> List.map (fun c -> string c.SelectedItem)
-        window.Close()
-        found |> should be (greaterThan 0)
-        texts |> List.exists (fun t -> t.StartsWith "Page 1 of 1") |> should be True
-        // Each region's reading order, and its tag in a picker beside it.
-        texts |> should contain " 1"
-        tags |> should haveLength found
-        tags |> List.forall (fun tag -> List.contains tag Legibyl.Validation.LayoutFile.tags) |> should be True)
+let ``the suggestions show as elements, said not to be tagged yet`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let window = show pdf (reviewOf pdf)
+            let shown = texts window
+            let tags =
+                descendants<Border> window |> List.choose (fun b -> match b.Tag with :? StructureNode as n -> Some n.Tag | _ -> None)
+            window.Close()
+
+            shown |> should contain "Not tagged yet: this is the structure suggested for it"
+            shown |> List.exists (fun t -> t.StartsWith "Every page's layout found.") |> should be True
+            tags |> should equal [ "Document"; "H"; "P"; "Link" ]))
 
 [<Fact>]
-let ``every page's layout is found in the background, so the next page shows at once`` () =
+let ``a region can be left out and kept again, as an edit tagging takes`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = reviewOf pdf
+            let window = show pdf review
+            select (blockFor window "H")
+            click (button window "Leave Out")
+            pump ()
+            let leftOut = texts window
+            let saved = File.ReadAllText(pdf + ".legibyl.json")
+            use suggester = new LayoutSuggester(pdf)
+            let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> IPageLayoutSource).PageRegions(pdf, 1)
+            let tagged = [ for region in regions -> region.Tag ]
+            click (button window "Keep")
+            pump ()
+            let kept = review.Edits
+            window.Close()
+
+            leftOut |> should contain "✎ left out: not tagged (its text joins the nearest region kept)"
+            // With the layout the edit is on.
+            saved |> should haveSubstring "\"exclude\": true"
+            saved |> should haveSubstring "\"layout\""
+            tagged |> should equal [ "P" ]
+            kept |> List.exists _.Exclude |> should be False))
+
+[<Fact>]
+let ``a region can be given any suggested tag, which is kept and tagged`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = reviewOf pdf
+            let window = show pdf review
+            select (blockFor window "P")
+            let picker = descendants<ComboBox> window |> List.exactlyOne
+            let choices = picker.Items |> Seq.map string |> List.ofSeq
+            picker.SelectedItem <- "Note"
+            pump ()
+            let shown = texts window
+            window.Close()
+
+            choices |> should equal LayoutFile.tags
+            shown |> should contain "✎ your tag: \"Note\""
+            // An edit on the suggestion, which stays as found; a new session has it.
+            let later = LayoutReviews().For pdf
+            later.Pages[1].Blocks[1].Tag |> should equal "P"
+            later.Edits |> List.map (fun e -> e.Tag, e.Retag) |> should equal [ "P", Some "Note" ]))
+
+[<Fact>]
+let ``a web link's description is an edit, which tagging writes`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = reviewOf pdf
+            let window = show pdf review
+            let link = blockFor window "Link"
+            let item = link.ContextMenu |> nonNull |> _.Items |> Seq.cast<MenuItem> |> Seq.exactlyOne
+            item.RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
+            pump ()
+            let prompt = window.OwnedWindows |> Seq.exactlyOne
+            (descendants<TextBox> prompt |> List.exactlyOne).Text <- "Apply for membership"
+            pump ()
+            click (button prompt "OK")
+            pump ()
+            let shown = texts window
+            window.Close()
+
+            string item.Header |> should equal "Edit Link Description…"
+            shown |> should contain "✎ your description: \"Apply for membership\""
+            review.LinkDescription review.WebLinks.Head |> should equal (Some "Apply for membership")))
+
+[<Fact>]
+let ``reopening keeps what was found and left out`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let reviews = LayoutReviews()
+            let review = reviews.For pdf
+            for KeyValue(page, found) in reviewOf pdf |> _.Pages do review.Pages[page] <- found
+            let window = show pdf review
+            select (blockFor window "H")
+            click (button window "Leave Out")
+            window.Close()
+
+            // A new session: the layout and the edit come back from the file next to the PDF.
+            let later = LayoutReviews().For pdf
+            later.Pages[1].Blocks |> List.map _.Tag |> should equal [ "H"; "P" ]
+            later.Edits |> List.filter _.Exclude |> List.length |> should equal 1))
+
+[<Fact>]
+let ``the document title is prefilled from the document, and only a change is saved`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "flyer.pdf")
+    do
+        use document = new PdfDocument(new PdfWriter(pdf))
+        document.AddNewPage() |> ignore
+        document.GetDocumentInfo().SetTitle "Design" |> ignore
+    try
+        onUiThread (fun () ->
+            let reviews = LayoutReviews()
+            let window = show pdf (reviews.For pdf)
+            let titleBox () = descendants<TextBox> window |> List.find (fun b -> b.PlaceholderText = "What a screen reader and the title bar call this document")
+            let prefilled = titleBox().Text
+            let savedAtFirst = File.Exists(pdf + ".legibyl.json")
+            titleBox().Text <- "Cub Scout Pack 721"
+            pump ()
+            let saved = File.ReadAllText(pdf + ".legibyl.json")
+            titleBox().Text <- "Design"
+            pump ()
+            let removed = not (File.Exists(pdf + ".legibyl.json"))
+            window.Close()
+
+            prefilled |> should equal "Design"
+            savedAtFirst |> should be False
+            saved |> should haveSubstring "\"title\": \"Cub Scout Pack 721\""
+            removed |> should be True
+            (reviews.For pdf).DocumentTitle |> should equal (Some "Design"))
+    finally
+        Directory.Delete(folder, true)
+
+[<Fact>]
+let ``the detector's regions are found in the background and fill in the structure`` () =
     if not (LayoutModel.isDownloaded ()) then
         Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
     let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
@@ -95,92 +268,22 @@ let ``every page's layout is found in the background, so the next page shows at 
                 |> ignore
     try
         onUiThread (fun () ->
-            let window = SuggestedStructureWindow(pdf)
-            window.Show()
-            let texts () = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
-            let allFound () = texts () |> List.exists (fun t -> t.EndsWith "every page's layout found")
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) allFound |> ignore
-            let foundBeforeMoving = allFound ()
-
-            click (button window "Next ▶")
-            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-            let afterMoving = texts ()
+            let window = show pdf (LayoutReview(File.GetLastWriteTimeUtc pdf))
+            let allFound () = texts window |> List.exists (fun t -> t.StartsWith "Every page's layout found.")
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 90.0) allFound |> ignore
+            let found = allFound ()
+            let pages =
+                descendants<Border> window
+                |> List.choose (fun b -> match b.Tag with :? StructureNode as n when n.PageNumber.HasValue -> Some n.PageNumber.Value | _ -> None)
+                |> List.distinct
+            let tags = descendants<Border> window |> List.choose (fun b -> match b.Tag with :? StructureNode as n -> Some n.Tag | _ -> None)
+            let preview = descendants<Image> window |> List.exists (fun image -> not (isNull image.Source))
             window.Close()
 
-            foundBeforeMoving |> should be True
-            afterMoving |> List.exists (fun t -> t.StartsWith "Page 2 of 2") |> should be True
-            afterMoving |> List.exists (fun t -> t.StartsWith "Finding the layout") |> should be False)
-    finally
-        Directory.Delete(folder, true)
-
-[<Fact>]
-let ``a QR code's alt text is prefilled with where it links, to edit`` () =
-    if not (LayoutModel.isDownloaded ()) then
-        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
-    Directory.CreateDirectory folder |> ignore
-    let pdf = Path.Combine(folder, "qr.pdf")
-    do
-        use document = new PdfDocument(new PdfWriter(pdf))
-        let canvas = PdfCanvas(document.AddNewPage())
-        canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 18f).MoveText(72.0, 720.0).ShowText("Scan to apply").EndText()
-        |> ignore
-        // A 2-inch code, a point per module, drawn as squares.
-        let matrix = ZXing.QrCode.QRCodeWriter().encode("https://example.com/apply", ZXing.BarcodeFormat.QR_CODE, 144, 144)
-        for row in 0 .. matrix.Height - 1 do
-            for column in 0 .. matrix.Width - 1 do
-                if matrix[column, row] then canvas.Rectangle(72.0 + float column, 680.0 - float row, 1.0, 1.0) |> ignore
-        canvas.Fill() |> ignore
-    try
-        onUiThread (fun () ->
-            let window = SuggestedStructureWindow(pdf)
-            window.Show()
-            let boxes () = descendants<TextBox> window |> List.map (fun t -> string t.Text)
-            let alt = "QR code linking to https://example.com/apply"
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> boxes () |> List.contains alt) |> ignore
-            let shown = boxes ()
-            // Reading titles is offered before the window opens, not in it.
-            let checkbox = descendants<CheckBox> window |> List.tryFind (fun c -> string c.Content = "Read link titles from the web")
-            window.Close()
-
-            shown |> should contain alt
-            checkbox |> should equal None)
-    finally
-        Directory.Delete(folder, true)
-
-[<Fact>]
-let ``suggestions can be discarded and kept again, and discarded ones aren't tagged`` () =
-    if not (LayoutModel.isDownloaded ()) then
-        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    // A copy of its own: discarding saves the review next to the PDF.
-    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
-    Directory.CreateDirectory folder |> ignore
-    let pdf = Path.Combine(folder, "pass.pdf")
-    File.Copy(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), pdf)
-    try
-      onUiThread (fun () ->
-        let window = SuggestedStructureWindow(pdf)
-        window.Show()
-        let buttons () = descendants<Button> window
-        let toggles () = buttons () |> List.filter (fun b -> string b.Content = "Discard" || string b.Content = "Keep")
-        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (toggles().IsEmpty)) |> ignore
-        let count = toggles().Length
-
-        click (toggles().Head)
-        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-        let afterDiscarding = toggles () |> List.map (fun b -> string b.Content)
-        click (button window "Keep all")
-        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-        let afterKeepingAll = toggles () |> List.map (fun b -> string b.Content)
-        click (button window "Discard all")
-        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-        let afterDiscardingAll = toggles () |> List.map (fun b -> string b.Content)
-        window.Close()
-
-        count |> should be (greaterThan 0)
-        afterDiscarding |> should equal ("Keep" :: List.replicate (count - 1) "Discard")
-        afterKeepingAll |> should equal (List.replicate count "Discard")
-        afterDiscardingAll |> should equal (List.replicate count "Keep"))
+            found |> should be True
+            pages |> should equal [ 1; 2 ]
+            tags |> List.forall (fun tag -> tag = "Document" || tag = "L" || tag = "Link" || List.contains tag LayoutFile.tags) |> should be True
+            preview |> should be True)
     finally
         Directory.Delete(folder, true)
 
@@ -195,159 +298,3 @@ let ``the reviewed layout leaves out discarded suggestions`` () =
     let reviewed = ReviewedLayout(prefetcher, review) :> Legibyl.Validation.IPageLayoutSource
     let regions = reviewed.PageRegions("unused.pdf", 1)
     regions.Count |> should equal (all.Length - 1)
-
-[<Fact>]
-let ``reopening Suggest Structure keeps what was found and discarded`` () =
-    if not (LayoutModel.isDownloaded ()) then
-        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    // A copy of its own: discarding saves the review next to the PDF.
-    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
-    Directory.CreateDirectory folder |> ignore
-    let pdf = Path.Combine(folder, "pass.pdf")
-    File.Copy(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), pdf)
-    let reviews = LayoutReviews()
-    try
-      onUiThread (fun () ->
-        let toggles (window: Window) =
-            descendants<Button> window |> List.filter (fun b -> string b.Content = "Discard" || string b.Content = "Keep")
-        let first = SuggestedStructureWindow(pdf, reviews.For pdf)
-        first.Show()
-        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (toggles first).IsEmpty) |> ignore
-        click (toggles first).Head
-        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-        first.Close()
-
-        let reopened = SuggestedStructureWindow(pdf, reviews.For pdf)
-        reopened.Show()
-        // Already found: shown without waiting for the detector.
-        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> not (toggles reopened).IsEmpty) |> ignore
-        let restored = toggles reopened |> List.map (fun b -> string b.Content)
-        reopened.Close()
-
-        restored |> should not' (be Empty)
-        restored.Head |> should equal "Keep"
-        restored.Tail |> List.forall ((=) "Discard") |> should be True
-        let excluded (review: LayoutReview) = review.Edits |> List.filter _.Exclude |> List.length
-        excluded (reviews.For pdf) |> should equal 1
-        // Kept next to the PDF too: a new session finds it again.
-        excluded (LayoutReviews().For pdf) |> should equal 1)
-    finally
-        Directory.Delete(folder, true)
-
-/// A PDF with a heading and a QR code, which the detector finds as a figure.
-let private createQrPdf (pdf: string) =
-    use document = new PdfDocument(new PdfWriter(pdf))
-    let canvas = PdfCanvas(document.AddNewPage())
-    canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 18f).MoveText(72.0, 720.0).ShowText("Scan to apply").EndText()
-    |> ignore
-    let matrix = ZXing.QrCode.QRCodeWriter().encode("https://example.com/apply", ZXing.BarcodeFormat.QR_CODE, 144, 144)
-    for row in 0 .. matrix.Height - 1 do
-        for column in 0 .. matrix.Width - 1 do
-            if matrix[column, row] then canvas.Rectangle(72.0 + float column, 680.0 - float row, 1.0, 1.0) |> ignore
-    canvas.Fill() |> ignore
-
-[<Fact>]
-let ``alt text typed for a figure is saved next to the PDF, filled in again later, and tagged`` () =
-    if not (LayoutModel.isDownloaded ()) then
-        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
-    Directory.CreateDirectory folder |> ignore
-    let pdf = Path.Combine(folder, "qr.pdf")
-    createQrPdf pdf
-    let altBoxes (window: Window) =
-        descendants<TextBox> window |> List.filter (fun b -> b.PlaceholderText = "Alt text: what this figure shows, for someone who can't see it")
-    try
-        onUiThread (fun () ->
-            let first = SuggestedStructureWindow(pdf, LayoutReviews().For pdf)
-            first.Show()
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (altBoxes first).IsEmpty) |> ignore
-            (altBoxes first).Head.Text <- "Scan to apply online"
-            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-            first.Close()
-
-            // A new session: the alt text comes back from the file next to the PDF.
-            let review = LayoutReviews().For pdf
-            let reopened = SuggestedStructureWindow(pdf, review)
-            reopened.Show()
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (altBoxes reopened).IsEmpty) |> ignore
-            let filled = (altBoxes reopened).Head.Text
-            reopened.Close()
-
-            File.ReadAllText(pdf + ".legibyl.json") |> should haveSubstring "Scan to apply online"
-            filled |> should equal "Scan to apply online"
-            use suggester = new LayoutSuggester(pdf)
-            let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> Legibyl.Validation.IPageLayoutSource).PageRegions(pdf, 1)
-            regions |> Seq.choose (fun r -> Option.ofObj r.Alt) |> List.ofSeq |> should equal [ "Scan to apply online" ])
-    finally
-        Directory.Delete(folder, true)
-
-[<Fact>]
-let ``the document title is prefilled from the document, and only a change is saved`` () =
-    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
-    Directory.CreateDirectory folder |> ignore
-    let pdf = Path.Combine(folder, "flyer.pdf")
-    do
-        use document = new PdfDocument(new PdfWriter(pdf))
-        document.AddNewPage() |> ignore
-        document.GetDocumentInfo().SetTitle "Design" |> ignore
-    try
-        onUiThread (fun () ->
-            let reviews = LayoutReviews()
-            let window = SuggestedStructureWindow(pdf, reviews.For pdf)
-            window.Show()
-            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-            let titleBox () = descendants<TextBox> window |> List.find (fun b -> b.PlaceholderText = "What a screen reader and the title bar call this document")
-            let prefilled = titleBox().Text
-            let savedAtFirst = File.Exists(pdf + ".legibyl.json")
-            titleBox().Text <- "Cub Scout Pack 721"
-            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-            let saved = File.ReadAllText(pdf + ".legibyl.json")
-            titleBox().Text <- "Design"
-            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-            let removed = not (File.Exists(pdf + ".legibyl.json"))
-            window.Close()
-
-            prefilled |> should equal "Design"
-            savedAtFirst |> should be False
-            saved |> should haveSubstring "\"title\": \"Cub Scout Pack 721\""
-            removed |> should be True
-            (reviews.For pdf).DocumentTitle |> should equal (Some "Design"))
-    finally
-        Directory.Delete(folder, true)
-
-[<Fact>]
-let ``a region can be given another tag, which is kept and tagged`` () =
-    if not (LayoutModel.isDownloaded ()) then
-        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
-    Directory.CreateDirectory folder |> ignore
-    let pdf = Path.Combine(folder, "pass.pdf")
-    File.Copy(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), pdf)
-    let reviews = LayoutReviews()
-    try
-        onUiThread (fun () ->
-            let window = SuggestedStructureWindow(pdf, reviews.For pdf)
-            window.Show()
-            let pickers () = descendants<ComboBox> window
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (pickers().IsEmpty)) |> ignore
-            let first = pickers().Head
-            let before = string first.SelectedItem
-            let other = if before = "Caption" then "Note" else "Caption"
-            first.SelectedItem <- other
-            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-            let shown = string (pickers().Head.SelectedItem)
-            window.Close()
-
-            shown |> should equal other
-            // Kept next to the PDF: a new session has it.
-            // An edit on the suggestion, which stays as found.
-            let later = LayoutReviews().For pdf
-            later.Pages[1].Blocks.Head.Tag |> should equal before
-            later.Edits |> List.map (fun e -> e.Tag, e.Retag) |> should equal [ before, Some other ]
-            // And it's what tagging takes.
-            let reviewed = LayoutReviews().For pdf
-            use suggester = new LayoutSuggester(pdf)
-            let regions = (ReviewedLayout(LayoutPrefetcher(suggester, reviewed.Pages), reviewed) :> Legibyl.Validation.IPageLayoutSource).PageRegions(pdf, 1)
-            regions[0].Tag |> should equal other)
-    finally
-        Directory.Delete(folder, true)

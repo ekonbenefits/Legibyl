@@ -1,4 +1,4 @@
-/// Changes made to suggested regions in Suggest Structure: a figure's alt text, and corrected
+/// Changes made to suggested regions (an untagged PDF's structure in View Structure): a figure's alt text, and corrected
 /// OCR text; and the same, plus paragraphs merged, to elements in View Structure. Kept in the
 /// "edits" section of the "<name>.pdf.legibyl.json" file next to the PDF
 /// (with any remembered dismissals). A region is found again by its page, its suggested tag and
@@ -196,7 +196,7 @@ let save (pdfPath: string) (edits: Edit list) =
 /// place of its saved dismissals if given, and its edits moved to the elements tagging made.
 let reviewFor (pdfPath: string) (dismissed: Dismissed option) = ReviewFile.forCopy (reviewFile pdfPath dismissed)
 
-/// The document title set in Suggest Structure and saved for pdfPath, if any.
+/// The document title set for an untagged PDF in View Structure and saved for pdfPath, if any.
 let loadTitle (pdfPath: string) : string option =
     readFor pdfPath |> Option.bind (fun saved -> Option.ofObj saved.Title)
 

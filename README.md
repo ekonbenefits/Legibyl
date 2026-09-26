@@ -258,10 +258,11 @@ dismissed. The CLI applies their edits with `--edits` (see below).
 
 Changes are chosen first and written together. Three buttons under the details:
 
-- **Structure…** opens View Structure (or, for an untagged PDF, offers Suggest
-  Structure), where you make edits. Its badge counts your edits that aren't in
-  this PDF yet: for a tagged PDF, edits its elements don't have yet; for an
-  untagged one, its edits in Suggest Structure (and a changed title). Edits
+- **Structure…** opens View Structure (for an untagged PDF, after offering to
+  suggest a structure, which it then shows), where you make edits. Its badge
+  counts your edits that aren't in this PDF yet: for a tagged PDF, edits its
+  elements don't have yet; for an untagged one, its edits on the suggested
+  structure (and a changed title). Edits
   already in the PDF are reference, and for importing into another version of
   it; they don't count.
 - **Auto Fixes…** chooses repairs (the dialog doesn't save). Nothing is chosen
@@ -275,7 +276,7 @@ Changes are chosen first and written together. Three buttons under the details:
   there's something to write.
 
 A copy the GUI saves carries the review it was made with — dismissals as the window has them, edits
-and the title from Suggest Structure — inside it: a compressed stream the
+and the title given an untagged PDF — inside it: a compressed stream the
 catalog points to under a private key (`/LBYL_Review`), added as an incremental
 update, which PDF readers don't show. Opening a PDF uses the file next to it if
 there is one (it holds any changes made since), and otherwise the review inside
@@ -318,11 +319,11 @@ that already has alt text) or **Edit Replacement Text…** (only elements that
 already have `/ActualText`, like OCR'd text, since writing it over real text
 would hide what the page says) or **Edit Link Description…** (a link: what a
 screen reader announces for it, written as its annotation's `/Contents`, the
-same edit Suggest Structure makes for an untagged PDF's web links; blocks show
+same edit made on an untagged PDF's suggested structure; blocks show
 a link's description, and structure output has it as `linkDescription`). An
 edit is saved with the rest of the review
 (`<name>.pdf.legibyl.json`, and inside copies Legibyl saves), keyed by page,
-tag and box like the edits in Suggest Structure, and the block shows it as not
+tag and box like the edits on a suggested structure, and the block shows it as not
 in the PDF yet. Paragraphs can be merged too: shift-click extends the selection
 over a block's siblings (the page preview outlines and numbers each one), and
 when a single block of text (a paragraph, heading, caption, note or block
@@ -336,12 +337,12 @@ yet, and removes ones you no longer want. **Save…** writes the ones not in it
 yet to a copy (`ElementEdits.fs`), each to the element with its tag in about the
 same place, so they still apply after other repairs have rearranged the tree.
 
-Edits made in Suggest Structure are the same kind of edit, keyed to the regions
-it suggested. A copy tagged from them carries them moved to the elements
+Edits made on a suggested structure are the same kind of edit, keyed to the
+regions suggested. A copy tagged from them carries them moved to the elements
 tagging made (the tag it wrote, like `H1` for a suggested `H`, and the box of
 what the element holds), so in View Structure they're edits of those elements:
 shown as in the PDF, and updated rather than duplicated when edited there. The
-original's file keeps them keyed to the regions, for Suggest Structure.
+original's file keeps them keyed to the regions, for its suggested structure.
 The default **Layout** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
 (headings, lists, tables, links, figures, etc. use different colors).
@@ -375,23 +376,29 @@ document also renders the page it goes to below, with the destination marked
 in blue: the line the view starts at, the rectangle a `/FitR` destination
 shows, or the whole page when the destination names no position.
 If the file has no structure tree at all (completely untagged), the button
-reports that instead of an empty tree, and offers **Suggest Structure…**: a
-preview of the structure a layout detector finds on each page (PaddleOCR's
-PP-DocLayoutV3, via the pure C# [PaddleOCR](https://www.nuget.org/packages/PaddleOCR)
-port in `Legibyl.Layout`). Each region is outlined on the page with the tag it
-suggests (H1, H, P, Figure, Table, Caption, Note, or Artifact for page
-furniture) and its reading order. The detector has no list regions, so runs of
-paragraphs that start with list markers become list items (LI) by the same
-rules as the lists-from-paragraphs fix; the list beside it shows each region's text,
-with a picker to give it another tag (H1, H, P, LI, Figure, Table, Caption,
-Note, Formula, Lbl, Artifact) — a heading the detector took for a paragraph,
-say.
+reports that instead of an empty tree, and offers **Suggest Structure…**, which
+opens View Structure on the structure a layout detector suggests for each page
+(PaddleOCR's PP-DocLayoutV3, via the pure C# [PaddleOCR](https://www.nuget.org/packages/PaddleOCR)
+port in `Legibyl.Layout`), under a banner saying it isn't tagged yet. It's one
+outline of the whole document, filling in as each page's layout is found: each
+region an element with the tag it suggests (H1, H, P, Figure, Table, Caption,
+Note, or Artifact for page furniture), in reading order, and the page preview
+outlines and numbers them as it does a tagged PDF's elements. The detector has
+no list regions, so runs of paragraphs that start with list markers become list
+items (LI), in a list, by the same rules as the lists-from-paragraphs fix; a web
+link without a description is a `Link` inside the region it's in. Selecting a
+region gives a **Tag** picker for another tag (H1, H, P, LI, Figure, Table,
+Caption, Note, Formula, Lbl, Artifact) — a heading the detector took for a
+paragraph, say — and **Leave Out** (or **Keep**); shift-click selects several,
+and selecting a list or the document leaves out or keeps every region in it.
+The preview draws a region left out in grey, and every region with its tag as
+edited.
 
 The layout itself is never changed: like a structure read from a
 tagged PDF, they're read-only, and what you decide is layered on top as edits
 (`ElementEdits.onRegions`), each naming the region by its page, the tag it
 was found with, and its box — the same kind of edit View Structure makes on a
-tagged PDF's elements. Discarding a region is an `exclude` edit, picking
+tagged PDF's elements. Leaving a region out is an `exclude` edit, picking
 another tag a `retag` edit, and alt text and corrected text are edits too.
 Nothing is written to the PDF until **Save…** in the main window tags a copy
 with the regions and the edits on them. Once you've decided something, the
@@ -404,7 +411,7 @@ since (a regenerated PDF) is found again instead; edits, matched by box, still
 apply to it. The model (about 130 MB) is
 downloaded once, when asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`)
 and runs locally; each page takes several seconds on the CPU, so pages are
-detected as they're shown. A page without a text layer (a scan) is flagged, since
+found in the background, in order, and added to the structure as they are. A page without a text layer (a scan) is flagged, since
 tagging it would need OCR first. The detector test is skipped unless the model
 has been downloaded.
 
@@ -439,19 +446,19 @@ that needs OCR. Text drawn as outlines is tagged as its region's element, with
 the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
 and the report asks for it to be checked. It doesn't describe links outside a table of contents.
 
-Suggest Structure also has a **Document title** field, prefilled the way the
+For an untagged PDF, View Structure also has a **Document title** field, prefilled the way the
 title fixes find one: the document's own title (Info, then XMP), else a short
 first page's text, else the first H1 the layout found. The other candidates are
 offered beside it with where they came from (e.g. "Cub Scout Pack 721 · first
 heading" when the document's own title is just "Design"). A title that's changed
 is saved as `title` in the file next to the PDF; tagging gives the document the
-title as edited, or as shown prefilled if the window was opened, with
+title as edited, or as shown prefilled if the structure was viewed, with
 `/DisplayDocTitle`. (The Auto Fixes dialog, tagging a file never reviewed, doesn't take
 a title from a heading.)
 
-Figures can be given alt text, and OCR'd text corrected, right in Suggest
-Structure: each Figure has an alt text box (a QR code's own description shows
-as its hint), and each region read with OCR has its text in a box to correct.
+Figures can be given alt text, and OCR'd text corrected, on the suggested
+structure too: right-click a figure for **Edit Alt Text…** (a QR code's starts
+from where it links), and a region read with OCR for **Edit Replacement Text…**.
 When tagging (**Save…** with a review, or the Auto Fixes option), alt text is written as the
 figure's `/Alt`, and corrected text as the region's `/ActualText` (cleared
 meaning there's nothing to read there). Edits are saved as they're typed in the
@@ -461,7 +468,7 @@ correction is recorded only if it differs from what OCR read. So they're filled
 in again whenever the layout is suggested again, even for a regenerated PDF, as
 long as the region is in about the same place (same page and tag, boxes
 overlapping at least 60%). The file is read automatically when it's named after
-the PDF; **Import Edits…** takes one with another name, such as the one saved
+the PDF; **Import Edits…** (in View Structure, tagged or not) takes one with another name, such as the one saved
 for an earlier version, or another PDF: the edits saved for it, or inside it (a
 copy Legibyl saved, like the tagged copy of an earlier version).
 
@@ -478,17 +485,16 @@ figures are tried on their own first. A code inside a figure describes it (alt
 text "QR code linking to …", or "QR code: …" for other content); one the
 detector didn't take for a figure becomes a figure of its own.
 
-Before Suggest Structure opens, if the PDF links to web pages without saying
+Before the suggested structure opens, if the PDF links to web pages without saying
 where (link annotations with no description, and QR codes, found by a quick
 scan of each page without the layout model), Legibyl offers to read those
 pages' titles: the addresses are listed as they're found, each can be
 unticked, and **Skip** reads none. The titles are read as the link-titles fix
 does (public pages only, titles only), and QR codes found later in the window
-follow the same answer; it's asked once per file per session. In the window, a
-QR code's alt text ("QR code linking to Apply online (https://…)") and each
-undescribed link's description ("Apply online (example.com)", under **Links on
-this page without a description**) are prefilled from what was read, and can be
-edited; like OCR corrections, only a change from what was prefilled is saved
+follow the same answer; it's asked once per file per session. A QR code's alt
+text ("QR code linking to Apply online (https://…)") and each undescribed link's
+description ("Apply online (example.com)"; right-click the link for **Edit Link
+Description…**) are prefilled from what was read, and can be edited; like OCR corrections, only a change from what was prefilled is saved
 (as `alt` on the region's or link's entry in `edits`). Tagging writes them as
 the figure's `/Alt` and the link's `/Contents`. With the Auto Fixes dialog's **Link QR
 codes** option (off by default, alongside tagging), a code that encodes a web
@@ -725,7 +731,7 @@ when OCR read it because it's drawn rather than written), a QR code's `qrText`,
 and a `title` — to stdout, or with `--output <path>` to a file (stdout then
 gets a summary). Each figure also gets `textBefore` and `textAfter`, the text of
 the regions just before and after it (a caption, the paragraph about it), since
-good alt text says why a figure is there. It's what Suggest Structure shows.
+good alt text says why a figure is there. It's what View Structure shows for an untagged PDF.
 Downloads the layout model the first time; several seconds a page, with
 progress on stderr.
 

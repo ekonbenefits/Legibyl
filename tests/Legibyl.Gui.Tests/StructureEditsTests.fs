@@ -276,6 +276,24 @@ let ``a block of text can be given another tag, which shows as not in the PDF ye
             editsTab |> should contain "Not in this PDF yet: Save… writes it to a copy."))
 
 [<Fact>]
+let ``the tag picker retags the block selected now, not one selected before`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show lines pdf
+            let blocks = paragraphs window
+            click blocks[0] false
+            click blocks[1] false
+            (tagPicker window |> Option.get).SelectedItem <- "Caption"
+            pump ()
+            // Moving on sets the picker to the next one's tag, which retags neither.
+            click blocks[2] false
+            click blocks[0] false
+            window.Close()
+
+            let second = nonNull (blocks[1].Tag :?> StructureNode).Geometry
+            RegionEdits.load pdf |> List.map (fun e -> e.Box, e.Retag) |> should equal [ second, Some "Caption" ]))
+
+[<Fact>]
 let ``a retag the PDF already has shows as in it, and figures get no tag picker`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
