@@ -107,14 +107,16 @@ let private ofSaved (saved: SavedEdit) : Edit option =
         if edit.Alt.IsNone && edit.Text.IsNone then None else Some edit
     | _ -> None
 
-/// The edits in a .legibyl.json file, e.g. one saved next to an earlier version of the PDF.
-let fromFile (jsonPath: string) : Edit list =
-    match readFile jsonPath with
+let private editsOf (saved: SavedFile option) : Edit list =
+    match saved with
     | Some saved -> saved.Edits |> Option.ofObj |> Option.map (Array.choose ofSaved >> List.ofArray) |> Option.defaultValue []
     | None -> []
 
-/// The edits saved next to pdfPath.
-let load (pdfPath: string) = fromFile (filePath pdfPath)
+/// The edits in a .legibyl.json file, e.g. one saved next to an earlier version of the PDF.
+let fromFile (jsonPath: string) : Edit list = editsOf (readFile jsonPath)
+
+/// The edits saved for pdfPath (see Dismissals.readFor).
+let load (pdfPath: string) = editsOf (readFor pdfPath)
 
 /// Saves edits next to pdfPath, keeping any dismissals in the file. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
@@ -128,9 +130,9 @@ let save (pdfPath: string) (edits: Edit list) =
     let saved = edits |> List.map toSaved |> Array.ofList
     writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Edits = (if saved.Length = 0 then null else saved) }
 
-/// The document title set in Suggest Structure and saved next to pdfPath, if any.
+/// The document title set in Suggest Structure and saved for pdfPath, if any.
 let loadTitle (pdfPath: string) : string option =
-    readFile (filePath pdfPath) |> Option.bind (fun saved -> Option.ofObj saved.Title)
+    readFor pdfPath |> Option.bind (fun saved -> Option.ofObj saved.Title)
 
 /// Saves (or, with None, removes) the document title next to pdfPath, keeping the rest of the file.
 let saveTitle (pdfPath: string) (title: string option) =
