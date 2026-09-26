@@ -179,11 +179,13 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
           |> Option.defaultValue e ]
 
 /// Builds the review a copy carries (see VeraPdfValidator.Review): saved, with its edits moved to
-/// the elements tagging made (if it tagged). Nothing for no review.
+/// the elements tagging made (if it tagged), and without the layout it was tagged from (the copy
+/// has elements instead). Nothing for no review.
 let forCopy (saved: SavedFile option) =
     Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null>(fun tagged ->
         match saved with
         | Some saved ->
+            let saved = if tagged.Count > 0 then { saved with Layout = null } else saved
             match rekey (edits saved) tagged with
             | [] -> toJson saved
             | moved -> toJson { saved with Edits = moved |> List.map ofElementEdit |> Array.ofList }

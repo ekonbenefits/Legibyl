@@ -164,11 +164,17 @@ let fromFileOrPdf (path: string) : Edit list =
     if String.Equals(Path.GetExtension path, ".pdf", StringComparison.OrdinalIgnoreCase) then load path
     else fromFile path
 
-/// The edits and document title saved for pdfPath, read once (reading a review embedded in the
-/// PDF opens it).
-let loadWithTitle (pdfPath: string) : Edit list * string option =
+/// The edits, document title and reviewed layout saved for pdfPath, read once (reading a review
+/// embedded in the PDF opens it). The layout has only the pages that haven't changed since.
+let loadReview (pdfPath: string) : Edit list * string option * LayoutFile.SavedLayout option =
     let saved = readFor pdfPath
-    editsOf saved, saved |> Option.bind (fun saved -> Option.ofObj saved.Title)
+    editsOf saved,
+    saved |> Option.bind (fun saved -> Option.ofObj saved.Title),
+    saved |> Option.bind (fun saved -> Option.ofObj saved.Layout) |> Option.map (LayoutFile.current pdfPath)
+
+/// Saves (or, with None, removes) the reviewed layout next to pdfPath, keeping the rest of the file.
+let saveLayout (pdfPath: string) (layout: LayoutFile.SavedLayout option) =
+    writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Layout = Option.toObj layout }
 
 let private toSaved (e: Edit) : SavedEdit =
     let saved (box: StructureGeometry) = [| box.Left; box.Bottom; box.Right; box.Top |] |> Array.map (fun v -> Math.Round(v, 1))

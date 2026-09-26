@@ -219,15 +219,39 @@ module LayoutSuggestions =
               Image = null
               TextBefore = if figure then nearbyText blocks index -1 else null
               TextAfter = if figure then nearbyText blocks index 1 else null }
+        let fingerprints = LayoutFile.fingerprints pdfPath
         let page (page: PageSuggestion) : LayoutFile.SavedPage =
             { Page = page.PageNumber
               HasText = page.HasText
               Rotated = page.Rotated
+              Fingerprint = Map.tryFind page.PageNumber fingerprints |> Option.toObj
               Regions = page.Blocks |> List.mapi (region page.Blocks) |> Array.ofList }
         { Version = 1
           File = string (Path.GetFileName pdfPath)
           Title = Option.toObj title
           Pages = pages |> List.map page |> Array.ofList }
+
+    /// A saved page's regions as the model's suggestions (what it found, as the layout keeps it).
+    let ofLayoutPage (page: LayoutFile.SavedPage) : PageSuggestion =
+        { PageNumber = page.Page
+          HasText = page.HasText
+          Rotated = page.Rotated
+          Blocks =
+            [ for region in page.Regions |> Array.sortBy _.Order ->
+                  { Order = region.Order
+                    Label = string region.Label
+                    Tag = region.Tag
+                    Score = region.Score
+                    Geometry =
+                      { PageNumber = page.Page
+                        Left = region.Box[0]
+                        Bottom = region.Box[1]
+                        Right = region.Box[2]
+                        Top = region.Box[3] }
+                    Text = string region.Text
+                    ListNumbering = Option.ofObj region.ListNumbering
+                    Recognized = region.Recognized
+                    QrText = Option.ofObj region.QrText } ] }
 
     /// A title for the layout: the document's own (or a short first page's), else the first H1
     /// the layout found; as Suggest Structure prefills it.

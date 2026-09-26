@@ -54,6 +54,27 @@ type LayoutReview(modified: DateTime) =
     /// The title to give the document: as edited, else as shown prefilled; None to leave it.
     member this.DocumentTitle = this.Title |> Option.orElse this.ShownTitle
 
+    /// The layout as reviewed: each page found so far, its suggestions marked if discarded (see
+    /// LayoutFile); None before any page is found.
+    member this.ToLayout(pdfPath: string) : LayoutFile.SavedLayout option =
+        if this.Pages.IsEmpty then
+            None
+        else
+            let pages = this.Pages.Values |> Seq.sortBy _.PageNumber |> List.ofSeq
+            let layout = LayoutSuggestions.toLayoutFile pdfPath pages None
+            Some
+                { layout with
+                    Pages =
+                        [| for page in layout.Pages ->
+                               { page with
+                                   Regions =
+                                       [| for region in page.Regions ->
+                                              { region with Discarded = this.Discarded.Contains((page.Page, region.Order)) } |] } |] }
+
+    /// Whether a person has decided anything here (discarded a suggestion, written an edit or a
+    /// title), so the layout is worth keeping next to the PDF.
+    member this.HasDecisions = not this.Discarded.IsEmpty || not this.Edits.IsEmpty || this.Title.IsSome
+
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
         match this.LinkTitles with
@@ -83,11 +104,21 @@ type LayoutReviews() =
         let fullPath = Path.GetFullPath pdfPath
         let modified = File.GetLastWriteTimeUtc fullPath
         let fresh () =
-            // Any alt text saved next to the PDF, written for it or an earlier version of it.
+            // Any alt text saved next to the PDF, written for it or an earlier version of it, and
+            // the layout as reviewed before: its pages count as found, with their discards.
             let review = LayoutReview modified
-            let edits, title = RegionEdits.loadWithTitle fullPath
+            let edits, title, layout = RegionEdits.loadReview fullPath
             review.Edits <- edits
             review.Title <- title
+            match layout with
+            | Some layout ->
+                for page in layout.Pages do
+                    review.Pages[page.Page] <- LayoutSuggestions.ofLayoutPage page
+                review.Discarded <-
+                    set [ for page in layout.Pages do
+                              for region in page.Regions do
+                                  if region.Discarded then page.Page, region.Order ]
+            | None -> ()
             review
         reviews.AddOrUpdate(fullPath, (fun _ -> fresh ()), (fun _ existing -> if existing.Modified = modified then existing else fresh ()))
 
@@ -334,6 +365,16 @@ module SuggestedStructureView =
                     render result (Some block.Order) version.Current |> ignore
                 | None -> ()
 
+            /// Keeps the layout as reviewed (the pages found, and what's discarded) next to the PDF,
+            /// once a person has decided something here.
+            let saveLayout () =
+                if review.HasDecisions then
+                    try
+                        RegionEdits.saveLayout pdfPath (review.ToLayout pdfPath)
+                    with
+                    | :? IOException
+                    | :? UnauthorizedAccessException as ex -> status.Set $"Couldn't save the review next to the PDF: {ex.Message}"
+
             /// Keeps or discards some of this page's suggestions, and redraws it.
             let setDiscarded (orders: int list) (discard: bool) =
                 match suggestion.Current with
@@ -342,6 +383,7 @@ module SuggestedStructureView =
                     let next = if discard then Set.union discarded.Current keys else Set.difference discarded.Current keys
                     discarded.Set next
                     review.Discarded <- next
+                    saveLayout ()
                     onChanged ()
                     render result selected.Current version.Current |> ignore
                 | None -> ()
@@ -858,6 +900,13 @@ type SuggestedStructureWindow(pdfPath: string, review: LayoutReview, onChanged: 
 
     override _.OnClosed(e) =
         base.OnClosed e
+        // The pages found since the last change are worth keeping too.
+        if review.HasDecisions then
+            try
+                RegionEdits.saveLayout pdfPath (review.ToLayout pdfPath)
+            with
+            | :? IOException
+            | :? UnauthorizedAccessException -> ()
         // A page may still be being found: stop after it, then let go of the suggester.
         Task.Run(fun () ->
             prefetcher.Stop()

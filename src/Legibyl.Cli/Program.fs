@@ -146,6 +146,13 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
                           | Some path -> $"No edits were applied: {path} has no review to read them from."
                           | None -> $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
                 // A review of an untagged PDF can hold its reviewed layout, to tag from.
+                // (Only the pages that haven't changed since it was saved.)
+                let review =
+                    review
+                    |> Option.map (fun review ->
+                        match review.Layout with
+                        | NonNull layout -> { review with Layout = LayoutFile.current file layout }
+                        | Null -> review)
                 let reviewLayout = review |> Option.bind (fun review -> Option.ofObj review.Layout)
                 let options =
                     requestedFixes args

@@ -259,4 +259,6 @@ let ``a review keeps an untagged PDF's layout, and --edits tags from it`` () =
         tagged |> List.map _.Tag |> List.filter (fun t -> t = "H1" || t = "Figure") |> should equal [ "H1"; "Figure" ]
         (tagged |> List.find (fun n -> n.Tag = "Figure")).AlternateDescription |> should equal "Tomato seedlings"
         use document = new PdfDocument(new PdfReader(copy))
-        document.GetDocumentInfo().GetTitle() |> should equal "The garden")
+        document.GetDocumentInfo().GetTitle() |> should equal "The garden"
+        // The copy carries the review, but not the layout it was tagged from: it has elements now.
+        (ReviewFile.readFor copy |> Option.get).Layout |> should be Null)

@@ -62,6 +62,12 @@ type SavedPage =
       [<JsonPropertyName "hasText">] HasText: bool
       /// A rotated page isn't detected yet, so it has no regions.
       [<JsonPropertyName "rotated">] Rotated: bool
+      /// What the page was when this layout was found (a hash of its size and text): a page
+      /// that's changed since (a regenerated PDF, say) is found again rather than tagged from a
+      /// layout that no longer fits it. Null to take the layout as it is.
+      [<JsonPropertyName "fingerprint">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Fingerprint: string | null
       [<JsonPropertyName "regions">] Regions: SavedRegion array }
 
 [<CLIMutable>]
@@ -72,6 +78,39 @@ type SavedLayout =
       /// The title to give the document; null to leave its title as it is.
       [<JsonPropertyName "title">] Title: string | null
       [<JsonPropertyName "pages">] Pages: SavedPage array }
+
+/// Each page's fingerprint (see SavedPage.Fingerprint), by page number; none if pdfPath can't
+/// be read.
+let fingerprints (pdfPath: string) : Map<int, string> =
+    if not (File.Exists pdfPath) then
+        Map.empty
+    else
+        try
+            use document = UglyToad.PdfPig.PdfDocument.Open pdfPath
+            [ for page in document.GetPages() ->
+                  let described = $"{page.Width:F1}x{page.Height:F1}\n{page.Text}"
+                  let hash = Security.Cryptography.SHA256.HashData(Text.Encoding.UTF8.GetBytes described)
+                  page.Number, Convert.ToHexString(hash, 0, 8).ToLowerInvariant() ]
+            |> Map.ofList
+        with
+        | :? IOException
+        | :? UnauthorizedAccessException
+        | :? UglyToad.PdfPig.Core.PdfDocumentFormatException -> Map.empty
+
+/// layout without the pages that have changed since it was found (their fingerprints don't
+/// match pdfPath's pages); pages without a fingerprint are kept.
+let current (pdfPath: string) (layout: SavedLayout) : SavedLayout =
+    if layout.Pages |> Array.forall (fun page -> isNull page.Fingerprint) then
+        layout
+    else
+        let now = fingerprints pdfPath
+        { layout with
+            Pages =
+                layout.Pages
+                |> Array.filter (fun page ->
+                    match page.Fingerprint with
+                    | NonNull fingerprint -> Map.tryFind page.Page now = Some fingerprint
+                    | Null -> true) }
 
 /// The tags a region can have.
 let tags = [ "H1"; "H"; "P"; "LI"; "Figure"; "Table"; "Caption"; "Note"; "Formula"; "Lbl"; "Artifact" ]
