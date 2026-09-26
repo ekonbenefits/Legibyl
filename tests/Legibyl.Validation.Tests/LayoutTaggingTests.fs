@@ -272,3 +272,27 @@ let ``with QR code links, the figure is a link to what it encodes, and the page 
     use before = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(input.Path, offPage).PngBytes)
     use after = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(output.Path, offPage).PngBytes)
     after.Pixels |> should equal before.Pixels
+
+[<Fact>]
+let ``a fix reports each step it runs, in order, with pages where there are pages`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let reports = ResizeArray<FixProgress>()
+    let progress = { new IProgress<FixProgress> with member _.Report p = reports.Add p }
+    let validator = VeraPdfValidator()
+    validator.LayoutSource <- FixedLayout regions
+
+    validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout ||| PdfFixOptions.AnnotationTabs ||| PdfFixOptions.Metadata, progress)
+    |> ignore
+
+    // The distinct steps, in order, each numbered out of four.
+    reports |> Seq.map (fun p -> p.Stage, p.Step, p.Steps) |> Seq.distinct |> List.ofSeq
+    |> should
+        equal
+        [ FixStage.CheckingOriginal, 1, 4
+          FixStage.Tagging, 2, 4
+          FixStage.Repairing, 3, 4
+          FixStage.RepairingMetadata, 4, 4 ]
+    reports |> Seq.exists (fun p -> p.Stage = FixStage.CheckingOriginal && p.Page = 1 && p.PageCount = 1) |> should be True
+    reports |> Seq.exists (fun p -> p.Stage = FixStage.Tagging && p.Page = 1 && p.PageCount = 1) |> should be True

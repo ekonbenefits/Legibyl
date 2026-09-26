@@ -276,8 +276,9 @@ let private webAddress (text: string) =
     | _ -> None
 
 /// Tags pdfPath's pages from source's regions, writing the result to outputPath. With
-/// linkQrCodes, a QR code that encodes a web address also gets a link going there.
-let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (linkQrCodes: bool) : string list =
+/// linkQrCodes, a QR code that encodes a web address also gets a link going there. onPage
+/// hears (page, page count) as each page's regions are asked for.
+let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (linkQrCodes: bool) (onPage: int -> int -> unit) : string list =
     use reader = new PdfReader(pdfPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
@@ -295,7 +296,10 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (link
         let tally =
             { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0 }
         let pageCount = document.GetNumberOfPages()
-        let regionsByPage = [| for page in 1 .. pageCount -> List.ofSeq (source.PageRegions(pdfPath, page)) |]
+        let regionsByPage =
+            [| for page in 1 .. pageCount ->
+                   onPage page pageCount
+                   List.ofSeq (source.PageRegions(pdfPath, page)) |]
         let hasTitle = regionsByPage |> Array.exists (List.exists (fun region -> region.Tag = "H1"))
         let mutable noteIds = 0
         // Annotations' /StructParent keys come after every page's.

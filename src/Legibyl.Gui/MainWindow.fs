@@ -207,8 +207,8 @@ module private MainView =
         | ReadingStructure of StructureReadProgress
         /// Downloading the layout model for tagging from the layout: the fraction done.
         | DownloadingLayoutModel of float
-        /// Finding a page's layout, to tag it: the page and the page count.
-        | TaggingPage of page: int * pageCount: int
+        /// Fixing: which step, and the page within it where there are pages.
+        | Fixing of FixProgress
 
     let private formatElapsed (elapsed: TimeSpan) =
         if elapsed.TotalHours >= 1.0 then elapsed.ToString(@"h\:mm\:ss") else elapsed.ToString(@"m\:ss")
@@ -256,7 +256,18 @@ module private MainView =
                 [ stat "Elements" 64.0 (progress.Elements.ToString "N0")
                   stat "Elapsed" 48.0 (formatElapsed progress.Elapsed) ]
             | DownloadingLayoutModel fraction -> $"Downloading the layout model… {fraction:P0}", []
-            | TaggingPage(page, pageCount) -> $"Finding page {page:N0} of {pageCount:N0}'s layout", []
+            | Fixing progress ->
+                let step = $"Step {progress.Step} of {progress.Steps}: "
+                let pages = progress.Page > 0 && progress.PageCount > 0
+                let status =
+                    match progress.Stage with
+                    | FixStage.CheckingOriginal when pages -> $"{step}checking the original, page {progress.Page:N0} of {progress.PageCount:N0}"
+                    | FixStage.CheckingOriginal -> $"{step}checking the original…"
+                    | FixStage.Tagging when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to tag it"
+                    | FixStage.Tagging -> $"{step}tagging from the layout…"
+                    | FixStage.Repairing -> $"{step}applying the repairs…"
+                    | _ -> $"{step}repairing metadata with veraPDF…"
+                status, []
         WrapPanel.create [
             WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
             WrapPanel.children [ yield slot 210.0 TextAlignment.Left status :> IView; for stat in stats do yield stat :> IView ]
@@ -279,7 +290,8 @@ module private MainView =
             fraction progress.Page progress.PageCount
         | Some(ReadingStructure _) -> full
         | Some(DownloadingLayoutModel fraction) -> [ ProgressBar.isIndeterminate false; ProgressBar.maximum 1.0; ProgressBar.value fraction ]
-        | Some(TaggingPage(page, pageCount)) -> fraction page pageCount
+        | Some(Fixing progress) when progress.Page > 0 && progress.PageCount > 0 -> fraction progress.Page progress.PageCount
+        | Some(Fixing _) -> [ ProgressBar.isIndeterminate true ]
         | _ -> [ ProgressBar.isIndeterminate true ]
 
     let view (window: Window) (openRequests: IReadable<string option>) =
@@ -513,14 +525,7 @@ module private MainView =
                                         // Tagging from the layout runs the layout detector page by page,
                                         // after downloading its model the first time.
                                         let tagging = options.HasFlag PdfFixOptions.TagFromLayout
-                                        let source =
-                                            if tagging then
-                                                new LayoutRegionSource(
-                                                    Progress<int * int>(fun (page, pageCount) -> busyProgress.Set(Some(TaggingPage(page, pageCount))))
-                                                )
-                                                |> Some
-                                            else
-                                                None
+                                        let source = if tagging then Some(new LayoutRegionSource(null)) else None
                                         try
                                             try
                                                 if tagging && not (LayoutModel.isDownloaded ()) then
@@ -529,7 +534,8 @@ module private MainView =
                                                             (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
                                                             CancellationToken.None
                                                 source |> Option.iter (fun source -> validator.LayoutSource <- source)
-                                                let! fix = Task.Run(fun () -> validator.Fix(sourcePath, profile, outputPath, options))
+                                                let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
+                                                let! fix = Task.Run(fun () -> validator.Fix(sourcePath, profile, outputPath, options, progress))
                                                 return Ok fix
                                             with
                                             | :? VeraPdfValidationException as ex -> return Error ex.Message

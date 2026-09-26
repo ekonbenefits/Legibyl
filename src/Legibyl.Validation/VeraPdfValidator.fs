@@ -431,13 +431,39 @@ type VeraPdfValidator() =
             pdfPath: string,
             profile: PdfProfile,
             outputPath: string,
-            [<Optional; DefaultParameterValue(PdfFixOptions.Metadata)>] options: PdfFixOptions
+            [<Optional; DefaultParameterValue(PdfFixOptions.Metadata)>] options: PdfFixOptions,
+            [<Optional; DefaultParameterValue(null: IProgress<FixProgress> | null)>] progress: IProgress<FixProgress> | null
         ) : FixResult =
         ensureExists pdfPath
         if options = PdfFixOptions.None then
             raise (VeraPdfValidationException "At least one fix option must be selected.")
 
-        let originalReport = this.Validate(pdfPath, profile)
+        let structuralOptions =
+            StructureFixes.orderedFixes |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
+        let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
+        // The steps this fix runs, in order, so progress can say "step 2 of 4".
+        let steps =
+            [ yield FixStage.CheckingOriginal
+              if tagging then yield FixStage.Tagging
+              if options &&& structuralOptions <> PdfFixOptions.None then yield FixStage.Repairing
+              if options.HasFlag PdfFixOptions.Metadata then yield FixStage.RepairingMetadata ]
+        let report stage page pageCount =
+            match progress with
+            | NonNull progress ->
+                progress.Report
+                    { Stage = stage
+                      Step = 1 + List.findIndex ((=) stage) steps
+                      Steps = steps.Length
+                      Page = page
+                      PageCount = pageCount }
+            | Null -> ()
+
+        report FixStage.CheckingOriginal 0 0
+        let validationProgress =
+            { new IProgress<ValidationProgress> with
+                member _.Report p =
+                    if p.Stage = ValidationStage.CheckingPages then report FixStage.CheckingOriginal p.Page p.PageCount }
+        let originalReport = this.Validate(pdfPath, profile, validationProgress)
         let appliedFixes = ResizeArray<string>()
         let notApplied = ResizeArray<string>()
         let mutable currentInput = pdfPath
@@ -452,10 +478,13 @@ type VeraPdfValidator() =
                 // Tagging an untagged document comes first, so the structural repairs can work
                 // on its tags; then Legibyl's own repairs, then veraPDF's metadata fix.
                 match this.LayoutSource with
-                | NonNull source when options.HasFlag PdfFixOptions.TagFromLayout ->
+                | NonNull source when tagging ->
+                    report FixStage.Tagging 0 0
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempTaggedOutput <- tempOutput
-                    match LayoutTagging.tag currentInput tempOutput source (options.HasFlag PdfFixOptions.QrCodeLinks) with
+                    match
+                        LayoutTagging.tag currentInput tempOutput source (options.HasFlag PdfFixOptions.QrCodeLinks) (report FixStage.Tagging)
+                    with
                     | [] ->
                         tryDeleteTemporary tempOutput
                         tempTaggedOutput <- null
@@ -466,10 +495,8 @@ type VeraPdfValidator() =
                         status <- RepairStatus.Success
                 | _ -> ()
 
-                let structuralOptions =
-                    StructureFixes.orderedFixes |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
-
                 if options &&& structuralOptions <> PdfFixOptions.None then
+                    report FixStage.Repairing 0 0
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempStructuralOutput <- tempOutput
                     match StructureFixes.applyFixes currentInput tempOutput options with
@@ -483,6 +510,7 @@ type VeraPdfValidator() =
                         status <- RepairStatus.Success
 
                 if options.HasFlag PdfFixOptions.Metadata then
+                    report FixStage.RepairingMetadata 0 0
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempMetadataOutput <- tempOutput
                     let metadataFix = fixMetadataOnly currentInput profile tempOutput
@@ -552,7 +580,7 @@ type VeraPdfValidator() =
         member this.Validate(pdfPath, profile, progress) = this.Validate(pdfPath, profile, progress)
 
     interface IPdfFixer with
-        member this.Fix(pdfPath, profile, outputPath, options) = this.Fix(pdfPath, profile, outputPath, options)
+        member this.Fix(pdfPath, profile, outputPath, options, progress) = this.Fix(pdfPath, profile, outputPath, options, progress)
 
     interface IStructureTreeReader with
         member this.ReadStructureTree(pdfPath, progress) = this.ReadStructureTree(pdfPath, progress)

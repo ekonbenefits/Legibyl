@@ -156,6 +156,27 @@ type IPdfValidator =
         [<Optional; DefaultParameterValue(null: IProgress<ValidationProgress> | null)>] progress: IProgress<ValidationProgress> | null ->
             ValidationReport
 
+/// Which step of a fix is running.
+type FixStage =
+    /// Validating the original, page by page (see FixProgress.Page), to know what to fix.
+    | CheckingOriginal = 0
+    /// Tagging an untagged document from its layout, page by page.
+    | Tagging = 1
+    /// Legibyl's own structural repairs.
+    | Repairing = 2
+    /// veraPDF's metadata repair, which validates the document again as it goes.
+    | RepairingMetadata = 3
+
+/// How far a fix has got.
+type FixProgress =
+    { Stage: FixStage
+      /// This step's position among the steps this fix runs (1-based), and how many there are.
+      Step: int
+      Steps: int
+      /// Checking the original or tagging: the 1-based page, and the page count; 0 otherwise.
+      Page: int
+      PageCount: int }
+
 /// Repairs selected PDF/A or PDF/UA issues. Implementations keep veraPDF/IKVM
 /// and PDF writer details behind this façade.
 type IPdfFixer =
@@ -167,7 +188,8 @@ type IPdfFixer =
         pdfPath: string *
         profile: PdfProfile *
         outputPath: string *
-        [<Optional; DefaultParameterValue(PdfFixOptions.Metadata)>] options: PdfFixOptions ->
+        [<Optional; DefaultParameterValue(PdfFixOptions.Metadata)>] options: PdfFixOptions *
+        [<Optional; DefaultParameterValue(null: IProgress<FixProgress> | null)>] progress: IProgress<FixProgress> | null ->
             FixResult
 
 /// Which part of reading a structure tree is running.
