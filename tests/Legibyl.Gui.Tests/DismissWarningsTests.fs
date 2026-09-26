@@ -117,6 +117,33 @@ let ``remembered dismissals are saved next to the PDF and reloaded`` () =
             remembering |> should be True))
 
 [<Fact>]
+let ``ignoring a type of warning hides all of them until it's stopped`` () =
+    // Every warning of the rule, wherever it is, is covered by DismissalsTests; this is the menu.
+    withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
+        onUiThread (fun () ->
+            let window = openPdf pdf
+            let before = rows window
+            let warning = before |> List.find (fun r -> r.Severity = "Warning")
+
+            rightClickRow window (before |> List.findIndex (fun r -> obj.ReferenceEquals(r, warning)))
+            click (menuItem window $"Ignore all {warning.Violation.RuleId} warnings")
+            let ignored = rows window
+
+            clickButton window "Show 1 dismissed"
+            rightClickRow window (rows window |> List.findIndex _.Dismissed)
+            // Nothing to restore on its own: it's hidden with the rest of its type.
+            let headers =
+                (HeadlessWindow.resultsGrid window).ContextMenu |> nonNull |> _.Items |> Seq.cast<obj> |> Seq.choose (function :? MenuItem as m -> Some(string m.Header) | _ -> None) |> List.ofSeq
+            click (menuItem window "Stop ignoring")
+            let restored = rows window
+            window.Close()
+            ignored |> should haveLength (before.Length - 1)
+            headers |> should contain $"Stop ignoring {warning.Violation.RuleId} warnings"
+            headers |> should not' (contain "Restore warning")
+            restored |> should haveLength before.Length
+            restored |> List.exists _.Dismissed |> should be False))
+
+[<Fact>]
 let ``failures can't be dismissed`` () =
     withSampleCopy "pages-clipped-paragraphs.pdf" (fun pdf ->
         onUiThread (fun () ->

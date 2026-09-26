@@ -538,12 +538,12 @@ module private MainView =
                     | _ -> ()
                 }
 
-            /// Dismisses or restores a warning, keeping the selection on it, or moving it on to
-            /// the next shown finding if it's now hidden.
-            let setDismissed (row: RuleViolationRow) (isDismissed: bool) =
+            /// Dismisses or restores a warning (key), or every warning of its rule (ruleKey),
+            /// keeping the selection on it, or moving it on to the next shown finding if it's now hidden.
+            let setDismissed (row: RuleViolationRow) (key: RuleViolation -> Dismissals.Key) (isDismissed: bool) =
                 let next =
-                    if isDismissed then dismissed.Current.Add(Dismissals.keyOf row.Violation, row.Message)
-                    else dismissed.Current.Remove(Dismissals.keyOf row.Violation)
+                    if isDismissed then dismissed.Current.Add(key row.Violation, row.Message)
+                    else dismissed.Current.Remove(key row.Violation)
                 dismissed.Set next
                 match outcome.Current with
                 | Validated(report, rows) ->
@@ -705,15 +705,31 @@ module private MainView =
                     ContextMenu.viewItems [
                         match selected with
                         | Some row when row.Dismissed ->
-                            MenuItem.create [
-                                MenuItem.header "Restore warning"
-                                MenuItem.onClick (fun _ -> setDismissed row false)
-                            ]
+                            if dismissed.Current.ContainsKey(Dismissals.keyOf row.Violation) then
+                                MenuItem.create [
+                                    MenuItem.header "Restore warning"
+                                    MenuItem.onClick (fun _ -> setDismissed row Dismissals.keyOf false)
+                                ]
+                            if Dismissals.isRuleIgnored dismissed.Current row.Violation then
+                                MenuItem.create [
+                                    MenuItem.header $"Stop ignoring {row.Violation.RuleId} warnings"
+                                    MenuItem.onClick (fun _ -> setDismissed row Dismissals.ruleKeyOf false)
+                                ]
                         | _ ->
                             MenuItem.create [
                                 MenuItem.header (if canDismiss || selected.IsNone then "Dismiss warning" else "Dismiss warning (only warnings can be dismissed)")
                                 MenuItem.isEnabled canDismiss
-                                MenuItem.onClick (fun _ -> selected |> Option.iter (fun row -> setDismissed row true))
+                                MenuItem.onClick (fun _ -> selected |> Option.iter (fun row -> setDismissed row Dismissals.keyOf true))
+                            ]
+                            MenuItem.create [
+                                MenuItem.header (
+                                    match selected with
+                                    | Some row when canDismiss -> $"Ignore all {row.Violation.RuleId} warnings"
+                                    | _ -> "Ignore this type of warning"
+                                )
+                                MenuItem.isEnabled canDismiss
+                                ToolTip.tip "Hides every warning of this type in this PDF, wherever it is."
+                                MenuItem.onClick (fun _ -> selected |> Option.iter (fun row -> setDismissed row Dismissals.ruleKeyOf true))
                             ]
                         Separator.create []
                         MenuItem.create [

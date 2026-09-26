@@ -44,9 +44,19 @@ let ``a warning is recognised by its rule and location`` () =
     Dismissals.isDismissed dismissed { splitParagraph with LocationContext = "StructTreeRoot/K[1]" } |> should be False
 
 [<Fact>]
+let ``ignoring a warning's type dismisses every warning of its rule`` () =
+    let dismissed = Map [ Dismissals.ruleKeyOf splitParagraph, splitParagraph.Message ]
+    Dismissals.isDismissed dismissed splitParagraph |> should be True
+    Dismissals.isDismissed dismissed { splitParagraph with LocationContext = "StructTreeRoot/K[1]" } |> should be True
+    Dismissals.isRuleIgnored dismissed splitParagraph |> should be True
+    Dismissals.isDismissed dismissed emptyParagraph |> should be False
+
+[<Fact>]
 let ``saved dismissals load back`` () =
     withPdfPath (fun pdf ->
-        let dismissed = Map [ Dismissals.keyOf splitParagraph, splitParagraph.Message; Dismissals.keyOf emptyParagraph, emptyParagraph.Message ]
+        let dismissed =
+            Map [ Dismissals.keyOf splitParagraph, splitParagraph.Message
+                  Dismissals.ruleKeyOf emptyParagraph, emptyParagraph.Message ]
 
         Dismissals.save pdf dismissed
 
