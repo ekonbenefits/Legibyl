@@ -89,16 +89,28 @@ type SavedFile =
 let private jsonOptions =
     JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
 
+let private parse (json: string) : SavedFile option =
+    try
+        JsonSerializer.Deserialize<SavedFile>(json, jsonOptions) |> Option.ofObj
+    with :? JsonException ->
+        None
+
 /// The file at path, or None if there's none (or it can't be read).
 let readFile (path: string) : SavedFile option =
     if not (File.Exists path) then
         None
     else
         try
-            JsonSerializer.Deserialize<SavedFile>(File.ReadAllText path, jsonOptions) |> Option.ofObj
-        with
-        | :? JsonException
-        | :? IOException -> None
+            parse (File.ReadAllText path)
+        with :? IOException ->
+            None
+
+/// pdfPath's review: the file next to it, or else the one embedded in it (a copy Legibyl saved;
+/// see EmbeddedReview). The file wins, since it holds any changes made since the copy was saved.
+let readFor (pdfPath: string) : SavedFile option =
+    match readFile (filePath pdfPath) with
+    | Some saved -> Some saved
+    | None -> EmbeddedReview.read pdfPath |> Option.bind parse
 
 /// Writes file next to pdfPath, or deletes it when there's nothing left in it. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
@@ -109,19 +121,24 @@ let writeFile (pdfPath: string) (file: SavedFile) =
         | NonNull items -> items.Length = 0
         | Null -> true
     if isNull file.DismissedWarnings && empty file.Edits && isNull file.Title then
-        if File.Exists path then File.Delete path
+        // An empty file still stands in for a review embedded in the PDF, so that one doesn't
+        // come back.
+        if (EmbeddedReview.read pdfPath).IsSome then
+            File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
+        elif File.Exists path then
+            File.Delete path
     else
         File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
 
-/// The file next to pdfPath, or an empty one.
+/// pdfPath's review (see readFor), or an empty one.
 let readOrEmpty (pdfPath: string) =
-    readFile (filePath pdfPath)
+    readFor pdfPath
     |> Option.defaultValue { Version = 1; DismissedWarnings = null; Edits = null; Title = null }
 
-/// The dismissals saved next to pdfPath, or None if none are (no file, or one holding only
-/// alt text).
+/// The dismissals saved for pdfPath (see readFor), or None if none are (no review, or one
+/// holding only edits).
 let load (pdfPath: string) : Dismissed option =
-    readFile (filePath pdfPath)
+    readFor pdfPath
     |> Option.bind (fun saved -> Option.ofObj saved.DismissedWarnings)
     |> Option.map (fun warnings ->
         warnings
@@ -144,6 +161,28 @@ let save (pdfPath: string) (dismissed: Dismissed) =
 /// Stops remembering dismissals next to pdfPath: removes them from its file, deleting the file
 /// if that leaves it empty.
 let forget (pdfPath: string) =
-    match readFile (filePath pdfPath) with
+    match readFor pdfPath with
     | Some saved -> writeFile pdfPath { saved with DismissedWarnings = null }
     | None -> ()
+
+/// pdfPath's review as JSON, to embed in a copy of it (see EmbeddedReview), with dismissed in
+/// place of its saved dismissals if given; null if there's nothing to carry.
+let reviewJson (pdfPath: string) (dismissed: Dismissed option) : string | null =
+    let saved = readOrEmpty pdfPath
+    let saved =
+        match dismissed with
+        | Some dismissed when dismissed.IsEmpty -> { saved with DismissedWarnings = null }
+        | Some dismissed ->
+            { saved with
+                DismissedWarnings =
+                    [| for KeyValue(key, message) in dismissed ->
+                           { Rule = key.Rule
+                             Location = key.Location
+                             Message = message } |] }
+        | None -> saved
+    let empty (items: 'T array | null) =
+        match items with
+        | NonNull items -> items.Length = 0
+        | Null -> true
+    if empty saved.DismissedWarnings && empty saved.Edits && isNull saved.Title then null
+    else JsonSerializer.Serialize({ saved with Version = 1 }, jsonOptions)

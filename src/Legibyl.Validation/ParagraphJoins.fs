@@ -199,7 +199,10 @@ let join (runs: JoinRun list) =
     for run in runs |> List.sortByDescending (fun run -> run.Indexes.Head) do
         let parent = PdfStructElem run.Parent
         let kids = run.Parent.GetAsArray(PdfName.K) |> nonNull
-        let paragraph index = PdfStructElem(nonNull (resolve (kids.Get index)) :?> PdfDictionary)
+        let paragraph index =
+            match resolve (kids.Get index) with
+            | :? PdfDictionary as dictionary -> PdfStructElem dictionary
+            | _ -> invalidOp "A paragraph to join isn't a dictionary."
         let target = paragraph run.Indexes.Head
         for index in run.Indexes.Tail do
             moveContent target (paragraph index)

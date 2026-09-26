@@ -395,11 +395,19 @@ open VeraPdf
 /// RuleViolation, etc).
 [<Sealed>]
 type VeraPdfValidator() =
+    // A plain field: an auto-property (member val) of type string | null reaches other
+    // assemblies as a non-nullable string.
+    let mutable review: string | null = null
     do ensureInitialised ()
 
     /// Where the TagFromLayout and JoinSplitParagraphs fixes get each page's regions (see
     /// Legibyl.Layout). Without one, those fixes do nothing.
     member val LayoutSource: IPageLayoutSource | null = null with get, set
+
+    /// A review to carry in the fixed copy (see EmbeddedReview), as JSON; null for none.
+    member _.Review
+        with get (): string | null = review
+        and set (value: string | null) = review <- value
 
     /// Where the LinkTitlesFromWeb fix reads the titles of the web pages links go to: the web
     /// itself, safely (see LinkTitles), unless replaced.
@@ -483,6 +491,7 @@ type VeraPdfValidator() =
         let mutable tempMetadataOutput: string | null = null
         let mutable tempStructuralOutput: string | null = null
         let mutable tempTaggedOutput: string | null = null
+        let mutable tempReviewOutput: string | null = null
         let mutable changed = false
         let mutable status = RepairStatus.NoAction
 
@@ -572,6 +581,13 @@ type VeraPdfValidator() =
                     deleteIfExists outputPath
                     result
                 else
+                    match this.Review with
+                    | NonNull review ->
+                        let tempOutput = createTemporaryPdfPath outputPath
+                        tempReviewOutput <- tempOutput
+                        EmbeddedReview.write currentInput tempOutput review
+                        currentInput <- tempOutput
+                    | Null -> ()
                     moveToOutput currentInput outputPath
                     { result with OutputPath = outputPath }
             with
@@ -582,7 +598,7 @@ type VeraPdfValidator() =
                 // may be a temporary file rather than outputPath; keep both.
                 raise (VeraPdfValidationException($"Could not write fixed PDF for '{outputPath}': {ex.Message}", ex))
         finally
-            for tempOutput in [ tempMetadataOutput; tempStructuralOutput; tempTaggedOutput ] do
+            for tempOutput in [ tempMetadataOutput; tempStructuralOutput; tempTaggedOutput; tempReviewOutput ] do
                 if not (String.Equals(tempOutput, outputPath, StringComparison.OrdinalIgnoreCase)) then
                     tryDeleteTemporary tempOutput
 

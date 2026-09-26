@@ -541,6 +541,8 @@ module private MainView =
                                                             (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
                                                             CancellationToken.None
                                                 source |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
+                                                // The review (as the window has it) goes in the repaired copy.
+                                                validator.Review <- Dismissals.reviewJson sourcePath (Some dismissed.Current)
                                                 let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
                                                 let! fix = Task.Run(fun () -> validator.Fix(sourcePath, profile, outputPath, options, progress))
                                                 return Ok fix
@@ -549,6 +551,7 @@ module private MainView =
                                             | :? Net.Http.HttpRequestException as ex -> return Error $"Couldn't download the layout model: {ex.Message}"
                                         finally
                                             validator.LayoutSource <- null
+                                            validator.Review <- null
                                             source |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
                                             busyProgress.Set None
                                             isBusy.Set false

@@ -20,6 +20,7 @@
     <Compile Include="StructureCacheTests.fs" />
     <Compile Include="DismissalsTests.fs" />
     <Compile Include="RegionEditsTests.fs" />
+    <Compile Include="EmbeddedReviewTests.fs" />
     <Compile Include="LinkTitleOfferTests.fs" />
     <Compile Include="DismissWarningsTests.fs" />
     <Compile Include="FixDialogTests.fs" />
