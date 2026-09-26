@@ -575,9 +575,9 @@ module private MainView =
                                 Some("Save tags from your review in Suggest Structure, ticked or not." + alt)
                             | 0, 0 when alt = "" -> None
                             | 0, 0 -> Some(alt.Trim())
-                            | _, 0 -> Some("Uses the suggestions found in Suggest Structure." + alt)
-                            | _, 1 -> Some("Uses your review in Suggest Structure: 1 suggestion discarded." + alt)
-                            | _, discarded -> Some($"Uses your review in Suggest Structure: {discarded} suggestions discarded." + alt)
+                            | _, 0 -> Some("Uses the layout found in Suggest Structure." + alt)
+                            | _, 1 -> Some("Uses your review in Suggest Structure: 1 region discarded." + alt)
+                            | _, discarded -> Some($"Uses your review in Suggest Structure: {discarded} regions discarded." + alt)
                         match! Dialogs.chooseFixOptions window report reviewNote autoFixes.Current with
                         | Some options -> autoFixes.Set(Some options)
                         | None -> ()
@@ -1178,8 +1178,8 @@ module private MainView =
                             let structureName =
                                 match changes with
                                 | 0 -> "Structure…"
-                                | 1 -> "Structure…, 1 change to save"
-                                | n -> $"Structure…, {n} changes to save"
+                                | 1 -> "Structure…, 1 edit to save"
+                                | n -> $"Structure…, {n} edits to save"
                             let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
                             Button.create [
                                 Button.content (badged "Structure…" changes)
@@ -1188,7 +1188,7 @@ module private MainView =
                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                 Button.isEnabled (not busy && selectedFile.Current.IsSome)
                                 ToolTip.tip
-                                    "Shows the tagged logical structure tree (the semantic heading/paragraph/list/table/link hierarchy a screen reader uses), where alt text and replacement text can be edited, or for an untagged PDF, suggests one. The count is your changes Save writes."
+                                    "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements, or for an untagged PDF, suggests a layout to tag it from. The count is your edits Save writes."
                                 Button.onClick viewStructure
                             ]
                             Button.create [

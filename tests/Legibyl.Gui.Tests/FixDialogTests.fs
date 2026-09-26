@@ -173,11 +173,11 @@ let ``continuing applies the ticked repairs`` () =
 let ``tagging from the layout says when it uses a review from Suggest Structure`` () =
     onUiThread (fun () ->
         let mutable text = ""
-        withDialogNoted (Some "Uses your review in Suggest Structure: 2 suggestions discarded.") findings (fun dialog ->
+        withDialogNoted (Some "Uses your review in Suggest Structure: 2 regions discarded.") findings (fun dialog ->
             text <- rowText dialog "Tag from the page layout")
         |> ignore
 
-        text |> should haveSubstring "Uses your review in Suggest Structure: 2 suggestions discarded.")
+        text |> should haveSubstring "Uses your review in Suggest Structure: 2 regions discarded.")
 
 [<Fact>]
 let ``with every repair shown on a short screen, the list scrolls and the buttons stay on screen`` () =

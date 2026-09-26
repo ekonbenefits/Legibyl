@@ -387,14 +387,15 @@ module SuggestedStructureView =
             )
 
             let intro =
-                "Suggested structure for this untagged PDF, from what each page looks like: its regions, "
-                + "the tag each suggests, and their reading order (the numbers). Keep or discard each suggestion, or pick another tag for it, then Save… in the main "
-                + "window tags a copy with the kept ones (a discarded region's text joins the nearest kept one; its images and lines are "
-                + "decoration), on every page. The original isn't changed. "
+                "The layout suggested for this untagged PDF, from what each page looks like: its regions, "
+                + "the tag each suggests, and their reading order (the numbers). The suggestions stay as found; what you change "
+                + "(discarding a region, giving it another tag, alt text, corrected text) is kept as edits on top, next to the PDF. "
+                + "Save… in the main window tags a copy with the regions and your edits, on every page (a discarded region's text "
+                + "joins the nearest region kept; its images and lines are decoration). The original isn't changed. "
                 + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
                 + "list markers are list items (LI), and Artifact marks page furniture like running headers and page numbers. "
-                + "Text drawn as outlines or pixels rather than as text is read with OCR, and can be corrected; figures can be given alt text. Both are saved next to the PDF, and QR codes are read "
-                + "and shown with the alt text tagging would give them (Alt)."
+                + "Text drawn as outlines or pixels rather than as text is read with OCR, and can be corrected; figures can be given alt text; "
+                + "QR codes are read and shown with the alt text tagging would give them (Alt)."
 
             let downloadPanel =
                 StackPanel.create [
@@ -558,9 +559,9 @@ module SuggestedStructureView =
                             Dialogs.showMessage
                                 window
                                 (if imported.IsEmpty then
-                                     $"{Path.GetFileName path} has no edits (alt text or corrected text) to import."
+                                     $"{Path.GetFileName path} has no edits to import."
                                  else
-                                     $"Imported {added} of {imported.Length} edits (alt text and corrected text) from {Path.GetFileName path}; the rest were already here. {found} regions found so far have edits.")
+                                     $"Imported {added} of {imported.Length} edits (regions discarded or retagged, alt text, corrected text) from {Path.GetFileName path}; the rest were already here. {found} regions found so far have edits.")
                                 "Import Edits"
                     | None -> ()
                 }
@@ -663,7 +664,7 @@ module SuggestedStructureView =
                                         Button.verticalAlignment VerticalAlignment.Top
                                         Button.content (if isDiscarded then "Keep" else "Discard")
                                         ToolTip.tip (
-                                            if isDiscarded then "Tag this region as suggested."
+                                            if isDiscarded then "Keep this region: tag it."
                                             else "Don't tag this region: its text joins the nearest kept region; its images and lines are decoration."
                                         )
                                         Button.onClick (fun _ -> setDiscarded [ block.Order ] (not isDiscarded))
@@ -741,21 +742,21 @@ module SuggestedStructureView =
                                     Button.content "Keep all"
                                     Button.margin (16.0, 0.0, 0.0, 0.0)
                                     Button.isEnabled suggestion.Current.IsSome
-                                    ToolTip.tip "Keep every suggestion on this page."
+                                    ToolTip.tip "Keep every region on this page."
                                     Button.onClick (fun _ ->
                                         suggestion.Current |> Option.iter (fun result -> setDiscarded [ for b in result.Blocks -> b.Order ] false))
                                 ]
                                 Button.create [
                                     Button.content "Discard all"
                                     Button.isEnabled suggestion.Current.IsSome
-                                    ToolTip.tip "Discard every suggestion on this page."
+                                    ToolTip.tip "Discard every region on this page."
                                     Button.onClick (fun _ ->
                                         suggestion.Current |> Option.iter (fun result -> setDiscarded [ for b in result.Blocks -> b.Order ] true))
                                 ]
                                 Button.create [
                                     Button.content "Import Edits…"
                                     Button.margin (16.0, 0.0, 0.0, 0.0)
-                                    ToolTip.tip "Use the alt text and corrected text saved for another PDF, such as an earlier version of this one: pick that PDF, or the .legibyl.json file saved for it."
+                                    ToolTip.tip "Use the edits made for another PDF, such as an earlier version of this one (regions discarded or retagged, alt text, corrected text): pick that PDF, or the .legibyl.json file saved for it."
                                     Button.onClick importAlt
                                 ]
                             ]
