@@ -252,7 +252,9 @@ type private Tally =
       /// QR codes described with the title of the page they go to.
       mutable QrTitles: int
       /// Figures given alt text a person wrote.
-      mutable WrittenAlt: int }
+      mutable WrittenAlt: int
+      /// Links without a description given one by the source.
+      mutable LinksDescribed: int }
 
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
@@ -296,7 +298,7 @@ let tag
 
         let parentTree = PdfArray()
         let tally =
-            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0; WrittenAlt = 0 }
+            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0; WrittenAlt = 0; LinksDescribed = 0 }
         let pageCount = document.GetNumberOfPages()
         let regionsByPage =
             [| for page in 1 .. pageCount ->
@@ -586,6 +588,19 @@ let tag
                     objectReferences.Add((dictionary, link.Dictionary))
                     tally.Links <- tally.Links + 1
                     hasLinks <- true
+                    // A description for a link without one, if the source has it.
+                    if isNull (dictionary.Get PdfName.Contents) then
+                        let geometry: StructureGeometry =
+                            { PageNumber = pageNumber
+                              Left = float (rectangle.GetLeft())
+                              Bottom = float (rectangle.GetBottom())
+                              Right = float (rectangle.GetRight())
+                              Top = float (rectangle.GetTop()) }
+                        match source.LinkDescription(pdfPath, pageNumber, geometry) with
+                        | NonNull description when not (String.IsNullOrWhiteSpace description) ->
+                            dictionary.Put(PdfName.Contents, PdfString(description.Trim(), PdfEncodings.UNICODE_BIG)) |> ignore
+                            tally.LinksDescribed <- tally.LinksDescribed + 1
+                        | _ -> ()
                 elif not (PdfName.Popup.Equals(annotation.GetSubtype())) then
                     tally.UntaggedAnnotations <- tally.UntaggedAnnotations + 1
             // Links over QR codes, added after the page's own were tagged. No border, so the
@@ -650,6 +665,9 @@ let tag
           if tally.QrLinks > 0 then
               let linked = plural tally.QrLinks "QR code" "QR codes"
               yield $"Linked {linked} to the web address they encode"
+          if tally.LinksDescribed > 0 then
+              let described = plural tally.LinksDescribed "link" "links"
+              yield $"Described {described} as reviewed in Suggest Structure"
           if tally.WrittenAlt > 0 then
               let given = plural tally.WrittenAlt "figure" "figures"
               yield $"Gave {given} the alt text written in Suggest Structure"

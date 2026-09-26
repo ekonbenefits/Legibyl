@@ -60,6 +60,11 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
 let setAlt edits page tag box (alt: string) =
     update edits page tag box (fun e -> { e with Alt = (if String.IsNullOrWhiteSpace alt then None else Some alt) })
 
+/// Alt text for something prefilled (a QR code's description, a link's from its page's title),
+/// recorded only if it differs from what was prefilled; "" if cleared.
+let setAltAgainst edits page tag box (prefilled: string) (alt: string) =
+    update edits page tag box (fun e -> { e with Alt = (if alt = prefilled then None else Some alt) })
+
 /// A region's OCR text corrected, recorded only if it differs from what OCR read.
 let setText edits page tag box (ocr: string) (text: string) =
     update edits page tag box (fun e -> { e with Text = (if text = ocr then None else Some text) })
@@ -78,7 +83,7 @@ let textFor edits page (block: SuggestedBlock) =
 let apply (edits: Edit list) (page: int) (block: SuggestedBlock) (region: LayoutRegion) : LayoutRegion =
     let region =
         match altFor edits page block with
-        | Some alt when block.Tag = "Figure" -> { region with Alt = alt }
+        | Some alt when block.Tag = "Figure" && not (String.IsNullOrWhiteSpace alt) -> { region with Alt = alt }
         | _ -> region
     match find edits page block.Tag block.Geometry |> Option.bind _.Text with
     | Some text when block.Recognized -> { region with ActualText = (if String.IsNullOrWhiteSpace text then null else text) }
@@ -97,7 +102,7 @@ let private ofSaved (saved: SavedEdit) : Edit option =
             { Page = saved.Page
               Tag = saved.Tag
               Box = { PageNumber = saved.Page; Left = left; Bottom = bottom; Right = right; Top = top }
-              Alt = value saved.Alt |> Option.filter (String.IsNullOrWhiteSpace >> not)
+              Alt = value saved.Alt
               Text = value saved.Text }
         if edit.Alt.IsNone && edit.Text.IsNone then None else Some edit
     | _ -> None

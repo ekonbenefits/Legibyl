@@ -60,9 +60,10 @@ let private regions =
       region "Artifact" (295.0, 35.0, 360.0, 52.0) null ]
 
 /// Regions from a list, as a layout detector would give them.
-type private FixedLayout(regions: LayoutRegion list) =
+type private FixedLayout(regions: LayoutRegion list, ?linkDescription: string) =
     interface IPageLayoutSource with
         member _.PageRegions(_, _) = regions
+        member _.LinkDescription(_, _, _) = Option.toObj linkDescription
 
 let private tagFromLayout (input: string) (output: string) (source: IPageLayoutSource option) =
     let validator = VeraPdfValidator()
@@ -333,3 +334,18 @@ let ``alt text written for a figure is its alt text, ahead of a QR code's own`` 
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
     (flatten root |> List.find (fun node -> node.Tag = "Figure")).AlternateDescription |> should equal "Our pack's colour swatch"
     failedRules output.Path |> should not' (contain "7.3-1")
+
+[<Fact>]
+let ``a link without a description gets the one the layout source has`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout(regions, "Example Domain (example.com)")))
+
+    result.AppliedFixes |> should contain "Described 1 link as reviewed in Suggest Structure"
+    do
+        use document = new PdfDocument(new PdfReader(output.Path))
+        let link = document.GetPage(1).GetAnnotations() |> Seq.find (fun a -> PdfName.Link.Equals(a.GetSubtype()))
+        link.GetContents().ToUnicodeString() |> should equal "Example Domain (example.com)"
+    failedRules output.Path |> should not' (contain "7.18.5-2")

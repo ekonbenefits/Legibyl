@@ -441,7 +441,10 @@ module private MainView =
                                         "Document Structure"
                                         "Suggest Structure…"
                                 if suggest then
-                                    SuggestedStructureWindow(filePath, layoutReviews.For filePath).Show window
+                                    let review = layoutReviews.For filePath
+                                    // Offer to read the titles of pages links go to, before the window opens.
+                                    do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
+                                    SuggestedStructureWindow(filePath, review).Show window
                             | structure -> StructureTreeWindow(structure, filePath).Show window
                         }
 
