@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="LayoutSuggestions.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- A pure C# port of PaddleOCR's layout detector (PP-DocLayoutV3) - Apache 2.0. Its model is
+         downloaded on first use, not shipped. -->
+    <PackageReference Include="PaddleOCR" Version="26.9.5517" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Legibyl.Rendering\Legibyl.Rendering.fsproj" />
+  </ItemGroup>
+
+</Project>

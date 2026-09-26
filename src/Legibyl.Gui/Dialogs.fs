@@ -64,6 +64,48 @@ let showMessage (owner: Window) (message: string) (title: string) : Task =
             ])
     window.ShowDialog owner
 
+/// A message with an action button beside Close; true if the user chose the action.
+let showMessageWithAction (owner: Window) (message: string) (title: string) (action: string) : Task<bool> =
+    let window = dialogWindow title 460.0
+    let mutable chosen = false
+    window.Content <-
+        Component(fun _ ->
+            StackPanel.create [
+                StackPanel.margin 16.0
+                StackPanel.spacing 16.0
+                StackPanel.children [
+                    SelectableTextBlock.create [
+                        SelectableTextBlock.text message
+                        SelectableTextBlock.textWrapping TextWrapping.Wrap
+                    ]
+                    StackPanel.create [
+                        StackPanel.orientation Orientation.Horizontal
+                        StackPanel.horizontalAlignment HorizontalAlignment.Right
+                        StackPanel.spacing 8.0
+                        StackPanel.children [
+                            Button.create [
+                                Button.content action
+                                Button.isDefault true
+                                Button.onClick (fun _ ->
+                                    chosen <- true
+                                    window.Close())
+                            ]
+                            Button.create [
+                                Button.content "Close"
+                                Button.minWidth 82.0
+                                Button.isCancel true
+                                Button.horizontalContentAlignment HorizontalAlignment.Center
+                                Button.onClick (fun _ -> window.Close())
+                            ]
+                        ]
+                    ]
+                ]
+            ])
+    task {
+        do! window.ShowDialog owner
+        return chosen
+    }
+
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
 /// one addresses. Returns None if the user cancelled.
 let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOptions option> =

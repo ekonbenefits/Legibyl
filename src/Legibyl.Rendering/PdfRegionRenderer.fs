@@ -25,6 +25,16 @@ type HighlightImageResult =
       /// Human-readable explanation of what was (or wasn't) highlighted, for display alongside the image.
       Note: string }
 
+/// A labelled box to draw on a page, e.g. a suggested structure element.
+type PageRegion =
+    { Geometry: StructureGeometry
+      /// Drawn at the box's top-left corner, e.g. "3 H".
+      Label: string
+      /// 0xRRGGBB.
+      Color: uint32
+      /// Drawn filled and thicker, e.g. the selected one.
+      Emphasised: bool }
+
 type IPdfRegionRenderer =
     /// Renders the page containing location as a PNG, highlighting the failing object's
     /// region when it can be determined. Throws InvalidOperationException if location
@@ -86,6 +96,29 @@ module private Rendering =
         use stroke = new SKPaint(Color = color, Style = SKPaintStyle.Stroke, StrokeWidth = 3f, IsAntialias = true)
         canvas.DrawRect(box, fill)
         canvas.DrawRect(box, stroke)
+
+    /// A labelled region: an outline, filled when emphasised, with its label on a tab above
+    /// its top-left corner.
+    let drawRegion (bitmap: SKBitmap) (region: PageRegion) (scale: float32) =
+        use canvas = new SKCanvas(bitmap)
+        let geometry = region.Geometry
+        let scaled (value: float) = float32 (value * float scale)
+        let height = float32 bitmap.Height
+        let box = SKRect(scaled geometry.Left, height - scaled geometry.Top, scaled geometry.Right, height - scaled geometry.Bottom)
+        let color = SKColor(byte (region.Color >>> 16), byte (region.Color >>> 8), byte region.Color)
+        use fill = new SKPaint(Color = color.WithAlpha(if region.Emphasised then 70uy else 18uy), Style = SKPaintStyle.Fill)
+        use stroke =
+            new SKPaint(Color = color, Style = SKPaintStyle.Stroke, StrokeWidth = (if region.Emphasised then 4f else 2f), IsAntialias = true)
+        canvas.DrawRect(box, fill)
+        canvas.DrawRect(box, stroke)
+        use font = new SKFont(SKTypeface.Default, 11f * scale)
+        use text = new SKPaint(Color = SKColors.White, IsAntialias = true)
+        let width = font.MeasureText region.Label
+        let tabHeight = font.Size * 1.25f
+        let tabTop = max 0f (box.Top - tabHeight)
+        use tab = new SKPaint(Color = color, Style = SKPaintStyle.Fill)
+        canvas.DrawRect(SKRect(box.Left, tabTop, box.Left + width + 6f * scale, tabTop + tabHeight), tab)
+        canvas.DrawText(region.Label, box.Left + 3f * scale, tabTop + font.Size, font, text)
 
     /// "PDLinkAnnot" -> "Link": the PdfPig annotation type veraPDF's object type corresponds to.
     let private expectedAnnotationTypeName (objectType: string | null) =
@@ -266,6 +299,25 @@ type PdfRegionRenderer() =
                   PageNumber = destination.PageNumber
                   HasPreciseRegion = destination.Top.HasValue || destination.Left.HasValue
                   Note = note }
+        )
+
+    /// Renders pageNumber with each region outlined and labelled.
+    member _.RenderPageWithRegions
+        (
+            pdfPath: string,
+            pageNumber: int,
+            regions: PageRegion seq,
+            [<Optional; DefaultParameterValue(2.0f)>] scale: float32
+        ) : byte array =
+        cache.WithPage(
+            pdfPath,
+            pageNumber,
+            scale,
+            fun _ bitmap ->
+                // The emphasised region last, so it's on top.
+                for region in regions |> Seq.sortBy _.Emphasised do
+                    drawRegion bitmap region scale
+                encodePng bitmap
         )
 
     /// Closes the cached document and frees the cached pages.

@@ -44,6 +44,7 @@ Legibyl.slnx
 src/
   Legibyl.Validation/   F# facade over the veraPDF Java validation core (IKVM)
   Legibyl.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
+  Legibyl.Layout/       Suggests structure for untagged pages with a layout detector (PaddleOCR, model downloaded on use)
   Legibyl.Gui/          Avalonia + FuncUI UI (Windows/macOS/Linux): file picker, profile selector, results grid
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
 tests/
@@ -281,7 +282,18 @@ document also renders the page it goes to below, with the destination marked
 in blue: the line the view starts at, the rectangle a `/FitR` destination
 shows, or the whole page when the destination names no position.
 If the file has no structure tree at all (completely untagged), the button
-reports that instead of an empty tree.
+reports that instead of an empty tree, and offers **Suggest Structure…**: a
+preview of the structure a layout detector finds on each page (PaddleOCR's
+PP-DocLayoutV3, via the pure C# [PaddleOCR](https://www.nuget.org/packages/PaddleOCR)
+port in `Legibyl.Layout`). Each region is outlined on the page with the tag it
+suggests (H1, H, P, Figure, Table, Caption, Note, or Artifact for page
+furniture) and its reading order; the list beside it shows each region's text.
+It's a preview only: nothing is written to the PDF. The model (about 130 MB) is
+downloaded once, when asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`)
+and runs locally; each page takes several seconds on the CPU, so pages are
+detected as they're shown. A page without a text layer (a scan) is flagged, since
+tagging it would need OCR first. The detector test is skipped unless the model
+has been downloaded.
 **Export JSON…** in that window saves the whole hierarchy — including each
 node's `content` text, geometry, link targets, and form field metadata — as
 JSON, the same shape produced by the CLI's `--structure` flag. This is intended for AI agents
