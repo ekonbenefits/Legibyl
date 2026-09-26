@@ -111,28 +111,20 @@ let private pageNumberOfKey context (key: obj | null) =
     | null -> None
     | key -> lookup context.PageNumberByKey (string key)
 
+/// An element's /A: one attribute dictionary, or an array of them, each optionally followed
+/// by a revision number ([ << ... >> 0 ], as Canva writes it). The layout /BBox from the first
+/// dictionary that has one.
 let rec private bboxFromAttributes (attributes: COSObject | null) pageNumber =
     match attributes with
     | null -> None
-    | attributes when attributes.empty () -> None
-    | attributes when attributes.knownKey(atom "BBox").booleanValue() ->
-        geometryFromCosRect pageNumber (attributes.getKey(atom "BBox"))
-    | attributes ->
-        let rec tryItem i =
-            if i >= cosSize attributes then
-                None
-            else
-                let found =
-                    try
-                        Ok(bboxFromAttributes (attributes.at i) pageNumber)
-                    with :? java.lang.Exception ->
-                        // Not an array-like attributes object; leave geometry unavailable.
-                        Error()
-                match found with
-                | Ok(Some geometry) -> Some geometry
-                | Ok None -> tryItem (i + 1)
-                | Error() -> None
-        tryItem 0
+    | attributes when attributes.getType () = COSObjType.COS_DICT ->
+        match attributes.knownKey (atom "BBox") with
+        | NonNull known when known.booleanValue () -> geometryFromCosRect pageNumber (attributes.getKey (atom "BBox"))
+        | _ -> None
+    | attributes when attributes.getType () = COSObjType.COS_ARRAY ->
+        seq { 0 .. cosSize attributes - 1 } |> Seq.tryPick (fun i -> bboxFromAttributes (attributes.at i) pageNumber)
+    // A revision number, or anything else: no attributes here.
+    | _ -> None
 
 let private layoutBBoxGeometry (elem: PDStructElem) (pageNumber: int option) =
     pageNumber |> Option.bind (bboxFromAttributes (elem.getKey(atom "A")))
