@@ -158,3 +158,95 @@ let ``saving an edit tells whoever opened the window, so it can count them`` () 
             window.Close()
 
             told |> should equal 1))
+
+/// Three paragraphs a line each, and a list with one paragraph in its item's body.
+let private lines =
+    node "StructTreeRoot" null [
+        node "Document" null [
+            node "P" (rect 72.0 697.0 238.0 712.0) []
+            node "P" (rect 72.0 685.0 227.0 698.0) []
+            { node "P" (rect 72.0 669.0 222.0 684.0) [] with ActualText = null }
+            node "L" null [ node "LI" null [ node "LBody" null [ node "P" (rect 90.0 640.0 200.0 652.0) [] ] ] ]
+        ]
+    ]
+
+let private paragraphs (window: Window) =
+    descendants<Border> window |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "P" | _ -> false)
+
+/// Clicks a block, with shift held if extend.
+let private click (block: Border) (extend: bool) =
+    let modifiers = if extend then Input.KeyModifiers.Shift else Input.KeyModifiers.None
+    let properties = Input.PointerPointProperties(Input.RawInputModifiers.LeftMouseButton, Input.PointerUpdateKind.LeftButtonPressed)
+    block.RaiseEvent(
+        Input.PointerPressedEventArgs(block, new Input.Pointer(0, Input.PointerType.Mouse, true), block, Point(4.0, 4.0), 0UL, properties, modifiers)
+    )
+    pump ()
+
+let private mergeButton (window: Window) =
+    descendants<Button> window |> List.tryFind (fun b -> (string b.Content).StartsWith "Merge ")
+
+[<Fact>]
+let ``shift-clicking selects the paragraphs between, which can be merged as an edit`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show lines pdf
+            let blocks = paragraphs window
+            click blocks[0] false
+            let hint = texts window
+            click blocks[2] true
+            let offer = mergeButton window |> Option.map (fun b -> string b.Content)
+            (mergeButton window |> Option.get).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let layout = texts window
+            selectTab window "Edits"
+            let editsTab = texts window
+            window.Close()
+
+            hint |> should contain "Shift-click the paragraphs after it to merge them into one."
+            offer |> should equal (Some "Merge 3 Paragraphs")
+            RegionEdits.load pdf |> List.map (fun e -> e.Tag, e.MergeWith.Length) |> should equal [ "P", 2 ]
+            layout |> should contain "✎ merged with the next 2 paragraphs, not in the PDF yet"
+            layout |> List.filter ((=) "✎ merged into the paragraph before, not in the PDF yet") |> List.length |> should equal 2
+            editsTab |> should contain "merge: 3 paragraphs into one, from \"P text\""
+            editsTab |> should contain "Not in this PDF yet: Save… writes it to a copy."))
+
+[<Fact>]
+let ``paragraphs already chosen to merge offer to stay apart instead`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show lines pdf
+            let blocks = paragraphs window
+            click blocks[0] false
+            click blocks[1] true
+            (mergeButton window |> Option.get).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let undo = descendants<Button> window |> List.find (fun b -> string b.Content = "Don't Merge These")
+            undo.RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let offer = mergeButton window |> Option.map (fun b -> string b.Content)
+            window.Close()
+
+            RegionEdits.load pdf |> should be Empty
+            offer |> should equal (Some "Merge 2 Paragraphs")))
+
+[<Fact>]
+let ``a merge isn't offered across parents, or for paragraphs with replacement text`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show lines pdf
+            let blocks = paragraphs window
+            click blocks[2] false
+            // The list's paragraph has another parent: just it is selected.
+            click blocks[3] true
+            let acrossParents = mergeButton window
+            window.Close()
+            let window = show (structure null) pdf
+            let blocks = paragraphs window
+            // The first paragraph has replacement text (it was read by OCR).
+            click blocks[0] false
+            click blocks[1] true
+            let withReplacement = mergeButton window
+            window.Close()
+
+            acrossParents |> should equal None
+            withReplacement |> should equal None))

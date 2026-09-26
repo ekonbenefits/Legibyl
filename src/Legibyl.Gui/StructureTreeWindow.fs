@@ -82,10 +82,11 @@ module private StructureView =
         | AltText
         | ReplacementText
 
-    /// What blocks can do: select (called with the clicked block's node and its border
-    /// control), show the user's edits, and edit an element.
+    /// What blocks can do: select (called with the clicked block's node, its border control, and
+    /// whether to extend the selection to it, as shift-click does), show the user's edits, and edit
+    /// an element.
     type Selection =
-        { Select: StructureNode -> Border -> unit
+        { Select: StructureNode -> Border -> bool -> unit
           Edits: IReadable<RegionEdits.Edit list>
           Edit: StructureNode -> EditKind -> unit }
 
@@ -105,6 +106,40 @@ module private StructureView =
         match node.Geometry with
         | null -> None
         | geometry -> RegionEdits.find edits geometry.PageNumber node.Tag geometry
+
+    /// For a paragraph: how it's in a merge the user chose, if it is (merges are only ever not in
+    /// the PDF yet where the paragraphs are still apart, as they are wherever a block shows them).
+    let mergeLine (edits: RegionEdits.Edit list) (node: StructureNode) =
+        match node.Geometry with
+        | NonNull box when node.Tag = "P" ->
+            match RegionEdits.findMerge edits box.PageNumber box with
+            | Some merge ->
+                let others = merge.MergeWith.Length
+                Some(if others = 1 then "✎ merged with the next paragraph, not in the PDF yet" else $"✎ merged with the next {others} paragraphs, not in the PDF yet")
+            | None ->
+                let merged =
+                    edits
+                    |> List.exists (fun e ->
+                        e.Page = box.PageNumber && e.MergeWith |> List.exists (fun other -> RegionEdits.overlap other box >= RegionEdits.SameRegionOverlap))
+                if merged then Some "✎ merged into the paragraph before, not in the PDF yet" else None
+        | _ -> None
+
+    /// The selected blocks, if they're paragraphs that can be merged: two or more on one page,
+    /// none with alt text or replacement text (merging would lose them).
+    let mergeable (nodes: StructureNode list) =
+        match nodes with
+        | first :: _ :: _ when
+            nodes
+            |> List.forall (fun n ->
+                n.Tag = "P"
+                && isNull n.AlternateDescription
+                && isNull n.ActualText
+                && (match n.Geometry, first.Geometry with
+                    | NonNull box, NonNull firstBox -> box.PageNumber = firstBox.PageNumber
+                    | _ -> false))
+            ->
+            Some nodes
+        | _ -> None
 
     /// What of edit isn't in the element yet: (label, text) lines.
     let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
@@ -195,7 +230,7 @@ module private StructureView =
                             | :? Border as border when obj.ReferenceEquals(border.Tag, node) -> Some border
                             | _ -> None)
                     e.Handled <- true
-                    selection.Select node owner
+                    selection.Select node owner (e.KeyModifiers.HasFlag KeyModifiers.Shift)
                 | _ -> ())
         ]
 
@@ -273,7 +308,7 @@ module private StructureView =
                 StackPanel.children [
                     header
                     match node.AlternateDescription with NonNull alt -> detailLine $"alt: \"{alt}\"" true | Null -> ()
-                    if not (editKinds node).IsEmpty then
+                    if not (editKinds node).IsEmpty || (node.Tag = "P" && not (isNull node.Geometry)) then
                         // Its own component, so an edit re-renders just this line.
                         Component.create("pending-edit", fun ctx ->
                             let edits = ctx.usePassedRead selection.Edits
@@ -281,8 +316,11 @@ module private StructureView =
                                 editFor edits.Current node |> Option.map (fun edit -> pendingLines edit node) |> Option.defaultValue []
                             StackPanel.create [
                                 StackPanel.children [
-                                    for label, text in lines ->
+                                    for label, text in lines do
                                         detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
+                                    match mergeLine edits.Current node with
+                                    | Some line -> detailLine line true
+                                    | None -> ()
                                 ]
                             ])
                     match node.FormFieldDescription with NonNull tooltip -> detailLine $"tooltip: \"{tooltip}\"" true | Null -> ()
@@ -442,8 +480,22 @@ module private StructureView =
     /// onEditsChanged is called once an edit has been saved (so the main window can count them).
     let view (window: Window) (renderer: PdfRegionRenderer) (root: StructureNode) (sourceFilePath: string) (onEditsChanged: unit -> unit) =
         Component(fun ctx ->
-            // The highlighted border and the style to restore when the selection moves.
-            let highlighted = ctx.useState ((None: (Border * (IBrush | null) * Thickness) option), false)
+            // The highlighted borders and the styles to restore when the selection moves.
+            let highlighted = ctx.useState (([]: (Border * (IBrush | null) * Thickness) list), false)
+            // The selected blocks' nodes, in document order, and the one a shift-click extends from.
+            let selected = ctx.useState ([]: StructureNode list)
+            let anchor = ctx.useState ((None: StructureNode option), false)
+            // Each node's parent, to extend a selection over its siblings.
+            let parents =
+                ctx.useStateLazy(fun () ->
+                    let parents = Collections.Generic.Dictionary<StructureNode, StructureNode>(HashIdentity.Reference)
+                    let rec add (node: StructureNode) =
+                        for child in node.Children do
+                            parents[child] <- node
+                            add child
+                    add root
+                    parents)
+                    .Current
             let previewImage = ctx.useState (None: Bitmap option)
             // For a link: the page it goes to, with its destination marked in blue.
             let targetImage = ctx.useState (None: Bitmap option)
@@ -453,17 +505,42 @@ module private StructureView =
             // Bumped on every selection so a slower preview for an earlier one can't overwrite it.
             let previewVersion = ctx.useState (0, false)
 
-            let select (node: StructureNode) (border: Border) =
-                // Restyle just the two affected borders; re-rendering the layout would
-                // re-diff every block, which is slow for large documents.
-                match highlighted.Current with
-                | Some(previous, previousBrush, previousThickness) ->
+            let select (node: StructureNode) (border: Border) (extend: bool) =
+                // Extending: every sibling from the anchor to this one (a shift-click on a block
+                // with another parent selects just it).
+                let nodes =
+                    match anchor.Current with
+                    | Some from when extend && not (obj.ReferenceEquals(from, node)) ->
+                        match parents.TryGetValue from, parents.TryGetValue node with
+                        | (true, parent), (true, other) when obj.ReferenceEquals(parent, other) ->
+                            let siblings = List.ofSeq parent.Children
+                            let i = siblings |> List.findIndex (fun s -> obj.ReferenceEquals(s, from))
+                            let j = siblings |> List.findIndex (fun s -> obj.ReferenceEquals(s, node))
+                            siblings[min i j .. max i j]
+                        | _ -> [ node ]
+                    | _ -> [ node ]
+                if nodes.Length = 1 then anchor.Set(Some node)
+                selected.Set nodes
+                // Restyle just the affected borders; re-rendering the layout would re-diff every
+                // block, which is slow for large documents.
+                for previous, previousBrush, previousThickness in highlighted.Current do
                     previous.BorderBrush <- previousBrush
                     previous.BorderThickness <- previousThickness
-                | None -> ()
-                highlighted.Set(Some(border, border.BorderBrush, border.BorderThickness))
-                border.BorderBrush <- Brushes.DodgerBlue
-                border.BorderThickness <- Thickness 3.0
+                let borders =
+                    if nodes.Length = 1 then
+                        [ border ]
+                    else
+                        window.GetVisualDescendants()
+                        |> Seq.choose (fun v ->
+                            match v with
+                            | :? Border as b when (match b.Tag with :? StructureNode as n -> nodes |> List.exists (fun s -> obj.ReferenceEquals(s, n)) | _ -> false) ->
+                                Some b
+                            | _ -> None)
+                        |> List.ofSeq
+                highlighted.Set [ for b in borders -> b, b.BorderBrush, b.BorderThickness ]
+                for b in borders do
+                    b.BorderBrush <- Brushes.DodgerBlue
+                    b.BorderThickness <- Thickness 3.0
 
                 task {
                     previewVersion.Set(previewVersion.Current + 1)
@@ -471,8 +548,22 @@ module private StructureView =
                     previewImage.Set None
                     targetImage.Set None
                     targetNote.Set ""
-                    let geometry = Option.ofObj node.Geometry
-                    let destination = Option.ofObj node.LinkDestination
+                    // Several blocks on one page: all of them.
+                    let geometry =
+                        match nodes |> List.map (fun n -> Option.ofObj n.Geometry) with
+                        | [ single ] -> single
+                        | boxes when boxes |> List.forall Option.isSome ->
+                            match boxes |> List.choose id with
+                            | first :: _ as boxes when boxes |> List.forall (fun b -> b.PageNumber = first.PageNumber) ->
+                                Some
+                                    { first with
+                                        Left = boxes |> List.map _.Left |> List.min
+                                        Bottom = boxes |> List.map _.Bottom |> List.min
+                                        Right = boxes |> List.map _.Right |> List.max
+                                        Top = boxes |> List.map _.Top |> List.max }
+                            | _ -> None
+                        | _ -> None
+                    let destination = if nodes.Length = 1 then Option.ofObj node.LinkDestination else None
                     match geometry with
                     | None ->
                         previewNote.Set(
@@ -488,7 +579,23 @@ module private StructureView =
                                     let decode (result: HighlightImageResult) =
                                         use stream = new MemoryStream(result.PngBytes)
                                         result, new Bitmap(stream)
-                                    geometry |> Option.map (fun g -> decode (renderer.RenderPageWithHighlight(sourceFilePath, g))),
+                                    geometry
+                                    |> Option.map (fun g ->
+                                        if nodes.Length = 1 then
+                                            decode (renderer.RenderPageWithHighlight(sourceFilePath, g))
+                                        else
+                                            // Several blocks: each outlined and numbered, in order.
+                                            let regions =
+                                                [ for i, n in List.indexed nodes ->
+                                                      { Geometry = nonNull n.Geometry
+                                                        Label = string (i + 1)
+                                                        Color = 0xD32F2Fu
+                                                        Emphasised = false } ]
+                                            decode
+                                                { PngBytes = renderer.RenderPageWithRegions(sourceFilePath, g.PageNumber, regions)
+                                                  PageNumber = g.PageNumber
+                                                  HasPreciseRegion = true
+                                                  Note = $"Outlined the {nodes.Length} selected blocks, numbered in order." }),
                                     destination |> Option.map (fun d -> decode (renderer.RenderPageWithTarget(sourceFilePath, d))))
                             if version = previewVersion.Current then
                                 match source with
@@ -614,7 +721,7 @@ module private StructureView =
                         Grid.create [
                             Grid.column 2
                             Grid.margin (10.0, 0.0, 0.0, 0.0)
-                            Grid.rowDefinitions "Auto,Auto,*"
+                            Grid.rowDefinitions "Auto,Auto,Auto,*"
                             Grid.children [
                                 TextBlock.create [
                                     TextBlock.text "Selected block geometry"
@@ -628,6 +735,46 @@ module private StructureView =
                                     Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                     TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                 ]
+                                // Paragraphs next to each other can be merged into one.
+                                let pendingMerge =
+                                    match mergeable selected.Current with
+                                    | Some(first :: rest) ->
+                                        let box = nonNull first.Geometry
+                                        RegionEdits.findMerge edits.Current box.PageNumber box
+                                        |> Option.filter (fun m -> m.MergeWith.Length = rest.Length)
+                                    | _ -> None
+                                match mergeable selected.Current, pendingMerge with
+                                | Some _, Some merge ->
+                                    Button.create [
+                                        Grid.row 2
+                                        Button.content "Don't Merge These"
+                                        Button.margin (0.0, 0.0, 0.0, 8.0)
+                                        ToolTip.tip "Drop this merge: they stay separate paragraphs."
+                                        Button.onClick (fun _ ->
+                                            saveEdits (edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore)
+                                    ]
+                                | Some paragraphs, None ->
+                                    Button.create [
+                                        Grid.row 2
+                                        Button.content $"Merge {paragraphs.Length} Paragraphs"
+                                        Button.margin (0.0, 0.0, 0.0, 8.0)
+                                        ToolTip.tip "Make these paragraphs one, as an edit: Save… in the main window writes it to a copy."
+                                        Button.onClick (fun _ ->
+                                            let boxes = paragraphs |> List.map (fun p -> nonNull p.Geometry)
+                                            saveEdits (RegionEdits.mergeParagraphs edits.Current boxes.Head.PageNumber boxes) |> ignore)
+                                    ]
+                                | None, _ ->
+                                    match selected.Current with
+                                    | [ single ] when single.Tag = "P" ->
+                                        TextBlock.create [
+                                            Grid.row 2
+                                            TextBlock.text "Shift-click the paragraphs after it to merge them into one."
+                                            TextBlock.textWrapping TextWrapping.Wrap
+                                            TextBlock.fontSize 11.0
+                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                            TextBlock.margin (0.0, 0.0, 0.0, 8.0)
+                                        ]
+                                    | _ -> ()
                                 // The selected block's page, and for a link, the page it goes to below it.
                                 let imageBox (row: int) (image: Bitmap option) =
                                     Border.create [
@@ -647,7 +794,7 @@ module private StructureView =
                                         )
                                     ]
                                 Grid.create [
-                                    Grid.row 2
+                                    Grid.row 3
                                     Grid.rowDefinitions (if targetImage.Current.IsSome then "*,Auto,*" else "*")
                                     Grid.children [
                                         imageBox 0 previewImage.Current
@@ -689,11 +836,31 @@ module private StructureView =
                         |> List.tryHead
                         |> Option.map fst
                     let row (edit: RegionEdits.Edit) =
+                        // A paragraph in about this place, if there is one.
+                        let paragraphAt (box: StructureGeometry) =
+                            allNodes
+                            |> List.exists (fun node ->
+                                match node.Geometry with
+                                | NonNull own when node.Tag = "P" && own.PageNumber = edit.Page ->
+                                    RegionEdits.overlap own box >= RegionEdits.SameRegionOverlap
+                                | _ -> false)
                         let status =
-                            match elementFor edit with
-                            | None -> $"No <{edit.Tag}> in about this place in this PDF, so Fix can't apply it."
-                            | Some node when (pendingLines edit node).IsEmpty -> "In this PDF."
-                            | Some _ -> "Not in this PDF yet: Save… writes it to a copy."
+                            if not edit.MergeWith.IsEmpty then
+                                let boxes = edit.Box :: edit.MergeWith
+                                let all =
+                                    { edit.Box with
+                                        Left = boxes |> List.map _.Left |> List.min
+                                        Bottom = boxes |> List.map _.Bottom |> List.min
+                                        Right = boxes |> List.map _.Right |> List.max
+                                        Top = boxes |> List.map _.Top |> List.max }
+                                if boxes |> List.forall paragraphAt then "Not in this PDF yet: Save… writes it to a copy."
+                                elif paragraphAt all then "In this PDF."
+                                else "These paragraphs aren't in this PDF, so Save can't merge them."
+                            else
+                                match elementFor edit with
+                                | None -> $"No <{edit.Tag}> in about this place in this PDF, so Save can't apply it."
+                                | Some node when (pendingLines edit node).IsEmpty -> "In this PDF."
+                                | Some _ -> "Not in this PDF yet: Save… writes it to a copy."
                         Border.create [
                             Border.borderThickness (0.0, 0.0, 0.0, 1.0)
                             Theme.resources [ Border.BorderBrushProperty, Theme.Tokens.Border ]
@@ -716,6 +883,21 @@ module private StructureView =
                                                 | Some "" -> detailLine "text: (nothing to read)" false
                                                 | Some text -> detailLine $"text: \"{text}\"" false
                                                 | None -> ()
+                                                if not edit.MergeWith.IsEmpty then
+                                                    // Its first paragraph's text, to tell merges apart.
+                                                    let start =
+                                                        allNodes
+                                                        |> List.tryFind (fun node ->
+                                                            match node.Geometry with
+                                                            | NonNull own when node.Tag = "P" && own.PageNumber = edit.Page ->
+                                                                RegionEdits.overlap own edit.Box >= RegionEdits.SameRegionOverlap
+                                                            | _ -> false)
+                                                        |> Option.bind (fun node -> Option.ofObj node.Content)
+                                                        |> Option.map (fun text ->
+                                                            let text = text.Trim()
+                                                            if text.Length > 50 then $", from \"{text[..49]}…\"" else $", from \"{text}\"")
+                                                        |> Option.defaultValue ""
+                                                    detailLine $"merge: {edit.MergeWith.Length + 1} paragraphs into one{start}" false
                                                 detailLine status true
                                             ]
                                         ]

@@ -1,5 +1,6 @@
 /// Changes made to suggested regions in Suggest Structure: a figure's alt text, and corrected
-/// OCR text. Kept in the "edits" section of the "<name>.pdf.legibyl.json" file next to the PDF
+/// OCR text; and the same, plus paragraphs merged, to elements in View Structure. Kept in the
+/// "edits" section of the "<name>.pdf.legibyl.json" file next to the PDF
 /// (with any remembered dismissals). A region is found again by its page, its suggested tag and
 /// its box, so an edit still applies when the layout is suggested again, even for a regenerated
 /// PDF, as long as the region is in about the same place.
@@ -18,7 +19,9 @@ type Edit =
       /// A figure's alt text.
       Alt: string option
       /// A region's OCR text, corrected; "" for nothing to read.
-      Text: string option }
+      Text: string option
+      /// Paragraphs merged into this one (a P), by box: its neighbours after it, in order.
+      MergeWith: StructureGeometry list }
 
 /// How much two boxes must overlap to be the same region: their intersection over their
 /// union. A regenerated PDF can move things a little; different regions rarely overlap this much.
@@ -35,10 +38,10 @@ let overlap (a: StructureGeometry) (b: StructureGeometry) =
     let union = area a + area b - intersection
     if union <= 0.0 then 0.0 else intersection / union
 
-/// The edit for this region: same page and tag, overlapping most.
+/// The edit for this region (its alt text or text, not a merge): same page and tag, overlapping most.
 let find (edits: Edit list) (page: int) (tag: string) (box: StructureGeometry) : Edit option =
     edits
-    |> List.filter (fun e -> e.Page = page && e.Tag = tag)
+    |> List.filter (fun e -> e.Page = page && e.Tag = tag && e.MergeWith.IsEmpty)
     |> List.map (fun e -> e, overlap e.Box box)
     |> List.filter (fun (_, o) -> o >= SameRegionOverlap)
     |> List.sortByDescending snd
@@ -54,7 +57,7 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
         | Some e -> edits |> List.filter (fun other -> not (obj.ReferenceEquals(other, e)))
         | None -> edits
     let edited =
-        change (existing |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None })
+        change (existing |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = [] })
     if edited.Alt.IsNone && edited.Text.IsNone then others else others @ [ { edited with Box = box } ]
 
 /// A figure's alt text set, or removed if blank.
@@ -90,23 +93,47 @@ let apply (edits: Edit list) (page: int) (block: SuggestedBlock) (region: Layout
     | Some text when block.Recognized -> { region with ActualText = (if String.IsNullOrWhiteSpace text then null else text) }
     | _ -> region
 
+/// The merge of paragraphs (boxes, first to last) on page, added to edits. Merges it overlaps
+/// are replaced: a paragraph is merged once.
+let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry list) : Edit list =
+    let same (a: StructureGeometry) (b: StructureGeometry) = overlap a b >= SameRegionOverlap
+    let involves (e: Edit) =
+        e.Page = page && not e.MergeWith.IsEmpty && (e.Box :: e.MergeWith) |> List.exists (fun box -> boxes |> List.exists (same box))
+    (edits |> List.filter (not << involves))
+    @ [ { Page = page; Tag = "P"; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail } ]
+
+/// The merge that starts at box on page, if any.
+let findMerge (edits: Edit list) (page: int) (box: StructureGeometry) : Edit option =
+    edits |> List.tryFind (fun e -> e.Page = page && not e.MergeWith.IsEmpty && overlap e.Box box >= SameRegionOverlap)
+
 /// Adds imported edits for regions that have none here; returns the result and how many were added.
 let merge (edits: Edit list) (imported: Edit list) : Edit list * int =
-    let added = imported |> List.filter (fun e -> (find edits e.Page e.Tag e.Box).IsNone)
+    let isNew (e: Edit) =
+        if e.MergeWith.IsEmpty then (find edits e.Page e.Tag e.Box).IsNone else (findMerge edits e.Page e.Box).IsNone
+    let added = imported |> List.filter isNew
     edits @ added, added.Length
 
 let private ofSaved (saved: SavedEdit) : Edit option =
     let value (text: string | null) = Option.ofObj text
-    match saved.Box with
-    | [| left; bottom; right; top |] when not (isNull saved.Alt && isNull saved.Text) ->
+    let geometry (box: float array) =
+        match box with
+        | [| left; bottom; right; top |] -> Some { PageNumber = saved.Page; Left = left; Bottom = bottom; Right = right; Top = top }
+        | _ -> None
+    match geometry saved.Box with
+    | Some box ->
+        let mergeWith =
+            match saved.MergeWith with
+            | NonNull boxes -> boxes |> Array.choose geometry |> List.ofArray
+            | Null -> []
         let edit: Edit =
             { Page = saved.Page
               Tag = saved.Tag
-              Box = { PageNumber = saved.Page; Left = left; Bottom = bottom; Right = right; Top = top }
+              Box = box
               Alt = value saved.Alt
-              Text = value saved.Text }
-        if edit.Alt.IsNone && edit.Text.IsNone then None else Some edit
-    | _ -> None
+              Text = value saved.Text
+              MergeWith = mergeWith }
+        if edit.Alt.IsNone && edit.Text.IsNone && edit.MergeWith.IsEmpty then None else Some edit
+    | None -> None
 
 let private editsOf (saved: SavedFile option) : Edit list =
     match saved with
@@ -123,7 +150,8 @@ let toElementEdits (edits: Edit list) : ElementEdit list =
              Tag = e.Tag
              Box = e.Box
              Alt = Option.toObj e.Alt
-             Text = Option.toObj e.Text }
+             Text = Option.toObj e.Text
+             MergeWith = e.MergeWith }
           : ElementEdit) ]
 
 /// The edits saved for pdfPath (see Dismissals.readFor).
@@ -142,11 +170,13 @@ let loadWithTitle (pdfPath: string) : Edit list * string option =
     editsOf saved, saved |> Option.bind (fun saved -> Option.ofObj saved.Title)
 
 let private toSaved (e: Edit) : SavedEdit =
+    let saved (box: StructureGeometry) = [| box.Left; box.Bottom; box.Right; box.Top |] |> Array.map (fun v -> Math.Round(v, 1))
     { Page = e.Page
       Tag = e.Tag
-      Box = [| e.Box.Left; e.Box.Bottom; e.Box.Right; e.Box.Top |] |> Array.map (fun v -> Math.Round(v, 1))
+      Box = saved e.Box
       Alt = Option.toObj e.Alt
-      Text = Option.toObj e.Text }
+      Text = Option.toObj e.Text
+      MergeWith = if e.MergeWith.IsEmpty then null else e.MergeWith |> List.map saved |> Array.ofList }
 
 /// Saves edits next to pdfPath, keeping any dismissals in the file. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
