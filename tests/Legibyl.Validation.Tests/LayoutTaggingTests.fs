@@ -417,3 +417,23 @@ let ``tagging says which element each region became, and the box of what it hold
     let figure = tagged |> List.find (fun t -> t.Tag = "Figure")
     let box = figure.Box |> notNull
     (box.Left, box.Bottom, box.Right, box.Top) |> should equal (72.0, 450.0, 172.0, 550.0)
+
+[<Fact>]
+let ``tagging from regions with a review writes its alt text and title`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let review: ReviewFile.SavedFile =
+        { Version = 1
+          DismissedWarnings = null
+          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 70.0; 448.0; 175.0; 552.0 |]; Alt = "Red, green and blue squares"; Text = null; MergeWith = null } |]
+          Title = "Squares" }
+
+    VeraPdfValidator(LayoutSource = ReviewFile.ReviewedRegions(FixedLayout regions, review))
+        .Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout)
+    |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    flatten root |> List.find (fun n -> n.Tag = "Figure") |> _.AlternateDescription |> should equal "Red, green and blue squares"
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle() |> should equal "Squares"

@@ -157,7 +157,7 @@ let promptText (owner: Window) (title: string) (prompt: string) (initial: string
         return chosen
     }
 
-/// A repair the Fix dialog offers.
+/// A repair the Auto Fixes dialog offers.
 type private FixChoice =
     { Option: PdfFixOptions
       Title: string

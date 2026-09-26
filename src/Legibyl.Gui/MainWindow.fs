@@ -30,7 +30,7 @@ type RuleViolationRow =
       Clause: string
       TestNumber: int
       Severity: string
-      /// What the Fix dialog can do about this finding, e.g. "Fix XMP metadata"; empty if nothing.
+      /// What an auto fix can do about this finding, e.g. "Fix XMP metadata"; empty if nothing.
       Fixable: string
       Message: string
       LocationContext: string | null
@@ -204,7 +204,7 @@ module private MainView =
     let fixableHeading (heading: IView) =
         withIcon (decorativeIcon fixIcon Theme.Tokens.Primary 14.0) heading
 
-    /// A wrench for findings the Fix dialog can repair; nothing otherwise.
+    /// A wrench for findings an auto fix can repair; nothing otherwise.
     let fixableIcon (row: RuleViolationRow) : IView =
         if row.Violation.IsFixable then
             gridIcon fixIcon Theme.Tokens.Primary $"Fixable: {row.Fixable}"

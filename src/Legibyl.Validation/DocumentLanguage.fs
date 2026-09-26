@@ -6,7 +6,6 @@
 module internal Legibyl.Validation.DocumentLanguage
 
 open System
-open System.Globalization
 open System.Text
 open iText.Kernel.Pdf
 open iText.Kernel.Pdf.Canvas.Parser
@@ -39,16 +38,74 @@ let isDeclared (document: PdfDocument) =
     | null -> false
     | language -> not (String.IsNullOrWhiteSpace(language.ToUnicodeString()))
 
-/// "eng" -> "en": the detector's ISO 639-3 code as the BCP 47 tag /Lang takes (two letters
-/// where there are two, as usual). Codes with a region ("zh-cn") are already tags.
+/// The detector's languages (its ISO 639-3 codes), each with the BCP 47 tag /Lang takes (two
+/// letters, as usual) and its name in English. A table rather than .NET's cultures, which the
+/// CLI doesn't carry (it runs with invariant globalization).
+let private languages =
+    dict
+        [ "afr", ("af", "Afrikaans")
+          "ara", ("ar", "Arabic")
+          "ben", ("bn", "Bangla")
+          "bul", ("bg", "Bulgarian")
+          "ces", ("cs", "Czech")
+          "dan", ("da", "Danish")
+          "deu", ("de", "German")
+          "ell", ("el", "Greek")
+          "eng", ("en", "English")
+          "est", ("et", "Estonian")
+          "fas", ("fa", "Persian")
+          "fin", ("fi", "Finnish")
+          "fra", ("fr", "French")
+          "guj", ("gu", "Gujarati")
+          "heb", ("he", "Hebrew")
+          "hin", ("hi", "Hindi")
+          "hrv", ("hr", "Croatian")
+          "hun", ("hu", "Hungarian")
+          "ind", ("id", "Indonesian")
+          "ita", ("it", "Italian")
+          "jpn", ("ja", "Japanese")
+          "kan", ("kn", "Kannada")
+          "kor", ("ko", "Korean")
+          "lav", ("lv", "Latvian")
+          "lit", ("lt", "Lithuanian")
+          "mal", ("ml", "Malayalam")
+          "mar", ("mr", "Marathi")
+          "mkd", ("mk", "Macedonian")
+          "nep", ("ne", "Nepali")
+          "nld", ("nl", "Dutch")
+          "nor", ("no", "Norwegian")
+          "pan", ("pa", "Punjabi")
+          "pol", ("pl", "Polish")
+          "por", ("pt", "Portuguese")
+          "ron", ("ro", "Romanian")
+          "rus", ("ru", "Russian")
+          "slk", ("sk", "Slovak")
+          "slv", ("sl", "Slovenian")
+          "som", ("so", "Somali")
+          "spa", ("es", "Spanish")
+          "sqi", ("sq", "Albanian")
+          "swa", ("sw", "Swahili")
+          "swe", ("sv", "Swedish")
+          "tam", ("ta", "Tamil")
+          "tel", ("te", "Telugu")
+          "tgl", ("tl", "Tagalog")
+          "tha", ("th", "Thai")
+          "tur", ("tr", "Turkish")
+          "twi", ("tw", "Twi")
+          "ukr", ("uk", "Ukrainian")
+          "urd", ("ur", "Urdu")
+          "vie", ("vi", "Vietnamese")
+          "zho", ("zh", "Chinese") ]
+
+/// "eng" -> "en": the detector's code as the tag /Lang takes. Codes it doesn't know are kept.
 let tagFor (code: string) =
-    if code.Contains '-' then
-        code
-    else
-        CultureInfo.GetCultures CultureTypes.NeutralCultures
-        |> Array.tryFind (fun culture -> culture.ThreeLetterISOLanguageName = code && culture.TwoLetterISOLanguageName.Length = 2)
-        |> Option.map _.TwoLetterISOLanguageName
-        |> Option.defaultValue code
+    match languages.TryGetValue code with
+    | true, (tag, _) -> tag
+    | _ -> code
+
+/// "en" -> "English": a tag tagFor gives, named in English (the tag itself for others).
+let nameOf (tag: string) =
+    languages.Values |> Seq.tryFind (fun (t, _) -> t = tag) |> Option.map snd |> Option.defaultValue tag
 
 /// The language text is in, as a BCP 47 tag, if there's enough of it and the detector is sure.
 let detect (text: string) : string option =

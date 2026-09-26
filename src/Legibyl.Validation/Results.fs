@@ -4,7 +4,7 @@ open System
 open System.Collections.Generic
 open System.Runtime.InteropServices
 
-/// Plain-language descriptions of the repairs, worded like the GUI's Fix dialog.
+/// Plain-language descriptions of the repairs, worded like the GUI's Auto Fixes dialog.
 module PdfFixDescriptions =
     /// One description per option set in options, e.g. "Remove empty /P structure elements".
     let Describe (options: PdfFixOptions) : string list =
@@ -22,7 +22,9 @@ module PdfFixDescriptions =
           PdfFixOptions.ListsFromParagraphs, "Tag paragraphs that start with list markers as a list (L/LI)"
           PdfFixOptions.BookmarksFromHeadings, "Add bookmarks for the H1 and H2 headings"
           PdfFixOptions.DocumentTitle, "Set a document title and show it in the title bar"
-          PdfFixOptions.TitleFromFirstPage, "Title an untitled document from its title page's text" ]
+          PdfFixOptions.TitleFromFirstPage, "Title an untitled document from its title page's text"
+          PdfFixOptions.JoinSplitParagraphs, "Join paragraphs tagged line by line where the page layout shows one block of text"
+          PdfFixOptions.ApplyEdits, "Write the edits a person made (alt text, replacement text, merged paragraphs)" ]
         |> List.filter (fun (option, _) -> options.HasFlag option)
         |> List.map snd
 

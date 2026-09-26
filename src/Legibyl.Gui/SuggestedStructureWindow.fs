@@ -29,7 +29,7 @@ type LinkTitlesChoice =
 
 /// What's been found and decided about one file's suggested structure: each page's layout
 /// found so far, the suggestions discarded, and the page last looked at. Remembered while the
-/// app is open, so reopening Suggest Structure (or tagging from the Fix dialog) picks it up.
+/// app is open, so reopening Suggest Structure (or tagging on Save) picks it up.
 [<Sealed>]
 type LayoutReview(modified: DateTime) =
     member _.Modified = modified

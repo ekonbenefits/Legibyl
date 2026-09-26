@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Legibyl.Validation\Legibyl.Validation.fsproj" />
+    <ProjectReference Include="..\Legibyl.Layout\Legibyl.Layout.fsproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -16,6 +17,7 @@
   <ItemGroup>
     <Compile Include="ProfileNames.fs" />
     <Compile Include="FileValidationResult.fs" />
+    <Compile Include="FixNames.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
