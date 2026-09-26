@@ -59,7 +59,7 @@ licenses/                   AGPLv3+/GPLv3+/MPLv2+/Apache-2.0/MIT license texts a
 
 ## Building & running
 
-Requires the .NET 8 SDK. The GUI, CLI, and tests build and run on Windows,
+Requires the .NET 10 SDK. The GUI, CLI, and tests build and run on Windows,
 macOS, and Linux; only the MSI installer project is Windows-only, so the
 solution build skips it (build it explicitly, see below).
 
@@ -307,7 +307,7 @@ dotnet run --project src/Legibyl.Cli/Legibyl.Cli.fsproj -- <file.pdf> [<file2.pd
 ```
 
 Or after building, run the exe directly:
-`src\Legibyl.Cli\bin\Debug\net8.0\legibyl.exe <file.pdf>`
+`src\Legibyl.Cli\bin\Debug\net10.0\legibyl.exe <file.pdf>`
 
 Options:
 - `--profile <name>` — profile to validate against (default `pdfua1`). Run

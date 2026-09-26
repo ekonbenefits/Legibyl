@@ -100,7 +100,7 @@ let ``selecting a link also shows the page it goes to`` () =
         let window = StructureTreeWindow(node "StructTreeRoot" [ node "Document" [ link ] ], pdf)
         window.Show()
         HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
-        let block = blocks window |> List.find (fun border -> (border.Tag :?> StructureNode).Tag = "Link")
+        let block = blocks window |> List.find (fun border -> match border.Tag with :? StructureNode as n -> n.Tag = "Link" | _ -> false)
         let point = (block.TranslatePoint(Point(4.0, 4.0), window)).Value
         window.MouseDown(point, MouseButton.Left)
         window.MouseUp(point, MouseButton.Left)
