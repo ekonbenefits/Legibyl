@@ -250,3 +250,47 @@ let ``a merge isn't offered across parents, or for paragraphs with replacement t
 
             acrossParents |> should equal None
             withReplacement |> should equal None))
+
+let private tagPicker (window: Window) =
+    descendants<ComboBox> window
+    |> List.tryFind (fun c -> (string (Automation.AutomationProperties.GetName c)).StartsWith "Tag for this")
+
+[<Fact>]
+let ``a block of text can be given another tag, which shows as not in the PDF yet`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show lines pdf
+            let first = (paragraphs window)[0]
+            click first false
+            (tagPicker window |> Option.get).SelectedItem <- "H1"
+            pump ()
+            let layout = texts window
+            selectTab window "Edits"
+            let editsTab = texts window
+            window.Close()
+
+            RegionEdits.load pdf |> List.map (fun e -> e.Tag, e.Retag) |> should equal [ "P", Some "H1" ]
+            layout |> should contain "✎ your tag, not in the PDF yet: \"H1\""
+            editsTab |> should contain "tag: H1"
+            editsTab |> should contain "Not in this PDF yet: Save… writes it to a copy."))
+
+[<Fact>]
+let ``a retag the PDF already has shows as in it, and figures get no tag picker`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let paragraph = rect 72.0 697.0 238.0 712.0
+            RegionEdits.save pdf (RegionEdits.setRetag [] 1 "P" paragraph "H1")
+            let retagged = node "StructTreeRoot" null [ node "Document" null [ node "H1" paragraph []; node "Figure" logo [] ] ]
+            let window = show retagged pdf
+            let heading = descendants<Border> window |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "H1" | _ -> false)
+            click heading false
+            let picked = tagPicker window |> Option.map (fun c -> string c.SelectedItem)
+            click (blockFor window "Figure") false
+            let forFigure = tagPicker window
+            selectTab window "Edits"
+            let editsTab = texts window
+            window.Close()
+
+            picked |> should equal (Some "H1")
+            forFigure |> should equal None
+            editsTab |> should contain "In this PDF."))

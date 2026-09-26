@@ -59,7 +59,7 @@ let ``an edit is written to the element with its tag in about the same place`` (
 
     let result = applyEdits input.Path output.Path [ altEdit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text and merged paragraphs)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
     figureAlt output.Path |> should equal "Tomato seedlings in a tray"
 
 [<Fact>]
@@ -99,7 +99,7 @@ let ``an edit with no element in about the same place isn't applied, and says so
     result.AppliedFixes
     |> should
         contain
-        "Applied 1 of your edits (alt text, replacement text and merged paragraphs); 1 weren't, as no element with their tag is in about the same place."
+        "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs); 1 weren't, as no element with their tag is in about the same place."
     ElementEdits.pending input.Path [ elsewhere ] |> should equal 0
 
 /// Three lines tagged a paragraph each.
@@ -133,7 +133,7 @@ let ``paragraphs chosen to merge are joined into the first`` () =
 
     let result = applyEdits input.Path output.Path [ edit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text and merged paragraphs)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
     paragraphTexts output.Path |> List.map (fun t -> t.Replace("  ", " "))
     |> should equal [ "Plots are assigned each spring, and members share the tools kept in the shed by the gate." ]
     ElementEdits.pending output.Path [ edit ] |> should equal 0

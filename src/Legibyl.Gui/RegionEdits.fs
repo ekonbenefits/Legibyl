@@ -43,10 +43,11 @@ let overlap (a: StructureGeometry) (b: StructureGeometry) =
     let union = area a + area b - intersection
     if union <= 0.0 then 0.0 else intersection / union
 
-/// The edit for this region (its alt text or text, not a merge): same page and tag, overlapping most.
+/// The edit for this region or element (not a merge): same page and tag (the one it was found
+/// with, or, once retagged, the one it was given), overlapping most.
 let find (edits: Edit list) (page: int) (tag: string) (box: StructureGeometry) : Edit option =
     edits
-    |> List.filter (fun e -> e.Page = page && e.Tag = tag && e.MergeWith.IsEmpty)
+    |> List.filter (fun e -> e.Page = page && (e.Tag = tag || e.Retag = Some tag) && e.MergeWith.IsEmpty)
     |> List.map (fun e -> e, overlap e.Box box)
     |> List.filter (fun (_, o) -> o >= SameRegionOverlap)
     |> List.sortByDescending snd
@@ -86,9 +87,9 @@ let setText edits page tag box (ocr: string) (text: string) =
 let setExcluded edits page tag box (exclude: bool) =
     update edits page tag box (fun e -> { e with Exclude = exclude })
 
-/// A suggested region (found as tag) given another tag, or its own again.
+/// A suggested region or an element (found as tag) given another tag, or its own again.
 let setRetag edits page (tag: string) box (newTag: string) =
-    update edits page tag box (fun e -> { e with Retag = (if newTag = tag then None else Some newTag) })
+    update edits page tag box (fun e -> { e with Retag = (if newTag = e.Tag then None else Some newTag) })
 
 /// Whether the suggestion is left out.
 let isExcluded edits page (block: SuggestedBlock) =

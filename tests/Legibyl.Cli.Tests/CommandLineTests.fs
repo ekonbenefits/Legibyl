@@ -85,7 +85,7 @@ let ``--edits writes the review next to the PDF into the repaired copy, and carr
 
         let _, result = run [ pdf; "--edits" ]
 
-        strings result.Value "fixAppliedFixes" |> should contain "Applied 1 of your edits (alt text, replacement text and merged paragraphs)."
+        strings result.Value "fixAppliedFixes" |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
         figureAlt copy |> should equal (Some "Tomato seedlings")
         // Only the edits: no other repair was asked for.
         strings result.Value "fixAppliedFixes" |> should haveLength 1
