@@ -68,7 +68,9 @@ let ``RenderPageWithHighlight rereads a file that changed on disk`` () =
     IO.File.Copy(corpusFile "pdfua1-fail.pdf", input.Path, true)
     let before = renderer.RenderPageWithHighlight(input.Path, region 50.0 600.0 200.0 700.0)
 
-    IO.File.Copy(corpusFile "pdfua1-pass.pdf", input.Path, true)
+    // A visibly different page. (pdfua1-pass.pdf draws the same page as pdfua1-fail.pdf; they
+    // differ only in their tags.)
+    IO.File.Copy(corpusFile "libreoffice-empty-paragraph.pdf", input.Path, true)
     IO.File.SetLastWriteTimeUtc(input.Path, DateTime.UtcNow.AddMinutes 1.0)
     let after = renderer.RenderPageWithHighlight(input.Path, region 50.0 600.0 200.0 700.0)
 
@@ -139,3 +141,12 @@ let ``RenderPageWithRegions outlines each region in its color, filling the empha
     outline.Green |> should be (greaterThan outline.Red)
     let filled = colorAt png 350.0 150.0
     filled.Red |> should be (greaterThan filled.Green)
+
+[<Fact>]
+let ``PDFium draws each page at the requested scale, and refuses pages that don't exist`` () =
+    use document = new PdfiumDocument(corpusFile "pdfua1-fail.pdf")
+    document.PageCount |> should equal 1
+    use page = document.Render(1, 2f)
+    (page.Width, page.Height) |> should equal (1224, 1584)
+    page.Pixels |> Array.exists (fun c -> c.Red < 128uy) |> should be True
+    (fun () -> document.Render(2, 1f) |> ignore) |> should throw typeof<InvalidOperationException>

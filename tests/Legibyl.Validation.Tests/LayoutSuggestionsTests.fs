@@ -178,3 +178,43 @@ let ``a QR code with coloured finder patterns is found`` () =
                 canvas.DrawRect(float32 (200 + (quiet + x) * cell), float32 (200 + (quiet + y) * cell), float32 cell, float32 cell, paint)
 
     QrCodes.decodeAll page |> List.map fst |> should equal [ "https://example.com/styled" ]
+
+[<Fact>]
+let ``a QR code drawn as a soft mask, as Canva exports it, is rendered and found`` () =
+    // A flat light image whose soft mask holds the code, drawn flipped in a form XObject with a
+    // transparency group, over a dark box.
+    use input = new TempPdf()
+    do
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(input.Path))
+        let page = document.AddNewPage(iText.Kernel.Geom.PageSize.LETTER)
+        let matrix = ZXing.QrCode.QRCodeWriter().encode("https://example.com/canva", ZXing.BarcodeFormat.QR_CODE, 300, 300)
+        let size = matrix.Width
+        let stream (bytes: byte array) (colorSpace: iText.Kernel.Pdf.PdfName) =
+            let image = iText.Kernel.Pdf.PdfStream(bytes)
+            image.Put(iText.Kernel.Pdf.PdfName.Type, iText.Kernel.Pdf.PdfName.XObject) |> ignore
+            image.Put(iText.Kernel.Pdf.PdfName.Subtype, iText.Kernel.Pdf.PdfName.Image) |> ignore
+            image.Put(iText.Kernel.Pdf.PdfName.Width, iText.Kernel.Pdf.PdfNumber size) |> ignore
+            image.Put(iText.Kernel.Pdf.PdfName.Height, iText.Kernel.Pdf.PdfNumber size) |> ignore
+            image.Put(iText.Kernel.Pdf.PdfName.ColorSpace, colorSpace) |> ignore
+            image.Put(iText.Kernel.Pdf.PdfName.BitsPerComponent, iText.Kernel.Pdf.PdfNumber 8) |> ignore
+            image
+        // Light modules where the code is dark: the mask is opaque on the code's dark modules,
+        // so the light colour shows there, on the dark box.
+        let mask = stream [| for y in 0 .. size - 1 do for x in 0 .. size - 1 -> if matrix[x, size - 1 - y] then 255uy else 0uy |] iText.Kernel.Pdf.PdfName.DeviceGray
+        let image = stream (Array.create (size * size * 3) 240uy) iText.Kernel.Pdf.PdfName.DeviceRGB
+        image.Put(iText.Kernel.Pdf.PdfName.SMask, mask.MakeIndirect document) |> ignore
+        let xobject = iText.Kernel.Pdf.Xobject.PdfImageXObject(image.MakeIndirect document :?> iText.Kernel.Pdf.PdfStream)
+        let form = iText.Kernel.Pdf.Xobject.PdfFormXObject(iText.Kernel.Geom.Rectangle(0f, 0f, 200f, 200f))
+        let group = iText.Kernel.Pdf.PdfDictionary()
+        group.Put(iText.Kernel.Pdf.PdfName.S, iText.Kernel.Pdf.PdfName.Transparency) |> ignore
+        form.GetPdfObject().Put(iText.Kernel.Pdf.PdfName.Group, group) |> ignore
+        let formCanvas = iText.Kernel.Pdf.Canvas.PdfCanvas(form, document)
+        formCanvas.AddXObjectWithTransformationMatrix(xobject, 200f, 0f, 0f, -200f, 0f, 200f) |> ignore
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(page)
+        canvas.SetFillColorRgb(0.05f, 0.25f, 0.05f).Rectangle(150.0, 250.0, 300.0, 300.0).Fill() |> ignore
+        canvas.AddXObjectAt(form, 200f, 300f) |> ignore
+
+    use document = new Legibyl.Rendering.PdfiumDocument(input.Path)
+    use rendered = document.Render(1, float32 (400.0 / 72.0))
+
+    QrCodes.decodeAll rendered |> List.map fst |> should equal [ "https://example.com/canva" ]

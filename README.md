@@ -43,7 +43,7 @@ box (`RuleViolation.Geometry`, in `FindingGeometry.fs`).
 Legibyl.slnx
 src/
   Legibyl.Validation/   F# facade over the veraPDF Java validation core (IKVM)
-  Legibyl.Rendering/    Renders a page image with a highlight box around a failure's region (PdfPig + SkiaSharp)
+  Legibyl.Rendering/    Renders page images with PDFium, with highlight boxes around a failure's region (SkiaSharp)
   Legibyl.Layout/       Suggests structure for untagged pages with a layout detector (PaddleOCR, model downloaded on use)
   Legibyl.Gui/          Avalonia + FuncUI UI (Windows/macOS/Linux): file picker, profile selector, results grid
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
@@ -241,10 +241,14 @@ element's content, or an annotation's `/Rect` (see `RuleViolation.Geometry`
 above; Legibyl's own warnings carry one too) — the details panel
 automatically renders that page with a highlight box around it. The image
 scales to the available panel space rather than opening at 100% zoom.
-Rendering uses [PdfPig](https://github.com/UglyToad/PdfPig) and
-[PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia) +
-SkiaSharp to rasterise the page and draw the box (`Legibyl.Rendering`
-project). Findings without a region (document-level metadata, whole-page
+Pages are drawn with [PDFium](https://pdfium.googlesource.com/pdfium/)
+(Chrome's PDF renderer; the native libraries come from the `bblanchon.PDFium.*`
+packages for Windows, Linux and macOS, called through a small binding,
+`Pdfium.fs`) into SkiaSharp bitmaps, which the box is drawn on
+(`Legibyl.Rendering` project). Layout detection, OCR and QR scanning use the
+same rendering. [PdfPig](https://github.com/UglyToad/PdfPig) still reads the
+text, positions and annotations; its own renderer was replaced because it
+leaves out some content readers draw (a Canva flyer's QR code, for one). Findings without a region (document-level metadata, whole-page
 checks, structure elements with no drawn content) show the full page for
 context when a page is known, with a banner noting the exact region isn't
 available.

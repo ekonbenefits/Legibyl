@@ -7,7 +7,6 @@ open System.Runtime.InteropServices
 open SkiaSharp
 open UglyToad.PdfPig
 open UglyToad.PdfPig.Core
-open UglyToad.PdfPig.Rendering.Skia
 open Legibyl.Validation
 
 /// Result of rendering a page image for a rule violation, with a best-effort highlight box
@@ -56,21 +55,31 @@ type IPdfRegionRenderer =
         pdfPath: string * destination: LinkDestination * [<Optional; DefaultParameterValue(2.0f)>] scale: float32 ->
             HighlightImageResult
 
+/// An open PDF: PdfPig reads it (annotation rectangles), PDFium draws it.
+type private OpenPdf =
+    { Reader: PdfDocument
+      Pages: PdfiumDocument }
+
+    member this.Dispose() =
+        this.Reader.Dispose()
+        (this.Pages :> IDisposable).Dispose()
+
+module private Documents =
+    let openDocument (pdfPath: string) =
+        let bytes = File.ReadAllBytes pdfPath
+        { Reader = PdfDocument.Open bytes
+          Pages = new PdfiumDocument(bytes) }
+
+    let renderPage (document: OpenPdf) pageNumber (scale: float32) =
+        if pageNumber < 1 || pageNumber > document.Reader.NumberOfPages then
+            raise (InvalidOperationException $"Page {pageNumber} is out of range (document has {document.Reader.NumberOfPages} pages).")
+        document.Pages.Render(pageNumber, scale)
+
 module private Rendering =
     /// A finding or selected element.
     let highlightColor = SKColor(0xE8uy, 0x1Buy, 0x23uy)
     /// Where a link goes, so it reads differently from the link itself.
     let targetColor = SKColor(0x1Auy, 0x73uy, 0xE8uy)
-
-    let openDocument (pdfPath: string) =
-        let document = PdfDocument.Open(pdfPath, SkiaRenderingParsingOptions.Instance)
-        document.AddSkiaPageFactory()
-        document
-
-    let renderPage (document: PdfDocument) pageNumber (scale: float32) =
-        if pageNumber < 1 || pageNumber > document.NumberOfPages then
-            raise (InvalidOperationException $"Page {pageNumber} is out of range (document has {document.NumberOfPages} pages).")
-        document.GetPageAsSKBitmap(pageNumber, scale, SKColors.White)
 
     let encodePng (bitmap: SKBitmap) =
         use image = SKImage.FromBitmap bitmap
@@ -154,7 +163,7 @@ open Rendering
 type private PageCache() =
     let gate = obj ()
     let capacity = 6
-    let mutable current: (string * DateTime * PdfDocument) option = None
+    let mutable current: (string * DateTime * OpenPdf) option = None
     // Most recently used last.
     let pages = List<struct (int * float32 * SKBitmap)>()
 
@@ -177,12 +186,12 @@ type private PageCache() =
         | Some(path, stamp, document) when path = fullPath && stamp = modified -> document
         | _ ->
             close ()
-            let document = openDocument fullPath
+            let document = Documents.openDocument fullPath
             current <- Some(fullPath, modified, document)
             document
 
     /// A copy of the page's rendering (from the cache if possible), for the caller to draw on and dispose.
-    let pageCopy (document: PdfDocument) pageNumber scale =
+    let pageCopy (document: OpenPdf) pageNumber scale =
         let cached =
             match pages |> Seq.tryFindIndex (fun struct (page, pageScale, _) -> page = pageNumber && pageScale = scale) with
             | Some index ->
@@ -192,7 +201,7 @@ type private PageCache() =
                 let struct (_, _, bitmap) = entry
                 bitmap
             | None ->
-                let bitmap = renderPage document pageNumber scale
+                let bitmap = Documents.renderPage document pageNumber scale
                 pages.Add(struct (pageNumber, scale, bitmap))
                 if pages.Count > capacity then
                     let struct (_, _, oldest) = pages[0]
@@ -206,7 +215,7 @@ type private PageCache() =
         lock gate (fun () ->
             let document = documentFor pdfPath
             use bitmap = pageCopy document pageNumber scale
-            f document bitmap)
+            f document.Reader bitmap)
 
     interface IDisposable with
         member _.Dispose() = lock gate close

@@ -46,31 +46,29 @@ licensed under the Apache License, Version 2.0 (full text in
 `LICENSE.Apache` in this directory), to execute the veraPDF Java bytecode
 from .NET.
 
-## PdfPig and PdfPig.Rendering.Skia
+## PdfPig
 
-Legibyl uses PdfPig in two places: the validation layer reads each page's
-marked-content text by MCID so the exported semantic structure tree can
-include the visible content under each tag, and the GUI's selected-finding
-preview renders the page containing a failure with a highlight box around
-it. These features use:
-
-- [PdfPig](https://github.com/UglyToad/PdfPig) — a pure managed C# PDF
-  parser (no native/JNI dependencies), licensed under the Apache License,
-  Version 2.0. Used here to read marked-content/MCID text and annotation
-  geometry (`/Rect`) directly from the PDF's object model.
-- [PdfPig.Rendering.Skia](https://github.com/BobLd/PdfPig.Rendering.Skia)
-  — a PdfPig extension that rasterises pages to
-  [SkiaSharp](https://github.com/mono/SkiaSharp) bitmaps, licensed under
-  the Apache License, Version 2.0. SkiaSharp itself is MIT-licensed (see
-  below).
-
-Both are used unmodified via NuGet package references (no vendored/bundled
-source), so no additional source-availability obligations apply beyond the
-license texts themselves. The full Apache License 2.0 text is in
+Legibyl uses [PdfPig](https://github.com/UglyToad/PdfPig), a pure managed C#
+PDF parser licensed under the Apache License, Version 2.0, to read what's on a
+page: each page's marked-content text by MCID (so the exported structure tree
+includes the visible content under each tag), words and their positions for
+layout suggestions, and annotation geometry (`/Rect`). It's used unmodified via
+a NuGet package reference. The full Apache License 2.0 text is in
 `LICENSE.Apache` in this directory.
 
-PdfPig.Rendering.Skia ships the following NOTICE, reproduced unmodified as
-the Apache License requires:
+## PDFium
+
+Pages are drawn (for previews, layout detection, OCR and QR scanning) with
+[PDFium](https://pdfium.googlesource.com/pdfium/), Chrome's PDF renderer,
+copyright The PDFium Authors, licensed under the BSD 3-Clause License, with
+some parts under the Apache License, Version 2.0; its license is in
+`LICENSE.PDFium` in this directory. The native libraries come unmodified from
+[pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) by Benoît
+Blanchon (the `bblanchon.PDFium.*` NuGet packages, Apache License 2.0), called
+through Legibyl's own small binding (`Pdfium.fs`).
+
+PdfPig derives in part from Apache PDFBox, whose NOTICE is reproduced
+unmodified here:
 
 ```text
 Apache PDFBox
@@ -180,7 +178,7 @@ unmodified via NuGet package references.
   command-line parsing library FSharp.SystemCommandLine builds on.
   Copyright © .NET Foundation and Contributors.
 - [SkiaSharp and HarfBuzzSharp](https://github.com/mono/SkiaSharp) — 2D
-  graphics and text shaping, used by Avalonia and PdfPig.Rendering.Skia.
+  graphics and text shaping, used by Avalonia and for drawing pages' highlights.
   Copyright (c) 2015-2016 Xamarin, Inc. Copyright (c) 2017-2018 Microsoft
   Corporation.
 
