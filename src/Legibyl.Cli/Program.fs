@@ -274,6 +274,7 @@ let rec private appendStructure (sb: StringBuilder) (node: StructureNode) (inden
           match node.FormFieldDescription with NonNull tooltip -> yield $"tooltip=\"{tooltip}\"" | Null -> ()
           match node.FormFieldValue with NonNull value -> yield $"value=\"{value}\"" | Null -> ()
           match node.LinkUri with NonNull href -> yield $"href=\"{href}\"" | Null -> ()
+          match node.LinkDescription with NonNull description -> yield $"description=\"{description}\"" | Null -> ()
           match node.LinkDestinationDescription with NonNull dest -> yield $"dest=\"{dest}\"" | Null -> ()
           if node.ContentLeafCount > 0 then yield $"content×{node.ContentLeafCount}" ]
 

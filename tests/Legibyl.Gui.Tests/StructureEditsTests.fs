@@ -30,6 +30,7 @@ let private node (tag: string) (geometry: StructureGeometry | null) (children: S
       LinkDestinationPageNumber = Nullable()
       LinkDestinationDescription = null
       LinkDestination = null
+      LinkDescription = null
       Geometry = geometry
       Language = null
       PageNumber = (match geometry with NonNull g -> Nullable g.PageNumber | Null -> Nullable())
@@ -294,3 +295,30 @@ let ``a retag the PDF already has shows as in it, and figures get no tag picker`
             picked |> should equal (Some "H1")
             forFigure |> should equal None
             editsTab |> should contain "In this PDF."))
+
+[<Fact>]
+let ``a link's description can be edited, starting from the one it has`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let link =
+                { node "Link" (rect 72.0 690.0 150.0 710.0) [] with
+                    LinkUri = "https://example.com"
+                    LinkDescription = "click here"
+                    Content = "Visit the site" }
+            let window = show (node "StructTreeRoot" null [ node "Document" null [ link ] ]) pdf
+            let items = menuItems (blockFor window "Link") |> List.map fst
+            (menuItems (blockFor window "Link") |> List.find (fst >> (=) "Edit Link Description…") |> snd).RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
+            pump ()
+            let prompt = window.OwnedWindows |> Seq.exactlyOne
+            let prefilled = (descendants<TextBox> prompt |> List.exactlyOne).Text
+            (descendants<TextBox> prompt |> List.exactlyOne).Text <- "Example (example.com)"
+            (descendants<Button> prompt |> List.find (fun b -> string b.Content = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let layout = texts window
+            window.Close()
+
+            items |> should equal [ "Edit Link Description…" ]
+            prefilled |> should equal "click here"
+            layout |> should contain "description: \"click here\""
+            layout |> should contain "✎ your description, not in the PDF yet: \"Example (example.com)\""
+            RegionEdits.load pdf |> List.map (fun e -> e.Tag, e.Alt) |> should equal [ "Link", Some "Example (example.com)" ]))

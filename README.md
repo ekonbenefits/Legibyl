@@ -299,7 +299,11 @@ Alt text and replacement text can be edited there: right-click a block in
 the **Layout** tab for **Edit Alt Text…** (figures, formulas, and anything
 that already has alt text) or **Edit Replacement Text…** (only elements that
 already have `/ActualText`, like OCR'd text, since writing it over real text
-would hide what the page says). An edit is saved with the rest of the review
+would hide what the page says) or **Edit Link Description…** (a link: what a
+screen reader announces for it, written as its annotation's `/Contents`, the
+same edit Suggest Structure makes for an untagged PDF's web links; blocks show
+a link's description, and structure output has it as `linkDescription`). An
+edit is saved with the rest of the review
 (`<name>.pdf.legibyl.json`, and inside copies Legibyl saves), keyed by page,
 tag and box like the edits in Suggest Structure, and the block shows it as not
 in the PDF yet. Paragraphs can be merged too: shift-click extends the selection

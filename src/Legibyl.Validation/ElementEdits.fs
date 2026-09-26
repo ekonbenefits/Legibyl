@@ -130,16 +130,24 @@ let internal find (document: PdfDocument) context (edits: ElementEdit list) : (E
 let private textOf (element: PdfDictionary) (key: PdfName) =
     element.GetAsString key |> Option.ofObj |> Option.map _.ToUnicodeString()
 
-/// What edit changes on element: each key with its new value, where that differs from what it has.
+/// Whether an edit is for a link, whose "alt text" is its description: its annotation's
+/// /Contents, which is what readers announce, rather than the element's /Alt.
+let private isLink (edit: ElementEdit) = edit.Tag = "Link" || edit.Retag = "Link"
+
+/// What edit changes on element: each dictionary, key and new value, where that differs from
+/// what it has.
 let private changes (edit: ElementEdit, element: PdfDictionary) =
     [ match edit.Retag with
-      | NonNull tag when (element.GetAsName PdfName.S |> Option.ofObj |> Option.map _.GetValue()) <> Some tag -> yield PdfName.S, tag
+      | NonNull tag when (element.GetAsName PdfName.S |> Option.ofObj |> Option.map _.GetValue()) <> Some tag -> yield element, PdfName.S, tag
       | _ -> ()
       match edit.Alt with
-      | NonNull alt when textOf element PdfName.Alt <> Some alt -> yield PdfName.Alt, alt
+      | NonNull alt when isLink edit ->
+          for annotation in ownAnnotations element do
+              if textOf annotation PdfName.Contents <> Some alt then yield annotation, PdfName.Contents, alt
+      | NonNull alt when textOf element PdfName.Alt <> Some alt -> yield element, PdfName.Alt, alt
       | _ -> ()
       match edit.Text with
-      | NonNull text when textOf element PdfName.ActualText <> Some text -> yield PdfName.ActualText, text
+      | NonNull text when textOf element PdfName.ActualText <> Some text -> yield element, PdfName.ActualText, text
       | _ -> () ]
 
 /// A PdfString that survives non-ASCII text.
@@ -157,9 +165,9 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     let applied =
         [ for pair in found do
               let changes = changes pair
-              for key, value in changes do
+              for dictionary, key, value in changes do
                   // A tag is a name; the rest are text.
-                  (snd pair).Put(key, (if key.Equals PdfName.S then PdfName value :> PdfObject else textString value)) |> ignore
+                  dictionary.Put(key, (if key.Equals PdfName.S then PdfName value :> PdfObject else textString value)) |> ignore
               if not changes.IsEmpty then yield () ]
     let missing = edits.Length - found.Length
     let count = applied.Length + runs.Length
