@@ -96,7 +96,7 @@ let ``an edit not in the PDF yet counts on Structure, and can be saved`` () =
             let canSave = (button window "Save…").IsEnabled
             window.Close()
 
-            structure |> should equal "Structure…, 1 change to save"
+            structure |> should equal "Structure…, 1 edit to save"
             canSave |> should be True))
 
 [<Fact>]
@@ -129,5 +129,5 @@ let ``an untagged PDF's review in Suggest Structure counts on Structure, and Sav
             let canSave = (button window "Save…").IsEnabled
             window.Close()
 
-            structure |> should equal "Structure…, 1 change to save"
+            structure |> should equal "Structure…, 1 edit to save"
             canSave |> should be True))

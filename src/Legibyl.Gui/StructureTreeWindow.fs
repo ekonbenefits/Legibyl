@@ -521,7 +521,7 @@ module private StructureView =
             let targetImage = ctx.useState (None: Bitmap option)
             let targetNote = ctx.useState ""
             let previewNote =
-                ctx.useState "Select a structure block to highlight its best-effort page geometry when available."
+                ctx.useState "Select an element to highlight where it is on its page, when that's known."
             // Bumped on every selection so a slower preview for an earlier one can't overwrite it.
             let previewVersion = ctx.useState (0, false)
 
@@ -615,7 +615,7 @@ module private StructureView =
                                                 { PngBytes = renderer.RenderPageWithRegions(sourceFilePath, g.PageNumber, regions)
                                                   PageNumber = g.PageNumber
                                                   HasPreciseRegion = true
-                                                  Note = $"Outlined the {nodes.Length} selected blocks, numbered in order." }),
+                                                  Note = $"Outlined the {nodes.Length} selected elements, numbered in order." }),
                                     destination |> Option.map (fun d -> decode (renderer.RenderPageWithTarget(sourceFilePath, d))))
                             if version = previewVersion.Current then
                                 match source with
@@ -752,7 +752,7 @@ module private StructureView =
                             Grid.rowDefinitions "Auto,Auto,Auto,*"
                             Grid.children [
                                 TextBlock.create [
-                                    TextBlock.text "Selected block geometry"
+                                    TextBlock.text "Selected element"
                                     TextBlock.fontWeight FontWeight.SemiBold
                                     TextBlock.margin (0.0, 0.0, 0.0, 6.0)
                                 ]
@@ -790,7 +790,7 @@ module private StructureView =
                                                 AttrBuilder<ComboBox>.CreateProperty<string | null>(
                                                     Automation.AutomationProperties.NameProperty, $"Tag for this <{single.Tag}>", ValueNone)
                                                 ToolTip.tip
-                                                    "Give this block another tag, e.g. a heading tagged as a paragraph (as an edit: Save… in the main window writes it to a copy)."
+                                                    "Give this element another tag, e.g. a heading tagged as a paragraph (as an edit: Save… in the main window writes it to a copy)."
                                                 ComboBox.onSelectedItemChanged (fun item ->
                                                     match item with
                                                     | :? string as picked when picked <> tag ->
@@ -993,7 +993,7 @@ module private StructureView =
                                         TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                         TextBlock.text (
                                             if edits.Current.IsEmpty then
-                                                "No edits yet. Right-click a figure in the Layout tab to write its alt text, or an element with replacement text to correct it."
+                                                "No edits yet. In the Layout tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs to merge them."
                                             else
                                                 let file = Path.GetFileName(Dismissals.filePath sourceFilePath)
                                                 let where =

@@ -235,18 +235,35 @@ back. Dismissals are kept in memory for
 the open PDF; **Remember dismissals for this PDF** in the same menu saves them
 to `<name>.pdf.legibyl.json` next to it, which is loaded automatically when the
 PDF is opened again (turning it off deletes that file). Failures can't be
-dismissed. The CLI doesn't read these files.
+dismissed. The CLI applies their edits with `--edits` (see below).
+
+### Terms
+
+- **Structure**: a tagged PDF's tag tree, made of **elements** (the Layout tab
+  of View Structure draws each as a block). Read from the PDF; never changed in
+  place.
+- **Layout**: an untagged PDF's suggested structure, made of **regions**, each
+  with the tag it suggests, found by the layout model. Recorded as found; never
+  changed in place.
+- **Edits**: what a person changes, layered on either one: alt text, replacement
+  (or corrected OCR) text, another tag, merged paragraphs, a link's description,
+  or leaving a region out. Each names what it's for by its `page`, `tag` and
+  `box`, so it still applies after other repairs, or to another version of the
+  PDF.
+- **Review**: everything kept for a PDF in `<name>.pdf.legibyl.json` (and inside
+  copies Legibyl saves): dismissed warnings, edits, the layout they're on, and a
+  title.
 
 ### Saving: Structure, Auto Fixes and Save
 
 Changes are chosen first and written together. Three buttons under the details:
 
 - **Structure…** opens View Structure (or, for an untagged PDF, offers Suggest
-  Structure), where alt text and replacement text are edited. Its badge counts
-  your changes that aren't in this PDF yet: edits whose element doesn't say
-  them yet, or for an untagged PDF, its review in Suggest Structure (edits,
-  discarded suggestions, a changed title). Edits already in the PDF are
-  reference, and for importing into another version of it; they don't count.
+  Structure), where you make edits. Its badge counts your edits that aren't in
+  this PDF yet: for a tagged PDF, edits its elements don't have yet; for an
+  untagged one, its edits in Suggest Structure (and a changed title). Edits
+  already in the PDF are reference, and for importing into another version of
+  it; they don't count.
 - **Auto Fixes…** chooses repairs (the dialog doesn't save). Nothing is chosen
   when a PDF is opened; the first time the dialog opens, the safe repairs the PDF
   needs start ticked, and after that it shows what was chosen. Its badge counts
@@ -367,14 +384,14 @@ with a picker to give it another tag (H1, H, P, LI, Figure, Table, Caption,
 Note, Formula, Lbl, Artifact) — a heading the detector took for a paragraph,
 say.
 
-The suggestions themselves are never changed: like a structure read from a
+The layout itself is never changed: like a structure read from a
 tagged PDF, they're read-only, and what you decide is layered on top as edits
-(`ElementEdits.onRegions`), each naming the suggestion by its page, the tag it
+(`ElementEdits.onRegions`), each naming the region by its page, the tag it
 was found with, and its box — the same kind of edit View Structure makes on a
-tagged PDF's elements. Discarding a suggestion is an `exclude` edit, picking
+tagged PDF's elements. Discarding a region is an `exclude` edit, picking
 another tag a `retag` edit, and alt text and corrected text are edits too.
 Nothing is written to the PDF until **Save…** in the main window tags a copy
-with the suggestions and the edits on them. Once you've decided something, the
+with the regions and the edits on them. Once you've decided something, the
 edits are kept in the file next to the PDF, with the layout they're on recorded
 as found (`layout`, in the same format as the CLI's `--suggest-layout`, see
 `LayoutFile.fs`): reopening the PDF, even in a later session, shows the pages
