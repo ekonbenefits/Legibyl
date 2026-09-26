@@ -356,7 +356,15 @@ suggests (H1, H, P, Figure, Table, Caption, Note, or Artifact for page
 furniture) and its reading order. The detector has no list regions, so runs of
 paragraphs that start with list markers become list items (LI) by the same
 rules as the lists-from-paragraphs fix; the list beside it shows each region's text.
-It's a preview only: nothing is written to the PDF. The model (about 130 MB) is
+Nothing is written to the PDF until **Save…** in the main window tags a copy
+from it. Once you've decided something (discarded a suggestion, written alt text
+or corrected text, changed the title), the review is kept in the file next to
+the PDF: the edits, and the layout as reviewed (`layout`, in the same format as
+the CLI's `--suggest-layout`, see `LayoutFile.fs`), each page found so far with
+its discarded suggestions marked. Reopening the PDF, even in a later session,
+shows those pages at once without the detector, as reviewed. Each saved page
+has a fingerprint of its size and text, so a page that's changed since (a
+regenerated PDF) is found again instead. The model (about 130 MB) is
 downloaded once, when asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`)
 and runs locally; each page takes several seconds on the CPU, so pages are
 detected as they're shown. A page without a text layer (a scan) is flagged, since

@@ -148,8 +148,13 @@ let ``a QR code's alt text is prefilled with where it links, to edit`` () =
 let ``suggestions can be discarded and kept again, and discarded ones aren't tagged`` () =
     if not (LayoutModel.isDownloaded ()) then
         Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    let pdf = Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf")
-    onUiThread (fun () ->
+    // A copy of its own: discarding saves the review next to the PDF.
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "pass.pdf")
+    File.Copy(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), pdf)
+    try
+      onUiThread (fun () ->
         let window = SuggestedStructureWindow(pdf)
         window.Show()
         let buttons () = descendants<Button> window
@@ -172,6 +177,8 @@ let ``suggestions can be discarded and kept again, and discarded ones aren't tag
         afterDiscarding |> should equal ("Keep" :: List.replicate (count - 1) "Discard")
         afterKeepingAll |> should equal (List.replicate count "Discard")
         afterDiscardingAll |> should equal (List.replicate count "Keep"))
+    finally
+        Directory.Delete(folder, true)
 
 [<Fact>]
 let ``the reviewed layout leaves out discarded suggestions`` () =
@@ -189,9 +196,14 @@ let ``the reviewed layout leaves out discarded suggestions`` () =
 let ``reopening Suggest Structure keeps what was found and discarded`` () =
     if not (LayoutModel.isDownloaded ()) then
         Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
-    let pdf = Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf")
+    // A copy of its own: discarding saves the review next to the PDF.
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "pass.pdf")
+    File.Copy(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), pdf)
     let reviews = LayoutReviews()
-    onUiThread (fun () ->
+    try
+      onUiThread (fun () ->
         let toggles (window: Window) =
             descendants<Button> window |> List.filter (fun b -> string b.Content = "Discard" || string b.Content = "Keep")
         let first = SuggestedStructureWindow(pdf, reviews.For pdf)
@@ -211,7 +223,11 @@ let ``reopening Suggest Structure keeps what was found and discarded`` () =
         restored |> should not' (be Empty)
         restored.Head |> should equal "Keep"
         restored.Tail |> List.forall ((=) "Discard") |> should be True
-        (reviews.For pdf).Discarded.Count |> should equal 1)
+        (reviews.For pdf).Discarded.Count |> should equal 1
+        // Kept next to the PDF too: a new session finds it again.
+        (LayoutReviews().For pdf).Discarded.Count |> should equal 1)
+    finally
+        Directory.Delete(folder, true)
 
 /// A PDF with a heading and a QR code, which the detector finds as a figure.
 let private createQrPdf (pdf: string) =

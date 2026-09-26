@@ -129,3 +129,53 @@ let ``the document title is saved with the rest of the file, and removed without
         RegionEdits.saveTitle pdf None
         RegionEdits.loadTitle pdf |> should equal None
         RegionEdits.load pdf |> should haveLength 1)
+
+/// A one-page PDF with text, in a fresh folder.
+let private withPdf (text: string) (test: string -> unit) =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "flyer.pdf")
+    let write (text: string) =
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf))
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(document.AddNewPage())
+        let font = iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+        canvas.BeginText().SetFontAndSize(font, 12f).MoveText(100.0, 330.0).ShowText(text).EndText() |> ignore
+    write text
+    try test pdf finally Directory.Delete(folder, true)
+
+let private found: PageSuggestion =
+    { PageNumber = 1
+      HasText = true
+      Rotated = false
+      Blocks = [ { block "P" blurb "Caving this spring" false with Order = 1 }; { block "Figure" logo "" false with Order = 2 } ] }
+
+[<Fact>]
+let ``a review's layout is kept next to the PDF, with what's discarded, and found again when it's reopened`` () =
+    withPdf "Caving this spring" (fun pdf ->
+        let review = LayoutReview(File.GetLastWriteTimeUtc pdf)
+        review.Pages[1] <- found
+        review.Discarded <- set [ 1, 2 ]
+        RegionEdits.saveLayout pdf (review.ToLayout pdf)
+
+        let reopened = LayoutReviews().For pdf
+
+        reopened.Pages.Keys |> List.ofSeq |> should equal [ 1 ]
+        reopened.Pages[1].Blocks |> List.map (fun b -> b.Order, b.Tag, b.Text) |> should equal [ 1, "P", "Caving this spring"; 2, "Figure", "" ]
+        reopened.Discarded |> should equal (set [ 1, 2 ]))
+
+[<Fact>]
+let ``a page that has changed since isn't taken from the saved layout`` () =
+    withPdf "Caving this spring" (fun pdf ->
+        let review = LayoutReview(File.GetLastWriteTimeUtc pdf)
+        review.Pages[1] <- found
+        RegionEdits.saveLayout pdf (review.ToLayout pdf)
+        let saved = File.ReadAllText(Dismissals.filePath pdf)
+        // The PDF regenerated with other text (its review file kept).
+        do
+            use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf))
+            let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(document.AddNewPage())
+            let font = iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+            canvas.BeginText().SetFontAndSize(font, 12f).MoveText(100.0, 330.0).ShowText("Hiking this summer").EndText() |> ignore
+        File.WriteAllText(Dismissals.filePath pdf, saved)
+
+        (LayoutReviews().For pdf).Pages.IsEmpty |> should be True)
