@@ -15,6 +15,7 @@ open Avalonia.Media
 open Avalonia.Media.Imaging
 open Legibyl.Layout
 open Legibyl.Rendering
+open Legibyl.Validation
 
 /// Finds every page's layout in the background, one page at a time (each takes seconds): the
 /// page being viewed first, then the pages after it, then any before. So moving to another page
@@ -112,6 +113,32 @@ module SuggestedStructureView =
             let readyCount = ctx.useState prefetcher.ReadyCount
             // Bumped per page shown, so a rendering that finishes late doesn't replace a newer one.
             let version = ctx.useState (0, renderOnChange = false)
+            // QR codes' page titles, read from the web only once asked for; and the addresses
+            // already asked about, so each is fetched once.
+            let readTitles = ctx.useState false
+            let titles = ctx.useState (Map.empty: Map<string, string>)
+            let asked = ctx.useState (HashSet<string>(), renderOnChange = false)
+            let readingTitles = ctx.useState 0
+
+            /// The web addresses the page's QR codes go to.
+            let qrAddresses (result: PageSuggestion) =
+                result.Blocks |> List.choose (fun block -> block.QrText |> Option.bind LinkTitles.webAddress)
+
+            /// Reads the titles of the pages result's QR codes go to, if asked to and not read yet.
+            let readTitlesFor (result: PageSuggestion) =
+                if readTitles.Current then
+                    match qrAddresses result |> List.filter asked.Current.Add with
+                    | [] -> ()
+                    | wanted ->
+                        readingTitles.Set(readingTitles.Current + 1)
+                        task {
+                            try
+                                let! found = Task.Run(fun () -> (LinkTitles.WebPageTitles() :> IPageTitleSource).PageTitles wanted)
+                                titles.Set(found |> Seq.fold (fun all (KeyValue(address, title)) -> Map.add address title all) titles.Current)
+                            finally
+                                readingTitles.Set(readingTitles.Current - 1)
+                        }
+                        |> ignore
 
             let render (result: PageSuggestion) (emphasised: int option) (current: int) =
                 task {
@@ -143,6 +170,7 @@ module SuggestedStructureView =
                     else ""
                 )
                 render result None version.Current |> ignore
+                readTitlesFor result
 
             let showPage (number: int) =
                 version.Set(version.Current + 1)
@@ -209,7 +237,8 @@ module SuggestedStructureView =
                 + "the tag each suggests, and their reading order (the numbers). This is a preview; nothing is written to the PDF. "
                 + "Headings are shown as H because their levels aren't known from one page, runs of paragraphs that start with "
                 + "list markers are list items (LI), and Artifact marks page furniture like running headers and page numbers. "
-                + "Text drawn as outlines or pixels rather than as text is read with OCR (marked OCR), and QR codes are read (marked QR)."
+                + "Text drawn as outlines or pixels rather than as text is read with OCR (marked OCR), and QR codes are read "
+                + "and shown with the alt text tagging would give them (Alt)."
 
             let downloadPanel =
                 StackPanel.create [
@@ -281,7 +310,7 @@ module SuggestedStructureView =
                                                     ]
                                                     TextBlock.create [
                                                         DockPanel.dock Dock.Left
-                                                        TextBlock.width 76.0
+                                                        TextBlock.width 84.0
                                                         TextBlock.fontFamily Fonts.Monospace
                                                         TextBlock.text $"{block.Order,2} {block.Tag}"
                                                     ]
@@ -289,7 +318,7 @@ module SuggestedStructureView =
                                                         TextBlock.textWrapping TextWrapping.Wrap
                                                         TextBlock.text (
                                                             match block.QrText with
-                                                            | Some text -> $"QR: {snippet text}"
+                                                            | Some text -> $"Alt: {LinkTitles.qrAltText titles.Current text}"
                                                             | None ->
                                                             if block.Text = "" then "(no text)"
                                                             elif block.Recognized then $"OCR: {snippet block.Text}"
@@ -305,9 +334,42 @@ module SuggestedStructureView =
                     )
                 ]
 
+            // Offered only on a page with a QR code that links somewhere: reading titles visits those sites.
+            let titlesPanel =
+                StackPanel.create [
+                    Grid.row 1
+                    StackPanel.orientation Orientation.Horizontal
+                    StackPanel.spacing 8.0
+                    StackPanel.margin (0.0, 6.0, 0.0, 0.0)
+                    StackPanel.isVisible (suggestion.Current |> Option.exists (fun result -> not (qrAddresses result).IsEmpty))
+                    StackPanel.children [
+                        CheckBox.create [
+                            CheckBox.content "Read link titles from the web"
+                            CheckBox.isChecked readTitles.Current
+                            ToolTip.tip (
+                                "Visits the web page each QR code on this page links to, and names it by its title in the alt text. "
+                                + "Only public web pages are visited, and only their titles read; the sites see the visit."
+                            )
+                            CheckBox.onIsCheckedChanged (fun e ->
+                                match e.Source with
+                                | :? CheckBox as checkBox ->
+                                    let isChecked = checkBox.IsChecked.GetValueOrDefault()
+                                    if isChecked <> readTitles.Current then
+                                        readTitles.Set isChecked
+                                        if isChecked then suggestion.Current |> Option.iter readTitlesFor
+                                | _ -> ())
+                        ]
+                        TextBlock.create [
+                            TextBlock.verticalAlignment VerticalAlignment.Center
+                            TextBlock.text (if readingTitles.Current > 0 then "Reading titles…" else "")
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                        ]
+                    ]
+                ]
+
             let pagePanel =
                 Grid.create [
-                    Grid.rowDefinitions "Auto,Auto,*"
+                    Grid.rowDefinitions "Auto,Auto,Auto,*"
                     Grid.children [
                         StackPanel.create [
                             StackPanel.orientation Orientation.Horizontal
@@ -329,15 +391,16 @@ module SuggestedStructureView =
                                 ]
                             ]
                         ]
+                        titlesPanel
                         TextBlock.create [
-                            Grid.row 1
+                            Grid.row 2
                             TextBlock.margin (0.0, 6.0, 0.0, 6.0)
                             TextBlock.textWrapping TextWrapping.Wrap
                             TextBlock.text status.Current
                             Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                         ]
                         Grid.create [
-                            Grid.row 2
+                            Grid.row 3
                             Grid.columnDefinitions "2*,6,3*"
                             Grid.children [
                                 blockList

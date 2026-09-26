@@ -108,3 +108,40 @@ let ``every page's layout is found in the background, so the next page shows at 
             afterMoving |> List.exists (fun t -> t.StartsWith "Finding the layout") |> should be False)
     finally
         Directory.Delete(folder, true)
+
+[<Fact>]
+let ``a QR code shows the alt text tagging would give it, and offers to read its page's title`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "qr.pdf")
+    do
+        use document = new PdfDocument(new PdfWriter(pdf))
+        let canvas = PdfCanvas(document.AddNewPage())
+        canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 18f).MoveText(72.0, 720.0).ShowText("Scan to apply").EndText()
+        |> ignore
+        // A 2-inch code, a point per module, drawn as squares.
+        let matrix = ZXing.QrCode.QRCodeWriter().encode("https://example.com/apply", ZXing.BarcodeFormat.QR_CODE, 144, 144)
+        for row in 0 .. matrix.Height - 1 do
+            for column in 0 .. matrix.Width - 1 do
+                if matrix[column, row] then canvas.Rectangle(72.0 + float column, 680.0 - float row, 1.0, 1.0) |> ignore
+        canvas.Fill() |> ignore
+    try
+        onUiThread (fun () ->
+            let window = SuggestedStructureWindow(pdf)
+            window.Show()
+            let texts () = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
+            let alt = "Alt: QR code linking to https://example.com/apply"
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> texts () |> List.contains alt) |> ignore
+            let shown = texts ()
+            let offer = descendants<CheckBox> window |> List.tryFind (fun c -> string c.Content = "Read link titles from the web")
+            window.Close()
+
+            shown |> should contain alt
+            // Offered, but off: nothing is fetched unless asked for.
+            offer.IsSome |> should be True
+            offer.Value.IsVisible |> should be True
+            offer.Value.IsChecked.GetValueOrDefault() |> should be False)
+    finally
+        Directory.Delete(folder, true)
