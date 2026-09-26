@@ -3,6 +3,7 @@
 /// The same file holds the edits made in Suggest Structure (see RegionEdits).
 module Legibyl.Gui.Dismissals
 
+open System
 open System.IO
 open System.Text.Json
 open System.Text.Json.Serialization
@@ -102,8 +103,9 @@ let readFile (path: string) : SavedFile option =
     else
         try
             parse (File.ReadAllText path)
-        with :? IOException ->
-            None
+        with
+        | :? IOException
+        | :? UnauthorizedAccessException -> None
 
 /// pdfPath's review: the file next to it, or else the one embedded in it (a copy Legibyl saved;
 /// see EmbeddedReview). The file wins, since it holds any changes made since the copy was saved.
