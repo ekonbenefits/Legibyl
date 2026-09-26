@@ -26,6 +26,7 @@
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
     <Compile Include="LayoutSuggestionsTests.fs" />
+    <Compile Include="LayoutTaggingTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

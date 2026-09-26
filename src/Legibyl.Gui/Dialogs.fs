@@ -126,6 +126,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let paragraphLists = ctx.useState false
             // The page's text may not be the title an author would give it.
             let titleFromFirstPage = ctx.useState false
+            // Its tags are a detector's best guess, to check before relying on them.
+            let tagFromLayout = ctx.useState false
 
             let checkBox (state: IWritable<bool>) (content: IView) =
                 CheckBox.create [
@@ -158,7 +160,8 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
 
             let onContinue _ =
                 let options =
-                    [ metadata.Current, PdfFixOptions.Metadata
+                    [ tagFromLayout.Current, PdfFixOptions.TagFromLayout
+                      metadata.Current, PdfFixOptions.Metadata
                       annotationTabs.Current, PdfFixOptions.AnnotationTabs
                       emptyParagraphs.Current, PdfFixOptions.RemoveEmptyParagraphs
                       emptyTocEntries.Current, PdfFixOptions.RemoveEmptyTocEntries
@@ -187,7 +190,15 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                     StackPanel.create [
                         Grid.row 1
                         StackPanel.children [
-                            // In the order the repairs run (StructureFixes.orderedFixes, then veraPDF's metadata fix).
+                            // In the order the repairs run (tagging first, StructureFixes.orderedFixes,
+                            // then veraPDF's metadata fix).
+                            checkBox
+                                tagFromLayout
+                                (label
+                                    ("Tag this untagged document from each page's layout: headings, paragraphs, lists, figures and reading order, "
+                                     + "found by a layout detector (the page looks the same; figures still need alt text). Takes several seconds a page, "
+                                     + $"and downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time")
+                                    PdfFixOptions.TagFromLayout)
                             checkBox
                                 tocHeadings
                                 (label
@@ -233,7 +244,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
                                 TextBlock.textWrapping TextWrapping.Wrap
                                 TextBlock.margin (0.0, 8.0, 0.0, 16.0)
                                 TextBlock.text
-                                    "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't add missing alt text, tag content that isn't tagged at all, or infer tables."
+                                    "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't add missing alt text or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
                             ]
                         ]
                     ]
@@ -525,7 +536,7 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                             | Ok _ ->
                                 TextBlock.create [
                                     TextBlock.text
-                                        "Fixes are best-effort and limited to the repairs you selected. They don't add missing alt text, retag untagged content, or infer table headers."
+                                        "Fixes are best-effort and limited to the repairs you selected. They don't add missing alt text or infer table headers, and tags from the layout are a detector's best guess, to check."
                                     TextBlock.fontSize 12.0
                                     TextBlock.textWrapping TextWrapping.Wrap
                                     TextBlock.margin (0.0, 0.0, 16.0, 0.0)

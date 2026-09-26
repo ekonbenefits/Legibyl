@@ -296,6 +296,27 @@ and runs locally; each page takes several seconds on the CPU, so pages are
 detected as they're shown. A page without a text layer (a scan) is flagged, since
 tagging it would need OCR first. The detector test is skipped unless the model
 has been downloaded.
+
+The Fix dialog's **Tag this untagged document from each page's layout** option
+(off by default, and only for a document with no structure tree) writes those
+regions as tags, before the other fixes run, so they can build on them
+(`PdfFixOptions.TagFromLayout`, `LayoutTagging.fs`; the fixer gets the regions
+from an `IPageLayoutSource`, which `Legibyl.Layout` provides). Each piece of
+content goes to the smallest region it's drawn in, and is marked in the page's
+content stream as that region's content or as an artifact (page furniture,
+and lines and images outside any region). Text outside every region joins the
+nearest text region, so nothing is hidden from a screen reader. The content
+streams are rewritten by copying every original operator's bytes unchanged and
+inserting only marked-content operators between them, so pages look exactly
+the same. The structure is a `Document` of the regions' elements in reading
+order: the title is H1 and other headings H2 (H1 when there's no title),
+consecutive list items form an `L` with its `/ListNumbering`, notes get the
+`/ID` PDF/UA asks for, and each link annotation gets a `Link` element (with its
+`/StructParent` and the page's `/Tabs /S`). What it can't do is reported:
+figures still need alt text, tables are tagged as text (their rows and cells
+need tagging by hand), and a page without text (a scan) is tagged as a figure
+that needs OCR. It doesn't guess the document's language, or describe links
+outside a table of contents.
 **Export JSON…** in that window saves the whole hierarchy — including each
 node's `content` text, geometry, link targets, and form field metadata — as
 JSON, the same shape produced by the CLI's `--structure` flag. This is intended for AI agents

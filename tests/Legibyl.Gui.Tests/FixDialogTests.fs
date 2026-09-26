@@ -54,7 +54,8 @@ let ``the fix dialog counts what each repair addresses and ticks only what appli
               finding (PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle)
               finding PdfFixOptions.ListsFromParagraphs
               finding PdfFixOptions.ListsFromParagraphs
-              finding PdfFixOptions.ListsFromParagraphs ]
+              finding PdfFixOptions.ListsFromParagraphs
+              finding PdfFixOptions.TagFromLayout ]
 
         let pending = Dialogs.chooseFixOptions owner (report findings)
         HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
@@ -70,6 +71,7 @@ let ``the fix dialog counts what each repair addresses and ticks only what appli
         shown["Describe table-of-contents links"] |> should equal (false, "None found in this PDF")
         // Opt-in repairs show their count but stay unticked even when found.
         shown["Tag runs of"] |> should equal (false, "3 found")
+        shown["Tag this untagged"] |> should equal (false, "1 found")
         shown["Tag headings the"] |> should equal (false, "None found in this PDF")
         shown["Remove empty semantic"] |> should equal (false, "None found in this PDF")
         shown["Add bookmarks for"] |> should equal (false, "None found in this PDF"))
