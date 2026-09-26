@@ -182,7 +182,8 @@ let ``the reviewed layout leaves out discarded suggestions`` () =
     use suggester = new LayoutSuggester(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"))
     let prefetcher = LayoutPrefetcher(suggester, Collections.Concurrent.ConcurrentDictionary())
     let all = (prefetcher.Find 1).Blocks
-    let reviewed = ReviewedLayout(prefetcher, set [ 1, all.Head.Order ]) :> Legibyl.Validation.IPageLayoutSource
+    let review = LayoutReview(DateTime.UtcNow, Discarded = set [ 1, all.Head.Order ])
+    let reviewed = ReviewedLayout(prefetcher, review) :> Legibyl.Validation.IPageLayoutSource
     let regions = reviewed.PageRegions("unused.pdf", 1)
     regions.Count |> should equal (all.Length - 1)
 
@@ -213,3 +214,49 @@ let ``reopening Suggest Structure keeps what was found and discarded`` () =
         restored.Head |> should equal "Keep"
         restored.Tail |> List.forall ((=) "Discard") |> should be True
         (reviews.For pdf).Discarded.Count |> should equal 1)
+
+/// A PDF with a heading and a QR code, which the detector finds as a figure.
+let private createQrPdf (pdf: string) =
+    use document = new PdfDocument(new PdfWriter(pdf))
+    let canvas = PdfCanvas(document.AddNewPage())
+    canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 18f).MoveText(72.0, 720.0).ShowText("Scan to apply").EndText()
+    |> ignore
+    let matrix = ZXing.QrCode.QRCodeWriter().encode("https://example.com/apply", ZXing.BarcodeFormat.QR_CODE, 144, 144)
+    for row in 0 .. matrix.Height - 1 do
+        for column in 0 .. matrix.Width - 1 do
+            if matrix[column, row] then canvas.Rectangle(72.0 + float column, 680.0 - float row, 1.0, 1.0) |> ignore
+    canvas.Fill() |> ignore
+
+[<Fact>]
+let ``alt text typed for a figure is saved next to the PDF, filled in again later, and tagged`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "qr.pdf")
+    createQrPdf pdf
+    let altBoxes (window: Window) = descendants<TextBox> window
+    try
+        onUiThread (fun () ->
+            let first = SuggestedStructureWindow(pdf, LayoutReviews().For pdf)
+            first.Show()
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (altBoxes first).IsEmpty) |> ignore
+            (altBoxes first).Head.Text <- "Scan to apply online"
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            first.Close()
+
+            // A new session: the alt text comes back from the file next to the PDF.
+            let review = LayoutReviews().For pdf
+            let reopened = SuggestedStructureWindow(pdf, review)
+            reopened.Show()
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> not (altBoxes reopened).IsEmpty) |> ignore
+            let filled = (altBoxes reopened).Head.Text
+            reopened.Close()
+
+            File.ReadAllText(pdf + ".legibyl.json") |> should haveSubstring "Scan to apply online"
+            filled |> should equal "Scan to apply online"
+            use suggester = new LayoutSuggester(pdf)
+            let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> Legibyl.Validation.IPageLayoutSource).PageRegions(pdf, 1)
+            regions |> Seq.choose (fun r -> Option.ofObj r.Alt) |> List.ofSeq |> should equal [ "Scan to apply online" ])
+    finally
+        Directory.Delete(folder, true)

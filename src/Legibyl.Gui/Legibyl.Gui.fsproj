@@ -20,6 +20,7 @@
     <Compile Include="Dialogs.fs" />
     <Compile Include="StructureCache.fs" />
     <Compile Include="Dismissals.fs" />
+    <Compile Include="FigureAlt.fs" />
     <Compile Include="BusyStatus.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="SuggestedStructureWindow.fs" />

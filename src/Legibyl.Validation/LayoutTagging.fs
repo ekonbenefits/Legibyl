@@ -250,7 +250,9 @@ type private Tally =
       /// Of those, the ones given a link to the address they encode.
       mutable QrLinks: int
       /// QR codes described with the title of the page they go to.
-      mutable QrTitles: int }
+      mutable QrTitles: int
+      /// Figures given alt text a person wrote.
+      mutable WrittenAlt: int }
 
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
@@ -294,7 +296,7 @@ let tag
 
         let parentTree = PdfArray()
         let tally =
-            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0 }
+            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0; WrittenAlt = 0 }
         let pageCount = document.GetNumberOfPages()
         let regionsByPage =
             [| for page in 1 .. pageCount ->
@@ -349,8 +351,8 @@ let tag
             let mcids = List<PdfDictionary>()
             let regionAt index =
                 match index with
-                | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null }
-                | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null }
+                | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
+                | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
                 | index -> fst regions[index]
             let elementFor (index: int) =
                 match elements.TryGetValue index with
@@ -374,17 +376,27 @@ let tag
                             | "H2" -> tally.Headings <- tally.Headings + 1
                             | "Figure" ->
                                 tally.Figures <- tally.Figures + 1
+                                // Alt text a person wrote comes first; the QR code's own is kept
+                                // for anything else it's used for (its link).
+                                let written =
+                                    match region.Alt with
+                                    | NonNull alt when not (String.IsNullOrWhiteSpace alt) ->
+                                        element.Dictionary.Put(PdfName.Alt, PdfString(alt.Trim(), PdfEncodings.UNICODE_BIG)) |> ignore
+                                        tally.WrittenAlt <- tally.WrittenAlt + 1
+                                        true
+                                    | _ -> false
                                 // A QR code says what it encodes, which is what its alt text should say.
                                 match region.QrText with
                                 | NonNull text ->
                                     let address = LinkTitles.webAddress text
                                     let alt = LinkTitles.qrAltText pageTitles text
-                                    if address |> Option.bind pageTitle |> Option.isSome then
-                                        tally.QrTitles <- tally.QrTitles + 1
-                                    element.Dictionary.Put(PdfName.Alt, PdfString(alt, PdfEncodings.UNICODE_BIG)) |> ignore
-                                    // Legibyl writes these descriptions in English.
-                                    element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
-                                    tally.QrCodes <- tally.QrCodes + 1
+                                    if not written then
+                                        if address |> Option.bind pageTitle |> Option.isSome then
+                                            tally.QrTitles <- tally.QrTitles + 1
+                                        element.Dictionary.Put(PdfName.Alt, PdfString(alt, PdfEncodings.UNICODE_BIG)) |> ignore
+                                        // Legibyl writes these descriptions in English.
+                                        element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
+                                        tally.QrCodes <- tally.QrCodes + 1
                                     // Unless the page already has a link over it.
                                     let alreadyLinked () =
                                         let point = centre (rectangleOf region.Geometry)
@@ -638,8 +650,11 @@ let tag
           if tally.QrLinks > 0 then
               let linked = plural tally.QrLinks "QR code" "QR codes"
               yield $"Linked {linked} to the web address they encode"
-          if tally.Figures > tally.QrCodes then
-              let need = plural (tally.Figures - tally.QrCodes) "figure needs" "figures need"
+          if tally.WrittenAlt > 0 then
+              let given = plural tally.WrittenAlt "figure" "figures"
+              yield $"Gave {given} the alt text written in Suggest Structure"
+          if tally.Figures > tally.QrCodes + tally.WrittenAlt then
+              let need = plural (tally.Figures - tally.QrCodes - tally.WrittenAlt) "figure needs" "figures need"
               yield $"{need} alt text, written by a person"
           if tally.Tables > 0 then
               let were = plural tally.Tables "table was" "tables were"
