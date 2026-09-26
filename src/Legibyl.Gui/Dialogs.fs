@@ -163,6 +163,13 @@ let private fixChoices =
         Title = "Describe contents links"
         Detail = "Give table-of-contents links without a description the entry's own text (/Contents)."
         OptIn = false }
+      { Option = PdfFixOptions.LinkTitlesFromWeb
+        Title = "Describe web links from their pages"
+        Detail =
+          "Visits each web address a link without a description (or, with tagging, a QR code) goes to, and uses the page's title, "
+          + "with the link's own site: \"Apply for benefits (example.com)\". Only public web pages are visited, and only their titles read; "
+          + "the sites see the visit. Check the descriptions."
+        OptIn = true }
       { Option = PdfFixOptions.DocumentTitle
         Title = "Document title"
         Detail = "Use the title the document carries, and show it in place of the file name (/DisplayDocTitle)."
@@ -182,9 +189,12 @@ let private fixChoices =
 let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOptions option> =
     let window = dialogWindow "Fix PDF" 560.0
     let found (option: PdfFixOptions) = report.FixableCount option
-    /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging.
-    let applies (choice: FixChoice) =
-        if choice.Option = PdfFixOptions.QrCodeLinks then found PdfFixOptions.TagFromLayout > 0 else found choice.Option > 0
+    /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
+    /// and so can describing them from the pages they go to.
+    let withTagging (choice: FixChoice) =
+        (choice.Option = PdfFixOptions.QrCodeLinks || choice.Option = PdfFixOptions.LinkTitlesFromWeb)
+        && found PdfFixOptions.TagFromLayout > 0
+    let applies (choice: FixChoice) = found choice.Option > 0 || withTagging choice
     // veraPDF only repairs metadata (adding the PDF/UA identifier) when the document would then
     // conform, so it's only worth ticking when every failure can be fixed here.
     let everyFailureFixable =
@@ -202,7 +212,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) : Task<PdfFixOpt
             let row (choice: FixChoice) =
                 let count =
                     match found choice.Option with
-                    | _ when choice.Option = PdfFixOptions.QrCodeLinks && applies choice -> "with tagging"
+                    | 0 when withTagging choice -> "with tagging"
                     | 0 -> "none found"
                     | n -> $"{n} found"
                 let detail =

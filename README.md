@@ -357,6 +357,38 @@ address (absolute http(s), or `www.`, taken as https, as qr-link-pdf does) also
 gets a borderless link over it, tagged as a `Link` holding the figure, unless
 the page already has a link there.
 
+The Fix dialog's **Describe web links from their pages** option (off by
+default; `--link-titles-from-web` with `--fix`) describes each link to a web
+page that has no description (`/Contents`) by the title of the page it goes
+to, with the link's own site: "Apply for benefits (example.com)". It works on
+any link, not only those in a table of contents, since a page's title says
+where the link goes in a way its visible text ("click here") doesn't. With
+tagging, it also describes QR codes that encode web addresses: "QR code
+linking to Apply for benefits (https://example.com/apply)". The report asks
+for these descriptions to be checked. A link whose page has no title that can
+be read is left for a person to describe.
+
+The addresses come from the document, so they are fetched defensively:
+
+- only `http`/`https` addresses, and none with a user name or password in them;
+- only to public internet addresses. The host name is resolved by Legibyl and
+  every address it resolves to has to be public (not loopback, private,
+  link-local such as the 169.254.169.254 cloud metadata service, CGNAT,
+  multicast or reserved, in IPv4 or IPv6). The connection is made to the
+  addresses that were checked, so DNS rebinding can't slip past. This happens
+  for every connection, so a redirect to an internal address is refused too;
+- no proxy (it would resolve the name itself), cookies or credentials; at most
+  5 redirects (never from https to http); 10 seconds a page; at most 100 pages
+  a document, 8 at a time;
+- only successful HTML responses, and only their first 256 KB;
+- only the `<title>` is read. Control characters and invisible formatting
+  characters (right-to-left overrides, zero-width spaces) are removed, it's cut
+  to 120 characters, and a title that only repeats the address is ignored. The
+  link's own host is always named alongside it, so a page (or a link shortener
+  it redirects through) can't pass itself off as another site.
+
+The sites do see the visit, which is why it's opt-in.
+
 The Fix dialog's **Declare the language** option (off by default)
 sets the catalog's `/Lang` when a document has none, which PDF/UA needs for
 every piece of text (veraPDF's "natural language … shall be determined" rules,

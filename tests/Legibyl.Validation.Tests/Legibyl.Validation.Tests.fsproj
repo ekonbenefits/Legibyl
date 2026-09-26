@@ -29,6 +29,7 @@
     <Compile Include="LayoutTaggingTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />
     <Compile Include="MetadataAndFontFixTests.fs" />
+    <Compile Include="LinkTitlesTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

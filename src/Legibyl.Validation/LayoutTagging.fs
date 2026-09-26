@@ -248,7 +248,9 @@ type private Tally =
       /// Figures that are QR codes, described by what they encode.
       mutable QrCodes: int
       /// Of those, the ones given a link to the address they encode.
-      mutable QrLinks: int }
+      mutable QrLinks: int
+      /// QR codes described with the title of the page they go to.
+      mutable QrTitles: int }
 
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
@@ -266,19 +268,17 @@ let private writtenTag (region: LayoutRegion) hasTitle =
 
 /// Tags pdfPath's pages from source's regions, writing the result to outputPath. Returns
 /// the report lines; empty (and nothing worth keeping written) if the document was already
-/// tagged.
-/// The web address QR text links to, if it's one: an absolute http(s) address, or one
-/// starting "www." (as qr-link-pdf treats them), taken to be https.
-let private webAddress (text: string) =
-    let candidate = if text.StartsWith("www.", StringComparison.OrdinalIgnoreCase) then "https://" + text else text
-    match Uri.TryCreate(candidate, UriKind.Absolute) with
-    | true, NonNull uri when uri.Scheme = Uri.UriSchemeHttps || uri.Scheme = Uri.UriSchemeHttp -> Some candidate
-    | _ -> None
-
-/// Tags pdfPath's pages from source's regions, writing the result to outputPath. With
-/// linkQrCodes, a QR code that encodes a web address also gets a link going there. onPage
-/// hears (page, page count) as each page's regions are asked for.
-let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (linkQrCodes: bool) (onPage: int -> int -> unit) : string list =
+/// tagged. With linkQrCodes, a QR code that encodes a web address also gets a link going
+/// there; with titles, its description names the title of the page it goes to. onPage hears
+/// (page, page count) as each page's regions are asked for.
+let tag
+    (pdfPath: string)
+    (outputPath: string)
+    (source: IPageLayoutSource)
+    (linkQrCodes: bool)
+    (titles: IPageTitleSource option)
+    (onPage: int -> int -> unit)
+    : string list =
     use reader = new PdfReader(pdfPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
@@ -294,13 +294,25 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (link
 
         let parentTree = PdfArray()
         let tally =
-            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0 }
+            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0 }
         let pageCount = document.GetNumberOfPages()
         let regionsByPage =
             [| for page in 1 .. pageCount ->
                    onPage page pageCount
                    List.ofSeq (source.PageRegions(pdfPath, page)) |]
         let hasTitle = regionsByPage |> Array.exists (List.exists (fun region -> region.Tag = "H1"))
+        // The titles of the pages QR codes go to, when asked for.
+        let pageTitles =
+            match titles with
+            | Some titles ->
+                titles.PageTitles
+                    [ for regions in regionsByPage do
+                          for region in regions do
+                              match region.QrText with
+                              | NonNull text -> yield! Option.toList (LinkTitles.webAddress text)
+                              | Null -> () ]
+            | None -> Dictionary<string, string>()
+        let pageTitle address = LinkTitles.titleFor pageTitles address
         let mutable noteIds = 0
         // Annotations' /StructParent keys come after every page's.
         let objectReferences = List<PdfDictionary * PdfDictionary>()
@@ -365,10 +377,15 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (link
                                 // A QR code says what it encodes, which is what its alt text should say.
                                 match region.QrText with
                                 | NonNull text ->
-                                    let address = webAddress text
+                                    let address = LinkTitles.webAddress text
                                     let alt =
                                         match address with
-                                        | Some address -> $"QR code linking to {address}"
+                                        | Some address ->
+                                            match pageTitle address with
+                                            | Some title ->
+                                                tally.QrTitles <- tally.QrTitles + 1
+                                                $"QR code linking to {title} ({address})"
+                                            | None -> $"QR code linking to {address}"
                                         | None -> $"QR code: {text}"
                                     element.Dictionary.Put(PdfName.Alt, PdfString(alt, PdfEncodings.UNICODE_BIG)) |> ignore
                                     // Legibyl writes these descriptions in English.
@@ -572,7 +589,11 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (link
                 annotation.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI address) |> ignore
                 annotation.SetBorder(PdfArray([| 0.0; 0.0; 0.0 |])) |> ignore
                 annotation.SetFlags PdfAnnotation.PRINT |> ignore
-                annotation.SetContents(PdfString($"QR code link to {address}", PdfEncodings.UNICODE_BIG)) |> ignore
+                let contents =
+                    match pageTitle address with
+                    | Some title -> $"QR code link to {title} ({address})"
+                    | None -> $"QR code link to {address}"
+                annotation.SetContents(PdfString(contents, PdfEncodings.UNICODE_BIG)) |> ignore
                 page.AddAnnotation annotation |> ignore
                 let dictionary = annotation.GetPdfObject()
                 let reference = PdfDictionary()
@@ -617,6 +638,9 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) (link
           if tally.QrCodes > 0 then
               let described = plural tally.QrCodes "QR code" "QR codes"
               yield $"Described {described} by what they encode"
+          if tally.QrTitles > 0 then
+              let named = plural tally.QrTitles "QR code's description names" "QR codes' descriptions name"
+              yield $"{named} the title of the web page it goes to, read from the web: to check"
           if tally.QrLinks > 0 then
               let linked = plural tally.QrLinks "QR code" "QR codes"
               yield $"Linked {linked} to the web address they encode"

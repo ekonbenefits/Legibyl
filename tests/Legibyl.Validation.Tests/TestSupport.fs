@@ -29,3 +29,13 @@ let single (predicate: 'T -> bool) (items: 'T seq) : 'T =
     let matches = items |> Seq.filter predicate |> List.ofSeq
     matches |> should haveLength 1
     matches.Head
+
+/// Page titles for the LinkTitlesFromWeb fix, without the web: titles by address. Remembers
+/// the addresses it was asked about.
+type FixedTitles(titles: (string * string) list) =
+    member val Asked = ResizeArray<string>()
+
+    interface Legibyl.Validation.IPageTitleSource with
+        member this.PageTitles addresses =
+            this.Asked.AddRange addresses
+            readOnlyDict titles

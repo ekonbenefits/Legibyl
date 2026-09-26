@@ -95,6 +95,8 @@ let ``the fix dialog lists what this PDF needs, in the order repairs run, tickin
               "Tag lists", (false, "3 found")
               "Tab order for annotations", (true, "2 found")
               "Font glyph mapping", (true, "1 found")
+              // Opt-in: it visits the web.
+              "Describe web links from their pages", (false, "with tagging")
               "Document title", (true, "1 found")
               // Every failure here is fixable, so veraPDF can repair the metadata.
               "Repair XMP metadata", (true, "1 found") ])
@@ -124,6 +126,7 @@ let ``showing all repairs lists the ones this PDF doesn't need too, still in ord
               "Tab order for annotations"
               "Font glyph mapping"
               "Describe contents links"
+              "Describe web links from their pages"
               "Document title"
               "Title from the first page"
               "Repair XMP metadata" ]

@@ -37,7 +37,11 @@ type PdfFixOptions =
     /// With TagFromLayout: adds a link over each QR code that encodes a web address, going
     /// there, tagged as a Link holding the figure.
     | QrCodeLinks = 8192
-    | All = 16383
+    /// Describes web links without a description (/Contents), and QR codes that encode web
+    /// addresses, by the titles of the pages they go to, fetched from the internet (safely;
+    /// see LinkTitles). Needs an IPageTitleSource.
+    | LinkTitlesFromWeb = 16384
+    | All = 32767
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
@@ -100,6 +104,12 @@ type LayoutRegion =
       /// For a "Figure" that's a QR code, what it encodes: its alt text says so, and the
       /// QrCodeLinks fix links it when it's a web address.
       QrText: string | null }
+
+/// Where the LinkTitlesFromWeb fix gets the titles of the web pages links go to.
+type IPageTitleSource =
+    /// The titles of the pages at addresses (absolute http(s) addresses), keyed by address.
+    /// An address whose title couldn't be read is left out.
+    abstract PageTitles: addresses: string seq -> Collections.Generic.IReadOnlyDictionary<string, string>
 
 /// Where the TagFromLayout fix gets each page's regions.
 type IPageLayoutSource =

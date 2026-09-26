@@ -554,6 +554,84 @@ let ``Validate marks a missing link description fixable only in a table of conte
     linkFixOptions body.Path |> should equal [ false ]
     linkFixOptions toc.Path |> should equal [ true ]
 
+/// Rewrites path in place, pointing each link annotation on its first page at the web
+/// address given for it (None leaves it without an action).
+let private setLinkAddresses (path: string) (addresses: string option list) =
+    let bytes = File.ReadAllBytes path
+    use reader = new PdfReader(new MemoryStream(bytes))
+    use writer = new PdfWriter(path)
+    use document = new PdfDocument(reader, writer)
+    let annotations = document.GetPage(1).GetPdfObject().GetAsArray(PdfName.Annots) |> notNull
+    addresses
+    |> List.iteri (fun i address ->
+        address
+        |> Option.iter (fun address ->
+            let action = PdfDictionary()
+            action.Put(PdfName.S, PdfName.URI) |> ignore
+            action.Put(PdfName.URI, PdfString address) |> ignore
+            (annotations.GetAsDictionary i |> notNull).Put(PdfName.A, action) |> ignore))
+
+let private fixWithTitles (titles: IPageTitleSource) (input: string) (output: string) (options: PdfFixOptions) =
+    let fixer = VeraPdfValidator(PageTitleSource = titles)
+    fixer.Fix(input, PdfProfile.PdfUa1, output, options)
+
+[<Fact>]
+let ``Fix link titles describes a web link anywhere by the title of the page it goes to`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path Body [ "click here", None; "read more", None ]
+    setLinkAddresses input.Path [ Some "https://example.com/apply"; Some "https://example.com/untitled" ]
+    let titles = FixedTitles [ "https://example.com/apply", "Apply for benefits" ]
+
+    let result = fixWithTitles titles input.Path output.Path PdfFixOptions.LinkTitlesFromWeb
+
+    result.AppliedFixes |> should contain "Described 1 web link by the title of the page it goes to, read from the web: to check."
+    // A page with no title to read leaves its link for a person to describe.
+    linkContentsOf output.Path |> should equal [ Some "Apply for benefits (example.com)"; None ]
+    titles.Asked |> List.ofSeq |> should equal [ "https://example.com/apply"; "https://example.com/untitled" ]
+
+[<Fact>]
+let ``Fix link titles leaves links without a web address, or with a description, alone`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path Body [ "Page 3", None; "Our site", Some "Our home page"; "Write to us", None ]
+    setLinkAddresses input.Path [ None; Some "https://example.com/"; Some "mailto:help@example.com" ]
+    let titles = FixedTitles [ "https://example.com/", "Example" ]
+
+    // Tab order is fixed too, so there's an output file to read.
+    fixWithTitles titles input.Path output.Path (PdfFixOptions.LinkTitlesFromWeb ||| PdfFixOptions.AnnotationTabs) |> ignore
+
+    titles.Asked |> should be Empty
+    linkContentsOf output.Path |> should equal [ None; Some "Our home page"; None ]
+
+[<Fact>]
+let ``Fix reads no link titles unless asked to`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path Body [ "click here", None ]
+    setLinkAddresses input.Path [ Some "https://example.com/apply" ]
+    let titles = FixedTitles [ "https://example.com/apply", "Apply for benefits" ]
+
+    fixWithTitles titles input.Path output.Path (PdfFixOptions.All &&& ~~~PdfFixOptions.LinkTitlesFromWeb) |> ignore
+
+    titles.Asked |> should be Empty
+
+[<Fact>]
+let ``Validate marks a missing description on a web link fixable from its page's title`` () =
+    use web = new TempPdf()
+    use local = new TempPdf()
+    createPdfWithLinks web.Path Body [ "click here", None ]
+    setLinkAddresses web.Path [ Some "https://example.com/apply" ]
+    createPdfWithLinks local.Path Body [ "click here", None ]
+    let linkFixOptions (path: string) =
+        VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions
+        |> Seq.filter (fun a -> a.RuleId = "7.18.5-2")
+        |> Seq.map (fun a -> a.FixOptions.HasFlag PdfFixOptions.LinkTitlesFromWeb)
+        |> List.ofSeq
+
+    linkFixOptions web.Path |> should equal [ true ]
+    linkFixOptions local.Path |> should equal [ false ]
+
 [<Fact>]
 let ``Fix document title moves a title the document carries in XMP into the Info dictionary`` () =
     use input = new TempPdf()

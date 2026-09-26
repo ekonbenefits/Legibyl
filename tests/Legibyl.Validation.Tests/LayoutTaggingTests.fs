@@ -245,6 +245,26 @@ let ``a figure that's a QR code is described by what it encodes`` () =
     failedRules output.Path |> should not' (contain "7.3-1")
 
 [<Fact>]
+let ``with link titles, a QR code's description names the page it goes to`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let validator = VeraPdfValidator(LayoutSource = FixedLayout(withQrCode regions), PageTitleSource = FixedTitles [ "https://example.com/apply", "Apply for benefits" ])
+
+    let result =
+        validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout ||| PdfFixOptions.QrCodeLinks ||| PdfFixOptions.LinkTitlesFromWeb)
+
+    result.AppliedFixes |> should contain "1 QR code's description names the title of the web page it goes to, read from the web: to check"
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let figure = flatten root |> List.find (fun node -> node.Tag = "Figure")
+    figure.AlternateDescription |> should equal "QR code linking to Apply for benefits (https://example.com/apply)"
+    use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(output.Path))
+    let annotations = document.GetPage(1).GetAnnotations()
+    annotations
+    |> Seq.exists (fun a -> not (isNull (a.GetContents())) && a.GetContents().ToUnicodeString() = "QR code link to Apply for benefits (https://example.com/apply)")
+    |> should be True
+
+[<Fact>]
 let ``with QR code links, the figure is a link to what it encodes, and the page looks the same`` () =
     use input = new TempPdf()
     use output = new TempPdf()
