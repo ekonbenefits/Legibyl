@@ -317,7 +317,7 @@ in the app's `tessdata` folder). The preview marks that text **OCR:**. Tesseract
 has native libraries for Windows, Linux and Apple Silicon Macs; elsewhere (Intel
 Macs) OCR is skipped and those regions show no text.
 
-The Fix dialog's **Tag this untagged document from each page's layout** option
+The Fix dialog's **Tag from the page layout** option
 (off by default, and only for a document with no structure tree) writes those
 regions as tags, before the other fixes run, so they can build on them
 (`PdfFixOptions.TagFromLayout`, `LayoutTagging.fs`; the fixer gets the regions
@@ -351,13 +351,13 @@ as white in ordinary luminance and ZXing can't find them. The detector's
 figures are tried on their own first. A code inside a figure describes it (alt
 text "QR code linking to …", or "QR code: …" for other content); one the
 detector didn't take for a figure becomes a figure of its own. The Suggest
-Structure preview marks them **QR:**. With the Fix dialog's **link each QR
-code** option (off by default, alongside tagging), a code that encodes a web
+Structure preview marks them **QR:**. With the Fix dialog's **Link QR
+codes** option (off by default, alongside tagging), a code that encodes a web
 address (absolute http(s), or `www.`, taken as https, as qr-link-pdf does) also
 gets a borderless link over it, tagged as a `Link` holding the figure, unless
 the page already has a link there.
 
-The Fix dialog's **Declare the document's language** option (off by default)
+The Fix dialog's **Declare the language** option (off by default)
 sets the catalog's `/Lang` when a document has none, which PDF/UA needs for
 every piece of text (veraPDF's "natural language … shall be determined" rules,
 which are marked fixable by it). The language is detected from the pages' text
@@ -428,8 +428,10 @@ Options:
   `--title-from-first-page` (or the matching Fix dialog option, off by
   default): then a document with no title in Info or XMP is titled from the
   text of its first page, as long as more pages follow and that page is short
-  enough to be a title page (at most 30 words and 200 characters). The GUI dialog
-  exposes the same repairs as individual checkboxes, plus removal of empty
+  enough to be a title page (at most 30 words and 200 characters). The GUI's Fix dialog
+  lists the same repairs, in the order they run, showing only those the PDF
+  needs unless asked for all ("Repair XMP metadata" starts ticked only when
+  every failure is automatically fixable, since veraPDF otherwise won't fix it), plus removal of empty
   semantic `/P` structure elements and empty table-of-contents entries, retagging headings recovered from the table
   of contents, and tagging marked paragraphs as lists (all off by default), and
   adding bookmarks for H1 and H2 headings; the CLI deliberately applies none of
