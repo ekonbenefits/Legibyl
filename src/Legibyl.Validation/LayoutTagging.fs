@@ -359,42 +359,88 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
                     elements[index] <- element
                     element
 
+            // Text objects (BT..ET) and saved graphics states (q..Q) whose content all has one
+            // owner, or none: a marked sequence can hold the whole block, so it needn't close
+            // around it. Writers like Quartz draw a line in many such blocks; closing at each
+            // would split a heading into pieces that read with spaces between them.
+            let uniformBlocks = Dictionary<int, int * Owner option>()
+            // Each block's end, in one pass: q..Q nest, and a BT..ET sits inside one level.
+            let ends = Dictionary<int, int>()
+            let saves = Stack<int>()
+            let mutable textStart = -1
+            for k in 0 .. operations.Count - 1 do
+                match operations[k].Name with
+                | "q" -> saves.Push k
+                | "Q" when saves.Count > 0 -> ends[saves.Pop()] <- k
+                | "BT" -> textStart <- k
+                | "ET" when textStart >= 0 ->
+                    ends[textStart] <- k
+                    textStart <- -1
+                | _ -> ()
+            // Where each operator's owner run and marked-content count stand, to test a block
+            // in constant time.
+            let markedBefore = Array.zeroCreate (operations.Count + 1)
+            for k in 0 .. operations.Count - 1 do
+                let name = operations[k].Name
+                markedBefore[k + 1] <- markedBefore[k] + (if name = "BMC" || name = "BDC" || name = "EMC" then 1 else 0)
+            for KeyValue(first, last) in ends do
+                if markedBefore[last + 1] = markedBefore[first] then
+                    let inner = seq { for k in first .. last -> owners[k] } |> Seq.choose id |> Seq.distinct |> Seq.truncate 2 |> List.ofSeq
+                    match inner with
+                    | [] -> uniformBlocks[first] <- (last, None)
+                    | [ owner ] -> uniformBlocks[first] <- (last, Some owner)
+                    | _ -> ()
+
             // Copy the stream, opening and closing marked content around each owner's operators.
             let output = new MemoryStream()
             let write (text: string) = output.Write(Encoding.ASCII.GetBytes text, 0, text.Length)
+            let copy (first: int) (last: int) =
+                output.Write(bytes, int operations[first].Start, int (operations[last].End - operations[first].Start))
             let mutable current: Owner option = None
             let close () =
                 if current.IsSome then
                     write "\nEMC\n"
                     current <- None
+            let openFor owner =
+                close ()
+                match owner with
+                | Artifact -> write "\n/Artifact BMC\n"
+                | Region index ->
+                    let element = elementFor index
+                    let mcid = mcids.Count
+                    mcids.Add element.Dictionary
+                    element.Kids.Add(PdfNumber mcid)
+                    let tag = (element.Dictionary.GetAsName PdfName.S).GetValue()
+                    write $"\n/{tag} <</MCID {mcid}>> BDC\n"
+                current <- Some owner
             let mutable insideArtifact = 0
-            for i in 0 .. operations.Count - 1 do
-                let operation = operations[i]
-                if boundaries.Contains operation.Name then close ()
-                // Content already marked as an artifact stays as it is.
-                match operation.Name with
-                | "BMC"
-                | "BDC" ->
-                    let text = Encoding.Latin1.GetString(bytes, int operation.Start, int (operation.End - operation.Start))
-                    if insideArtifact > 0 || text.Contains "/Artifact" then insideArtifact <- insideArtifact + 1
-                | "EMC" ->
-                    if insideArtifact > 0 then insideArtifact <- insideArtifact - 1
-                | _ -> ()
-                match owners[i] with
-                | Some owner when insideArtifact = 0 && current <> Some owner ->
-                    close ()
+            let mutable i = 0
+            while i < operations.Count do
+                match uniformBlocks.TryGetValue i with
+                | true, (last, owner) when insideArtifact = 0 ->
+                    // The whole block, in the sequence that's open or one opened for it.
                     match owner with
-                    | Artifact -> write "\n/Artifact BMC\n"
-                    | Region index ->
-                        let element = elementFor index
-                        let mcid = mcids.Count
-                        mcids.Add element.Dictionary
-                        element.Kids.Add(PdfNumber mcid)
-                        let tag = (element.Dictionary.GetAsName PdfName.S).GetValue()
-                        write $"\n/{tag} <</MCID {mcid}>> BDC\n"
-                    current <- Some owner
-                | _ -> ()
-                output.Write(bytes, int operation.Start, int (operation.End - operation.Start))
+                    | Some owner when current <> Some owner -> openFor owner
+                    | _ -> ()
+                    copy i last
+                    i <- last + 1
+                | _ ->
+                    let operation = operations[i]
+                    if boundaries.Contains operation.Name then close ()
+                    // Content already marked as an artifact stays as it is.
+                    match operation.Name with
+                    | "BMC"
+                    | "BDC" ->
+                        let text = Encoding.Latin1.GetString(bytes, int operation.Start, int (operation.End - operation.Start))
+                        if insideArtifact > 0 || text.Contains "/Artifact" then insideArtifact <- insideArtifact + 1
+                    | "EMC" ->
+                        if insideArtifact > 0 then insideArtifact <- insideArtifact - 1
+                    | _ -> ()
+                    match owners[i] with
+                    | Some owner when insideArtifact = 0 && current <> Some owner -> openFor owner
+                    | _ -> ()
+                    copy i i
+                    i <- i + 1
             close ()
             // Anything after the last operator (trailing whitespace).
             let last = if operations.Count > 0 then operations[operations.Count - 1].End else 0L
