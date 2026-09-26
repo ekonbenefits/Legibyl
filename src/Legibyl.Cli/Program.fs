@@ -40,6 +40,7 @@ type Args =
       OutputPath: string option
       Fix: bool
       TitleFromFirstPage: bool
+      LinkTitlesFromWeb: bool
       FixOutputPath: string option
       IncludeStructure: bool }
 
@@ -91,8 +92,9 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
                 let targetPath = args.FixOutputPath |> Option.defaultWith (fun () -> deriveFixOutputPath file)
                 try
                     let options =
-                        if args.TitleFromFirstPage then defaultFixOptions ||| PdfFixOptions.TitleFromFirstPage
-                        else defaultFixOptions
+                        [ args.TitleFromFirstPage, PdfFixOptions.TitleFromFirstPage
+                          args.LinkTitlesFromWeb, PdfFixOptions.LinkTitlesFromWeb ]
+                        |> List.fold (fun all (asked, option) -> if asked then all ||| option else all) defaultFixOptions
                     let fix = validator.Fix(file, profile, targetPath, options)
                     { result with
                         FixStatus = fix.Status.ToString()
@@ -201,6 +203,8 @@ let private run (args: Args) =
         usageError "--fix-output requires --fix."
     elif args.TitleFromFirstPage && not args.Fix then
         usageError "--title-from-first-page requires --fix."
+    elif args.LinkTitlesFromWeb && not args.Fix then
+        usageError "--link-titles-from-web requires --fix."
     elif args.FixOutputPath.IsSome && args.Files.Length > 1 then
         usageError "--fix-output can only be used with a single input file."
     else
@@ -316,6 +320,14 @@ let main argv =
                          of its first page, if that page is short enough to be a title page (at most 30 words) \
                          and more pages follow."
 
+                and! linkTitlesFromWeb =
+                    option<bool> "--link-titles-from-web"
+                    |> desc
+                        "Use with --fix. Describe links to web pages that have no description by the title of \
+                         the page each goes to, with its site (\"Apply for benefits (example.com)\"). This visits \
+                         those addresses: only public internet ones, reading only their titles, but the sites see \
+                         the visit. Check the descriptions."
+
                 and! fixOutputPath =
                     optionMaybe "--fix-output"
                     |> desc
@@ -343,6 +355,7 @@ let main argv =
                       OutputPath = outputPath
                       Fix = fix
                       TitleFromFirstPage = titleFromFirstPage
+                      LinkTitlesFromWeb = linkTitlesFromWeb
                       FixOutputPath = fixOutputPath
                       IncludeStructure = includeStructure }
             }

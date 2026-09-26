@@ -116,6 +116,61 @@ let private describeLinks (structTreeRoot: PdfDictionary) context =
                     described <- described + 1
     described
 
+// ---- Web link /Contents ----
+
+/// The web address a link annotation goes to, if its action is a URI to one.
+let private webLinkAddress (annotation: PdfDictionary) =
+    match annotation.GetAsDictionary PdfName.A with
+    | NonNull action when PdfName.Link.Equals(annotation.GetAsName PdfName.Subtype) && PdfName.URI.Equals(action.GetAsName PdfName.S) ->
+        match action.GetAsString PdfName.URI with
+        | NonNull uri -> LinkTitles.webAddress (uri.ToUnicodeString())
+        | Null -> None
+    | _ -> None
+
+/// Every link annotation without a description that goes to a web address, with the address.
+let private undescribedWebLinks (document: PdfDocument) =
+    [ for pageNumber in 1 .. document.GetNumberOfPages() do
+          match document.GetPage(pageNumber).GetPdfObject().GetAsArray PdfName.Annots with
+          | null -> ()
+          | annotations ->
+              for i in 0 .. annotations.Size() - 1 do
+                  match annotations.GetAsDictionary i with
+                  | NonNull annotation when isBlankString (annotation.GetAsString PdfName.Contents) ->
+                      match webLinkAddress annotation with
+                      | Some address -> yield annotation, address
+                      | None -> ()
+                  | _ -> () ]
+
+/// Object numbers of the link annotations describeWebLinks could give a /Contents: those going
+/// to web addresses. Lets validation mark those findings as fixable by it.
+let webLinkAnnotationNumbers (document: PdfDocument) : Set<int> =
+    set
+        [ for annotation, _ in undescribedWebLinks document do
+              match annotation.GetIndirectReference() with
+              | null -> ()
+              | reference -> yield reference.GetObjNumber() ]
+
+/// Gives each link to a web address that has no description one from the title of the page it
+/// goes to, with its host ("Apply for benefits (example.com)"), from titles. Wherever the link
+/// is: unlike its visible text ("click here"), the page's title does say where it goes. A link
+/// whose page has no title that can be read is left for a person to describe.
+let describeWebLinks (titles: IPageTitleSource) (document: PdfDocument) (_: Context) =
+    match undescribedWebLinks document with
+    | [] -> []
+    | links ->
+        let found = titles.PageTitles(links |> List.map snd |> List.distinct)
+        let mutable described = 0
+        for annotation, address in links do
+            match LinkTitles.linkDescription found address with
+            | Some description ->
+                annotation.Put(PdfName.Contents, textString description) |> ignore
+                described <- described + 1
+            | None -> ()
+        match described with
+        | 0 -> []
+        | 1 -> [ "Described 1 web link by the title of the page it goes to, read from the web: to check." ]
+        | n -> [ $"Described {n} web links by the titles of the pages they go to, read from the web: to check." ]
+
 // ---- Document title ----
 
 /// The document's XMP `dc:title`, if it has one. Best-effort: a malformed XMP packet
@@ -386,13 +441,15 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///   3. Lists.
 ///   4. Bookmarks, after headings are recovered, so those get bookmarks too.
 ///   5. The rest touch pages, annotations, fonts and the Info dictionary rather than
-///      paragraphs, so their order among themselves doesn't matter...
+///      paragraphs, so their order among themselves doesn't matter (except that a contents
+///      link is described from its own text before any is from a web page's title)...
 ///   6. ...except that a missing XMP stream is written last, from the Info dictionary the
 ///      title repairs may have just filled in.
 ///
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
 /// result, and syncs XMP with the Info dictionary the title repair may have just set.
-let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
+/// titles is where LinkTitlesFromWeb reads the titles of the pages links go to.
+let orderedFixes (titles: IPageTitleSource) : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.LanguageFromText, setLanguageFromText
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
@@ -401,6 +458,7 @@ let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list
       PdfFixOptions.BookmarksFromHeadings, addBookmarks
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
+      PdfFixOptions.LinkTitlesFromWeb, describeWebLinks titles
       PdfFixOptions.FontCidToGidMap, setIdentityCidToGidMaps
       PdfFixOptions.DocumentTitle, setDocumentTitle false
       PdfFixOptions.TitleFromFirstPage, setDocumentTitle true
@@ -409,11 +467,11 @@ let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list
 /// The structural repairs Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per repair that actually changed something, so a
 /// document that already had a given fix applied reports nothing for it.
-let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions) : string list =
+let applyFixes (inputPath: string) (outputPath: string) (options: PdfFixOptions) (titles: IPageTitleSource) : string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
-    [ for option, apply in orderedFixes do
+    [ for option, apply in orderedFixes titles do
           if options.HasFlag option then
               yield! apply document context ]

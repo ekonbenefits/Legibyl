@@ -138,20 +138,26 @@ module internal VeraPdf =
                 // The link fix only describes links in a table of contents, so a missing link
                 // description elsewhere isn't fixable (see StructureFixes.describeLinks).
                 let tocLinkAnnotations = lazy (StructureFixes.tocLinkAnnotationNumbers document context)
+                // Links to web pages can be described by their pages' titles, wherever they are.
+                let webLinkAnnotations = lazy (StructureFixes.webLinkAnnotationNumbers document)
                 let hasTitlePage = lazy (StructureFixes.titlePageText document |> Option.isSome)
                 let untagged = isNull (document.GetCatalog().GetPdfObject().Get iText.Kernel.Pdf.PdfName.StructTreeRoot)
                 let languageUndeclared = not (DocumentLanguage.isDeclared document)
                 let fixOptionsFor (assertion: RuleViolation) =
-                    let isTocLink () =
+                    let isIn (numbers: Lazy<Set<int>>) =
                         match assertion.Location with
-                        | NonNull location when location.ObjectNumber.HasValue ->
-                            tocLinkAnnotations.Value.Contains location.ObjectNumber.Value
+                        | NonNull location when location.ObjectNumber.HasValue -> numbers.Value.Contains location.ObjectNumber.Value
                         | _ -> false
                     let options =
-                        if assertion.FixOptions.HasFlag PdfFixOptions.LinkContents && not (isTocLink ()) then
+                        if assertion.FixOptions.HasFlag PdfFixOptions.LinkContents && not (isIn tocLinkAnnotations) then
                             assertion.FixOptions &&& ~~~PdfFixOptions.LinkContents
                         else
                             assertion.FixOptions
+                    let options =
+                        if assertion.FixOptions.HasFlag PdfFixOptions.LinkContents && isIn webLinkAnnotations then
+                            options ||| PdfFixOptions.LinkTitlesFromWeb
+                        else
+                            options
                     // Titling from the first page does what DocumentTitle does, and can only
                     // add a title where the document has a title page to take it from.
                     let options =
@@ -395,6 +401,10 @@ type VeraPdfValidator() =
     /// that fix does nothing.
     member val LayoutSource: IPageLayoutSource | null = null with get, set
 
+    /// Where the LinkTitlesFromWeb fix reads the titles of the web pages links go to: the web
+    /// itself, safely (see LinkTitles), unless replaced.
+    member val PageTitleSource: IPageTitleSource = LinkTitles.WebPageTitles() with get, set
+
     member _.Validate
         (
             pdfPath: string,
@@ -439,7 +449,7 @@ type VeraPdfValidator() =
             raise (VeraPdfValidationException "At least one fix option must be selected.")
 
         let structuralOptions =
-            StructureFixes.orderedFixes |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
+            StructureFixes.orderedFixes this.PageTitleSource |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
         let steps =
@@ -486,7 +496,13 @@ type VeraPdfValidator() =
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempTaggedOutput <- tempOutput
                     match
-                        LayoutTagging.tag currentInput tempOutput source (options.HasFlag PdfFixOptions.QrCodeLinks) (report FixStage.Tagging)
+                        LayoutTagging.tag
+                            currentInput
+                            tempOutput
+                            source
+                            (options.HasFlag PdfFixOptions.QrCodeLinks)
+                            (if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then Some this.PageTitleSource else None)
+                            (report FixStage.Tagging)
                     with
                     | [] ->
                         tryDeleteTemporary tempOutput
@@ -502,7 +518,7 @@ type VeraPdfValidator() =
                     report FixStage.Repairing 0 0
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempStructuralOutput <- tempOutput
-                    match StructureFixes.applyFixes currentInput tempOutput options with
+                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource with
                     | [] ->
                         tryDeleteTemporary tempOutput
                         tempStructuralOutput <- null

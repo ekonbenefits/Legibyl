@@ -17,6 +17,7 @@ module PdfFixDescriptions =
           PdfFixOptions.RemoveEmptyParagraphs, "Remove empty /P structure elements"
           PdfFixOptions.RemoveEmptyTocEntries, "Remove empty table-of-contents entries (TOCI)"
           PdfFixOptions.LinkContents, "Describe table-of-contents links from their own text (/Contents)"
+          PdfFixOptions.LinkTitlesFromWeb, "Describe web links and QR codes by the titles of the pages they go to"
           PdfFixOptions.HeadingsFromToc, "Tag headings the table of contents lists (H1–H6) and point its links at them"
           PdfFixOptions.ListsFromParagraphs, "Tag paragraphs that start with list markers as a list (L/LI)"
           PdfFixOptions.BookmarksFromHeadings, "Add bookmarks for the H1 and H2 headings"
