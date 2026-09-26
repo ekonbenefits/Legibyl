@@ -351,7 +351,10 @@ as white in ordinary luminance and ZXing can't find them. The detector's
 figures are tried on their own first. A code inside a figure describes it (alt
 text "QR code linking to …", or "QR code: …" for other content); one the
 detector didn't take for a figure becomes a figure of its own. The Suggest
-Structure preview marks them **QR:**. With the Fix dialog's **Link QR
+Structure preview shows the alt text each would get (**Alt:**), and on a page
+with a QR code that links somewhere offers **Read link titles from the web**
+(off; it fetches as the fix below does, only when ticked) to show the title it
+would name. With the Fix dialog's **Link QR
 codes** option (off by default, alongside tagging), a code that encodes a web
 address (absolute http(s), or `www.`, taken as https, as qr-link-pdf does) also
 gets a borderless link over it, tagged as a `Link` holding the figure, unless

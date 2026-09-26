@@ -11,7 +11,7 @@
 /// invisible formatting characters (bidi overrides, zero-width spaces) are removed, it's cut
 /// short, and a description always names the link's own host too, so a page can't pass itself
 /// off as another site.
-module internal Legibyl.Validation.LinkTitles
+module Legibyl.Validation.LinkTitles
 
 open System
 open System.Collections.Generic
@@ -120,6 +120,16 @@ let titleFor (titles: IReadOnlyDictionary<string, string>) (address: string) =
 /// e.g. "Apply for benefits (example.com)".
 let linkDescription (titles: IReadOnlyDictionary<string, string>) (address: string) =
     titleFor titles address |> Option.map (fun title -> $"{title} ({Uri(address).IdnHost})")
+
+/// A QR code's alt text, as tagging writes it and the Suggest Structure preview shows it: where
+/// it links (named by the page's title, when titles has it), or else what it says.
+let qrAltText (titles: IReadOnlyDictionary<string, string>) (qrText: string) =
+    match webAddress qrText with
+    | Some address ->
+        match titleFor titles address with
+        | Some title -> $"QR code linking to {title} ({address})"
+        | None -> $"QR code linking to {address}"
+    | None -> $"QR code: {qrText}"
 
 /// The most of a page read, looking for its title.
 let private maxBytes = 256 * 1024

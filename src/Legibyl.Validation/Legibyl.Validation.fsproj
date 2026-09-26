@@ -9,8 +9,6 @@
   <ItemGroup>
     <!-- Layout suggestions reuse the list marker rules (ParagraphLists). -->
     <InternalsVisibleTo Include="Legibyl.Layout" />
-    <!-- So the safety checks on fetching link titles (LinkTitles) can be tested directly. -->
-    <InternalsVisibleTo Include="Legibyl.Validation.Tests" />
   </ItemGroup>
 
   <ItemGroup>

@@ -378,15 +378,9 @@ let tag
                                 match region.QrText with
                                 | NonNull text ->
                                     let address = LinkTitles.webAddress text
-                                    let alt =
-                                        match address with
-                                        | Some address ->
-                                            match pageTitle address with
-                                            | Some title ->
-                                                tally.QrTitles <- tally.QrTitles + 1
-                                                $"QR code linking to {title} ({address})"
-                                            | None -> $"QR code linking to {address}"
-                                        | None -> $"QR code: {text}"
+                                    let alt = LinkTitles.qrAltText pageTitles text
+                                    if address |> Option.bind pageTitle |> Option.isSome then
+                                        tally.QrTitles <- tally.QrTitles + 1
                                     element.Dictionary.Put(PdfName.Alt, PdfString(alt, PdfEncodings.UNICODE_BIG)) |> ignore
                                     // Legibyl writes these descriptions in English.
                                     element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore

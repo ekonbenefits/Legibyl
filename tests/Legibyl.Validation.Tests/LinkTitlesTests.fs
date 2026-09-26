@@ -135,3 +135,10 @@ let ``page titles are never read from this machine`` () =
 
     found.Count |> should equal 0
     page.Requests |> should equal 0
+
+[<Fact>]
+let ``a QR code's alt text says where it links, named by the page's title when that's known`` () =
+    let titles = readOnlyDict [ "https://example.com/apply", "Apply for benefits" ]
+    LinkTitles.qrAltText titles "https://example.com/apply" |> should equal "QR code linking to Apply for benefits (https://example.com/apply)"
+    LinkTitles.qrAltText titles "www.example.com/other" |> should equal "QR code linking to https://www.example.com/other"
+    LinkTitles.qrAltText titles "WIFI:S:Guest;;" |> should equal "QR code: WIFI:S:Guest;;"
