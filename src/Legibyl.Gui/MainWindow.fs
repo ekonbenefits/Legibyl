@@ -2,6 +2,7 @@ namespace Legibyl.Gui
 
 open System
 open System.IO
+open System.Threading
 open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
@@ -18,6 +19,7 @@ open Avalonia.Media
 open Avalonia.Media.Imaging
 open Avalonia.Platform.Storage
 open Avalonia.Styling
+open Legibyl.Layout
 open Legibyl.Rendering
 open Legibyl.Validation
 
@@ -203,6 +205,10 @@ module private MainView =
     type BusyProgress =
         | Validating of ValidationProgress
         | ReadingStructure of StructureReadProgress
+        /// Downloading the layout model for tagging from the layout: the fraction done.
+        | DownloadingLayoutModel of float
+        /// Finding a page's layout, to tag it: the page and the page count.
+        | TaggingPage of page: int * pageCount: int
 
     let private formatElapsed (elapsed: TimeSpan) =
         if elapsed.TotalHours >= 1.0 then elapsed.ToString(@"h\:mm\:ss") else elapsed.ToString(@"m\:ss")
@@ -249,6 +255,8 @@ module private MainView =
                 status,
                 [ stat "Elements" 64.0 (progress.Elements.ToString "N0")
                   stat "Elapsed" 48.0 (formatElapsed progress.Elapsed) ]
+            | DownloadingLayoutModel fraction -> $"Downloading the layout model… {fraction:P0}", []
+            | TaggingPage(page, pageCount) -> $"Finding page {page:N0} of {pageCount:N0}'s layout", []
         WrapPanel.create [
             WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
             WrapPanel.children [ yield slot 210.0 TextAlignment.Left status :> IView; for stat in stats do yield stat :> IView ]
@@ -270,6 +278,8 @@ module private MainView =
         | Some(ReadingStructure progress) when progress.Stage = StructureReadStage.ReadingText && progress.PageCount > 0 ->
             fraction progress.Page progress.PageCount
         | Some(ReadingStructure _) -> full
+        | Some(DownloadingLayoutModel fraction) -> [ ProgressBar.isIndeterminate false; ProgressBar.maximum 1.0; ProgressBar.value fraction ]
+        | Some(TaggingPage(page, pageCount)) -> fraction page pageCount
         | _ -> [ ProgressBar.isIndeterminate true ]
 
     let view (window: Window) (openRequests: IReadable<string option>) =
@@ -497,15 +507,37 @@ module private MainView =
                             | Some outputPath ->
                                 let profile = currentProfile ()
                                 isBusy.Set true
+                                busyProgress.Set None
                                 let! fixOutcome =
                                     task {
+                                        // Tagging from the layout runs the layout detector page by page,
+                                        // after downloading its model the first time.
+                                        let tagging = options.HasFlag PdfFixOptions.TagFromLayout
+                                        let source =
+                                            if tagging then
+                                                new LayoutRegionSource(
+                                                    Progress<int * int>(fun (page, pageCount) -> busyProgress.Set(Some(TaggingPage(page, pageCount))))
+                                                )
+                                                |> Some
+                                            else
+                                                None
                                         try
                                             try
+                                                if tagging && not (LayoutModel.isDownloaded ()) then
+                                                    do!
+                                                        LayoutModel.download
+                                                            (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
+                                                            CancellationToken.None
+                                                source |> Option.iter (fun source -> validator.LayoutSource <- source)
                                                 let! fix = Task.Run(fun () -> validator.Fix(sourcePath, profile, outputPath, options))
                                                 return Ok fix
-                                            with :? VeraPdfValidationException as ex ->
-                                                return Error ex.Message
+                                            with
+                                            | :? VeraPdfValidationException as ex -> return Error ex.Message
+                                            | :? Net.Http.HttpRequestException as ex -> return Error $"Couldn't download the layout model: {ex.Message}"
                                         finally
+                                            validator.LayoutSource <- null
+                                            source |> Option.iter (fun source -> (source :> IDisposable).Dispose())
+                                            busyProgress.Set None
                                             isBusy.Set false
                                     }
 

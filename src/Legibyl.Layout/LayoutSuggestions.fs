@@ -5,6 +5,7 @@
 namespace Legibyl.Layout
 
 open System
+open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open SkiaSharp
@@ -35,7 +36,9 @@ type PageSuggestion =
     { PageNumber: int
       Blocks: SuggestedBlock list
       /// False when the page has no text to tag (a scan, say): it would need OCR first.
-      HasText: bool }
+      HasText: bool
+      /// A rotated page isn't detected yet: its rendering's coordinates are turned.
+      Rotated: bool }
 
 module LayoutSuggestions =
     /// The tag a detector label suggests. Heading levels aren't known from one page's layout,
@@ -62,13 +65,14 @@ module LayoutSuggestions =
         | _ -> "P"
 
     /// A box in the rendered image's pixels (top-left origin) as PDF user space (bottom-left
-    /// origin, in points), for a page rendered at scale pixels per point.
-    let toGeometry pageNumber (pageHeight: float) (scale: float) (box: LayoutBox) : StructureGeometry =
+    /// origin, in points), for a page whose visible area (crop box) has its top-left corner at
+    /// (left, top), rendered at scale pixels per point.
+    let toGeometry pageNumber (left: float, top: float) (scale: float) (box: LayoutBox) : StructureGeometry =
         { PageNumber = pageNumber
-          Left = float box.Left / scale
-          Right = float box.Right / scale
-          Top = pageHeight - float box.Top / scale
-          Bottom = pageHeight - float box.Bottom / scale }
+          Left = left + float box.Left / scale
+          Right = left + float box.Right / scale
+          Top = top - float box.Top / scale
+          Bottom = top - float box.Bottom / scale }
 
     let private contains (geometry: StructureGeometry) (x: float, y: float) =
         x >= geometry.Left && x <= geometry.Right && y >= geometry.Bottom && y <= geometry.Top
@@ -185,11 +189,16 @@ type LayoutSuggester(pdfPath: string) =
     member _.Suggest(pageNumber: int) : PageSuggestion =
         lock gate (fun () ->
             let page = document.GetPage pageNumber
+            let rotated = page.Rotation.Value % 360 <> 0
             let boxes =
-                use bitmap = document.GetPageAsSKBitmap(pageNumber, float32 scale, SKColors.White)
-                use image = LayoutSuggestions.rgbImage bitmap
-                detector.Value.Detect image
-            let regions = [ for box in boxes -> LayoutSuggestions.toGeometry pageNumber page.Height scale box ]
+                if rotated then
+                    [||] :> IReadOnlyList<_>
+                else
+                    use bitmap = document.GetPageAsSKBitmap(pageNumber, float32 scale, SKColors.White)
+                    use image = LayoutSuggestions.rgbImage bitmap
+                    detector.Value.Detect image
+            let crop = page.CropBox.Bounds
+            let regions = [ for box in boxes -> LayoutSuggestions.toGeometry pageNumber (crop.Left, crop.Top) scale box ]
             let words =
                 [ for word in page.GetWords() do
                       let centre = word.BoundingBox.Centroid
@@ -197,6 +206,7 @@ type LayoutSuggester(pdfPath: string) =
             let texts = LayoutSuggestions.assignText regions words
             { PageNumber = pageNumber
               HasText = not words.IsEmpty
+              Rotated = rotated
               Blocks =
                 [ for i, (box, region, text) in List.indexed (List.zip3 (List.ofSeq boxes) regions texts) ->
                       { Order = i + 1
@@ -214,3 +224,31 @@ type LayoutSuggester(pdfPath: string) =
                 if detector.IsValueCreated then
                     detector.Value.Dispose()
                 document.Dispose())
+
+/// Regions for the TagFromLayout fix, detected page by page as the fix asks for them.
+/// progress gets (page, page count) as each page starts. The model must be downloaded.
+[<Sealed>]
+type LayoutRegionSource(progress: IProgress<int * int> | null) =
+    let suggesters = Dictionary<string, LayoutSuggester>()
+
+    interface IPageLayoutSource with
+        member _.PageRegions(pdfPath, pageNumber) =
+            let suggester =
+                match suggesters.TryGetValue pdfPath with
+                | true, suggester -> suggester
+                | _ ->
+                    let suggester = new LayoutSuggester(pdfPath)
+                    suggesters[pdfPath] <- suggester
+                    suggester
+            match progress with
+            | NonNull progress -> progress.Report((pageNumber, suggester.PageCount))
+            | Null -> ()
+            [ for block in (suggester.Suggest pageNumber).Blocks ->
+                  { Tag = block.Tag
+                    Geometry = block.Geometry
+                    ListNumbering = Option.toObj block.ListNumbering } ]
+
+    interface IDisposable with
+        member _.Dispose() =
+            for suggester in suggesters.Values do
+                (suggester :> IDisposable).Dispose()

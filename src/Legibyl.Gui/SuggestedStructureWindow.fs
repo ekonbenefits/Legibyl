@@ -85,7 +85,8 @@ module SuggestedStructureView =
                         if current = version.Current then
                             suggestion.Set(Some result)
                             status.Set(
-                                if result.Blocks.IsEmpty then "Nothing was found on this page."
+                                if result.Rotated then "This page is rotated, and rotated pages aren't detected yet."
+                                elif result.Blocks.IsEmpty then "Nothing was found on this page."
                                 elif not result.HasText then
                                     "This page has no text layer (it may be a scan), so tagging it would need OCR first."
                                 else ""

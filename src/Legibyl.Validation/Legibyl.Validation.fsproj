@@ -22,6 +22,7 @@
     <Compile Include="TocHeadings.fs" />
     <Compile Include="ParagraphLists.fs" />
     <Compile Include="Bookmarks.fs" />
+    <Compile Include="LayoutTagging.fs" />
     <Compile Include="StructureFixes.fs" />
     <!-- Legibyl's own warnings; see the header of LegibylChecks.fs to add one. -->
     <Compile Include="LegibylChecks.fs" />

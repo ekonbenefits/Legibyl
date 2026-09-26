@@ -122,6 +122,11 @@ module internal VeraPdf =
         with _ ->
             ()
 
+    /// The PDF/UA-1 rules an untagged document fails that tagging it from its layout fixes:
+    /// no MarkInfo (6.2-1) or structure tree (7.1-11), untagged content (7.1-3), untagged
+    /// annotations and links (7.18.1-2, 7.18.5-1), and pages with links but no tab order (7.18.3-1).
+    let private tagFromLayoutRules = set [ "6.2-1"; "7.1-3"; "7.1-11"; "7.18.1-2"; "7.18.3-1"; "7.18.5-1" ]
+
     /// Adds page regions to veraPDF's failures and appends Legibyl's own warnings.
     let withLegibylAnalysis (analysis: LegibylAnalysis) (assertions: RuleViolation list) =
         match analysis with
@@ -132,6 +137,7 @@ module internal VeraPdf =
                 // description elsewhere isn't fixable (see StructureFixes.describeLinks).
                 let tocLinkAnnotations = lazy (StructureFixes.tocLinkAnnotationNumbers document context)
                 let hasTitlePage = lazy (StructureFixes.titlePageText document |> Option.isSome)
+                let untagged = isNull (document.GetCatalog().GetPdfObject().Get iText.Kernel.Pdf.PdfName.StructTreeRoot)
                 let fixOptionsFor (assertion: RuleViolation) =
                     let isTocLink () =
                         match assertion.Location with
@@ -145,8 +151,14 @@ module internal VeraPdf =
                             assertion.FixOptions
                     // Titling from the first page does what DocumentTitle does, and can only
                     // add a title where the document has a title page to take it from.
-                    if options.HasFlag PdfFixOptions.DocumentTitle && hasTitlePage.Value then
-                        options ||| PdfFixOptions.TitleFromFirstPage
+                    let options =
+                        if options.HasFlag PdfFixOptions.DocumentTitle && hasTitlePage.Value then
+                            options ||| PdfFixOptions.TitleFromFirstPage
+                        else
+                            options
+                    // What tagging an untagged document from its layout addresses.
+                    if untagged && tagFromLayoutRules.Contains assertion.RuleId then
+                        options ||| PdfFixOptions.TagFromLayout
                     else
                         options
                 let located =
@@ -370,6 +382,10 @@ open VeraPdf
 type VeraPdfValidator() =
     do ensureInitialised ()
 
+    /// Where the TagFromLayout fix gets each page's regions (see Legibyl.Layout). Without one,
+    /// that fix does nothing.
+    member val LayoutSource: IPageLayoutSource | null = null with get, set
+
     member _.Validate
         (
             pdfPath: string,
@@ -418,12 +434,29 @@ type VeraPdfValidator() =
         let mutable currentInput = pdfPath
         let mutable tempMetadataOutput: string | null = null
         let mutable tempStructuralOutput: string | null = null
+        let mutable tempTaggedOutput: string | null = null
         let mutable changed = false
         let mutable status = RepairStatus.NoAction
 
         try
             try
-                // Legibyl's own repairs run first, then veraPDF's metadata fix on their result.
+                // Tagging an untagged document comes first, so the structural repairs can work
+                // on its tags; then Legibyl's own repairs, then veraPDF's metadata fix.
+                match this.LayoutSource with
+                | NonNull source when options.HasFlag PdfFixOptions.TagFromLayout ->
+                    let tempOutput = createTemporaryPdfPath outputPath
+                    tempTaggedOutput <- tempOutput
+                    match LayoutTagging.tag currentInput tempOutput source with
+                    | [] ->
+                        tryDeleteTemporary tempOutput
+                        tempTaggedOutput <- null
+                    | tagged ->
+                        appliedFixes.AddRange tagged
+                        currentInput <- tempOutput
+                        changed <- true
+                        status <- RepairStatus.Success
+                | _ -> ()
+
                 let structuralOptions =
                     StructureFixes.orderedFixes |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
 
@@ -488,7 +521,7 @@ type VeraPdfValidator() =
                 // may be a temporary file rather than outputPath; keep both.
                 raise (VeraPdfValidationException($"Could not write fixed PDF for '{outputPath}': {ex.Message}", ex))
         finally
-            for tempOutput in [ tempMetadataOutput; tempStructuralOutput ] do
+            for tempOutput in [ tempMetadataOutput; tempStructuralOutput; tempTaggedOutput ] do
                 if not (String.Equals(tempOutput, outputPath, StringComparison.OrdinalIgnoreCase)) then
                     tryDeleteTemporary tempOutput
 

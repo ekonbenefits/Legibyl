@@ -25,7 +25,10 @@ type PdfFixOptions =
     | BookmarksFromHeadings = 256
     /// Removes table-of-contents entries (TOCI) with nothing in them, like RemoveEmptyParagraphs.
     | RemoveEmptyTocEntries = 512
-    | All = 1023
+    /// Tags an untagged document from each page's layout (regions found by a layout detector),
+    /// before the other fixes run; see LayoutTagging. Needs an IPageLayoutSource.
+    | TagFromLayout = 1024
+    | All = 2047
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
@@ -72,6 +75,20 @@ type StructureGeometry =
       Bottom: float
       Right: float
       Top: float }
+
+/// A region of a page to tag, e.g. one a layout detector found (see Legibyl.Layout).
+type LayoutRegion =
+    { /// The tag it suggests: "H1", "H", "P", "LI", "Figure", "Table", "Caption", "Note",
+      /// "Formula", "Lbl", or "Artifact" for page furniture like running headers.
+      Tag: string
+      Geometry: StructureGeometry
+      /// For an "LI", its list's /ListNumbering (e.g. "Disc"); consecutive items form one list.
+      ListNumbering: string | null }
+
+/// Where the TagFromLayout fix gets each page's regions.
+type IPageLayoutSource =
+    /// pageNumber's regions (1-based), in reading order.
+    abstract PageRegions: pdfPath: string * pageNumber: int -> Collections.Generic.IReadOnlyList<LayoutRegion>
 
 /// A human-friendly interpretation of a veraPDF <c>locationContext</c> string
 /// (e.g. <c>root/document[0]/pages[1](7 0 obj PDPage)/annots[0](9 0 obj PDLinkAnnot)</c>),

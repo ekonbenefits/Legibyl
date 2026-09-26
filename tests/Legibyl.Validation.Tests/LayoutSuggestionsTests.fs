@@ -21,7 +21,12 @@ let ``detector labels suggest tags`` () =
 let ``boxes in rendered pixels become PDF points from the bottom of the page`` () =
     // A 792pt page rendered at 2 pixels per point.
     let box = LayoutBox(0, "text", 0.9f, 100f, 200f, 300f, 260f, 0)
-    LayoutSuggestions.toGeometry 3 792.0 2.0 box |> should equal { PageNumber = 3; Left = 50.0; Right = 150.0; Top = 692.0; Bottom = 662.0 }
+    LayoutSuggestions.toGeometry 3 (0.0, 792.0) 2.0 box |> should equal { PageNumber = 3; Left = 50.0; Right = 150.0; Top = 692.0; Bottom = 662.0 }
+
+[<Fact>]
+let ``a crop box that doesn't start at the origin offsets the boxes`` () =
+    let box = LayoutBox(0, "text", 0.9f, 100f, 200f, 300f, 260f, 0)
+    LayoutSuggestions.toGeometry 1 (20.0, 800.0) 2.0 box |> should equal { PageNumber = 1; Left = 70.0; Right = 170.0; Top = 700.0; Bottom = 670.0 }
 
 [<Fact>]
 let ``each word goes to the smallest region it's in, once`` () =
