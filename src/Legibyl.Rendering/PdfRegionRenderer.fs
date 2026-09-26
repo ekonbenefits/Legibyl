@@ -310,6 +310,46 @@ type PdfRegionRenderer() =
                   Note = note }
         )
 
+    /// Renders just geometry's region of its page, with margin points around it, as a PNG whose
+    /// longest side is at most maxSide pixels: a figure, say, for someone (or something) to look at.
+    member _.RenderRegion
+        (
+            pdfPath: string,
+            geometry: StructureGeometry,
+            [<Optional; DefaultParameterValue(12.0)>] margin: float,
+            [<Optional; DefaultParameterValue(1024)>] maxSide: int
+        ) : byte array =
+        let scale = 2.0f
+        cache.WithPage(
+            pdfPath,
+            geometry.PageNumber,
+            scale,
+            fun _ bitmap ->
+                let scaled (value: float) = int (Math.Round(value * float scale))
+                let clampX value = max 0 (min bitmap.Width value)
+                let clampY value = max 0 (min bitmap.Height value)
+                // Bottom-left-origin points to the bitmap's top-left-origin pixels, as drawHighlight does.
+                let area =
+                    SKRectI(
+                        clampX (scaled (geometry.Left - margin)),
+                        clampY (bitmap.Height - scaled (geometry.Top + margin)),
+                        clampX (scaled (geometry.Right + margin)),
+                        clampY (bitmap.Height - scaled (geometry.Bottom - margin))
+                    )
+                if area.Width <= 0 || area.Height <= 0 then
+                    raise (InvalidOperationException $"The region is outside page {geometry.PageNumber}.")
+                use cropped = new SKBitmap()
+                bitmap.ExtractSubset(cropped, area) |> ignore
+                let longest = max area.Width area.Height
+                if longest <= maxSide then
+                    encodePng cropped
+                else
+                    let ratio = float maxSide / float longest
+                    let size = SKImageInfo(max 1 (int (float area.Width * ratio)), max 1 (int (float area.Height * ratio)))
+                    use smaller = cropped.Resize(size, SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear))
+                    encodePng smaller
+        )
+
     /// Renders pageNumber with each region outlined and labelled.
     member _.RenderPageWithRegions
         (

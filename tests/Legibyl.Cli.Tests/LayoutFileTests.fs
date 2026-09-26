@@ -155,3 +155,61 @@ let ``--suggest-layout returns each page's regions, ready to apply`` () =
         pages.GetArrayLength() |> should equal 1
         pages[0].GetProperty("regions").GetArrayLength() |> should be (greaterThan 0)
         LayoutFile.read path |> Result.isOk |> should be True)
+
+[<Fact>]
+let ``--figure-images writes a picture of each figure the model finds`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    withUntaggedPdf (fun pdf ->
+        let path = pdf + ".layout.json"
+
+        run [ pdf; "--suggest-layout"; "--suggest-layout-output"; path; "--figure-images" ] |> ignore
+
+        let layout = match LayoutFile.read path with Ok layout -> layout | Error message -> failwith message
+        let figures = layout.Pages |> Array.collect _.Regions |> Array.filter (fun r -> r.Tag = "Figure")
+        figures |> should not' (be Empty)
+        for figure in figures do
+            let image = Path.Combine(Path.GetDirectoryName path |> nonNull, figure.Image |> nonNull)
+            File.Exists image |> should be True)
+
+[<Fact>]
+let ``figure images go in a folder beside the layout, replacing the last run's`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    try
+        let layoutPath = Path.Combine(folder, "garden.layout.json")
+        let images = LayoutFile.imagesFolder layoutPath
+        Directory.CreateDirectory images |> ignore
+        File.WriteAllText(Path.Combine(images, "p9-r9.png"), "stale")
+        File.WriteAllText(Path.Combine(images, "notes.txt"), "someone's")
+        let rendered = ResizeArray<StructureGeometry>()
+
+        let layout =
+            LayoutFile.ofSuggestions "garden.pdf" [ suggestion ] None
+            |> LayoutFile.withFigureImages layoutPath (fun geometry -> rendered.Add geometry; [| 1uy |])
+
+        images |> should equal (Path.Combine(folder, "garden.layout.images"))
+        [ for region in layout.Pages[0].Regions -> region.Tag, region.Image ]
+        |> should equal [ "H", null; "Figure", "garden.layout.images/p1-r2.png" ]
+        [ for g in rendered -> g.Left, g.Top ] |> should equal [ 70.0, 652.0 ]
+        Directory.GetFiles images |> Array.map Path.GetFileName |> Array.sort |> should equal [| "notes.txt"; "p1-r2.png" |]
+    finally
+        Directory.Delete(folder, true)
+
+[<Fact>]
+let ``a figure is given the text just before and after it`` () =
+    let blocks =
+        { suggestion with
+            Blocks =
+                [ block 1 "H" (70.0, 695.0, 300.0, 715.0) "The garden"
+                  block 2 "Artifact" (70.0, 680.0, 300.0, 690.0) "Page 1"
+                  { block 3 "Figure" (70.0, 548.0, 175.0, 652.0) "" with Label = "image" }
+                  block 4 "Caption" (70.0, 530.0, 175.0, 545.0) "Seedlings in a tray" ] }
+
+    let figure = (LayoutFile.ofSuggestions "garden.pdf" [ blocks ] None).Pages[0].Regions[2]
+
+    (figure.TextBefore, figure.TextAfter) |> should equal ("The garden", "Seedlings in a tray")
+
+[<Fact>]
+let ``figure images need a layout file to go beside`` () =
+    withUntaggedPdf (fun pdf -> fst (run [ pdf; "--suggest-layout"; "--figure-images" ]) |> should equal 64)

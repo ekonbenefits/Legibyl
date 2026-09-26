@@ -49,6 +49,8 @@ type Args =
       SuggestLayout: bool
       /// Also write the suggested layout here (one input file).
       SuggestLayoutOutput: string option
+      /// Write a picture of each figure beside the layout written there.
+      FigureImages: bool
       /// Tag the file from the layout in this file (see --suggest-layout).
       ApplyLayout: string option
       TitleFromFirstPage: bool
@@ -210,7 +212,18 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) (appliedLayou
         else
             try
                 let layout = suggestLayout file
-                args.SuggestLayoutOutput |> Option.iter (fun path -> File.WriteAllText(path, Legibyl.Layout.LayoutFile.toJson layout))
+                let layout =
+                    match args.SuggestLayoutOutput with
+                    | Some path ->
+                        let layout =
+                            if args.FigureImages then
+                                use renderer = new Legibyl.Rendering.PdfRegionRenderer()
+                                Legibyl.Layout.LayoutFile.withFigureImages path (fun geometry -> renderer.RenderRegion(file, geometry)) layout
+                            else
+                                layout
+                        File.WriteAllText(path, Legibyl.Layout.LayoutFile.toJson layout)
+                        layout
+                    | None -> layout
                 { result with SuggestedLayout = layout }
             with
             | :? Net.Http.HttpRequestException as ex -> { result with SuggestedLayoutError = $"Couldn't download the layout model: {ex.Message}" }
@@ -309,6 +322,9 @@ let private renderText (results: FileValidationResult list) =
                             | _ -> ""
                         let recognized = if region.Recognized then " (OCR)" else ""
                         line $"      {region.Order} {region.Tag}{recognized}{text}"
+                        match region.Image with
+                        | NonNull image -> line $"        image: {image}"
+                        | Null -> ()
             | Null, Null -> ()
 
             match r.StructureError, r.Structure with
@@ -337,6 +353,8 @@ let private run (args: Args) =
         usageError "Use --edits or --edits-from, not both."
     elif args.SuggestLayoutOutput.IsSome && not args.SuggestLayout then
         usageError "--suggest-layout-output requires --suggest-layout."
+    elif args.FigureImages && args.SuggestLayoutOutput.IsNone then
+        usageError "--figure-images requires --suggest-layout-output: the images go in a folder beside that file."
     elif args.SuggestLayoutOutput.IsSome && args.Files.Length > 1 then
         usageError "--suggest-layout-output can only be used with a single input file."
     elif args.ApplyLayout.IsSome && args.Files.Length > 1 then
@@ -382,7 +400,7 @@ EXAMPLES:
   legibyl document.pdf --fixes safe,lists,headings-from-toc
   legibyl document.pdf --fixes all --edits
   legibyl flyer.v3.pdf --edits-from flyer.v2.pdf
-  legibyl scan.pdf --suggest-layout --suggest-layout-output scan.layout.json
+  legibyl scan.pdf --suggest-layout --suggest-layout-output scan.layout.json --figure-images
   legibyl scan.pdf --apply-layout scan.layout.json
   legibyl document.pdf --fix --fix-output document-repaired.pdf
   legibyl document.pdf --structure --output structure.json
@@ -528,6 +546,15 @@ let main argv =
                     |> desc "Use with --suggest-layout and one input file to also write the suggested layout to path, ready for --apply-layout."
                     |> helpName "path"
 
+                and! figureImages =
+                    option<bool> "--figure-images"
+                    |> desc
+                        "Use with --suggest-layout-output. Also writes a PNG of each figure into a folder \
+                         beside the layout file (\"scan.layout.json\" -> \"scan.layout.images/p1-r3.png\"), \
+                         and gives the figure its path as \"image\", for someone (or an agent) to look at \
+                         when writing its alt text. Each run empties the folder of the last run's images; \
+                         delete it with the layout file when done. --apply-layout doesn't use them."
+
                 and! applyLayout =
                     optionMaybe "--apply-layout"
                     |> desc
@@ -566,6 +593,7 @@ let main argv =
                       EditsFrom = editsFrom
                       SuggestLayout = suggestLayout
                       SuggestLayoutOutput = suggestLayoutOutput
+                      FigureImages = figureImages
                       ApplyLayout = applyLayout
                       TitleFromFirstPage = titleFromFirstPage
                       LinkTitlesFromWeb = linkTitlesFromWeb

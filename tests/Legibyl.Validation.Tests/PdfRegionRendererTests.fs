@@ -150,3 +150,26 @@ let ``PDFium draws each page at the requested scale, and refuses pages that don'
     (page.Width, page.Height) |> should equal (1224, 1584)
     page.Pixels |> Array.exists (fun c -> c.Red < 128uy) |> should be True
     (fun () -> document.Render(2, 1f) |> ignore) |> should throw typeof<InvalidOperationException>
+
+let private area (left, bottom, right, top) : StructureGeometry =
+    { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
+
+[<Fact>]
+let ``RenderRegion renders just the region, with a margin, at twice its size in points`` () =
+    use renderer = new PdfRegionRenderer()
+
+    let png = renderer.RenderRegion(corpusFile "pdfua1-pass.pdf", area (100.0, 500.0, 200.0, 550.0), 10.0)
+
+    shouldBePng png
+    use image = SkiaSharp.SKBitmap.Decode png
+    // 100 x 50 points, 10 points of margin each side, at 2 pixels a point.
+    (image.Width, image.Height) |> should equal (240, 140)
+
+[<Fact>]
+let ``RenderRegion keeps a large region's longest side to the size asked for`` () =
+    use renderer = new PdfRegionRenderer()
+
+    let png = renderer.RenderRegion(corpusFile "pdfua1-pass.pdf", area (0.0, 0.0, 600.0, 300.0), 0.0, 400)
+
+    use image = SkiaSharp.SKBitmap.Decode png
+    (image.Width, image.Height) |> should equal (400, 200)
