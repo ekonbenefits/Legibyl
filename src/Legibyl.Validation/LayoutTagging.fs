@@ -11,6 +11,7 @@ open System
 open System.Collections.Generic
 open System.IO
 open System.Text
+open iText.IO.Font
 open iText.IO.Source
 open iText.Kernel.Geom
 open iText.Kernel.Pdf
@@ -183,8 +184,10 @@ let private ownerOf (regions: (LayoutRegion * Rectangle) array) (drawn: Drawn) =
     match drawn.Kind, inside with
     | Text, Some(index, (region, _))
     | Image, Some(index, (region, _)) -> if region.Tag = "Artifact" then Artifact else Region index
-    // Lines and fills are decoration, except in a figure or table (a chart, a table's rules).
-    | Path, Some(index, (region, _)) when region.Tag = "Figure" || region.Tag = "Table" -> Region index
+    // Lines and fills are decoration, except in a figure or table (a chart, a table's rules),
+    // or where they draw a region's text (outlined text, read by OCR into its ActualText).
+    | Path, Some(index, (region, _)) when region.Tag = "Figure" || region.Tag = "Table" || not (isNull region.ActualText) ->
+        Region index
     | Path, _ -> Artifact
     | Image, None -> Artifact
     | Text, None ->
@@ -239,7 +242,9 @@ type private Tally =
       mutable Tables: int
       mutable Links: int
       mutable UntaggedAnnotations: int
-      mutable PagesWithoutText: int }
+      mutable PagesWithoutText: int
+      /// Elements whose text is drawn as outlines or pixels, given an OCR'd /ActualText.
+      mutable Recognized: int }
 
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
@@ -274,7 +279,7 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
 
         let parentTree = PdfArray()
         let tally =
-            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0 }
+            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0 }
         let pageCount = document.GetNumberOfPages()
         let regionsByPage = [| for page in 1 .. pageCount -> List.ofSeq (source.PageRegions(pdfPath, page)) |]
         let hasTitle = regionsByPage |> Array.exists (List.exists (fun region -> region.Tag = "H1"))
@@ -312,8 +317,8 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
             let mcids = List<PdfDictionary>()
             let regionAt index =
                 match index with
-                | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null }
-                | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null }
+                | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null }
+                | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null }
                 | index -> fst regions[index]
             let elementFor (index: int) =
                 match elements.TryGetValue index with
@@ -344,6 +349,13 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
                                 if region.Tag = "Table" then tally.Tables <- tally.Tables + 1
                                 tally.Paragraphs <- tally.Paragraphs + 1
                             element
+                    match region.ActualText with
+                    | NonNull text ->
+                        element.Dictionary.Put(PdfName.ActualText, PdfString(text, PdfEncodings.UNICODE_BIG)) |> ignore
+                        // OCR reads with its English model, so the text it gives is English.
+                        element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
+                        tally.Recognized <- tally.Recognized + 1
+                    | Null -> ()
                     elements[index] <- element
                     element
 
@@ -481,6 +493,9 @@ let tag (pdfPath: string) (outputPath: string) (source: IPageLayoutSource) : str
         [ yield
               $"Tagged {pages} from their layout: {headings}, {paragraphs}, {items}, {figures} "
               + $"and {links}; page furniture marked as artifacts"
+          if tally.Recognized > 0 then
+              let recognized = plural tally.Recognized "element's text is" "elements' text is"
+              yield $"{recognized} drawn as outlines or pixels: read with OCR into /ActualText, to check"
           if tally.Figures > 0 then
               let need = plural tally.Figures "figure needs" "figures need"
               yield $"{need} alt text, written by a person"

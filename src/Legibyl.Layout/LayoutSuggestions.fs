@@ -6,6 +6,8 @@ namespace Legibyl.Layout
 
 open System
 open System.Collections.Generic
+open System.IO
+open System.Text.RegularExpressions
 open System.Threading
 open System.Threading.Tasks
 open SkiaSharp
@@ -30,7 +32,10 @@ type SuggestedBlock =
       /// The page's own text inside the region (empty for a figure, or a page without a text layer).
       Text: string
       /// For a list item (LI): its list's /ListNumbering, e.g. "Disc" or "Decimal".
-      ListNumbering: string option }
+      ListNumbering: string option
+      /// True when Text was recognised by OCR, because the region's text is drawn as
+      /// outlines or pixels rather than as text.
+      Recognized: bool }
 
 type PageSuggestion =
     { PageNumber: int
@@ -93,6 +98,9 @@ module LayoutSuggestions =
             |> Option.iter (fun (index, _) -> byRegion[index].Add text)
         [ for words in byRegion -> String.Join(" ", words) ]
 
+    /// Whether a suggested tag is for text (so a region with none as text needs OCR).
+    let holdsText (tag: string) = tag <> "Figure" && tag <> "Table" && tag <> "Artifact"
+
     // Items of one list start within this many points of each other.
     [<Literal>]
     let private SameIndent = 6.0
@@ -130,6 +138,28 @@ module LayoutSuggestions =
             pixels[i * 3 + 1] <- source[i * 4 + 1]
             pixels[i * 3 + 2] <- source[i * 4 + 2]
         RgbImage.Wrap(pixels, bitmap.Width, bitmap.Height)
+
+/// Reads text drawn as outlines or pixels, with Tesseract and its English model (shipped in
+/// the app's tessdata folder). Unavailable where Tesseract has no native library (Intel Macs).
+module TextRecognition =
+    open Tesseract
+
+    let private tessdata () = Path.Combine(AppContext.BaseDirectory, "tessdata")
+
+    /// A Tesseract engine, or None if it can't be loaded here.
+    let createEngine () : TesseractEngine option =
+        try
+            Some(new TesseractEngine(tessdata (), "eng", EngineMode.Default))
+        with _ ->
+            // No native library for this platform, or it failed to load: no OCR, rather
+            // than no layout.
+            None
+
+    /// The text in a PNG of one region, on one line.
+    let recognize (engine: TesseractEngine) (png: byte array) =
+        use pix = Pix.LoadFromMemory png
+        use page = engine.Process(pix, PageSegMode.SingleBlock)
+        Regex.Replace(page.GetText(), @"\s+", " ").Trim()
 
 /// The layout detector's model: whether it's downloaded, and downloading it.
 module LayoutModel =
@@ -182,6 +212,40 @@ type LayoutSuggester(pdfPath: string) =
         document.AddSkiaPageFactory()
         document
     let detector = lazy (LayoutDetector.Load(LayoutModel.directory ()))
+    let ocr = lazy (TextRecognition.createEngine ())
+    // OCR wants more pixels than the detector: about 300 dpi.
+    let ocrScale = 4.0
+
+    /// The text of regions that have none as text but look like they hold some.
+    let recognizeText pageNumber (crop: UglyToad.PdfPig.Core.PdfRectangle) (regions: (string * StructureGeometry) list) =
+        match ocr.Value with
+        | Some engine when regions |> List.exists (fun (tag, _) -> tag <> "") ->
+            use bitmap = document.GetPageAsSKBitmap(pageNumber, float32 ocrScale, SKColors.White)
+            [ for tag, geometry in regions ->
+                  if tag = "" then
+                      None
+                  else
+                      let pixels (value: float) = int (Math.Round(value * ocrScale))
+                      let area =
+                          SKRectI(
+                              max 0 (pixels (geometry.Left - crop.Left)),
+                              max 0 (pixels (crop.Top - geometry.Top)),
+                              min bitmap.Width (pixels (geometry.Right - crop.Left)),
+                              min bitmap.Height (pixels (crop.Top - geometry.Bottom))
+                          )
+                      if area.Width < 4 || area.Height < 4 then
+                          None
+                      else
+                          use region = new SKBitmap()
+                          if bitmap.ExtractSubset(region, area) then
+                              use image = SKImage.FromBitmap region
+                              use png = image.Encode(SKEncodedImageFormat.Png, 100)
+                              match TextRecognition.recognize engine (png.ToArray()) with
+                              | "" -> None
+                              | text -> Some text
+                          else
+                              None ]
+        | _ -> regions |> List.map (fun _ -> None)
 
     member _.PageCount = document.NumberOfPages
 
@@ -204,18 +268,28 @@ type LayoutSuggester(pdfPath: string) =
                       let centre = word.BoundingBox.Centroid
                       yield word.Text, (centre.X, centre.Y) ]
             let texts = LayoutSuggestions.assignText regions words
+            // Regions that should hold text but have none as text: their text is drawn as
+            // outlines or pixels, so read it with OCR.
+            let recognized =
+                recognizeText
+                    pageNumber
+                    crop
+                    [ for box, region, text in List.zip3 (List.ofSeq boxes) regions texts ->
+                          let tag = LayoutSuggestions.tagFor box.Label
+                          (if text = "" && LayoutSuggestions.holdsText tag then tag else ""), region ]
             { PageNumber = pageNumber
               HasText = not words.IsEmpty
               Rotated = rotated
               Blocks =
-                [ for i, (box, region, text) in List.indexed (List.zip3 (List.ofSeq boxes) regions texts) ->
+                [ for i, ((box, region, text), recognized) in List.indexed (List.zip (List.zip3 (List.ofSeq boxes) regions texts) recognized) ->
                       { Order = i + 1
                         Label = box.Label
                         Tag = LayoutSuggestions.tagFor box.Label
                         Score = float box.Score
                         Geometry = region
-                        Text = text
-                        ListNumbering = None } ]
+                        Text = defaultArg recognized text
+                        ListNumbering = None
+                        Recognized = recognized.IsSome } ]
                 |> LayoutSuggestions.findLists })
 
     interface IDisposable with
@@ -223,6 +297,8 @@ type LayoutSuggester(pdfPath: string) =
             lock gate (fun () ->
                 if detector.IsValueCreated then
                     detector.Value.Dispose()
+                if ocr.IsValueCreated then
+                    ocr.Value |> Option.iter _.Dispose()
                 document.Dispose())
 
 /// Regions for the TagFromLayout fix, detected page by page as the fix asks for them.
@@ -246,7 +322,8 @@ type LayoutRegionSource(progress: IProgress<int * int> | null) =
             [ for block in (suggester.Suggest pageNumber).Blocks ->
                   { Tag = block.Tag
                     Geometry = block.Geometry
-                    ListNumbering = Option.toObj block.ListNumbering } ]
+                    ListNumbering = Option.toObj block.ListNumbering
+                    ActualText = if block.Recognized then block.Text else null } ]
 
     interface IDisposable with
         member _.Dispose() =

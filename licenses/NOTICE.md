@@ -109,6 +109,19 @@ PP-DocLayoutV3 (Apache License 2.0, by PaddlePaddle), isn't shipped with
 Legibyl: the app downloads it only when the user asks, into PaddleOCR's own
 model cache.
 
+## Tesseract OCR
+
+The **Suggest Structure** preview and the tag-from-layout fix read text drawn as
+outlines or pixels with [Tesseract](https://github.com/tesseract-ocr/tesseract),
+via the `Tesseract.CrossPlatform` NuGet package (a fork of
+[charlesw/tesseract](https://github.com/charlesw/tesseract)'s .NET wrapper) and
+its `Tesseract.Native` binaries (Tesseract and Leptonica, built with vcpkg), all
+licensed under the Apache License, Version 2.0 (Leptonica under its own
+BSD-2-Clause-style license). They're used unmodified via NuGet package references.
+The app also ships Tesseract's English model, `eng.traineddata` from
+[tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache License
+2.0), unmodified.
+
 ## iText Core
 
 Legibyl uses [iText Core for .NET](https://github.com/itext/itext-dotnet)

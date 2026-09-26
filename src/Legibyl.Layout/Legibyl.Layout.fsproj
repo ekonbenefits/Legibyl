@@ -14,10 +14,36 @@
     <!-- A pure C# port of PaddleOCR's layout detector (PP-DocLayoutV3) - Apache 2.0. Its model is
          downloaded on first use, not shipped. -->
     <PackageReference Include="PaddleOCR" Version="26.9.5517" />
+    <!-- Tesseract OCR (Apache 2.0) with native binaries for win-x64/arm64, linux-x64/arm64 and
+         osx-arm64, for regions whose text is drawn as outlines or pixels. -->
+    <PackageReference Include="Tesseract.CrossPlatform" Version="5.5.2.200" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Legibyl.Rendering\Legibyl.Rendering.fsproj" />
   </ItemGroup>
+
+  <!-- The English OCR model, pinned by TessdataVersion/TessdataEngSha256 in
+       Directory.Build.props, cached under obj/ and copied to the output's tessdata/. -->
+  <PropertyGroup>
+    <TessdataEngUrl>https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/$(TessdataVersion)/eng.traineddata</TessdataEngUrl>
+    <TessdataDir>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)tessdata/$(TessdataVersion)/</TessdataDir>
+    <TessdataEng>$(TessdataDir)eng.traineddata</TessdataEng>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(TessdataEng)" Link="tessdata/eng.traineddata" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="FetchTessdata" BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems" Condition="!Exists('$(TessdataEng)')">
+    <DownloadFile SourceUrl="$(TessdataEngUrl)" DestinationFolder="$(TessdataDir)" DestinationFileName="eng.traineddata.download" Retries="3" />
+    <GetFileHash Files="$(TessdataEng).download" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_TessdataActualSha256" />
+    </GetFileHash>
+    <Delete Files="$(TessdataEng).download" Condition="'$(_TessdataActualSha256)' != '$(TessdataEngSha256)'" />
+    <Error Condition="'$(_TessdataActualSha256)' != '$(TessdataEngSha256)'"
+           Text="SHA-256 mismatch for $(TessdataEngUrl): expected $(TessdataEngSha256), got $(_TessdataActualSha256). If you are upgrading tessdata, update TessdataEngSha256 in Directory.Build.props." />
+    <Move SourceFiles="$(TessdataEng).download" DestinationFiles="$(TessdataEng)" />
+  </Target>
 
 </Project>
