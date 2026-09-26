@@ -28,6 +28,7 @@
     <Compile Include="LayoutSuggestionsTests.fs" />
     <Compile Include="LayoutTaggingTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />
+    <Compile Include="MetadataAndFontFixTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -285,6 +285,68 @@ let private setAnnotationTabOrder (document: PdfDocument) _ =
                 fixedPages <- fixedPages + 1
     if fixedPages > 0 then [ $"Set /Tabs /S on {fixedPages} page(s) containing annotations." ] else []
 
+/// Embedded TrueType CID fonts without a /CIDToGIDMap get /Identity: the mapping the PDF spec
+/// says readers use when it's missing, so nothing draws differently, but PDF/UA (7.21.3.2-1)
+/// wants it written down. macOS Quartz, for one, leaves it out.
+let private setIdentityCidToGidMaps (document: PdfDocument) _ =
+    let mutable fixedFonts = 0
+    let fix (font: PdfDictionary) =
+        if PdfName.CIDFontType2.Equals(font.GetAsName PdfName.Subtype) && isNull (font.Get PdfName.CIDToGIDMap) then
+            match font.GetAsDictionary PdfName.FontDescriptor with
+            | null -> ()
+            | descriptor when isNull (descriptor.Get PdfName.FontFile2) -> ()
+            | _ ->
+                font.Put(PdfName.CIDToGIDMap, PdfName.Identity) |> ignore
+                fixedFonts <- fixedFonts + 1
+    for number in 1 .. document.GetNumberOfPdfObjects() - 1 do
+        match document.GetPdfObject number with
+        | :? PdfDictionary as font when PdfName.Font.Equals(font.GetAsName PdfName.Type) ->
+            fix font
+            // A Type0 font's descendant can also be a direct object, which the loop won't reach.
+            match font.GetAsArray PdfName.DescendantFonts with
+            | null -> ()
+            | descendants ->
+                for i in 0 .. descendants.Size() - 1 do
+                    match descendants.Get(i, false) with
+                    | :? PdfDictionary as descendant -> fix descendant
+                    | _ -> ()
+        | _ -> ()
+    if fixedFonts > 0 then
+        [ $"Set /CIDToGIDMap /Identity on {fixedFonts} embedded TrueType CID font(s), the mapping readers already use when it's missing." ]
+    else
+        []
+
+/// For a document with no XMP metadata stream, writes one from its Info dictionary, so
+/// veraPDF's metadata fixer (which runs next) has metadata to repair: for a document without
+/// any, it answers Won't fix.
+let private addMissingMetadata (document: PdfDocument) _ =
+    if not (isNull (document.GetCatalog().GetPdfObject().Get PdfName.Metadata)) then
+        []
+    else
+        let info = document.GetDocumentInfo()
+        let value (text: string | null) =
+            match text with
+            | NonNull text when not (String.IsNullOrWhiteSpace text) -> Some text
+            | _ -> None
+        let xmp = XMPMetaFactory.Create()
+        value (info.GetTitle()) |> Option.iter (fun title -> xmp.SetLocalizedText(XMPConst.NS_DC, "title", null, XMPConst.X_DEFAULT, title))
+        value (info.GetAuthor())
+        |> Option.iter (fun author ->
+            xmp.AppendArrayItem(XMPConst.NS_DC, "creator", iText.Kernel.XMP.Options.PropertyOptions(iText.Kernel.XMP.Options.PropertyOptions.ARRAY_ORDERED), author, null))
+        value (info.GetSubject()) |> Option.iter (fun subject -> xmp.SetLocalizedText(XMPConst.NS_DC, "description", null, XMPConst.X_DEFAULT, subject))
+        value (info.GetKeywords()) |> Option.iter (fun keywords -> xmp.SetProperty(XMPConst.NS_PDF, "Keywords", keywords))
+        value (info.GetCreator()) |> Option.iter (fun creator -> xmp.SetProperty(XMPConst.NS_XMP, "CreatorTool", creator))
+        value (info.GetProducer()) |> Option.iter (fun producer -> xmp.SetProperty(XMPConst.NS_PDF, "Producer", producer))
+        for key, property in [ PdfName.CreationDate, "CreateDate"; PdfName.ModDate, "ModifyDate" ] do
+            match document.GetTrailer().GetAsDictionary PdfName.Info |?> _.GetAsString(key) with
+            | null -> ()
+            | date ->
+                match PdfDate.GetW3CDate(date.GetValue()) with
+                | NonNull w3c when w3c <> "" -> xmp.SetProperty(XMPConst.NS_XMP, property, w3c)
+                | _ -> ()
+        document.SetXmpMetadata xmp
+        [ "Added an XMP metadata stream, from the document information dictionary." ]
+
 let private describeTocLinks (document: PdfDocument) context =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
@@ -323,8 +385,10 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///      them in the item.)
 ///   3. Lists.
 ///   4. Bookmarks, after headings are recovered, so those get bookmarks too.
-///   5. The rest touch pages, annotations and the Info dictionary rather than paragraphs, so
-///      their order among themselves doesn't matter.
+///   5. The rest touch pages, annotations, fonts and the Info dictionary rather than
+///      paragraphs, so their order among themselves doesn't matter...
+///   6. ...except that a missing XMP stream is written last, from the Info dictionary the
+///      title repairs may have just filled in.
 ///
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
 /// result, and syncs XMP with the Info dictionary the title repair may have just set.
@@ -337,8 +401,10 @@ let orderedFixes: (PdfFixOptions * (PdfDocument -> Context -> string list)) list
       PdfFixOptions.BookmarksFromHeadings, addBookmarks
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
+      PdfFixOptions.FontCidToGidMap, setIdentityCidToGidMaps
       PdfFixOptions.DocumentTitle, setDocumentTitle false
-      PdfFixOptions.TitleFromFirstPage, setDocumentTitle true ]
+      PdfFixOptions.TitleFromFirstPage, setDocumentTitle true
+      PdfFixOptions.Metadata, addMissingMetadata ]
 
 /// The structural repairs Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per repair that actually changed something, so a

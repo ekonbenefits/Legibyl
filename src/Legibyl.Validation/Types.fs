@@ -31,7 +31,10 @@ type PdfFixOptions =
     /// Declares the document's language (/Lang), detected from its text, when it has none;
     /// see DocumentLanguage.
     | LanguageFromText = 2048
-    | All = 4095
+    /// Writes /CIDToGIDMap /Identity on embedded TrueType CID fonts that leave it out (the
+    /// mapping readers already use then), which PDF/UA requires.
+    | FontCidToGidMap = 4096
+    | All = 8191
 
 /// The PDF/A or PDF/UA validation flavour to check a document against.
 /// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.

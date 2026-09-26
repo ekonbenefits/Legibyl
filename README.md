@@ -381,9 +381,13 @@ Options:
 - `--fix` — also attempt to repair the file, writing a repaired copy next to
   the original as `<name>.fixed<ext>`. It applies the repairs that need no
   guesswork about what the document means: XMP **metadata** via veraPDF's
-  metadata fixer (missing metadata stream, missing PDF/A|PDF/UA identifier,
-  false conformance claims, Info-dictionary sync); page annotation tab order
-  (`/Tabs /S`); a **description for table-of-contents links that have none**,
+  metadata fixer (missing PDF/A|PDF/UA identifier, false conformance claims,
+  Info-dictionary sync; for a document with **no metadata stream at all**,
+  which veraPDF won't fix, Legibyl first writes one from the Info dictionary
+  for it to repair); page annotation tab order (`/Tabs /S`); the **glyph
+  mapping** embedded TrueType CID fonts leave out (`/CIDToGIDMap /Identity`,
+  which PDF/UA requires written down and readers already assume when it's
+  missing, so nothing draws differently; macOS Quartz omits it); a **description for table-of-contents links that have none**,
   taken from the entry's own visible text with its dot leaders and printed page
   number stripped, so `Scope of this document ..... 3` becomes `Scope of this
   document`. Only a link inside a `TOC`/`TOCI` (at any depth) is described,
@@ -418,9 +422,9 @@ Options:
   repair files are created under the operating system temp directory, not
   beside the source PDF or requested output path. Empty `/P` cleanup is
   visible as a warning and fixable option, but it is unchecked by default in
-  the GUI so users opt into structure-tree deletion. Neither path adds
-  missing alt text, retags untagged content, infers headings, or infers table
-  headers.
+  the GUI so users opt into structure-tree deletion. The CLI doesn't tag
+  untagged content, infer headings or declare a language, and neither path
+  adds missing alt text or infers table headers.
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
 - `--structure` — include each file's tagged logical structure tree (the

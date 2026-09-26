@@ -55,7 +55,8 @@ let ``the fix dialog counts what each repair addresses and ticks only what appli
               finding PdfFixOptions.ListsFromParagraphs
               finding PdfFixOptions.ListsFromParagraphs
               finding PdfFixOptions.ListsFromParagraphs
-              finding PdfFixOptions.TagFromLayout ]
+              finding PdfFixOptions.TagFromLayout
+              finding PdfFixOptions.FontCidToGidMap ]
 
         let pending = Dialogs.chooseFixOptions owner (report findings)
         HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
@@ -73,6 +74,8 @@ let ``the fix dialog counts what each repair addresses and ticks only what appli
         shown["Tag runs of"] |> should equal (false, "3 found")
         shown["Tag this untagged"] |> should equal (false, "1 found")
         shown["Declare the document's"] |> should equal (false, "None found in this PDF")
+        // Safe repairs are ticked when found.
+        shown["Write the glyph"] |> should equal (true, "1 found")
         shown["Tag headings the"] |> should equal (false, "None found in this PDF")
         shown["Remove empty semantic"] |> should equal (false, "None found in this PDF")
         shown["Add bookmarks for"] |> should equal (false, "None found in this PDF"))

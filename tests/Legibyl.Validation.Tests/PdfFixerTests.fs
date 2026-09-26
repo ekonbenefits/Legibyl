@@ -601,8 +601,12 @@ let ``Fix writes output when a structural fix applies but the metadata fixer cha
     File.Exists output.Path |> should be True
     linkContentsOf output.Path |> should equal [ Some "Our privacy policy" ]
     // veraPDF's metadata changes weren't kept, so they aren't reported as made; that they
-    // weren't is.
-    List.ofSeq result.AppliedFixes |> should equal [ "Described 1 link annotation(s) from their own text." ]
+    // weren't is. (The XMP stream the document lacked is Legibyl's own repair, and kept.)
+    List.ofSeq result.AppliedFixes
+    |> should
+        equal
+        [ "Described 1 link annotation(s) from their own text."
+          "Added an XMP metadata stream, from the document information dictionary." ]
     List.ofSeq result.NotApplied
     |> should
         equal
