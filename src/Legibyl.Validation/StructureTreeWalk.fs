@@ -142,6 +142,10 @@ let private referencedAnnotation (child: obj) (subtype: string) =
         | _ -> None
     | _ -> None
 
+/// A link's description: its annotation's /Contents, if it has one.
+let private readLinkDescription (child: obj) =
+    referencedAnnotation child "Link" |> Option.bind (fun referenced -> Option.ofObj (nullIfEmpty (referenced.getStringKey(atom "Contents"))))
+
 let private readFormFieldInfo (child: obj) (ownPage: int option) =
     referencedAnnotation child "Widget"
     |> Option.map (fun referenced ->
@@ -418,6 +422,14 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
                 | _ -> None)
     let contentTexts = contentInfos |> List.map _.Text |> List.filter (not << String.IsNullOrEmpty)
     let formField = leaves |> List.tryPick (fun child -> readFormFieldInfo child ownPage)
+    // A link holding only its annotation is where the annotation is.
+    let linkRect =
+        match ownPage with
+        | Some page ->
+            leaves
+            |> List.tryPick (fun child ->
+                referencedAnnotation child "Link" |> Option.bind (fun referenced -> geometryFromCosRect page (referenced.getKey(atom "Rect"))))
+        | None -> None
 
     let children = walkChildren elem context ownPage (depth + 1)
 
@@ -425,6 +437,7 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
         (contentInfos |> List.choose _.Geometry) @ (children |> Seq.choose (fun child -> Option.ofObj child.Geometry) |> List.ofSeq)
         |> StructureTreeObjects.unionGeometry
         |> Option.orElse (formField |> Option.bind _.Geometry)
+        |> Option.orElse linkRect
         |> Option.orElseWith (fun () -> layoutBBoxGeometry elem ownPage)
 
     let linkTarget =
@@ -449,6 +462,7 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
       LinkDestinationPageNumber = linkTarget |> Option.bind _.DestinationPageNumber |> Option.toNullable
       LinkDestinationDescription = linkTarget |> Option.map _.DestinationDescription |> Option.toObj
       LinkDestination = linkTarget |> Option.bind _.Destination |> Option.toObj
+      LinkDescription = leaves |> List.tryPick readLinkDescription |> Option.toObj
       Geometry = Option.toObj geometry
       Language = nullIfEmpty (elem.getLang () |?> _.toString())
       PageNumber = Option.toNullable displayPage
@@ -523,6 +537,7 @@ let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) :
               LinkDestinationPageNumber = Nullable()
               LinkDestinationDescription = null
               LinkDestination = null
+              LinkDescription = null
               Geometry = children |> Seq.choose (fun child -> Option.ofObj child.Geometry) |> StructureTreeObjects.unionGeometry |> Option.toObj
               Language = null
               PageNumber = Nullable()

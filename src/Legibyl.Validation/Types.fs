@@ -243,6 +243,9 @@ type StructureNode =
       LinkDestinationDescription: string | null
       /// For /Link structure elements, where an internal destination goes on its page, if resolvable.
       LinkDestination: LinkDestination | null
+      /// For /Link structure elements, the link's description (its annotation's /Contents), if any:
+      /// what a screen reader announces for it.
+      LinkDescription: string | null
       /// Best-effort same-page geometry covered by this node's directly-owned content and
       /// child nodes, if determinable. Null when the node has no geometric content or
       /// spans multiple pages.

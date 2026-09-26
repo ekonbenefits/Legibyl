@@ -212,3 +212,36 @@ let ``edits move to the elements tagging made, retags becoming their tag and exc
 
     ReviewFile.rekey edits tagged |> List.map (fun e -> e.Tag, Option.ofObj e.Alt, Option.ofObj e.Retag, e.Box.Left)
     |> should equal ([ "Figure", Some "A map", None, 72.0 ] : (string * string option * string option * float) list)
+
+/// A tagged page with a sentence and a link over it that has no description.
+let private createLinked (path: string) =
+    use untagged = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(untagged.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        PdfCanvas(page).BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 12f).MoveText(72.0, 700.0).ShowText("Visit the site.").EndText()
+        |> ignore
+        let link = iText.Kernel.Pdf.Annot.PdfLinkAnnotation(Rectangle(72f, 695f, 80f, 15f))
+        link.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI "https://example.com") |> ignore
+        page.AddAnnotation link |> ignore
+    VeraPdfValidator(LayoutSource = FixedLayout [ region "P" (70.0, 690.0, 300.0, 715.0) ]).Fix(untagged.Path, PdfProfile.PdfUa1, path, PdfFixOptions.TagFromLayout)
+    |> ignore
+
+[<Fact>]
+let ``a link's description is its annotation's, read and written from an edit`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createLinked input.Path
+    let link (path: string) = VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Link")
+    let before = link input.Path
+    before.LinkDescription |> should be Null
+    let described = { altEdit with Tag = "Link"; Box = before.Geometry |> notNull; Alt = "Example (example.com)" }
+    ElementEdits.pending input.Path [ described ] |> should equal 1
+
+    applyEdits input.Path output.Path [ described ] |> ignore
+
+    let after = link output.Path
+    after.LinkDescription |> should equal "Example (example.com)"
+    // On the annotation, not as the element's alt text.
+    after.AlternateDescription |> should be Null
+    ElementEdits.pending output.Path [ described ] |> should equal 0

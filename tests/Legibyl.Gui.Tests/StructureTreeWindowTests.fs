@@ -28,6 +28,7 @@ let private node (tag: string) (children: StructureNode list) =
       LinkDestinationPageNumber = Nullable()
       LinkDestinationDescription = null
       LinkDestination = null
+      LinkDescription = null
       Geometry = null
       Language = null
       PageNumber = Nullable()

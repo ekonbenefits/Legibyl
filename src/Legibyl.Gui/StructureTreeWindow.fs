@@ -34,6 +34,7 @@ module StructureSummary =
               match node.FormFieldName with NonNull name -> yield $"field: {name}" | Null -> ()
               match node.FormFieldType with NonNull fieldType -> yield $"type: {fieldType}" | Null -> ()
               match node.LinkUri with NonNull href -> yield $"href: {href}" | Null -> ()
+              match node.LinkDescription with NonNull description -> yield $"description: \"{description}\"" | Null -> ()
               match node.LinkDestinationDescription with NonNull dest -> yield $"dest: {dest}" | Null -> ()
               if node.ContentLeafCount > 0 then
                   yield $"""({node.ContentLeafCount} content item{if node.ContentLeafCount = 1 then "" else "s"})""" ]
@@ -82,6 +83,8 @@ module private StructureView =
     type EditKind =
         | AltText
         | ReplacementText
+        /// A link's description (its annotation's /Contents).
+        | LinkDescription
 
     /// What blocks can do: select (called with the clicked block's node, its border control, and
     /// whether to extend the selection to it, as shift-click does), show the user's edits, and edit
@@ -99,7 +102,8 @@ module private StructureView =
         match node.Geometry with
         | null -> []
         | _ ->
-            [ if node.Tag = "Figure" || node.Tag = "Formula" || not (isNull node.AlternateDescription) then AltText
+            [ if node.Tag = "Link" then LinkDescription
+              elif node.Tag = "Figure" || node.Tag = "Formula" || not (isNull node.AlternateDescription) then AltText
               if not (isNull node.ActualText) then ReplacementText ]
 
     /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
@@ -156,7 +160,9 @@ module private StructureView =
           | Some tag when tag <> node.Tag -> "tag", tag
           | _ -> ()
           match edit.Alt with
-          | Some alt when alt <> string node.AlternateDescription -> "alt", alt
+          // A link's is its description.
+          | Some alt when node.Tag = "Link" && alt <> string node.LinkDescription -> "description", alt
+          | Some alt when node.Tag <> "Link" && alt <> string node.AlternateDescription -> "alt", alt
           | _ -> ()
           match edit.Text with
           | Some text when text <> string node.ActualText -> "text", text
@@ -221,6 +227,7 @@ module private StructureView =
                                         match kind with
                                         | AltText -> "Edit Alt Text…"
                                         | ReplacementText -> "Edit Replacement Text…"
+                                        | LinkDescription -> "Edit Link Description…"
                                     )
                                     MenuItem.onClick (fun _ -> selection.Edit node kind)
                                 ]
@@ -320,6 +327,7 @@ module private StructureView =
                 StackPanel.children [
                     header
                     match node.AlternateDescription with NonNull alt -> detailLine $"alt: \"{alt}\"" true | Null -> ()
+                    match node.LinkDescription with NonNull description -> detailLine $"description: \"{description}\"" true | Null -> ()
                     if not (editKinds node).IsEmpty || canRetag node then
                         // Its own component, so an edit re-renders just this line.
                         Component.create("pending-edit", fun ctx ->
@@ -659,6 +667,12 @@ module private StructureView =
                                 $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. Save… in the main window writes it to a copy.",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.AlternateDescription),
                                 "Describe what it shows"
+                            | LinkDescription ->
+                                let target = match node.LinkUri with NonNull uri -> $" (it goes to {uri})" | Null -> ""
+                                "Link Description",
+                                $"What a screen reader announces for this link on page {page}{target}: where it goes, e.g. \"Apply for benefits (example.com)\". Save… in the main window writes it to a copy.",
+                                existing |> Option.bind _.Alt |> Option.defaultValue (string node.LinkDescription),
+                                "Where the link goes"
                             | ReplacementText ->
                                 "Replacement Text",
                                 $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn. Save… in the main window writes it to a copy.",
@@ -671,6 +685,8 @@ module private StructureView =
                                 // Blank drops the edit: an element's alt text can't be made empty.
                                 | AltText when String.IsNullOrWhiteSpace text -> RegionEdits.setAlt edits.Current page node.Tag box ""
                                 | AltText -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.AlternateDescription) text
+                                | LinkDescription when String.IsNullOrWhiteSpace text -> RegionEdits.setAlt edits.Current page node.Tag box ""
+                                | LinkDescription -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.LinkDescription) text
                                 | ReplacementText -> RegionEdits.setText edits.Current page node.Tag box (string node.ActualText) text
                             do! saveEdits next
                         | None -> ()
@@ -928,6 +944,7 @@ module private StructureView =
                                                 | Some tag -> detailLine $"tag: {tag}" false
                                                 | None -> ()
                                                 match edit.Alt with
+                                                | Some alt when edit.Tag = "Link" -> detailLine $"description: \"{alt}\"" false
                                                 | Some alt -> detailLine $"alt: \"{alt}\"" false
                                                 | None -> ()
                                                 match edit.Text with
