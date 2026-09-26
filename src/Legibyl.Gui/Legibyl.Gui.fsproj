@@ -24,6 +24,7 @@
     <Compile Include="BusyStatus.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="SuggestedStructureWindow.fs" />
+    <Compile Include="LinkTitleOffer.fs" />
     <Compile Include="MainWindow.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

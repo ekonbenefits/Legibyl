@@ -119,6 +119,10 @@ type IPageLayoutSource =
     /// pageNumber's regions (1-based), in reading order.
     abstract PageRegions: pdfPath: string * pageNumber: int -> Collections.Generic.IReadOnlyList<LayoutRegion>
 
+    /// A description for a link annotation that has none (/Contents), e.g. written or checked in
+    /// Suggest Structure: for the link at rectangle on pageNumber. Null to leave it without one.
+    abstract LinkDescription: pdfPath: string * pageNumber: int * rectangle: StructureGeometry -> string | null
+
 /// A human-friendly interpretation of a veraPDF <c>locationContext</c> string
 /// (e.g. <c>root/document[0]/pages[1](7 0 obj PDPage)/annots[0](9 0 obj PDLinkAnnot)</c>),
 /// which otherwise requires knowledge of veraPDF's internal object model to read.

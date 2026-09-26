@@ -110,7 +110,7 @@ let ``every page's layout is found in the background, so the next page shows at 
         Directory.Delete(folder, true)
 
 [<Fact>]
-let ``a QR code shows the alt text tagging would give it, and offers to read its page's title`` () =
+let ``a QR code's alt text is prefilled with where it links, to edit`` () =
     if not (LayoutModel.isDownloaded ()) then
         Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
     let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
@@ -131,18 +131,16 @@ let ``a QR code shows the alt text tagging would give it, and offers to read its
         onUiThread (fun () ->
             let window = SuggestedStructureWindow(pdf)
             window.Show()
-            let texts () = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
-            let alt = "Alt: QR code linking to https://example.com/apply"
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> texts () |> List.contains alt) |> ignore
-            let shown = texts ()
-            let offer = descendants<CheckBox> window |> List.tryFind (fun c -> string c.Content = "Read link titles from the web")
+            let boxes () = descendants<TextBox> window |> List.map (fun t -> string t.Text)
+            let alt = "QR code linking to https://example.com/apply"
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 60.0) (fun () -> boxes () |> List.contains alt) |> ignore
+            let shown = boxes ()
+            // Reading titles is offered before the window opens, not in it.
+            let checkbox = descendants<CheckBox> window |> List.tryFind (fun c -> string c.Content = "Read link titles from the web")
             window.Close()
 
             shown |> should contain alt
-            // Offered, but off: nothing is fetched unless asked for.
-            offer.IsSome |> should be True
-            offer.Value.IsVisible |> should be True
-            offer.Value.IsChecked.GetValueOrDefault() |> should be False)
+            checkbox |> should equal None)
     finally
         Directory.Delete(folder, true)
 

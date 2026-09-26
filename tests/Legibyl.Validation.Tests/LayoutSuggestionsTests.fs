@@ -218,3 +218,28 @@ let ``a QR code drawn as a soft mask, as Canva exports it, is rendered and found
     use rendered = document.Render(1, float32 (400.0 / 72.0))
 
     QrCodes.decodeAll rendered |> List.map fst |> should equal [ "https://example.com/canva" ]
+
+[<Fact>]
+let ``the link scanner finds undescribed web links and QR codes, without the layout model`` () =
+    use input = new TempPdf()
+    do
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(input.Path))
+        let page = document.AddNewPage(iText.Kernel.Geom.PageSize.LETTER)
+        let link (uri: string) (x: float32) (contents: string option) =
+            let annotation = iText.Kernel.Pdf.Annot.PdfLinkAnnotation(iText.Kernel.Geom.Rectangle(x, 700f, 100f, 14f))
+            annotation.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI uri) |> ignore
+            contents |> Option.iter (fun c -> annotation.SetContents c |> ignore)
+            page.AddAnnotation annotation |> ignore
+        link "https://example.com/apply" 72f None
+        link "https://example.com/described" 300f (Some "Already described")
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(page)
+        let matrix = ZXing.QrCode.QRCodeWriter().encode("https://example.com/scan", ZXing.BarcodeFormat.QR_CODE, 144, 144)
+        for row in 0 .. matrix.Height - 1 do
+            for column in 0 .. matrix.Width - 1 do
+                if matrix[column, row] then canvas.Rectangle(72.0 + float column, 500.0 - float row, 1.0, 1.0) |> ignore
+        canvas.Fill() |> ignore
+
+    use scanner = new LinkScanner(input.Path)
+
+    scanner.WebLinks() |> List.map (fun l -> l.Page, l.Address) |> should equal [ 1, "https://example.com/apply" ]
+    scanner.QrCodes 1 |> List.map fst |> should equal [ "https://example.com/scan" ]

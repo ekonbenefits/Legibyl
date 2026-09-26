@@ -490,7 +490,75 @@ type LayoutRegionSource(progress: IProgress<int * int> | null) =
             | Null -> ()
             LayoutSuggestions.toRegions (suggester.Suggest pageNumber).Blocks
 
+        member _.LinkDescription(_, _, _) = null
+
     interface IDisposable with
         member _.Dispose() =
             for suggester in suggesters.Values do
                 (suggester :> IDisposable).Dispose()
+
+/// A link in the PDF to a web page, with no description of its own (/Contents).
+type WebLink =
+    { Page: int
+      Box: StructureGeometry
+      Address: string }
+
+/// Finds a PDF's links to web pages without the layout model, before Suggest Structure opens:
+/// its link annotations that have no description, and, page by page, its QR codes (the same
+/// scan Suggest Structure uses, about a second a page).
+[<Sealed>]
+type LinkScanner(pdfPath: string) =
+    let bytes = File.ReadAllBytes pdfPath
+    let document = PdfDocument.Open bytes
+    let pages = new Legibyl.Rendering.PdfiumDocument(bytes)
+    let qrScale = 400.0 / 72.0
+
+    member _.PageCount = document.NumberOfPages
+
+    /// The link annotations that go to a web page and have no description.
+    member _.WebLinks() : WebLink list =
+        use reader = new iText.Kernel.Pdf.PdfReader(new MemoryStream(bytes))
+        use pdf = new iText.Kernel.Pdf.PdfDocument(reader)
+        [ for page in 1 .. pdf.GetNumberOfPages() do
+              for annotation in pdf.GetPage(page).GetAnnotations() do
+                  let dictionary = annotation.GetPdfObject()
+                  let uri =
+                      match dictionary.GetAsDictionary iText.Kernel.Pdf.PdfName.A with
+                      | null -> None
+                      | action ->
+                          match action.GetAsString iText.Kernel.Pdf.PdfName.URI with
+                          | null -> None
+                          | uri -> LinkTitles.webAddress (uri.ToUnicodeString())
+                  match uri, annotation.GetRectangle() with
+                  | Some address, NonNull rectangle when
+                      iText.Kernel.Pdf.PdfName.Link.Equals(annotation.GetSubtype())
+                      && isNull (dictionary.Get iText.Kernel.Pdf.PdfName.Contents)
+                      ->
+                      let r = rectangle.ToRectangle()
+                      yield
+                          { Page = page
+                            Box =
+                              { PageNumber = page
+                                Left = float (r.GetLeft())
+                                Bottom = float (r.GetBottom())
+                                Right = float (r.GetRight())
+                                Top = float (r.GetTop()) }
+                            Address = address }
+                  | _ -> () ]
+
+    /// The QR codes on a page: what each encodes, and where, in PDF points.
+    member _.QrCodes(pageNumber: int) : (string * StructureGeometry) list =
+        let crop = document.GetPage(pageNumber).CropBox.Bounds
+        use bitmap = pages.Render(pageNumber, float32 qrScale)
+        [ for text, (left, top, right, bottom) in QrCodes.decodeAll bitmap ->
+              text,
+              { PageNumber = pageNumber
+                Left = crop.Left + left / qrScale
+                Right = crop.Left + right / qrScale
+                Top = crop.Top - top / qrScale
+                Bottom = crop.Top - bottom / qrScale } ]
+
+    interface IDisposable with
+        member _.Dispose() =
+            (pages :> IDisposable).Dispose()
+            document.Dispose()

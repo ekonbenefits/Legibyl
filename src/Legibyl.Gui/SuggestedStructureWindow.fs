@@ -19,6 +19,14 @@ open Legibyl.Validation
 open Legibyl.Rendering
 open Legibyl.Validation
 
+/// What was chosen about reading the titles of the web pages links go to, asked before Suggest
+/// Structure opens.
+type LinkTitlesChoice =
+    | NotAsked
+    | Skipped
+    /// Read them, except for these addresses.
+    | Read of except: Set<string>
+
 /// What's been found and decided about one file's suggested structure: each page's layout
 /// found so far, the suggestions discarded, and the page last looked at. Remembered while the
 /// app is open, so reopening Suggest Structure (or tagging from the Fix dialog) picks it up.
@@ -31,6 +39,32 @@ type LayoutReview(modified: DateTime) =
     member val LastPage = 1 with get, set
     /// Figures' alt text and corrected OCR text, as saved next to the PDF (see RegionEdits).
     member val Edits: RegionEdits.Edit list = [] with get, set
+    member val LinkTitles = NotAsked with get, set
+    /// The titles read for web addresses, by address.
+    member val Titles: Map<string, string> = Map.empty with get, set
+    /// The PDF's links to web pages without a description.
+    member val WebLinks: WebLink list = [] with get, set
+
+    member this.TitleLookup = this.Titles :> Collections.Generic.IReadOnlyDictionary<string, string>
+
+    /// Whether a web address's title may be read.
+    member this.MayRead(address: string) =
+        match this.LinkTitles with
+        | Read except -> not (except.Contains address)
+        | _ -> false
+
+    /// A QR code's alt text as prefilled: where it links, named by its page's title if read.
+    member this.QrAlt(qrText: string) = LinkTitles.qrAltText this.TitleLookup qrText
+
+    /// A web link's description as prefilled: its page's title, if read; "" if not.
+    member this.LinkPrefill(address: string) =
+        LinkTitles.linkDescription this.TitleLookup address |> Option.defaultValue ""
+
+    /// A web link's description: as edited, else as prefilled; None for none.
+    member this.LinkDescription(link: WebLink) =
+        match RegionEdits.find this.Edits link.Page "Link" link.Box |> Option.bind _.Alt with
+        | Some edited -> if String.IsNullOrWhiteSpace edited then None else Some edited
+        | None -> Some(this.LinkPrefill link.Address) |> Option.filter (String.IsNullOrWhiteSpace >> not)
 
 /// The layout reviews of the files opened this session, each forgotten if its file changes.
 [<Sealed>]
@@ -124,10 +158,22 @@ type ReviewedLayout(prefetcher: LayoutPrefetcher, review: LayoutReview) =
         member _.PageRegions(_, page) =
             let kept = (prefetcher.Find page).Blocks |> List.filter (fun block -> not (review.Discarded.Contains((page, block.Order))))
             List.map2
-                (fun block region -> RegionEdits.apply review.Edits page block region)
+                (fun (block: SuggestedBlock) region ->
+                    let region = RegionEdits.apply review.Edits page block region
+                    // A QR code's alt text as the window showed it (with its page's title, if
+                    // read), unless it was edited.
+                    match block.QrText with
+                    | Some text when isNull region.Alt -> { region with Alt = review.QrAlt text }
+                    | _ -> region)
                 kept
                 (LayoutSuggestions.toRegions kept)
             :> Collections.Generic.IReadOnlyList<_>
+
+        member _.LinkDescription(_, page, rectangle) =
+            review.WebLinks
+            |> List.tryFind (fun link -> link.Page = page && RegionEdits.overlap link.Box rectangle >= RegionEdits.SameRegionOverlap)
+            |> Option.bind review.LinkDescription
+            |> Option.toObj
 
 /// For an untagged PDF: the structure a layout detector suggests for each page, drawn over the
 /// page. Each suggestion can be kept or discarded, and the kept ones saved as a tagged copy.
@@ -171,8 +217,9 @@ module SuggestedStructureView =
             let version = ctx.useState (0, renderOnChange = false)
             // QR codes' page titles, read from the web only once asked for; and the addresses
             // already asked about, so each is fetched once.
-            let readTitles = ctx.useState false
-            let titles = ctx.useState (Map.empty: Map<string, string>)
+            // Titles read for web addresses: from the offer before the window opened, and for QR
+            // codes found since, if the offer's answer allows.
+            let titles = ctx.useState review.Titles
             let asked = ctx.useState (HashSet<string>(), renderOnChange = false)
             let readingTitles = ctx.useState 0
 
@@ -182,15 +229,20 @@ module SuggestedStructureView =
 
             /// Reads the titles of the pages result's QR codes go to, if asked to and not read yet.
             let readTitlesFor (result: PageSuggestion) =
-                if readTitles.Current then
-                    match qrAddresses result |> List.filter asked.Current.Add with
+                    match
+                        qrAddresses result
+                        |> List.filter (fun address -> review.MayRead address && not (titles.Current.ContainsKey address))
+                        |> List.filter asked.Current.Add
+                    with
                     | [] -> ()
                     | wanted ->
                         readingTitles.Set(readingTitles.Current + 1)
                         task {
                             try
                                 let! found = Task.Run(fun () -> (LinkTitles.WebPageTitles() :> IPageTitleSource).PageTitles wanted)
-                                titles.Set(found |> Seq.fold (fun all (KeyValue(address, title)) -> Map.add address title all) titles.Current)
+                                let merged = found |> Seq.fold (fun all (KeyValue(address, title)) -> Map.add address title all) titles.Current
+                                titles.Set merged
+                                review.Titles <- merged
                             finally
                                 readingTitles.Set(readingTitles.Current - 1)
                         }
@@ -398,23 +450,55 @@ module SuggestedStructureView =
 
             let currentPage () = suggestion.Current |> Option.map _.PageNumber |> Option.defaultValue page.Current
 
-            /// A figure's alt text, to edit. A QR code's own description shows as the hint.
+            /// A figure's alt text, to edit. A QR code's is prefilled with where it links (named
+            /// by the page's title, if read), and only a change from that is recorded.
             let altBox (block: SuggestedBlock) =
                 let page = currentPage ()
+                let prefilled = block.QrText |> Option.map (LinkTitles.qrAltText titles.Current)
+                let shown () =
+                    RegionEdits.altFor edits.Current page block
+                    |> Option.orElse prefilled
+                    |> Option.defaultValue ""
                 TextBox.create [
                     TextBox.margin (22.0, 2.0, 0.0, 6.0)
                     TextBox.textWrapping TextWrapping.Wrap
                     TextBox.acceptsReturn false
-                    TextBox.text (RegionEdits.altFor edits.Current page block |> Option.defaultValue "")
-                    TextBox.placeHolderText (
-                        match block.QrText with
-                        | Some text -> LinkTitles.qrAltText titles.Current text
-                        | None -> "Alt text: what this figure shows, for someone who can't see it"
-                    )
+                    TextBox.text (shown ())
+                    TextBox.placeHolderText "Alt text: what this figure shows, for someone who can't see it"
                     ToolTip.tip "Written as the figure's alt text when tagging. Saved next to the PDF, and found again if the layout is suggested again."
                     TextBox.onTextChanged (fun text ->
-                        if text <> (RegionEdits.altFor edits.Current page block |> Option.defaultValue "") then
-                            saveEdits (RegionEdits.setAlt edits.Current page block.Tag block.Geometry text))
+                        if text <> shown () then
+                            match prefilled with
+                            | Some prefill -> saveEdits (RegionEdits.setAltAgainst edits.Current page block.Tag block.Geometry prefill text)
+                            | None -> saveEdits (RegionEdits.setAlt edits.Current page block.Tag block.Geometry text))
+                ]
+
+            /// A web link's description, to edit: prefilled from its page's title, if read. Only a
+            /// change from that is recorded.
+            let linkBox (link: WebLink) =
+                let prefilled = LinkTitles.linkDescription titles.Current link.Address |> Option.defaultValue ""
+                let shown () =
+                    RegionEdits.find edits.Current link.Page "Link" link.Box |> Option.bind _.Alt |> Option.defaultValue prefilled
+                StackPanel.create [
+                    StackPanel.margin (0.0, 2.0, 0.0, 6.0)
+                    StackPanel.children [
+                        TextBlock.create [
+                            TextBlock.text $"Link to {link.Address}"
+                            TextBlock.textWrapping TextWrapping.Wrap
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                        ]
+                        TextBox.create [
+                            TextBox.margin (22.0, 2.0, 0.0, 0.0)
+                            TextBox.textWrapping TextWrapping.Wrap
+                            TextBox.acceptsReturn false
+                            TextBox.text (shown ())
+                            TextBox.placeHolderText "Description: where this link goes"
+                            ToolTip.tip "Written as the link's description (/Contents) when tagging. Saved next to the PDF."
+                            TextBox.onTextChanged (fun text ->
+                                if text <> shown () then
+                                    saveEdits (RegionEdits.setAltAgainst edits.Current link.Page "Link" link.Box prefilled text))
+                        ]
+                    ]
                 ]
 
             /// A region's OCR text, to correct. Only a change is recorded; clearing it means
@@ -471,7 +555,7 @@ module SuggestedStructureView =
                         StackPanel.create [
                             StackPanel.spacing 2.0
                             StackPanel.children [
-                                for block in suggestion.Current |> Option.map _.Blocks |> Option.defaultValue [] ->
+                                for block in suggestion.Current |> Option.map _.Blocks |> Option.defaultValue [] do
                                   let isDiscarded =
                                       suggestion.Current |> Option.exists (fun result -> discarded.Current.Contains((result.PageNumber, block.Order)))
                                   StackPanel.create [
@@ -519,7 +603,7 @@ module SuggestedStructureView =
                                                         TextBlock.textWrapping TextWrapping.Wrap
                                                         TextBlock.text (
                                                             match block.QrText with
-                                                            | Some text -> $"Alt: {LinkTitles.qrAltText titles.Current text}"
+                                                            | Some text -> $"QR code: {snippet text}"
                                                             | None ->
                                                             if block.Text = "" then "(no text)"
                                                             // The text itself is in the box below, to correct.
@@ -553,36 +637,39 @@ module SuggestedStructureView =
                                   elif block.Recognized then ocrBox block
                                    ]
                                   ]
+                                // The page's links to web pages that have no description.
+                                let links =
+                                    match suggestion.Current with
+                                    | Some result -> review.WebLinks |> List.filter (fun link -> link.Page = result.PageNumber)
+                                    | None -> []
+                                if not links.IsEmpty then
+                                    StackPanel.create [
+                                        StackPanel.margin (0.0, 10.0, 0.0, 0.0)
+                                        StackPanel.children [
+                                            yield
+                                                TextBlock.create [
+                                                    TextBlock.text "Links on this page without a description"
+                                                    TextBlock.fontWeight FontWeight.SemiBold
+                                                    TextBlock.margin (0.0, 0.0, 0.0, 4.0)
+                                                ]
+                                                :> Types.IView
+                                            for link in links do
+                                                yield linkBox link :> Types.IView
+                                        ]
+                                    ]
                             ]
                         ]
                     )
                 ]
 
-            // Offered only on a page with a QR code that links somewhere: reading titles visits those sites.
+            // Says when titles of pages QR codes link to are being read (as the offer allowed).
             let titlesPanel =
                 StackPanel.create [
                     Grid.row 1
                     StackPanel.orientation Orientation.Horizontal
-                    StackPanel.spacing 8.0
                     StackPanel.margin (0.0, 6.0, 0.0, 0.0)
-                    StackPanel.isVisible (suggestion.Current |> Option.exists (fun result -> not (qrAddresses result).IsEmpty))
+                    StackPanel.isVisible (readingTitles.Current > 0)
                     StackPanel.children [
-                        CheckBox.create [
-                            CheckBox.content "Read link titles from the web"
-                            CheckBox.isChecked readTitles.Current
-                            ToolTip.tip (
-                                "Visits the web page each QR code on this page links to, and names it by its title in the alt text. "
-                                + "Only public web pages are visited, and only their titles read; the sites see the visit."
-                            )
-                            CheckBox.onIsCheckedChanged (fun e ->
-                                match e.Source with
-                                | :? CheckBox as checkBox ->
-                                    let isChecked = checkBox.IsChecked.GetValueOrDefault()
-                                    if isChecked <> readTitles.Current then
-                                        readTitles.Set isChecked
-                                        if isChecked then suggestion.Current |> Option.iter readTitlesFor
-                                | _ -> ())
-                        ]
                         TextBlock.create [
                             TextBlock.verticalAlignment VerticalAlignment.Center
                             TextBlock.text (if readingTitles.Current > 0 then "Reading titles…" else "")

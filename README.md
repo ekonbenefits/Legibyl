@@ -365,11 +365,21 @@ styled code's coloured finder patterns (yellow rings, say) are nearly as light
 as white in ordinary luminance and ZXing can't find them. The detector's
 figures are tried on their own first. A code inside a figure describes it (alt
 text "QR code linking to …", or "QR code: …" for other content); one the
-detector didn't take for a figure becomes a figure of its own. The Suggest
-Structure preview shows the alt text each would get (**Alt:**), and on a page
-with a QR code that links somewhere offers **Read link titles from the web**
-(off; it fetches as the fix below does, only when ticked) to show the title it
-would name. With the Fix dialog's **Link QR
+detector didn't take for a figure becomes a figure of its own.
+
+Before Suggest Structure opens, if the PDF links to web pages without saying
+where (link annotations with no description, and QR codes, found by a quick
+scan of each page without the layout model), Legibyl offers to read those
+pages' titles: the addresses are listed as they're found, each can be
+unticked, and **Skip** reads none. The titles are read as the link-titles fix
+does (public pages only, titles only), and QR codes found later in the window
+follow the same answer; it's asked once per file per session. In the window, a
+QR code's alt text ("QR code linking to Apply online (https://…)") and each
+undescribed link's description ("Apply online (example.com)", under **Links on
+this page without a description**) are prefilled from what was read, and can be
+edited; like OCR corrections, only a change from what was prefilled is saved
+(as `alt` on the region's or link's entry in `edits`). Tagging writes them as
+the figure's `/Alt` and the link's `/Contents`. With the Fix dialog's **Link QR
 codes** option (off by default, alongside tagging), a code that encodes a web
 address (absolute http(s), or `www.`, taken as https, as qr-link-pdf does) also
 gets a borderless link over it, tagged as a `Link` holding the figure, unless
