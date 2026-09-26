@@ -481,7 +481,9 @@ Options:
 - `--format <json|text>` — output format (default `json`).
 - `--output <path>` — write output to a file instead of stdout.
 - `--fix` — also attempt to repair the file, writing a repaired copy next to
-  the original as `<name>.fixed<ext>`. It applies the repairs that need no
+  the original as its next version: `<name>.v2<ext>` (a name that already ends
+  in a version, like `flyer v2.pdf`, goes to `flyer v3.pdf`), skipping versions
+  that already exist. It applies the repairs that need no
   guesswork about what the document means: XMP **metadata** via veraPDF's
   metadata fixer (missing PDF/A|PDF/UA identifier, false conformance claims,
   Info-dictionary sync; for a document with **no metadata stream at all**,

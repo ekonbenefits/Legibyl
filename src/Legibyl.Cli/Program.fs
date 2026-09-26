@@ -62,7 +62,7 @@ let private defaultFixOptions =
     ||| PdfFixOptions.FontCidToGidMap
 
 let private deriveFixOutputPath (file: string) =
-    let fixedName = $"{Path.GetFileNameWithoutExtension file}.fixed{Path.GetExtension file}"
+    let fixedName = CopyNames.nextVersion file
     match Path.GetDirectoryName file with
     | NonNull dir when dir <> "" -> Path.Combine(dir, fixedName)
     | _ -> fixedName
@@ -305,8 +305,9 @@ let main argv =
                 and! fix =
                     option<bool> "--fix"
                     |> desc
-                        "Also attempt to repair each file, writing a repaired copy next to the original as \
-                         \"<name>.fixed<ext>\". Applies: XMP metadata (missing metadata stream, missing \
+                        "Also attempt to repair each file, writing a repaired copy next to the original as its \
+                         next version: \"<name>.v2<ext>\" (\"<name>.v3<ext>\" for \"<name>.v2<ext>\"), skipping \
+                         versions that already exist. Applies: XMP metadata (missing metadata stream, missing \
                          PDF/A|PDF/UA identifier, false conformance claims, Info-dictionary sync); /Tabs /S on \
                          pages containing annotations; a description for links that have none, taken from the \
                          link's own text; and a document title shown in place of the file name. NOTE: it does \

@@ -33,6 +33,7 @@
     <Compile Include="FindingGeometry.fs" />
     <Compile Include="StructureTreeWalk.fs" />
     <Compile Include="MetadataTransfer.fs" />
+    <Compile Include="CopyNames.fs" />
     <Compile Include="EmbeddedReview.fs" />
     <Compile Include="VeraPdfValidator.fs" />
   </ItemGroup>
