@@ -12,7 +12,6 @@ open System.Threading
 open System.Threading.Tasks
 open SkiaSharp
 open UglyToad.PdfPig
-open UglyToad.PdfPig.Rendering.Skia
 open PaddleOcrSharp.Download
 open PaddleOcrSharp.Imaging
 open PaddleOcrSharp.Models.Layout
@@ -323,10 +322,10 @@ type LayoutSuggester(pdfPath: string) =
     let gate = obj ()
     // Pixels per point to render at; the detector scales pages to its own input size anyway.
     let scale = 2.0
-    let document =
-        let document = PdfDocument.Open(pdfPath, SkiaRenderingParsingOptions.Instance)
-        document.AddSkiaPageFactory()
-        document
+    let bytes = File.ReadAllBytes pdfPath
+    // PdfPig reads the words and page boxes; PDFium draws the pages.
+    let document = PdfDocument.Open bytes
+    let pages = new Legibyl.Rendering.PdfiumDocument(bytes)
     let detector = lazy (LayoutDetector.Load(LayoutModel.directory ()))
     let ocr = lazy (TextRecognition.createEngine ())
     // OCR wants more pixels than the detector: about 300 dpi.
@@ -378,7 +377,7 @@ type LayoutSuggester(pdfPath: string) =
                 if rotated then
                     [||] :> IReadOnlyList<_>
                 else
-                    use bitmap = document.GetPageAsSKBitmap(pageNumber, float32 scale, SKColors.White)
+                    use bitmap = pages.Render(pageNumber, float32 scale)
                     use image = LayoutSuggestions.rgbImage bitmap
                     detector.Value.Detect image
             let crop = page.CropBox.Bounds
@@ -390,7 +389,7 @@ type LayoutSuggester(pdfPath: string) =
             let texts = LayoutSuggestions.assignText regions words
             // A high-resolution rendering, for OCR and QR codes, once there's something to read.
             use highResolution =
-                if boxes.Count = 0 then null else document.GetPageAsSKBitmap(pageNumber, float32 ocrScale, SKColors.White)
+                if boxes.Count = 0 then null else pages.Render(pageNumber, float32 ocrScale)
             // Regions that should hold text but have none as text: their text is drawn as
             // outlines or pixels, so read it with OCR.
             let recognized =
@@ -411,7 +410,7 @@ type LayoutSuggester(pdfPath: string) =
                 if boxes.Count = 0 then
                     []
                 else
-                    use bitmap = document.GetPageAsSKBitmap(pageNumber, float32 qrScale, SKColors.White)
+                    use bitmap = pages.Render(pageNumber, float32 qrScale)
                     let points (left, top, right, bottom) : StructureGeometry =
                         { PageNumber = pageNumber
                           Left = crop.Left + left / qrScale
@@ -458,6 +457,7 @@ type LayoutSuggester(pdfPath: string) =
                     detector.Value.Dispose()
                 if ocr.IsValueCreated then
                     ocr.Value |> Option.iter _.Dispose()
+                (pages :> IDisposable).Dispose()
                 document.Dispose())
 
 /// Regions for the TagFromLayout fix, detected page by page as the fix asks for them.
