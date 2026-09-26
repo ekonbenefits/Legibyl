@@ -56,7 +56,12 @@ type SavedFile =
       /// The document's title as set in Suggest Structure, if changed from what was prefilled.
       [<JsonPropertyName "title">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Title: string | null }
+      Title: string | null
+      /// For an untagged PDF: its layout as reviewed (see LayoutFile), the pages reviewed so far;
+      /// tagging takes it, and the layout model for the others.
+      [<JsonPropertyName "layout">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Layout: LayoutFile.SavedLayout | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf's") in a
 // file they may open by hand.
@@ -103,7 +108,7 @@ let writeFile (pdfPath: string) (file: SavedFile) =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    if isNull file.DismissedWarnings && empty file.Edits && isNull file.Title then
+    if isNull file.DismissedWarnings && empty file.Edits && isNull file.Title && isNull file.Layout then
         // An empty file still stands in for a review embedded in the PDF, so that one doesn't
         // come back.
         if (EmbeddedReview.read pdfPath).IsSome then
@@ -184,9 +189,23 @@ let forCopy (saved: SavedFile option) =
             | moved -> toJson { saved with Edits = moved |> List.map ofElementEdit |> Array.ofList }
         | None -> null)
 
-/// Regions from inner with a review's edits applied, as tagging from Suggest Structure's review
-/// does: alt text a person wrote for figures, corrected text for what OCR read, and the title.
+/// No regions: a layout source for when there's nothing but a review to tag from.
+let noRegions =
+    { new IPageLayoutSource with
+        member _.PageRegions(_, _) = [] :> Collections.Generic.IReadOnlyList<_>
+        member _.LinkDescription(_, _, _) = null
+        member _.PageTitles = null
+        member _.DocumentTitle = null }
+
+/// The regions to tag from, as a review has them: its layout's for the pages it has (see
+/// LayoutFile), inner's for the others, with its edits applied (alt text a person wrote for
+/// figures, corrected text for what OCR read; from a review before layouts were saved) and its
+/// title.
 type ReviewedRegions(inner: IPageLayoutSource, saved: SavedFile) =
+    let inner =
+        match saved.Layout with
+        | NonNull layout -> LayoutFile.FileRegions(layout, Some inner) :> IPageLayoutSource
+        | Null -> inner
     let edits = edits saved |> List.filter _.MergeWith.IsEmpty
 
     /// The edit for region: same page and tag, overlapping most.

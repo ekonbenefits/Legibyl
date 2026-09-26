@@ -68,7 +68,7 @@ type FileValidationResult =
       StructureError: string | null
       /// The layout suggested for each page, present only when --suggest-layout was requested:
       /// what --apply-layout takes, once looked over.
-      SuggestedLayout: Legibyl.Layout.LayoutFile.SavedLayout | null
+      SuggestedLayout: Legibyl.Validation.LayoutFile.SavedLayout | null
       /// Non-null only if --suggest-layout was requested but suggesting it errored.
       SuggestedLayoutError: string | null }
 

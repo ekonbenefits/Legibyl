@@ -184,6 +184,62 @@ module LayoutSuggestions =
 
 /// Reads text drawn as outlines or pixels, with Tesseract and its English model (shipped in
 /// the app's tessdata folder). Unavailable where Tesseract has no native library (Intel Macs).
+    // ---- As a layout file (see LayoutFile) ----
+
+    let private boxOf (geometry: StructureGeometry) =
+        [| geometry.Left; geometry.Bottom; geometry.Right; geometry.Top |] |> Array.map (fun v -> Math.Round(v, 1))
+
+    /// The text of the nearest region with some before (or after) index in blocks, skipping page
+    /// furniture and other figures.
+    let private nearbyText (blocks: SuggestedBlock list) (index: int) (step: int) =
+        let rec look i =
+            if i < 0 || i >= blocks.Length then
+                null
+            else
+                let block = blocks[i]
+                if holdsText block.Tag && not (String.IsNullOrWhiteSpace block.Text) then block.Text.Trim()
+                else look (i + step)
+        look (index + step)
+
+    /// The layout suggested for pdfPath's pages, with title (e.g. its own, or its first H1's text).
+    let toLayoutFile (pdfPath: string) (pages: PageSuggestion list) (title: string option) : LayoutFile.SavedLayout =
+        let region (blocks: SuggestedBlock list) index (block: SuggestedBlock) : LayoutFile.SavedRegion =
+            let figure = block.Tag = "Figure"
+            { Order = block.Order
+              Tag = block.Tag
+              Box = boxOf block.Geometry
+              Label = block.Label
+              Score = Math.Round(block.Score, 3)
+              Text = block.Text
+              Recognized = block.Recognized
+              ListNumbering = Option.toObj block.ListNumbering
+              QrText = Option.toObj block.QrText
+              Alt = null
+              Discarded = false
+              Image = null
+              TextBefore = if figure then nearbyText blocks index -1 else null
+              TextAfter = if figure then nearbyText blocks index 1 else null }
+        let page (page: PageSuggestion) : LayoutFile.SavedPage =
+            { Page = page.PageNumber
+              HasText = page.HasText
+              Rotated = page.Rotated
+              Regions = page.Blocks |> List.mapi (region page.Blocks) |> Array.ofList }
+        { Version = 1
+          File = string (Path.GetFileName pdfPath)
+          Title = Option.toObj title
+          Pages = pages |> List.map page |> Array.ofList }
+
+    /// A title for the layout: the document's own (or a short first page's), else the first H1
+    /// the layout found; as Suggest Structure prefills it.
+    let suggestedTitle (pdfPath: string) (pages: PageSuggestion list) =
+        match DocumentTitles.candidates pdfPath with
+        | first :: _ -> Some first.Title
+        | [] ->
+            pages
+            |> List.collect _.Blocks
+            |> List.tryFind (fun block -> block.Tag = "H1" && not (String.IsNullOrWhiteSpace block.Text))
+            |> Option.map _.Text.Trim()
+
 module TextRecognition =
     open Tesseract
 
