@@ -49,9 +49,10 @@ type SavedWarning =
       [<JsonPropertyName "location">] Location: string
       [<JsonPropertyName "message">] Message: string }
 
-/// Alt text written for a figure in Suggest Structure, found again by where it is.
+/// A change made in Suggest Structure to a suggested region, found again by where it is: for
+/// now, the alt text written for a figure.
 [<CLIMutable>]
-type SavedFigure =
+type SavedEdit =
     { [<JsonPropertyName "page">] Page: int
       /// The suggested tag, e.g. "Figure".
       [<JsonPropertyName "tag">] Tag: string
@@ -59,8 +60,8 @@ type SavedFigure =
       [<JsonPropertyName "box">] Box: float array
       [<JsonPropertyName "alt">] Alt: string }
 
-/// The file next to a PDF: its remembered dismissals and its figures' alt text, either of which
-/// may be missing (null).
+/// The file next to a PDF: its remembered dismissals and the edits made in Suggest Structure,
+/// either of which may be missing (null).
 [<CLIMutable>]
 type SavedFile =
     { [<JsonPropertyName "version">] Version: int
@@ -68,9 +69,9 @@ type SavedFile =
       [<JsonPropertyName "dismissedWarnings">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       DismissedWarnings: SavedWarning array | null
-      [<JsonPropertyName "figures">]
+      [<JsonPropertyName "edits">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Figures: SavedFigure array | null }
+      Edits: SavedEdit array | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf\u0027s") in a
 // file they may open by hand.
@@ -96,7 +97,7 @@ let writeFile (pdfPath: string) (file: SavedFile) =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    if isNull file.DismissedWarnings && empty file.Figures then
+    if isNull file.DismissedWarnings && empty file.Edits then
         if File.Exists path then File.Delete path
     else
         File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
@@ -104,7 +105,7 @@ let writeFile (pdfPath: string) (file: SavedFile) =
 /// The file next to pdfPath, or an empty one.
 let readOrEmpty (pdfPath: string) =
     readFile (filePath pdfPath)
-    |> Option.defaultValue { Version = 1; DismissedWarnings = null; Figures = null }
+    |> Option.defaultValue { Version = 1; DismissedWarnings = null; Edits = null }
 
 /// The dismissals saved next to pdfPath, or None if none are (no file, or one holding only
 /// alt text).
