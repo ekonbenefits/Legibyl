@@ -73,3 +73,47 @@ let ``RenderPageWithHighlight rereads a file that changed on disk`` () =
     let after = renderer.RenderPageWithHighlight(input.Path, region 50.0 600.0 200.0 700.0)
 
     after.PngBytes |> should not' (equal before.PngBytes)
+
+/// The color of the rendered image at a point given in PDF coordinates (scale 2).
+let private colorAt (png: byte array) (x: float) (y: float) =
+    use bitmap = SkiaSharp.SKBitmap.Decode png
+    bitmap.GetPixel(int (x * 2.0), bitmap.Height - int (y * 2.0))
+
+[<Fact>]
+let ``RenderPageWithTarget marks where a link goes in blue`` () =
+    use renderer = new PdfRegionRenderer()
+    let destination =
+        { PageNumber = 1
+          Kind = "XYZ"
+          Left = Nullable 0.0
+          Top = Nullable 400.0
+          Right = Nullable()
+          Bottom = Nullable() }
+
+    let result = renderer.RenderPageWithTarget(corpusFile "pdfua1-fail.pdf", destination)
+
+    result.PageNumber |> should equal 1
+    result.HasPreciseRegion |> should be True
+    // Inside the band just below the view's top edge: tinted blue, unlike a finding's red.
+    let inside = colorAt result.PngBytes 300.0 390.0
+    inside.Blue |> should be (greaterThan inside.Red)
+    // Well outside it, the page is untouched.
+    let outside = colorAt result.PngBytes 300.0 200.0
+    colorAt (renderer.RenderPageWithHighlight(corpusFile "pdfua1-fail.pdf", region 0.0 0.0 1.0 1.0).PngBytes) 300.0 200.0
+    |> should equal outside
+
+[<Fact>]
+let ``RenderPageWithTarget outlines the page when the link gives no position`` () =
+    use renderer = new PdfRegionRenderer()
+    let destination =
+        { PageNumber = 1
+          Kind = "Fit"
+          Left = Nullable()
+          Top = Nullable()
+          Right = Nullable()
+          Bottom = Nullable() }
+
+    let result = renderer.RenderPageWithTarget(corpusFile "pdfua1-fail.pdf", destination)
+
+    result.HasPreciseRegion |> should be False
+    result.Note |> should haveSubstring "without a position"

@@ -1,7 +1,11 @@
 module Legibyl.Gui.Tests.StructureTreeWindowTests
 
 open System
+open System.IO
+open Avalonia
 open Avalonia.Controls
+open Avalonia.Headless
+open Avalonia.Input
 open Avalonia.VisualTree
 open Xunit
 open FsUnit.Xunit
@@ -23,6 +27,7 @@ let private node (tag: string) (children: StructureNode list) =
       LinkUri = null
       LinkDestinationPageNumber = Nullable()
       LinkDestinationDescription = null
+      LinkDestination = null
       Geometry = null
       Language = null
       PageNumber = Nullable()
@@ -77,3 +82,32 @@ let ``large structures start collapsed and expand on click`` () =
         label |> should equal "▸ 100 child elements (200 in all)"
         // One chapter's 100 verses and their spans fit the budget together.
         shownAfterExpanding |> should equal (51 + 200))
+
+[<Fact>]
+let ``selecting a link also shows the page it goes to`` () =
+    onUiThread (fun () ->
+        let pdf = Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "libreoffice-empty-paragraph.pdf")
+        let link =
+            { node "Link" [] with
+                Geometry = { PageNumber = 1; Left = 72.0; Bottom = 700.0; Right = 200.0; Top = 715.0 }
+                LinkDestination =
+                    { PageNumber = 1
+                      Kind = "XYZ"
+                      Left = Nullable 72.0
+                      Top = Nullable 400.0
+                      Right = Nullable()
+                      Bottom = Nullable() } }
+        let window = StructureTreeWindow(node "StructTreeRoot" [ node "Document" [ link ] ], pdf)
+        window.Show()
+        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+        let block = blocks window |> List.find (fun border -> (border.Tag :?> StructureNode).Tag = "Link")
+        let point = (block.TranslatePoint(Point(4.0, 4.0), window)).Value
+        window.MouseDown(point, MouseButton.Left)
+        window.MouseUp(point, MouseButton.Left)
+        let images () = descendants<Image> window |> List.filter (fun image -> not (isNull image.Source))
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> images().Length = 2) |> ignore
+        let shown = images().Length
+        let texts = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
+        window.Close()
+        shown |> should equal 2
+        texts |> List.exists (fun t -> t.StartsWith "Where the link goes (marked in blue), page 1") |> should be True)
