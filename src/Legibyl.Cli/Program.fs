@@ -39,6 +39,12 @@ type Args =
       Format: string
       OutputPath: string option
       Fix: bool
+      /// The repairs --fixes names, as given.
+      Fixes: string option
+      /// Apply the edits in each file's own review (the file next to it, or inside it).
+      Edits: bool
+      /// Apply the edits in this review (a .legibyl.json file, or a PDF's own review).
+      EditsFrom: string option
       TitleFromFirstPage: bool
       LinkTitlesFromWeb: bool
       FixOutputPath: string option
@@ -49,17 +55,35 @@ let private usageError (message: string) =
     eprintfn "Run with --help for usage."
     ExitCodes.UsageError
 
-/// The repairs --fix applies: everything that needs no guesswork about the document's
-/// meaning. DocumentTitle only moves across a title the author did write, in Info or in
-/// XMP; a title is never invented from the file name. Deliberately left out:
-///   RemoveEmptyParagraphs — optional cleanup the GUI offers as a choice, not something
-///     to do to a file unasked.
-let private defaultFixOptions =
-    PdfFixOptions.Metadata
-    ||| PdfFixOptions.AnnotationTabs
-    ||| PdfFixOptions.LinkContents
-    ||| PdfFixOptions.DocumentTitle
-    ||| PdfFixOptions.FontCidToGidMap
+/// Whether the arguments ask for a repaired copy: --fix, or what implies it.
+let private fixing (args: Args) =
+    args.Fix || args.Fixes.IsSome || args.Edits || args.EditsFrom.IsSome
+
+/// The repairs asked for: those --fixes names (the safe ones with just --fix), and the ones
+/// their own flags ask for. Edits are added per file, when it has some.
+let private requestedFixes (args: Args) =
+    let named =
+        match args.Fixes with
+        | Some names -> FixNames.parse names |> Result.defaultValue PdfFixOptions.None
+        | None when args.Fix -> FixNames.safe
+        | None -> PdfFixOptions.None
+    [ args.TitleFromFirstPage, PdfFixOptions.TitleFromFirstPage
+      args.LinkTitlesFromWeb, PdfFixOptions.LinkTitlesFromWeb ]
+    |> List.fold (fun all (asked, option) -> if asked then all ||| option else all) named
+
+/// Downloads the layout model if it isn't yet, saying how it's going on stderr.
+let private ensureLayoutModel () =
+    if not (Legibyl.Layout.LayoutModel.isDownloaded ()) then
+        eprintfn $"Downloading the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB), once…"
+        let mutable shown = -1
+        let progress =
+            { new IProgress<float> with
+                member _.Report fraction =
+                    let percent = int (fraction * 10.0) * 10
+                    if percent > shown then
+                        shown <- percent
+                        eprintfn $"  {percent}%%" }
+        Legibyl.Layout.LayoutModel.download progress Threading.CancellationToken.None |> _.GetAwaiter().GetResult()
 
 let private deriveFixOutputPath (file: string) =
     let fixedName = CopyNames.nextVersion file
@@ -86,23 +110,64 @@ let private validateOne (validator: VeraPdfValidator) (args: Args) profile (file
                     |> Array.ofSeq }
 
         let result =
-            if not args.Fix then
+            if not (fixing args) then
                 result
             else
                 let targetPath = args.FixOutputPath |> Option.defaultWith (fun () -> deriveFixOutputPath file)
-                try
-                    let options =
-                        [ args.TitleFromFirstPage, PdfFixOptions.TitleFromFirstPage
-                          args.LinkTitlesFromWeb, PdfFixOptions.LinkTitlesFromWeb ]
-                        |> List.fold (fun all (asked, option) -> if asked then all ||| option else all) defaultFixOptions
-                    let fix = validator.Fix(file, profile, targetPath, options)
+                // The review whose edits to apply, if asked for.
+                let review =
+                    match args.EditsFrom with
+                    | Some path -> ReviewFile.readFrom path
+                    | None when args.Edits -> ReviewFile.readFor file
+                    | None -> None
+                let noReview =
+                    [ if (args.Edits || args.EditsFrom.IsSome) && review.IsNone then
+                          match args.EditsFrom with
+                          | Some path -> $"No edits were applied: {path} has no review to read them from."
+                          | None -> $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
+                let options =
+                    requestedFixes args
+                    ||| (match review with
+                         | Some review when not (ReviewFile.edits review).IsEmpty -> PdfFixOptions.ApplyEdits
+                         | _ -> PdfFixOptions.None)
+                if options = PdfFixOptions.None then
                     { result with
-                        FixStatus = fix.Status.ToString()
-                        FixOutputPath = fix.OutputPath
-                        FixAppliedFixes = if fix.AppliedFixes.Count > 0 then withNull fix.AppliedFixes else null
-                        FixNotApplied = if fix.NotApplied.Count > 0 then withNull fix.NotApplied else null }
-                with :? VeraPdfValidationException as ex ->
-                    { result with FixError = ex.Message }
+                        FixStatus = RepairStatus.NoAction.ToString()
+                        FixNotApplied = if noReview.IsEmpty then null else withNull (ResizeArray noReview) }
+                else
+                    let layout =
+                        if FixNames.usesLayout options then
+                            ensureLayoutModel ()
+                            Some(new Legibyl.Layout.LayoutRegionSource(null))
+                        else
+                            None
+                    try
+                        try
+                            // Tagging from the layout uses the review too: its alt text, corrected text and title.
+                            match layout, review with
+                            | Some source, Some review -> validator.LayoutSource <- ReviewFile.ReviewedRegions(source, review)
+                            | Some source, None -> validator.LayoutSource <- source
+                            | None, _ -> ()
+                            match review with
+                            | Some review ->
+                                validator.Edits <- ReviewFile.edits review
+                                validator.Review <- ReviewFile.forCopy (Some review)
+                            | None -> ()
+                            let fix = validator.Fix(file, profile, targetPath, options)
+                            let notApplied = List.ofSeq fix.NotApplied @ noReview
+                            { result with
+                                FixStatus = fix.Status.ToString()
+                                FixOutputPath = fix.OutputPath
+                                FixAppliedFixes = if fix.AppliedFixes.Count > 0 then withNull fix.AppliedFixes else null
+                                FixNotApplied = if notApplied.IsEmpty then null else withNull (ResizeArray notApplied) }
+                        with
+                        | :? VeraPdfValidationException as ex -> { result with FixError = ex.Message }
+                        | :? Net.Http.HttpRequestException as ex -> { result with FixError = $"Couldn't download the layout model: {ex.Message}" }
+                    finally
+                        validator.LayoutSource <- null
+                        validator.Edits <- []
+                        validator.Review <- null
+                        layout |> Option.iter (fun source -> (source :> IDisposable).Dispose())
 
         if not args.IncludeStructure then
             result
@@ -199,12 +264,18 @@ let private renderText (results: FileValidationResult list) =
 let private run (args: Args) =
     if args.Files.Length = 0 then
         usageError "No input PDF files given."
-    elif args.FixOutputPath.IsSome && not args.Fix then
-        usageError "--fix-output requires --fix."
-    elif args.TitleFromFirstPage && not args.Fix then
+    elif args.FixOutputPath.IsSome && not (fixing args) then
+        usageError "--fix-output requires --fix (or --fixes or --edits)."
+    elif args.TitleFromFirstPage && not (fixing args) then
         usageError "--title-from-first-page requires --fix."
-    elif args.LinkTitlesFromWeb && not args.Fix then
+    elif args.LinkTitlesFromWeb && not (fixing args) then
         usageError "--link-titles-from-web requires --fix."
+    elif args.Fixes |> Option.exists (fun names -> Result.isError (FixNames.parse names)) then
+        match FixNames.parse args.Fixes.Value with
+        | Error message -> usageError message
+        | Ok _ -> ExitCodes.UsageError
+    elif args.Edits && args.EditsFrom.IsSome then
+        usageError "Use --edits or --edits-from, not both."
     elif args.FixOutputPath.IsSome && args.Files.Length > 1 then
         usageError "--fix-output can only be used with a single input file."
     else
@@ -239,12 +310,19 @@ EXAMPLES:
   legibyl document.pdf --profile pdfa1b --format text
   legibyl *.pdf --output results.json
   legibyl document.pdf --fix
+  legibyl document.pdf --fixes safe,lists,headings-from-toc
+  legibyl document.pdf --fixes all --edits
+  legibyl flyer.v3.pdf --edits-from flyer.v2.pdf
   legibyl document.pdf --fix --fix-output document-repaired.pdf
   legibyl document.pdf --structure --output structure.json
 """
 
 let private listProfiles _ =
     ProfileNames.CanonicalNames |> List.iter (printfn "%s")
+    ExitCodes.Success
+
+let private listFixes _ =
+    FixNames.listing () |> List.iter (printfn "%s")
     ExitCodes.Success
 
 let private printVersion _ =
@@ -307,12 +385,38 @@ let main argv =
                     |> desc
                         "Also attempt to repair each file, writing a repaired copy next to the original as its \
                          next version: \"<name>.v2<ext>\" (\"<name>.v3<ext>\" for \"<name>.v2<ext>\"), skipping \
-                         versions that already exist. Applies: XMP metadata (missing metadata stream, missing \
-                         PDF/A|PDF/UA identifier, false conformance claims, Info-dictionary sync); /Tabs /S on \
-                         pages containing annotations; a description for links that have none, taken from the \
-                         link's own text; and a document title shown in place of the file name. NOTE: it does \
-                         not retag content (untagged content, missing alt-text, headings, table header scope, \
-                         etc)."
+                         versions that already exist. Applies the safe repairs, which need no guesswork about \
+                         what the document means: XMP metadata (missing metadata stream, missing PDF/A|PDF/UA \
+                         identifier, false conformance claims, Info-dictionary sync); /Tabs /S on pages \
+                         containing annotations; the glyph mapping embedded TrueType CID fonts leave out; a \
+                         description for links that have none, taken from the link's own text; and a document \
+                         title shown in place of the file name. --fixes chooses others."
+
+                and! fixes =
+                    optionMaybe "--fixes"
+                    |> desc
+                        "Repair each file (implies --fix) with the repairs named, comma-separated: \"safe\" \
+                         (what --fix applies), \"all\" (every repair but link-titles-from-web, which visits \
+                         web pages), or names from --list-fixes, e.g. \"safe,lists,headings-from-toc\". \
+                         tag-from-layout and join-split-paragraphs download the layout model (about 130 MB) the \
+                         first time."
+                    |> helpName "names"
+
+                and! edits =
+                    option<bool> "--edits"
+                    |> desc
+                        "Repair each file (implies --fix) with the edits in its review: the \
+                         \"<name>.pdf.legibyl.json\" file next to it (as the GUI saves it), or else the review \
+                         inside a copy Legibyl saved. Alt text, replacement text and merged paragraphs are \
+                         written to the elements they're for; an untagged file tagged with tag-from-layout is \
+                         tagged from the review. The repaired copy carries the review."
+
+                and! editsFrom =
+                    optionMaybe "--edits-from"
+                    |> desc
+                        "Like --edits, with the review in path: a .legibyl.json file, or a PDF whose review to \
+                         use, e.g. an earlier version's."
+                    |> helpName "path"
 
                 and! titleFromFirstPage =
                     option<bool> "--title-from-first-page"
@@ -349,12 +453,20 @@ let main argv =
                     |> desc "Print supported profile names and exit 0."
                     |> editOption (fun o -> o.Action <- InvokeAction listProfiles)
 
+                and! _ =
+                    option<bool> "--list-fixes"
+                    |> desc "Print the repairs --fixes can name, with what each does, and exit 0."
+                    |> editOption (fun o -> o.Action <- InvokeAction listFixes)
+
                 return
                     { Files = files
                       ProfileName = profileName
                       Format = format
                       OutputPath = outputPath
                       Fix = fix
+                      Fixes = fixes
+                      Edits = edits
+                      EditsFrom = editsFrom
                       TitleFromFirstPage = titleFromFirstPage
                       LinkTitlesFromWeb = linkTitlesFromWeb
                       FixOutputPath = fixOutputPath

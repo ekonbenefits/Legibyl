@@ -1,13 +1,12 @@
 /// Warnings the user has dismissed for a PDF, kept in memory and, if they choose, in a
 /// "<name>.pdf.legibyl.json" file next to the PDF so they stay dismissed when it's opened again.
-/// The same file holds the edits made in Suggest Structure (see RegionEdits).
+/// The same file holds the edits made in Suggest Structure and View Structure (see RegionEdits).
 module Legibyl.Gui.Dismissals
 
 open System
 open System.IO
-open System.Text.Json
-open System.Text.Json.Serialization
 open Legibyl.Validation
+open Legibyl.Validation.ReviewFile
 
 /// Identifies a warning across validations of the same file: its rule and where it is, or
 /// AnyLocation for every warning of the rule.
@@ -39,102 +38,22 @@ let isRuleIgnored (dismissed: Dismissed) (violation: RuleViolation) =
 let isDismissed (dismissed: Dismissed) (violation: RuleViolation) =
     canDismiss violation && (dismissed.ContainsKey(keyOf violation) || dismissed.ContainsKey(ruleKeyOf violation))
 
+// The file itself (its format, reading and writing it) is ReviewFile's, shared with the CLI.
+
 /// "report.pdf" -> "report.pdf.legibyl.json".
-let filePath (pdfPath: string) = pdfPath + ".legibyl.json"
-
-// The file's format. CLIMutable gives System.Text.Json the public parameterless constructor it
-// needs (a private F# type's constructors aren't public, so these stay public).
-[<CLIMutable>]
-type SavedWarning =
-    { [<JsonPropertyName "rule">] Rule: string
-      [<JsonPropertyName "location">] Location: string
-      [<JsonPropertyName "message">] Message: string }
-
-/// Changes made in Suggest Structure to a suggested region, found again by where it is. Each
-/// field it has says what it changes; the others are left out (null).
-[<CLIMutable>]
-type SavedEdit =
-    { [<JsonPropertyName "page">] Page: int
-      /// The suggested tag, e.g. "Figure".
-      [<JsonPropertyName "tag">] Tag: string
-      /// Left, bottom, right, top, in PDF points.
-      [<JsonPropertyName "box">] Box: float array
-      /// A figure's alt text.
-      [<JsonPropertyName "alt">]
-      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Alt: string | null
-      /// The text of a region read with OCR, corrected ("" for none to read).
-      [<JsonPropertyName "text">]
-      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Text: string | null
-      /// For paragraphs merged into this one (in View Structure): their boxes, like Box.
-      [<JsonPropertyName "mergeWith">]
-      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      MergeWith: float array array | null }
-
-/// The file next to a PDF: its remembered dismissals and the edits made in Suggest Structure,
-/// either of which may be missing (null).
-[<CLIMutable>]
-type SavedFile =
-    { [<JsonPropertyName "version">] Version: int
-      /// Null if dismissals aren't being remembered (or a hand-edited file leaves them out).
-      [<JsonPropertyName "dismissedWarnings">]
-      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      DismissedWarnings: SavedWarning array | null
-      [<JsonPropertyName "edits">]
-      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Edits: SavedEdit array | null
-      /// The document's title as set in Suggest Structure, if changed from what was prefilled.
-      [<JsonPropertyName "title">]
-      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Title: string | null }
-
-// Relaxed escaping keeps the text people write readable ("wolf's", not "wolf\u0027s") in a
-// file they may open by hand.
-let private jsonOptions =
-    JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
-
-let private parse (json: string) : SavedFile option =
-    try
-        JsonSerializer.Deserialize<SavedFile>(json, jsonOptions) |> Option.ofObj
-    with :? JsonException ->
-        None
+let filePath = ReviewFile.filePath
 
 /// The file at path, or None if there's none (or it can't be read).
-let readFile (path: string) : SavedFile option =
-    if not (File.Exists path) then
-        None
-    else
-        try
-            parse (File.ReadAllText path)
-        with
-        | :? IOException
-        | :? UnauthorizedAccessException -> None
+let readFile = ReviewFile.readFile
 
-/// pdfPath's review: the file next to it, or else the one embedded in it (a copy Legibyl saved;
-/// see EmbeddedReview). The file wins, since it holds any changes made since the copy was saved.
-let readFor (pdfPath: string) : SavedFile option =
-    match readFile (filePath pdfPath) with
-    | Some saved -> Some saved
-    | None -> EmbeddedReview.read pdfPath |> Option.bind parse
+/// pdfPath's review: the file next to it, or else the one embedded in it.
+let readFor = ReviewFile.readFor
 
-/// Writes file next to pdfPath, or deletes it when there's nothing left in it. Throws
-/// IOException/UnauthorizedAccessException if it can't be written.
-let writeFile (pdfPath: string) (file: SavedFile) =
-    let path = filePath pdfPath
-    let empty (items: 'T array | null) =
-        match items with
-        | NonNull items -> items.Length = 0
-        | Null -> true
-    if isNull file.DismissedWarnings && empty file.Edits && isNull file.Title then
-        // An empty file still stands in for a review embedded in the PDF, so that one doesn't
-        // come back.
-        if (EmbeddedReview.read pdfPath).IsSome then
-            File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
-        elif File.Exists path then
-            File.Delete path
-    else
-        File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
+/// Writes file next to pdfPath, or deletes it when there's nothing left in it.
+let writeFile = ReviewFile.writeFile
+
+/// file as it's saved.
+let toJson = ReviewFile.toJson
 
 /// pdfPath's review (see readFor), or an empty one.
 let readOrEmpty (pdfPath: string) =
@@ -170,9 +89,6 @@ let forget (pdfPath: string) =
     match readFor pdfPath with
     | Some saved -> writeFile pdfPath { saved with DismissedWarnings = null }
     | None -> ()
-
-/// file as it's saved.
-let toJson (file: SavedFile) = JsonSerializer.Serialize({ file with Version = 1 }, jsonOptions)
 
 /// pdfPath's review, to embed in a copy of it (see EmbeddedReview), with dismissed in place of
 /// its saved dismissals if given; None if there's nothing to carry.

@@ -8,7 +8,7 @@
 ///      are in StructureTreeObjects.
 ///   2. Add it to `all` below with the next unused TestNumber (numbers are shown to
 ///      users as "Structure-N", so never reuse or renumber one).
-///   3. If the Fix dialog can repair it, set FixOptions and implement the repair in
+///   3. If an auto fix can repair it, set FixOptions and implement the repair in
 ///      StructureFixes.
 ///   4. Cover it in tests/Legibyl.Validation.Tests/PdfFixerTests.fs.
 ///
@@ -32,7 +32,7 @@ type Finding =
 type Check =
     { TestNumber: int
       Message: string
-      /// The Fix dialog option that repairs this finding, or None if it's warning-only.
+      /// The auto fix that repairs this finding, or None if it's warning-only.
       FixOptions: PdfFixOptions
       Inspect: Context -> StructElemVisit -> Finding option }
 
@@ -81,17 +81,17 @@ let private splitParagraph context (visit: StructElemVisit) =
 let all: Check list =
     [ { TestNumber = 1
         Message =
-          "Empty semantic /P structure element. It can add meaningless stops to the screen-reader structure tree and can be removed by the Fix dialog."
+          "Empty semantic /P structure element. It can add meaningless stops to the screen-reader structure tree and can be removed as an auto fix."
         FixOptions = PdfFixOptions.RemoveEmptyParagraphs
         Inspect = emptyParagraph }
       { TestNumber = 2
         Message =
-          "Likely split paragraph: adjacent /P structure elements look like visual line fragments from the same sentence. This is best fixed in the source document if possible; the Fix dialog can join them where the page layout shows one block of text."
+          "Likely split paragraph: adjacent /P structure elements look like visual line fragments from the same sentence. This is best fixed in the source document if possible; an auto fix can join them where the page layout shows one block of text."
         FixOptions = PdfFixOptions.JoinSplitParagraphs
         Inspect = splitParagraph }
       { TestNumber = 8
         Message =
-          "Empty table-of-contents entry (TOCI). It adds a meaningless stop when a screen reader moves through the table of contents and can be removed by the Fix dialog."
+          "Empty table-of-contents entry (TOCI). It adds a meaningless stop when a screen reader moves through the table of contents and can be removed as an auto fix."
         FixOptions = PdfFixOptions.RemoveEmptyTocEntries
         Inspect = emptyTocEntry } ]
 
@@ -111,7 +111,7 @@ let private warning message (errorMessage: string | null) location testNumber fi
 
 [<Literal>]
 let private TocHeadingMessage =
-    "Paragraph that the table of contents lists as a heading. Tagged as a heading, screen reader users could jump to it; the Fix dialog can retag it."
+    "Paragraph that the table of contents lists as a heading. Tagged as a heading, screen reader users could jump to it; an auto fix can retag it."
 
 [<Literal>]
 let private TocEntryUnmatchedMessage =
@@ -150,7 +150,7 @@ let private tocHeadingFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private ParagraphListMessage =
-    "Looks like a list tagged as plain paragraphs: consecutive paragraphs start with list markers, so screen readers won't announce them as a list. The Fix dialog can tag them as one."
+    "Looks like a list tagged as plain paragraphs: consecutive paragraphs start with list markers, so screen readers won't announce them as a list. An auto fix can tag them as one."
 
 let private paragraphListFindings (document: PdfDocument) context =
     [ for run in ParagraphLists.find document context ->
@@ -166,7 +166,7 @@ let private paragraphListFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private MissingBookmarksMessage =
-    "The document has headings but no bookmarks, so readers can't jump between its sections from the navigation pane. The Fix dialog can add them for the H1 and H2 headings."
+    "The document has headings but no bookmarks, so readers can't jump between its sections from the navigation pane. An auto fix can add them for the H1 and H2 headings."
 
 let private missingBookmarkFindings (document: PdfDocument) context =
     match Bookmarks.find document context with

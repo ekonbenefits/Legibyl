@@ -446,8 +446,7 @@ let private setLanguageFromText (document: PdfDocument) context =
         match DocumentLanguage.detect (DocumentLanguage.sample document context) with
         | Some language ->
             document.GetCatalog().GetPdfObject().Put(PdfName.Lang, PdfString language) |> ignore
-            let name = Globalization.CultureInfo.GetCultureInfo(language).EnglishName
-            [ $"Declared the document's language as {language} ({name}), detected from its text." ]
+            [ $"Declared the document's language as {language} ({DocumentLanguage.nameOf language}), detected from its text." ]
         | None -> []
 
 /// Legibyl's own repairs, in the order they run. Each takes the open document and returns a

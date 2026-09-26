@@ -50,6 +50,7 @@ src/
 tests/
   Legibyl.Validation.Tests/   xUnit v3 + FsUnit tests using real PDF/UA-1 corpus samples
   Legibyl.Gui.Tests/          xUnit v3 + FsUnit tests of the GUI on Avalonia's headless platform
+  Legibyl.Cli.Tests/          xUnit v3 + FsUnit tests of the command line: repair names, --fixes and --edits
 tools/
   Legibyl.Screenshots/        Dev-only: saves GUI screenshots without a display (headless)
 installer/
@@ -263,7 +264,8 @@ update, which PDF readers don't show. Opening a PDF uses the file next to it if
 there is one (it holds any changes made since), and otherwise the review inside
 it, so a repaired copy opens with its warnings still dismissed. Turning off
 **Remember dismissals** on such a copy leaves a file without them next to it, so
-the ones inside don't come back. The CLI's `--fix` doesn't embed a review.
+the ones inside don't come back. The CLI embeds a review only with `--edits`
+or `--edits-from` (the one it applied).
 
 When a finding has a known region — its marked content, the structure
 element's content, or an annotation's `/Rect` (see `RuleViolation.Geometry`
@@ -560,8 +562,8 @@ Options:
   every failure is automatically fixable, since veraPDF otherwise won't fix it), plus removal of empty
   semantic `/P` structure elements and empty table-of-contents entries, retagging headings recovered from the table
   of contents, and tagging marked paragraphs as lists (all off by default), and
-  adding bookmarks for H1 and H2 headings; the CLI deliberately applies none of
-  these.
+  adding bookmarks for H1 and H2 headings; `--fix` alone applies none of
+  these, but `--fixes` can name them.
   Structural fixes run
   before the veraPDF metadata fixer so metadata is repaired against the
   already-cleaned copy in the same operation. veraPDF saves its metadata
@@ -572,9 +574,25 @@ Options:
   repair files are created under the operating system temp directory, not
   beside the source PDF or requested output path. Empty `/P` cleanup is
   visible as a warning and fixable option, but it is unchecked by default in
-  the GUI so users opt into structure-tree deletion. The CLI doesn't tag
-  untagged content, infer headings or declare a language, and neither path
-  adds missing alt text or infers table headers.
+  the GUI so users opt into structure-tree deletion. Neither path writes alt
+  text a person didn't (`--edits` writes theirs) or infers table headers.
+- `--fixes <names>` — repair each file (implies `--fix`) with the repairs
+  named, comma-separated: `safe` (what `--fix` applies), `all` (every repair
+  but `link-titles-from-web`, which visits web pages and has to be named), or
+  names from `--list-fixes`, e.g. `--fixes safe,lists,headings-from-toc`.
+  `tag-from-layout` (with `qr-links`) and `join-split-paragraphs` use the
+  layout model, downloading it (about 130 MB) the first time, with progress on
+  stderr.
+- `--edits` — repair each file (implies `--fix`) with the edits in its review:
+  the `<name>.pdf.legibyl.json` file next to it, as the GUI saves it, or else
+  the review inside a copy Legibyl saved. Alt text, replacement text and merged
+  paragraphs are written to the elements they're for; an untagged file tagged
+  with `tag-from-layout` is tagged from the review (its alt text, corrected OCR
+  text and title). The repaired copy carries the review. Without a review, the
+  result says so and nothing is written.
+- `--edits-from <path>` — like `--edits`, with the review in path: a
+  `.legibyl.json` file, or a PDF whose review to use, e.g. an earlier
+  version's.
 - `--fix-output <path>` — use with `--fix` and exactly one input file to
   write the repaired copy to an exact path instead of the auto-derived name.
 - `--structure` — include each file's tagged logical structure tree (the
@@ -591,6 +609,8 @@ Options:
   Absent/`null` `structure` with no `structureError` means the file has no
   structure tree at all (it's completely untagged).
 - `--list-profiles` — print supported profile names and exit `0`.
+- `--list-fixes` — print the repairs `--fixes` can name, with what each does
+  (and which are in `safe`), and exit `0`.
 - `--version` — print tool build + vendored veraPDF engine version and exit `0`.
 - `--help` / `-h` — print usage and exit `0`.
 
