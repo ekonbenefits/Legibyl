@@ -14,6 +14,19 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <!--
+    Published for a runtime (osx-arm64, win-x64...), code is compiled ahead of time (ReadyToRun),
+    so a run starts faster: a cold `validate` of a small PDF took ~1.85 s instead of ~2.16 s.
+    Except IKVM.Java.dll (the Java class library): compiling it too saved another ~0.35 s but
+    made the publish 100 MB larger. See #16.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+  <ItemGroup>
+    <PublishReadyToRunExclude Include="IKVM.Java.dll" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Include="ProfileNames.fs" />
     <Compile Include="Results.fs" />
