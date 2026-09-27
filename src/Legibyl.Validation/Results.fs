@@ -17,6 +17,7 @@ module PdfFixDescriptions =
           PdfFixOptions.AnnotationTabs, "Make the Tab key follow the reading order on pages with links or other annotations"
           PdfFixOptions.RemoveEmptyParagraphs, "Remove empty paragraph tags"
           PdfFixOptions.RemoveEmptyTocEntries, "Remove empty table-of-contents entries"
+          PdfFixOptions.RemoveEmptyFigures, "Remove figure tags that draw nothing"
           PdfFixOptions.LinkContents, "Describe table-of-contents links with their own text"
           PdfFixOptions.LinkTitlesFromWeb, "Describe web links and QR codes by the titles of the pages they go to"
           PdfFixOptions.HeadingsFromToc, "Tag headings the table of contents lists (H1–H6) and point its links at them"

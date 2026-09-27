@@ -29,6 +29,7 @@
     <Compile Include="ElementEditsTests.fs" />
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
+    <Compile Include="EmptyFiguresTests.fs" />
     <Compile Include="LayoutSuggestionsTests.fs" />
     <Compile Include="LayoutTaggingTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />

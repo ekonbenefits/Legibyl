@@ -10,6 +10,7 @@ let names =
       "headings-from-toc", PdfFixOptions.HeadingsFromToc
       "empty-paragraphs", PdfFixOptions.RemoveEmptyParagraphs
       "empty-toc-entries", PdfFixOptions.RemoveEmptyTocEntries
+      "empty-figures", PdfFixOptions.RemoveEmptyFigures
       "join-split-paragraphs", PdfFixOptions.JoinSplitParagraphs
       "lists", PdfFixOptions.ListsFromParagraphs
       "bookmarks", PdfFixOptions.BookmarksFromHeadings

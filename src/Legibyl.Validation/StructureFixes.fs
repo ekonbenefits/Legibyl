@@ -457,7 +457,7 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list repair could take it for a list item.
-///   2. Empty paragraphs and table-of-contents entries next, so blank lines between list items
+///   2. Empty paragraphs, table-of-contents entries and figures next, so blank lines between list items
 ///      are gone before lists are tagged. (The list repair copes with them either way, keeping
 ///      them in the item.)
 ///   3. Paragraphs tagged line by line are joined, so a list item's second line is part of
@@ -488,6 +488,7 @@ let orderedFixes
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.RemoveEmptyTocEntries, removeEmptyTocEntries
+      PdfFixOptions.RemoveEmptyFigures, EmptyFigures.remove
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
       PdfFixOptions.BookmarksFromHeadings, addBookmarks

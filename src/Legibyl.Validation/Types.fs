@@ -54,7 +54,10 @@ type PdfFixOptions =
     /// Rebuilds the structure tree's parent tree (which content and annotations each tag holds)
     /// where it's missing or incomplete, so the tags are found; see ParentTree. Runs first.
     | ParentTree = 262144
-    | All = 524287
+    /// Removes figures tagged around nothing (see EmptyFigures): they fail for having no alt text,
+    /// with nothing on the page to describe.
+    | RemoveEmptyFigures = 524288
+    | All = 1048575
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.

@@ -31,6 +31,7 @@
     <Compile Include="ContentOperations.fs" />
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="UntaggedContent.fs" />
+    <Compile Include="EmptyFigures.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="ElementEdits.fs" />
     <Compile Include="StructureFixes.fs" />
