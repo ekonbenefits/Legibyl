@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Compile Include="Types.fs" />
+    <Compile Include="PdfUaTarget.fs" />
     <Compile Include="PdfLocationParser.fs" />
     <Compile Include="Results.fs" />
     <Compile Include="ValidationReportTextFormatter.fs" />

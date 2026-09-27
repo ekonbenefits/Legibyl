@@ -35,8 +35,7 @@ let private appendFinding (sb: StringBuilder) (violation: RuleViolation) =
 let BuildReport (report: ValidationReport) : string =
     let sb = StringBuilder()
     sb.AppendLine($"File: {report.FilePath}")
-      .AppendLine($"Profile requested: {report.Profile}")
-      .AppendLine($"Flavour validated: {report.FlavourId}")
+      .AppendLine($"Checked against: {PdfUaTarget.describe report.Profile report.PdfVersion report.ProfileDetected}")
       .AppendLine($"Compliant: {report.IsCompliant}")
       .AppendLine($"Total checks: {report.TotalAssertions}")
       .AppendLine($"Failed checks: {report.FailedCount}")

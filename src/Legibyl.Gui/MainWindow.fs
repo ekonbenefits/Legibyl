@@ -94,11 +94,7 @@ type RuleViolationRow =
 module private MainView =
     let profiles =
         [ "PDF/UA-1", PdfProfile.PdfUa1
-          "PDF/A-1b", PdfProfile.PdfA1B
-          "PDF/A-2b", PdfProfile.PdfA2B
-          "PDF/A-2u", PdfProfile.PdfA2U
-          "PDF/A-3b", PdfProfile.PdfA3B
-          "PDF/A-4", PdfProfile.PdfA4 ]
+          "PDF/UA-2", PdfProfile.PdfUa2 ]
 
     let pdfFileType =
         FilePickerFileType(

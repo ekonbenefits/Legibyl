@@ -168,3 +168,35 @@ let ``every entry in RuleGuide.yaml names its clauses and has both texts`` () =
         (not (isNull entry.Clause) || not (isNull entry.Clauses)) |> should be True
         String.IsNullOrWhiteSpace entry.Meaning |> should be False
         String.IsNullOrWhiteSpace entry.WhatToDo |> should be False
+
+/// A PDF 2.0 file with a line of text.
+let private createPdf20 (path: string) =
+    use document = new PdfDocument(new PdfWriter(path, WriterProperties().SetPdfVersion(PdfVersion.PDF_2_0)))
+    let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(document.AddNewPage())
+    canvas.BeginText().SetFontAndSize(iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA, 12f)
+        .MoveText(72.0, 720.0).ShowText("A PDF 2.0 page.").EndText()
+    |> ignore
+
+[<Fact>]
+let ``the standard to check against follows the file's PDF version`` () =
+    PdfUaTarget.detect (IO.Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf")) |> fst |> should equal PdfProfile.PdfUa1
+    use pdf20 = new TempPdf()
+    createPdf20 pdf20.Path
+    PdfUaTarget.detect pdf20.Path |> should equal (PdfProfile.PdfUa2, Some "2.0")
+    // Unreadable: PDF/UA-1, as for any version before 2.0.
+    PdfUaTarget.detect "no-such-file.pdf" |> should equal (PdfProfile.PdfUa1, (None: string option))
+    PdfUaTarget.displayName PdfProfile.PdfUa2 |> should equal "PDF/UA-2"
+    PdfUaTarget.displayNameOfFlavour "ua1" |> should equal "PDF/UA-1"
+
+[<Fact>]
+let ``a PDF 2.0 file checked as PDF/UA-2 is checked by veraPDF's PDF/UA-2 profile`` () =
+    use pdf20 = new TempPdf()
+    createPdf20 pdf20.Path
+
+    let report = VeraPdfValidator().Validate(pdf20.Path, PdfProfile.PdfUa2)
+
+    report.FlavourId |> should equal "ua2"
+    report.PdfVersion |> should equal "2.0"
+    report.IsCompliant |> should be False
+    // Its failures are ISO 14289-2's.
+    report.FailedAssertions |> Seq.forall (fun f -> f.Specification.StartsWith "ISO 14289-2") |> should be True

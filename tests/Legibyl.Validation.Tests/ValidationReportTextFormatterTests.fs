@@ -51,6 +51,8 @@ let ``BuildReport includes locations for each failed finding`` () =
         { FilePath = @"C:\documents\sample.pdf"
           Profile = PdfProfile.PdfUa1
           FlavourId = "ua1"
+          PdfVersion = "1.7"
+          ProfileDetected = true
           IsCompliant = false
           TotalAssertions = 2
           Assertions =
@@ -68,3 +70,5 @@ let ``BuildReport includes locations for each failed finding`` () =
     text |> should haveSubstring $"Raw location: {RawLocation}"
     text |> should haveSubstring "Location: Not available"
     text |> should haveSubstring "Raw location: Not available"
+    // One line for what it was checked against, and why.
+    text |> should haveSubstring "Checked against: PDF/UA-1 (worked out from the file: PDF 1.7)"

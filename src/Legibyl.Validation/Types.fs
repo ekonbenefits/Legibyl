@@ -49,21 +49,13 @@ type PdfFixOptions =
     | ApplyEdits = 65536
     | All = 131071
 
-/// The PDF/A or PDF/UA validation flavour to check a document against.
-/// Mirrors a subset of org.verapdf.pdfa.flavours.PDFAFlavour.
+/// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
+/// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.
 type PdfProfile =
-    /// PDF/UA-1 (ISO 14289-1) — the primary supported profile.
+    /// PDF/UA-1 (ISO 14289-1), for PDF 1.x.
     | PdfUa1 = 0
-    /// PDF/A-1b (basic conformance).
-    | PdfA1B = 1
-    /// PDF/A-2b (basic conformance).
-    | PdfA2B = 2
-    /// PDF/A-2u (Unicode conformance).
-    | PdfA2U = 3
-    /// PDF/A-3b (basic conformance, embedded files allowed).
-    | PdfA3B = 4
-    /// PDF/A-4.
-    | PdfA4 = 5
+    /// PDF/UA-2 (ISO 14289-2), for PDF 2.0.
+    | PdfUa2 = 1
 
 /// Mirrors org.verapdf.pdfa.results.MetadataFixerResult.RepairStatus.
 type RepairStatus =
