@@ -26,24 +26,23 @@ let private withSampleCopy name (test: string -> unit) =
     File.Copy(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", name), pdf)
     try test pdf finally Directory.Delete(folder, true)
 
-let private rows (window: Window) =
-    (HeadlessWindow.resultsGrid window).ItemsSource |> Seq.cast<RuleViolationRow> |> List.ofSeq
+let private rows (window: Window) = HeadlessWindow.findings window
 
 let private texts (window: Window) = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
 
 let private pump () = HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
 
-/// Right-clicks the results row at index, as a user would to open its menu.
+/// Right-clicks the finding at index (its rule opened), as a user would to open its menu.
 let private rightClickRow (window: Window) index =
     HeadlessWindow.expandGroups window
-    let row = descendants<DataGridRow> (HeadlessWindow.resultsGrid window) |> List.find (fun r -> r.Index = index)
+    let row = HeadlessWindow.findingContainer window (List.item index (rows window))
     let point = (row.TranslatePoint(Point(20.0, row.Bounds.Height / 2.0), window)).Value
     window.MouseDown(point, MouseButton.Right)
     window.MouseUp(point, MouseButton.Right)
     pump ()
 
 let private menuItem (window: Window) (header: string) =
-    (HeadlessWindow.resultsGrid window).ContextMenu
+    (HeadlessWindow.resultsList window).ContextMenu
     |> nonNull
     |> _.Items
     |> Seq.cast<obj>
@@ -94,9 +93,12 @@ let ``a dismissed warning is hidden, counted, and can be shown and restored`` ()
             shown |> should haveLength before.Length
             shown |> List.filter _.Dismissed |> should haveLength 1
             texts window |> List.exists (fun t -> t.EndsWith "(dismissed)") |> should be True
-            descendants<DataGridRow> (HeadlessWindow.resultsGrid window)
-            |> List.filter (fun row -> match row.DataContext with :? RuleViolationRow as r -> r.Dismissed | _ -> false)
+            // Its row dimmed, and its rule's row says so.
+            HeadlessWindow.expandGroups window
+            descendants<Border> window
+            |> List.filter (fun b -> (b.Tag :? string) && string b.Tag = "finding-row")
             |> List.map _.Opacity
+            |> List.filter (fun o -> o < 1.0)
             |> should equal [ 0.5 ]
 
             rightClickRow window (shown |> List.findIndex _.Dismissed)
@@ -204,7 +206,7 @@ let ``ignoring a type of warning hides all of them until it's stopped`` () =
             rightClickRow window (rows window |> List.findIndex _.Dismissed)
             // Nothing to restore on its own: it's hidden with the rest of its type.
             let headers =
-                (HeadlessWindow.resultsGrid window).ContextMenu |> nonNull |> _.Items |> Seq.cast<obj> |> Seq.choose (function :? MenuItem as m -> Some(string m.Header) | _ -> None) |> List.ofSeq
+                (HeadlessWindow.resultsList window).ContextMenu |> nonNull |> _.Items |> Seq.cast<obj> |> Seq.choose (function :? MenuItem as m -> Some(string m.Header) | _ -> None) |> List.ofSeq
             click (menuItem window "Stop ignoring")
             let restored = rows window
             close window
@@ -229,8 +231,8 @@ let ``right-clicking a row selects it, so its menu acts on it`` () =
     withSampleCopy "pages-clipped-paragraphs.pdf" (fun pdf ->
         onUiThread (fun () ->
             let window = openPdf pdf
-            let grid = HeadlessWindow.resultsGrid window
             rightClickRow window 1
-            let selectedAfter = grid.SelectedIndex
+            let selectedAfter = (HeadlessWindow.resultsList window).SelectedItem
+            let expected = FindingItem(List.item 1 (rows window))
             close window
-            selectedAfter |> should equal 1))
+            selectedAfter |> should equal (box expected)))

@@ -188,7 +188,7 @@ let ``an untagged PDF's findings point to Suggest Structure…`` () =
     onUiThread (fun () ->
         withPdf false (fun pdf ->
             let window = openPdf pdf
-            let rows = (HeadlessWindow.resultsGrid window).ItemsSource |> Seq.cast<RuleViolationRow> |> List.ofSeq
+            let rows = HeadlessWindow.findings window
             HeadlessWindow.selectRow window (rows |> List.findIndex (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout))
             let texts = descendants<TextBox> window |> List.map (fun t -> string t.Text)
             window.Close()
@@ -208,7 +208,7 @@ let ``there's no Save button; Auto Fixes has the wrench its fixes have, and Sugg
             let autoFixes, suggest = icons "Auto Fixes…", icons "Suggest Structure…"
             // Findings fixed by suggesting the structure are marked with the wand too.
             let fixedBy =
-                descendants<Shapes.Path> (HeadlessWindow.resultsGrid window)
+                descendants<Shapes.Path> (HeadlessWindow.resultsList window)
                 |> List.map (fun p -> string (AutomationProperties.GetName p))
                 |> List.filter (fun n -> n.StartsWith "Fixed by Suggest Structure…")
             window.Close()

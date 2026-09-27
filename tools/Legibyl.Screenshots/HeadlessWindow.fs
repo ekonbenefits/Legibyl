@@ -51,8 +51,21 @@ let private waitForIdle (window: Window) =
     if not (pumpUntil (TimeSpan.FromMinutes 2.0) (fun () -> not (isBusy window))) then
         raise (TimeoutException "The window was still busy after two minutes.")
 
-/// The results grid.
-let resultsGrid (window: Window) : DataGrid = descendants<DataGrid> window |> Seq.exactlyOne
+/// The results list: each rule's row, and its findings under it where it's opened.
+let resultsList (window: Window) : ListBox = descendants<ListBox> window |> Seq.find (fun list -> list.Name = "Results")
+
+/// The list's items, as shown.
+let resultItems (window: Window) : ResultItem list =
+    match (resultsList window).ItemsSource with
+    | null -> []
+    | items -> items |> Seq.cast<ResultItem> |> List.ofSeq
+
+/// Every finding, in the list's order (each rule's, whether it's opened or not).
+let findings (window: Window) : RuleViolationRow list =
+    [ for item in resultItems window do
+          match item with
+          | RuleItem(group, _) -> yield! group.Findings
+          | FindingItem _ -> () ]
 
 /// Shows a new MainWindow at the given size.
 let show (width: float) (height: float) =
@@ -67,30 +80,37 @@ let openPdf (window: MainWindow) (pdfPath: string) =
     window.OpenFile pdfPath
     waitForIdle window
 
-/// Expands every group of findings (a rule found many times starts collapsed), as clicking
-/// their headers does.
+/// Opens every rule's findings (a rule found many times starts collapsed), as clicking their
+/// rows' arrows does.
 let expandGroups (window: Window) =
-    let grid = resultsGrid window
-    match grid.ItemsSource with
-    | :? Avalonia.Collections.DataGridCollectionView as view ->
-        match view.Groups with
-        | NonNull groups ->
-            for group in groups do
-                match group with
-                | :? Avalonia.Collections.DataGridCollectionViewGroup as group -> grid.ExpandRowGroup(group, true)
-                | _ -> ()
-        | Null -> ()
-    | _ -> ()
+    let collapsed () =
+        descendants<Button> window
+        |> Seq.tryFind (fun button -> (button.Tag :? string) && string button.Tag = "rule-expander" && string button.Content = "▸")
+    let mutable next = collapsed ()
+    let mutable guard = 0
+    while next.IsSome && guard < 1000 do
+        next.Value.RaiseEvent(Interactivity.RoutedEventArgs(Button.ClickEvent))
+        pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+        next <- collapsed ()
+        guard <- guard + 1
     pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
 
-/// Selects a results row (0-based) and waits for its preview.
+/// Selects a finding (0-based, in the order of findings) and waits for its preview.
 let selectRow (window: MainWindow) (index: int) =
-    let grid = resultsGrid window
-    let count = grid.ItemsSource |> Seq.cast<obj> |> Seq.length
-    if index < 0 || index >= count then
-        raise (ArgumentOutOfRangeException(nameof index, $"Row {index} doesn't exist; there are {count} results."))
-    grid.SelectedIndex <- index
+    let all = findings window
+    if index < 0 || index >= all.Length then
+        raise (ArgumentOutOfRangeException(nameof index, $"Finding {index} doesn't exist; there are {all.Length}."))
+    expandGroups window
+    (resultsList window).SelectedItem <- FindingItem all[index]
     waitForIdle window
+
+/// The list's row for a finding, once it's shown (see expandGroups).
+let findingContainer (window: Window) (row: RuleViolationRow) : ListBoxItem =
+    descendants<ListBoxItem> window
+    |> Seq.find (fun item ->
+        match item.DataContext with
+        | :? ResultItem as FindingItem shown -> obj.ReferenceEquals(shown, row)
+        | _ -> false)
 
 /// Saves the window's current rendered frame as a PNG.
 let savePng (window: Window) (path: string) =

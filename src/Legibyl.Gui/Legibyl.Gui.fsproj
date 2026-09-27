@@ -38,10 +38,7 @@
     <PackageReference Include="Avalonia.Desktop" />
     <!-- Semi Design theme (light and dark) - MIT. -->
     <PackageReference Include="Semi.Avalonia" />
-    <PackageReference Include="Semi.Avalonia.DataGrid" />
-    <PackageReference Include="Avalonia.Controls.DataGrid" />
     <PackageReference Include="Avalonia.FuncUI" />
-    <PackageReference Include="AvaloniaCommunity.FuncUI.Bindings.DataGrid" />
     <!-- Builds Legibyl.app on `dotnet msbuild -t:BundleApp` (see README "macOS app") - MIT. Build-time only. -->
     <PackageReference Include="Dotnet.Bundle" PrivateAssets="all" />
   </ItemGroup>

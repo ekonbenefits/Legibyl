@@ -266,12 +266,21 @@ can't judge (whether alt text says what a figure is for, heading levels,
 reading order, table headers, where links go) and points to Structure… to
 check them.
 
-The results list is sorted by page number by default (unlocated failures —
-those with no `pages[N]` in their context, such as document-level metadata
-checks — sort to the end), grouped by the rule they break under a header that
-leads with how many there are ("6 × 7.1-3: …"; a rule found more than three
-times starts collapsed). Its columns are each finding's type (failure or
-warning), fix icon, clause, test, page and location. Selecting a row shows its full, wrapped
+The results list is a row per rule, in the order each is first found by page
+(unlocated failures — those with no `pages[N]` in their context, such as
+document-level metadata checks — come last), with its findings under it. A rule's
+row keeps what it is in view even when it's collapsed (as one found more than
+three times starts): a strip of its colour down its edge (red for failures,
+orange for warnings), its type's icon, how it's fixed (a wrench, or a wand for
+tagging from the suggested structure; "4 of 6 fixable" in its tooltip when only
+some are), how many as a badge, and the rule (clause-test and message, cut to two
+lines). Its arrow, or Right and Left, opens and closes it. Selecting it shows the
+rule: its message, **What it means**, how it's fixed or **What to do**, how many
+places and on which pages, and its first finding's page. A finding's row says only
+its page and where it is (dimmed, "(dismissed)", when it's a dismissed warning
+shown), with a fix icon only where its rule's findings differ in that. Above the
+list, pills count the failures and warnings, and how many are fixable, and by
+tagging. Selecting a finding shows its full, wrapped
 message, friendly location (ending with what's there: the element that owns the
 content, like paragraph (P) "The garden in spring…", or content not in the tags and
 what's drawn there), raw veraPDF location context, and page preview

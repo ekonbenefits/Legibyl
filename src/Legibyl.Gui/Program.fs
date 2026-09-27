@@ -7,7 +7,6 @@ open Avalonia.Controls.ApplicationLifetimes
 open Avalonia.Platform.Storage
 open Avalonia.Styling
 open Semi.Avalonia
-open Semi.Avalonia.DataGrid
 
 type App() =
     inherit Application()
@@ -18,7 +17,6 @@ type App() =
         // Follow the OS light/dark setting.
         this.RequestedThemeVariant <- ThemeVariant.Default
         this.Styles.Add(SemiTheme())
-        this.Styles.Add(DataGridSemiTheme())
 
     override this.OnFrameworkInitializationCompleted() =
         // veraPDF's one-time setup takes a couple of seconds: done in the background now, while a

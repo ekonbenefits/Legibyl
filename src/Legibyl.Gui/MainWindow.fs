@@ -57,12 +57,6 @@ type RuleViolationRow =
       /// How many findings break the same rule, it included.
       Occurrences: int }
 
-    /// The rule it breaks, as the results group it, how many first (a long message is cut off at
-    /// the pane's edge): "6 × 7.1-3: Content shall be marked as…".
-    member row.Rule =
-        let count = if row.Occurrences > 1 then $"{row.Occurrences} × " else ""
-        $"{count}{row.Clause}-{row.TestNumber}: {row.Message}"
-
     static member Of(violation: RuleViolation) =
         let location = violation.Location
         let pageNumber =
@@ -90,6 +84,47 @@ type RuleViolationRow =
             | Null, Null -> ""
           Dismissed = false
           Occurrences = 1 }
+
+/// A rule's findings, as the results list shows them: a row for the rule, its findings under it.
+/// The same rule, by its key, is the same group (whichever findings of it are shown).
+[<CustomEquality; NoComparison>]
+type RuleGroup =
+    { /// What makes findings the same rule: "7.1-3: Content shall be marked as…".
+      Key: string
+      /// In the order found (by page).
+      Findings: RuleViolationRow list }
+
+    override group.Equals(other: obj) =
+        match other with
+        | :? RuleGroup as other -> group.Key = other.Key
+        | _ -> false
+
+    override group.GetHashCode() = group.Key.GetHashCode()
+
+    member group.First = group.Findings.Head
+    /// "7.1-3", or "Structure-9" for Legibyl's own.
+    member group.RuleId = group.First.Violation.RuleId
+    member group.Message = group.First.Message
+    member group.Severity = group.First.Violation.Severity
+    /// Those an auto fix (or tagging from the suggested structure) repairs.
+    member group.Fixable = group.Findings |> List.filter _.Violation.IsFixable
+    /// The pages its findings are on, in order.
+    member group.Pages = group.Findings |> List.choose _.PageNumber |> List.distinct |> List.sort
+
+    /// Findings grouped by rule, in the order each rule is first found.
+    static member OfRows(rows: RuleViolationRow list) : RuleGroup list =
+        let key (row: RuleViolationRow) = $"{row.Violation.RuleId}: {row.Message}"
+        rows
+        |> List.groupBy key
+        |> List.map (fun (key, findings) -> { Key = key; Findings = findings })
+
+    /// Whether its findings start shown: a rule found more than three times starts collapsed.
+    member group.ExpandedAtFirst = group.Findings.Length <= 3
+
+/// An item of the results list: a rule (and whether its findings are shown), or a finding.
+type ResultItem =
+    | RuleItem of RuleGroup * expanded: bool
+    | FindingItem of RuleViolationRow
 
 module private MainView =
     let pdfFileType =
@@ -252,9 +287,6 @@ module private MainView =
             ]
         ]
 
-    let gridLinesVisibility (value: DataGridGridLinesVisibility) : IAttr<DataGrid> =
-        AttrBuilder<DataGrid>.CreateProperty<DataGridGridLinesVisibility>(DataGrid.GridLinesVisibilityProperty, value, ValueNone)
-
     let detailText (text: string) (secondary: bool) (attrs: IAttr<TextBox> list) =
         TextBox.create [
             if secondary then
@@ -356,6 +388,10 @@ module private MainView =
             let busyProgress = ctx.useState (None: BusyProgress option)
             let outcome = ctx.useState NotValidated
             let selectedRow = ctx.useState (None: RuleViolationRow option)
+            // A rule's row, when that's what's selected (its first finding is selectedRow, for its
+            // preview); and the rules opened or closed, by key (see RuleGroup.ExpandedAtFirst).
+            let selectedRule = ctx.useState (None: RuleGroup option)
+            let ruleExpanded = ctx.useState (Map.empty: Map<string, bool>)
             let preview = ctx.useState noPreview
             // Bumped on every selection change so a slow page render for an earlier
             // selection can't overwrite the preview for the current one.
@@ -389,13 +425,21 @@ module private MainView =
             let clearResults () =
                 outcome.Set NotValidated
                 selectedRow.Set None
+                selectedRule.Set None
+                ruleExpanded.Set Map.empty
                 preview.Set noPreview
                 previewVersion.Set(previewVersion.Current + 1)
 
-            let selectRow (row: RuleViolationRow option) =
+            /// Selects a finding (its rule opened, so it's in the list), or, with asRule, the rule's
+            /// row, showing its first finding's page; and shows its page.
+            let selectFinding (row: RuleViolationRow option) (asRule: RuleGroup option) =
                 task {
                     previewVersion.Set(previewVersion.Current + 1)
                     let version = previewVersion.Current
+                    selectedRule.Set asRule
+                    match row, asRule with
+                    | Some row, None -> ruleExpanded.Set(Map.add $"{row.Violation.RuleId}: {row.Message}" true ruleExpanded.Current)
+                    | _ -> ()
                     selectedRow.Set row
                     preview.Set noPreview
 
@@ -427,6 +471,16 @@ module private MainView =
                         | _ -> preview.Set { noPreview with Note = "This finding is not associated with a specific PDF page." }
                 }
                 |> ignore
+
+            let selectRow (row: RuleViolationRow option) = selectFinding row None
+
+            /// Selects what the list starts with: the first rule's first finding, or the rule's row
+            /// if it starts collapsed.
+            let selectFirst (rows: RuleViolationRow list) =
+                match RuleGroup.OfRows(rows |> List.filter (fun row -> showDismissed.Current || not row.Dismissed)) with
+                | group :: _ when not group.ExpandedAtFirst -> selectFinding (Some group.First) (Some group)
+                | group :: _ -> selectRow (Some group.First)
+                | [] -> selectRow None
 
             /// Counts the user's changes Save would write for the selected file: for an untagged PDF,
             /// its edits on the suggested structure (regions merged into their neighbours, other edits, a title); otherwise its
@@ -501,7 +555,7 @@ module private MainView =
                                     rows |> List.map (fun r -> { r with Occurrences = counts[(r.Clause, r.TestNumber, r.Message)] })
                                 outcome.Set(Validated(report, rows))
                                 refreshPending ()
-                                selectRow (rows |> List.tryFind (fun row -> showDismissed.Current || not row.Dismissed))
+                                selectFirst rows
                                 return Some report
                             with :? VeraPdfValidationException as ex ->
                                 outcome.Set(ValidationFailed ex.Message)
@@ -628,34 +682,15 @@ module private MainView =
                     | Null -> ()
                 | _ -> ()
 
-            /// Selects a finding in the results list, opening its group and scrolling to it, and
+            /// Selects a finding in the results list, opening its rule and scrolling to it, and
             /// brings this window forward: from a marker in the Structure window.
             let showFinding (violation: RuleViolation) =
                 match outcome.Current with
                 | Validated(_, rows) ->
                     match rows |> List.tryFind (fun row -> obj.ReferenceEquals(row.Violation, violation)) with
                     | Some row ->
-                        let grid: DataGrid option =
-                            Avalonia.VisualTree.VisualExtensions.GetVisualDescendants window
-                            |> Seq.tryPick (fun v -> match v with :? DataGrid as grid -> Some grid | _ -> None)
-                        // A collapsed group hides its rows (and would clear the selection).
-                        grid
-                        |> Option.iter (fun grid ->
-                            match grid.ItemsSource with
-                            | :? Avalonia.Collections.DataGridCollectionView as view ->
-                                match view.Groups with
-                                | NonNull groups ->
-                                    for group in groups do
-                                        match group with
-                                        | :? Avalonia.Collections.DataGridCollectionViewGroup as group when
-                                            group.Items |> Seq.cast<obj> |> Seq.exists (fun item -> obj.ReferenceEquals(item, row))
-                                            ->
-                                            grid.ExpandRowGroup(group, false)
-                                        | _ -> ()
-                                | Null -> ()
-                            | _ -> ())
+                        // Its rule is opened, and the list scrolls to it as it's selected.
                         selectRow (Some row) |> ignore
-                        grid |> Option.iter (fun grid -> Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> grid.ScrollIntoView(row, null)))
                         window.Activate()
                     | None -> ()
                 | _ -> ()
@@ -1021,7 +1056,9 @@ module private MainView =
                     let shownWarnings = (withoutDismissed report).WarningCount
                     let warnings =
                         match report.WarningCount - shownWarnings with
+                        | 0 when shownWarnings = 1 -> "1 warning"
                         | 0 -> $"{shownWarnings} warnings"
+                        | hidden when shownWarnings = 1 -> $"1 warning, {hidden} dismissed"
                         | hidden -> $"{shownWarnings} warnings, {hidden} dismissed"
                     Some(
                         if report.IsCompliant then
@@ -1048,15 +1085,26 @@ module private MainView =
                 let canDismiss = selected |> Option.exists (fun row -> Dismissals.canDismiss row.Violation)
                 ContextMenu.create [
                     ContextMenu.viewItems [
-                        match selected with
-                        | Some row when row.Dismissed ->
+                        match selectedRule.Current, selected with
+                        // A rule's row: what applies to all of it.
+                        | Some group, _ ->
+                            let canIgnore = Dismissals.canDismiss group.First.Violation
+                            MenuItem.create [
+                                MenuItem.header (
+                                    if canIgnore then $"Ignore all {group.RuleId} warnings" else "Ignore this type of warning (only warnings can be dismissed)"
+                                )
+                                MenuItem.isEnabled canIgnore
+                                ToolTip.tip "Hides every warning of this type in this PDF, wherever it is."
+                                MenuItem.onClick (fun _ -> setDismissed group.First Dismissals.ruleKeyOf true)
+                            ]
+                        | None, Some row when row.Dismissed ->
                             let restore (header: string) (key: RuleViolation -> Dismissals.Key) =
                                 MenuItem.create [ MenuItem.header header; MenuItem.onClick (fun _ -> setDismissed row key false) ]
                             if dismissed.Current.ContainsKey(Dismissals.keyOf row.Violation) then
                                 restore "Restore warning" Dismissals.keyOf
                             if Dismissals.isRuleIgnored dismissed.Current row.Violation then
                                 restore $"Stop ignoring {row.Violation.RuleId} warnings" Dismissals.ruleKeyOf
-                        | _ ->
+                        | None, _ ->
                             MenuItem.create [
                                 MenuItem.header (if canDismiss || selected.IsNone then "Dismiss warning" else "Dismiss warning (only warnings can be dismissed)")
                                 MenuItem.isEnabled canDismiss
@@ -1077,95 +1125,241 @@ module private MainView =
 
             let gridFontSize = 12.0
 
-            // The findings grouped by rule, under a header saying how many; made again only when
-            // the rows are (a new view would reset the grid).
-            let groupedCache = ctx.useState ((None: (RuleViolationRow list * Avalonia.Collections.DataGridCollectionView) option), false)
-            let groupedRows (rows: RuleViolationRow list) =
-                match groupedCache.Current with
-                | Some(cached, view) when cached.Length = rows.Length && List.forall2 (fun a b -> obj.ReferenceEquals(a, b)) cached rows -> view
+            // The findings as the list shows them: each rule's row, and under it its findings if it's
+            // opened. Made again only when the findings or what's opened change (a new list would
+            // reset the list's scrolling).
+            let isExpanded (group: RuleGroup) = ruleExpanded.Current |> Map.tryFind group.Key |> Option.defaultValue group.ExpandedAtFirst
+            let groupsCache = ctx.useState ((None: (RuleViolationRow list * RuleGroup list) option), false)
+            let groups =
+                match groupsCache.Current with
+                | Some(cached, groups) when cached.Length = rows.Length && List.forall2 (fun a b -> obj.ReferenceEquals(a, b)) cached rows -> groups
                 | _ ->
-                    let view = Avalonia.Collections.DataGridCollectionView(rows)
-                    view.GroupDescriptions.Add(Avalonia.Collections.DataGridPathGroupDescription "Rule")
-                    groupedCache.Set(Some(rows, view))
-                    view
+                    let groups = RuleGroup.OfRows rows
+                    groupsCache.Set(Some(rows, groups))
+                    groups
+            let itemsCache = ctx.useState ((None: (RuleGroup list * Set<string> * ResultItem list) option), false)
+            let items =
+                let opened = groups |> List.filter isExpanded |> List.map _.Key |> Set.ofList
+                match itemsCache.Current with
+                | Some(cached, cachedOpened, items) when obj.ReferenceEquals(cached, groups) && cachedOpened = opened -> items
+                | _ ->
+                    let items =
+                        [ for group in groups do
+                              let expanded = opened.Contains group.Key
+                              yield RuleItem(group, expanded)
+                              if expanded then
+                                  yield! [ for row in group.Findings -> FindingItem row ] ]
+                    itemsCache.Set(Some(groups, opened, items))
+                    items
+            let toggle (group: RuleGroup) = ruleExpanded.Set(Map.add group.Key (not (isExpanded group)) ruleExpanded.Current)
 
-            let resultsGrid =
-                DataGrid.create [
-                    DataGrid.isReadOnly true
-                    DataGrid.canUserResizeColumns true
-                    DataGrid.canUserSortColumns false
-                    gridLinesVisibility DataGridGridLinesVisibility.Horizontal
-                    Theme.resources [ DataGrid.BorderBrushProperty, Theme.Tokens.Border ]
-                    DataGrid.borderThickness 1.0
-                    DataGrid.contextMenu findingMenu
-                    DataGrid.init (fun grid ->
-                        // A rule found many times starts collapsed to its header (with its count); its
-                        // first finding's details show beside the list, and the header expands it.
-                        grid.LoadingRowGroup.Add(fun e ->
-                            match e.RowGroupHeader.DataContext with
-                            | :? Avalonia.Collections.DataGridCollectionViewGroup as group when group.ItemCount > 3 ->
-                                Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> grid.CollapseRowGroup(group, false))
-                            | _ -> ())
-                        // Shown dismissed warnings are dimmed (rows are rebuilt when that changes).
-                        grid.LoadingRow.Add(fun e ->
-                            e.Row.Opacity <-
-                                match e.Row.DataContext with
-                                | :? RuleViolationRow as row when row.Dismissed -> 0.5
-                                | _ -> 1.0))
-                    DataGrid.onSelectedItemChanged (fun item ->
-                        match item with
-                        | :? RuleViolationRow as row when
-                            not (selectedRow.Current |> Option.exists (fun current -> obj.ReferenceEquals(current, row)))
-                            ->
-                            selectRow (Some row)
-                        | _ -> ())
-                    DataGrid.columns [
-                        let textColumn (header: string) (property: string) (width: float) =
-                            DataGridTextColumn.create [
-                                DataGridTextColumn.header header
-                                DataGridTextColumn.binding (Binding property)
-                                DataGridTextColumn.width (DataGridLength width)
-                                DataGridTextColumn.fontSize gridFontSize
+            /// A count as a rounded badge, in a colour.
+            let pill (color: string) (text: string) =
+                Border.create [
+                    Border.padding (7.0, 1.0)
+                    Border.cornerRadius 9.0
+                    Border.verticalAlignment VerticalAlignment.Center
+                    Theme.resources [ Border.BackgroundProperty, color ]
+                    Border.child (
+                        TextBlock.create [
+                            TextBlock.text text
+                            TextBlock.fontSize 11.0
+                            TextBlock.fontWeight FontWeight.SemiBold
+                            TextBlock.foreground Brushes.White
+                        ]
+                    )
+                ]
+
+            /// A rule's row: its colour down its edge, whether it's opened, its severity, how it's
+            /// fixed (if its findings are), how many, and the rule.
+            let ruleRow (group: RuleGroup) (expanded: bool) : IView =
+                let color = if group.Severity = FindingSeverity.Warning then Theme.Tokens.Warning else Theme.Tokens.Danger
+                let fixable = group.Fixable
+                let dismissedHere = group.Findings |> List.filter _.Dismissed |> List.length
+                Border.create [
+                    Border.borderThickness (4.0, 0.0, 0.0, 0.0)
+                    Border.padding (4.0, 4.0, 6.0, 4.0)
+                    Border.tag "rule-row"
+                    Theme.resources [ Border.BorderBrushProperty, color ]
+                    Border.child (
+                        Grid.create [
+                            Grid.columnDefinitions "Auto,Auto,Auto,Auto,*"
+                            Grid.children [
+                                Button.create [
+                                    Button.content (if expanded then "▾" else "▸")
+                                    Button.tag "rule-expander"
+                                    Button.padding (4.0, 0.0)
+                                    Button.minHeight 0.0
+                                    Button.background Brushes.Transparent
+                                    Button.borderThickness 0.0
+                                    Button.verticalAlignment VerticalAlignment.Top
+                                    AttrBuilder<Button>.CreateProperty<string | null>(
+                                        Automation.AutomationProperties.NameProperty, (if expanded then $"Hide {group.RuleId}'s findings" else $"Show {group.RuleId}'s findings"), ValueNone)
+                                    Button.onClick ((fun e -> e.Handled <- true; toggle group), SubPatchOptions.Always)
+                                ]
+                                Border.create [
+                                    Grid.column 1
+                                    Border.margin (2.0, 2.0, 4.0, 0.0)
+                                    Border.verticalAlignment VerticalAlignment.Top
+                                    Border.child (severityIcon group.First.Violation)
+                                ]
+                                Border.create [
+                                    Grid.column 2
+                                    Border.margin (0.0, 2.0, 4.0, 0.0)
+                                    Border.verticalAlignment VerticalAlignment.Top
+                                    match fixable with
+                                    | first :: _ when fixable.Length < group.Findings.Length ->
+                                        ToolTip.tip $"{fixable.Length} of {group.Findings.Length} fixable: {first.Fixable}"
+                                    | _ -> ()
+                                    Border.child (
+                                        match fixable with
+                                        | [] -> TextBlock.create [] :> IView
+                                        | first :: _ -> fixableIcon first
+                                    )
+                                ]
+                                StackPanel.create [
+                                    Grid.column 3
+                                    StackPanel.orientation Orientation.Horizontal
+                                    StackPanel.verticalAlignment VerticalAlignment.Top
+                                    StackPanel.margin (0.0, 1.0, 6.0, 0.0)
+                                    StackPanel.spacing 4.0
+                                    StackPanel.children [
+                                        if group.Findings.Length > 1 then pill color (string group.Findings.Length)
+                                        if dismissedHere > 0 then
+                                            TextBlock.create [
+                                                TextBlock.text $"{dismissedHere} dismissed"
+                                                TextBlock.fontSize 11.0
+                                                TextBlock.verticalAlignment VerticalAlignment.Center
+                                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                            ]
+                                    ]
+                                ]
+                                TextBlock.create [
+                                    Grid.column 4
+                                    TextBlock.text $"{group.RuleId}  {group.Message}"
+                                    TextBlock.fontSize gridFontSize
+                                    TextBlock.textWrapping TextWrapping.Wrap
+                                    TextBlock.maxLines 2
+                                    TextBlock.textTrimming TextTrimming.CharacterEllipsis
+                                    ToolTip.tip group.Message
+                                ]
                             ]
-                        DataGridTemplateColumn.create [
-                            DataGridTemplateColumn.header "Type"
-                            DataGridTemplateColumn.width (DataGridLength 64.0)
-                            DataGridTemplateColumn.cellTemplate (
-                                DataTemplateView<RuleViolationRow>.create (fun row -> severityIcon row.Violation)
-                            )
                         ]
-                        DataGridTemplateColumn.create [
-                            DataGridTemplateColumn.header "Fix"
-                            DataGridTemplateColumn.width (DataGridLength 52.0)
-                            DataGridTemplateColumn.cellTemplate (
-                                DataTemplateView<RuleViolationRow>.create (fun row -> fixableIcon row)
-                            )
+                    )
+                ]
+
+            /// A finding's row, under its rule: its page and where it is. How it's fixed only when
+            /// its rule's findings differ in that.
+            let findingRow (row: RuleViolationRow) : IView =
+                let mixed =
+                    groups
+                    |> List.tryFind (fun g -> g.Findings |> List.exists (fun r -> obj.ReferenceEquals(r, row)))
+                    |> Option.exists (fun g -> g.Fixable.Length > 0 && g.Fixable.Length < g.Findings.Length)
+                Border.create [
+                    Border.padding (30.0, 3.0, 6.0, 3.0)
+                    Border.tag "finding-row"
+                    Border.opacity (if row.Dismissed then 0.5 else 1.0)
+                    Border.child (
+                        Grid.create [
+                            Grid.columnDefinitions "Auto,64,*"
+                            Grid.children [
+                                Border.create [
+                                    Border.width 20.0
+                                    Border.verticalAlignment VerticalAlignment.Top
+                                    Border.child (if mixed then fixableIcon row else TextBlock.create [])
+                                ]
+                                TextBlock.create [
+                                    Grid.column 1
+                                    TextBlock.text row.PageDisplay
+                                    TextBlock.fontSize gridFontSize
+                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                ]
+                                TextBlock.create [
+                                    Grid.column 2
+                                    TextBlock.text (if row.Dismissed then $"{row.FriendlyLocation} (dismissed)" else row.FriendlyLocation)
+                                    TextBlock.fontSize gridFontSize
+                                    TextBlock.textWrapping TextWrapping.Wrap
+                                    ToolTip.tip row.Message
+                                ]
+                            ]
                         ]
-                        textColumn "Clause" "Clause" 72.0
-                        textColumn "Test" "TestNumber" 60.0
-                        textColumn "Page" "PageDisplay" 72.0
-                        DataGridTemplateColumn.create [
-                            DataGridTemplateColumn.header "Location"
-                            DataGridTemplateColumn.width (DataGridLength(1.0, DataGridLengthUnitType.Star))
-                            DataGridTemplateColumn.init (fun column -> column.MinWidth <- 140.0)
-                            DataGridTemplateColumn.cellTemplate (
-                                DataTemplateView<RuleViolationRow>.create (fun row ->
-                                    TextBlock.create [
-                                        TextBlock.text (if row.Dismissed then $"{row.FriendlyLocation} (dismissed)" else row.FriendlyLocation)
-                                        TextBlock.fontSize gridFontSize
-                                        TextBlock.textWrapping TextWrapping.Wrap
-                                        TextBlock.margin (8.0, 3.0)
-                                        TextBlock.verticalAlignment VerticalAlignment.Center
-                                        ToolTip.tip row.Message
-                                    ])
-                            )
-                        ]
-                    ]
-                    DataGrid.items (groupedRows rows)
-                    // By item: grouping orders them by rule.
-                    match selectedRow.Current with
-                    | Some row -> AttrBuilder<DataGrid>.CreateProperty<objnull>(DataGrid.SelectedItemProperty, box row, ValueNone)
-                    | None -> DataGrid.selectedIndex -1
+                    )
+                ]
+
+            let selectedItem =
+                match selectedRule.Current, selectedRow.Current with
+                | Some group, _ ->
+                    let shown = groups |> List.tryFind ((=) group) |> Option.defaultValue group
+                    Some(RuleItem(shown, isExpanded shown))
+                | None, Some row -> Some(FindingItem row)
+                | None, None -> None
+
+            let resultsList =
+                ListBox.create [
+                    ListBox.name "Results"
+                    Theme.resources [ ListBox.BorderBrushProperty, Theme.Tokens.Border ]
+                    ListBox.borderThickness 1.0
+                    ListBox.contextMenu findingMenu
+                    ListBox.dataItems items
+                    ListBox.itemTemplate (
+                        DataTemplateView<ResultItem>.create (fun item ->
+                            match item with
+                            | RuleItem(group, expanded) -> ruleRow group expanded
+                            | FindingItem row -> findingRow row)
+                    )
+                    ListBox.onSelectedItemChanged (
+                        (fun item ->
+                            match item with
+                            | :? ResultItem as RuleItem(group, _) when selectedRule.Current <> Some group ->
+                                selectFinding (Some group.First) (Some group) |> ignore
+                            | :? ResultItem as FindingItem row when
+                                selectedRule.Current.IsSome || not (selectedRow.Current |> Option.exists (fun current -> obj.ReferenceEquals(current, row)))
+                                ->
+                                selectRow (Some row) |> ignore
+                            | _ -> ()),
+                        SubPatchOptions.Always
+                    )
+                    // Right and left open and close the selected rule; left on a finding goes to its rule.
+                    ListBox.onKeyDown (
+                        (fun e ->
+                            match e.Key, selectedRule.Current, selectedRow.Current with
+                            | Key.Right, Some group, _ when not (isExpanded group) ->
+                                toggle group
+                                e.Handled <- true
+                            | Key.Left, Some group, _ when isExpanded group ->
+                                toggle group
+                                e.Handled <- true
+                            | Key.Left, None, Some row ->
+                                groups
+                                |> List.tryFind (fun g -> g.Findings |> List.exists (fun r -> obj.ReferenceEquals(r, row)))
+                                |> Option.iter (fun group -> selectFinding (Some group.First) (Some group) |> ignore)
+                                e.Handled <- true
+                            | _ -> ()),
+                        SubPatchOptions.Always
+                    )
+                    match selectedItem with
+                    | Some item -> AttrBuilder<ListBox>.CreateProperty<objnull>(ListBox.SelectedItemProperty, box item, ValueNone)
+                    | None -> ListBox.selectedIndex -1
+                ]
+
+            /// Above the list: how many failures and warnings, and how many are fixed how.
+            let summary =
+                let shownRows = rows |> List.filter (not << _.Dismissed)
+                let failures = shownRows |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Failure) |> List.length
+                let warnings = shownRows.Length - failures
+                let byTagging = shownRows |> List.filter (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout) |> List.length
+                let fixable = (shownRows |> List.filter _.Violation.IsFixable |> List.length) - byTagging
+                let plural (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
+                WrapPanel.create [
+                    WrapPanel.margin (0.0, 0.0, 0.0, 6.0)
+                    WrapPanel.isVisible (not allRows.IsEmpty)
+                    WrapPanel.children [
+                        for view in
+                            [ pill Theme.Tokens.Danger (plural failures "failure") :> IView
+                              pill Theme.Tokens.Warning (plural warnings "warning")
+                              if fixable > 0 then badged autoFixesIcon $"{fixable} fixable" 0
+                              if byTagging > 0 then badged (Some(wandIcon, Theme.Tokens.Primary)) $"{byTagging} by tagging" 0 ] ->
+                            Border.create [ Border.margin (0.0, 0.0, 10.0, 0.0); Border.child view ] ]
                 ]
 
             /// What the details pane says when no finding is selected: how to start, in an empty window;
@@ -1238,12 +1432,114 @@ module private MainView =
                     )
                 | _ -> None
 
-            let findingDetails (row: RuleViolationRow) =
+            /// Details above the page preview: a finding's, or a rule's (with its first finding's page).
+            let withPreview (top: IView) =
                 Grid.create [
                     Grid.column 2
                     Grid.margin (12.0, 0.0, 0.0, 0.0)
                     Grid.rowDefinitions "Auto,Auto,Auto,*"
                     Grid.children [
+                        top
+                        ProgressBar.create [
+                            Grid.row 1
+                            ProgressBar.height 4.0
+                            ProgressBar.minHeight 4.0
+                            ProgressBar.isIndeterminate true
+                            ProgressBar.isVisible preview.Current.Loading
+                            ProgressBar.margin (0.0, 0.0, 0.0, 8.0)
+                        ]
+                        TextBlock.create [
+                            Grid.row 2
+                            TextBlock.text preview.Current.Note
+                            TextBlock.textWrapping TextWrapping.Wrap
+                            TextBlock.margin (0.0, 0.0, 0.0, 8.0)
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                        ]
+                        Border.create [
+                            Grid.row 3
+                            Theme.resources
+                                [ Border.BorderBrushProperty, Theme.Tokens.Border
+                                  Border.BackgroundProperty, Theme.Tokens.Fill ]
+                            Border.borderThickness 1.0
+                            Border.padding 6.0
+                            Border.child (
+                                Image.create [
+                                    match preview.Current.Image with
+                                    | Some image -> Image.source image
+                                    | None -> ()
+                                    Image.stretch Stretch.Uniform
+                                ]
+                            )
+                        ]
+                    ]
+                ]
+
+            let sectionHeading (text: string) =
+                TextBlock.create [
+                    TextBlock.text text
+                    TextBlock.fontWeight FontWeight.SemiBold
+                    TextBlock.margin (0.0, 8.0, 0.0, 0.0)
+                ]
+
+            /// A rule's details: what it says and means, how many places it's found and where, and
+            /// what fixes it; its first finding's page below.
+            let ruleDetails (group: RuleGroup) =
+                let first = group.First.Violation
+                let places =
+                    let count = if group.Findings.Length = 1 then "1 place" else $"{group.Findings.Length} places"
+                    match group.Pages with
+                    | [] -> count
+                    | [ page ] -> $"{count}, on page {page}"
+                    | pages -> $"{count}, on pages {List.head pages}–{List.last pages}"
+                let title =
+                    if first.Specification = "Legibyl" then $"Legibyl warning: {group.RuleId} — {places}"
+                    else
+                        let standard = first.Specification.Split(':').[0]
+                        $"{first.Severity}: {standard} {first.Clause}, test {first.TestNumber} — {places}"
+                withPreview (
+                    StackPanel.create [
+                        StackPanel.margin (0.0, 0.0, 0.0, 10.0)
+                        StackPanel.children [
+                            detailTitle
+                                first
+                                (TextBlock.create [
+                                    TextBlock.text title
+                                    TextBlock.fontSize 16.0
+                                    TextBlock.fontWeight FontWeight.SemiBold
+                                    TextBlock.textWrapping TextWrapping.Wrap
+                                ])
+                            |> View.withAttrs [ Control.margin (0.0, 0.0, 0.0, 8.0) ]
+                            TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
+                            detailText group.Message false [ TextBox.maxHeight 130.0 ]
+                            match RuleGuide.forFinding first with
+                            | Some guide ->
+                                sectionHeading "What it means"
+                                detailText guide.Meaning false []
+                                if group.Fixable.IsEmpty then
+                                    sectionHeading "What to do"
+                                    detailText guide.WhatToDo false []
+                            | None -> ()
+                            match group.Fixable with
+                            | [] -> ()
+                            | fixable ->
+                                fixableHeading fixable.Head.Violation (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
+                                |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
+                                let how = if fixable.Length = group.Findings.Length then "" else $"{fixable.Length} of {group.Findings.Length} places: "
+                                // Each way its findings are fixed, as some rules' are more than one.
+                                let ways = fixable |> List.map _.Fixable |> List.distinct |> String.concat "; "
+                                detailText $"{how}{ways}." false []
+                            TextBlock.create [
+                                TextBlock.text "Select a place in the list for its details; its first is shown below."
+                                TextBlock.textWrapping TextWrapping.Wrap
+                                TextBlock.margin (0.0, 8.0, 0.0, 0.0)
+                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                            ]
+                        ]
+                    ]
+                )
+
+            let findingDetails (row: RuleViolationRow) =
+                withPreview (
                         Grid.create [
                             Grid.margin (0.0, 0.0, 0.0, 10.0)
                             Grid.columnDefinitions "*,Auto"
@@ -1325,39 +1621,7 @@ module private MainView =
                                 ]
                             ]
                         ]
-                        ProgressBar.create [
-                            Grid.row 1
-                            ProgressBar.height 4.0
-                            ProgressBar.minHeight 4.0
-                            ProgressBar.isIndeterminate true
-                            ProgressBar.isVisible preview.Current.Loading
-                            ProgressBar.margin (0.0, 0.0, 0.0, 8.0)
-                        ]
-                        TextBlock.create [
-                            Grid.row 2
-                            TextBlock.text preview.Current.Note
-                            TextBlock.textWrapping TextWrapping.Wrap
-                            TextBlock.margin (0.0, 0.0, 0.0, 8.0)
-                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                        ]
-                        Border.create [
-                            Grid.row 3
-                            Theme.resources
-                                [ Border.BorderBrushProperty, Theme.Tokens.Border
-                                  Border.BackgroundProperty, Theme.Tokens.Fill ]
-                            Border.borderThickness 1.0
-                            Border.padding 6.0
-                            Border.child (
-                                Image.create [
-                                    match preview.Current.Image with
-                                    | Some image -> Image.source image
-                                    | None -> ()
-                                    Image.stretch Stretch.Uniform
-                                ]
-                            )
-                        ]
-                    ]
-                ]
+                )
 
             // Kept in step with the buttons.
             match menuItems.Current with
@@ -1409,11 +1673,12 @@ module private MainView =
                             ]
                             Grid.children [
                                 Grid.create [
-                                    Grid.rowDefinitions "*,Auto"
+                                    Grid.rowDefinitions "Auto,*,Auto"
                                     Grid.children [
-                                        resultsGrid
+                                        summary
+                                        Border.create [ Grid.row 1; Border.child resultsList ]
                                         DockPanel.create [
-                                          Grid.row 1
+                                          Grid.row 2
                                           DockPanel.margin (0.0, 8.0, 0.0, 0.0)
                                           DockPanel.children [
                                             if dismissedCount > 0 then
@@ -1459,10 +1724,11 @@ module private MainView =
                                     Theme.resources [ GridSplitter.BackgroundProperty, Theme.Tokens.Border ]
                                     GridSplitter.resizeDirection GridResizeDirection.Columns
                                 ]
-                                match selectedRow.Current, guidance () with
-                                | Some row, _ -> findingDetails row
-                                | None, Some panel -> panel
-                                | None, None -> ()
+                                match selectedRule.Current, selectedRow.Current, guidance () with
+                                | Some group, _, _ -> ruleDetails (groups |> List.tryFind ((=) group) |> Option.defaultValue group)
+                                | None, Some row, _ -> findingDetails row
+                                | None, None, Some panel -> panel
+                                | None, None, None -> ()
                             ]
                         ]
                         StackPanel.create [
@@ -1553,18 +1819,6 @@ type MainWindow(shell: DocumentShell) as this =
             shown <- true
             waiting |> Option.iter (fun request -> openRequests.Set(Some request))
             waiting <- None)
-        // Semi's column headers are larger than the 12pt cells; match them so short
-        // headers aren't clipped in the narrow results pane.
-        let headerStyle = Style(fun selector -> selector.OfType<DataGridColumnHeader>())
-        headerStyle.Setters.Add(Setter(DataGridColumnHeader.FontSizeProperty, 12.0))
-        this.Styles.Add headerStyle
-        // A group of findings is headed by its rule and how many there are, not "Rule:".
-        let groupStyle = Style(fun selector -> selector.OfType<DataGridRowGroupHeader>())
-        groupStyle.Setters.Add(Setter(DataGridRowGroupHeader.IsPropertyNameVisibleProperty, false))
-        // The count leads the header's text instead (see RuleViolationRow.Rule).
-        groupStyle.Setters.Add(Setter(DataGridRowGroupHeader.IsItemCountVisibleProperty, false))
-        groupStyle.Setters.Add(Setter(DataGridRowGroupHeader.FontSizeProperty, 12.0))
-        this.Styles.Add groupStyle
         let openElsewhere path changed =
             task {
                 let! window, report = MainWindow.Open(shell, path, this, changed)
