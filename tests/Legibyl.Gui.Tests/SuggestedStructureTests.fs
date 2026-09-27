@@ -68,12 +68,27 @@ let private texts (root: Visual) = descendants<TextBlock> root |> List.map (fun 
 let private blockFor (window: Window) (tag: string) =
     descendants<Border> window |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = tag | _ -> false)
 
-/// Clicks a block, selecting it.
-let private select (block: Border) =
+/// Clicks a block, selecting it; with shift, extending the selection to it.
+let private clickBlock (modifiers: Input.KeyModifiers) (block: Border) =
     let properties = Input.PointerPointProperties(Input.RawInputModifiers.LeftMouseButton, Input.PointerUpdateKind.LeftButtonPressed)
     block.RaiseEvent(
-        Input.PointerPressedEventArgs(block, new Input.Pointer(0, Input.PointerType.Mouse, true), block, Point(4.0, 4.0), 0UL, properties, Input.KeyModifiers.None)
+        Input.PointerPressedEventArgs(block, new Input.Pointer(0, Input.PointerType.Mouse, true), block, Point(4.0, 4.0), 0UL, properties, modifiers)
     )
+    pump ()
+
+let private select (block: Border) = clickBlock Input.KeyModifiers.None block
+
+/// The Read as picker's choices, by label.
+let private readings (window: Window) =
+    descendants<RadioButton> window |> List.filter (fun b -> b.GroupName = "read-as")
+
+/// The Read as choice that's chosen, if one is.
+let private readAs (window: Window) =
+    readings window |> List.tryFind (fun b -> b.IsChecked = Nullable true) |> Option.map (fun b -> string b.Content)
+
+/// Picks a Read as choice, as a click does.
+let private pickReadAs (window: Window) (label: string) =
+    (readings window |> List.find (fun b -> string b.Content = label)).IsChecked <- true
     pump ()
 
 [<Fact>]
@@ -135,20 +150,26 @@ let ``a region can be merged into its neighbour and kept again, as an edit taggi
             let review = reviewOf pdf
             let window = show pdf review
             select (blockFor window "H")
-            click (button window "Merge into Neighbour")
-            pump ()
+            let fresh = readAs window
+            pickReadAs window "Part of its neighbour"
             let leftOut = texts window
+            let merged = readAs window
             let unsaved = review.IsEdited && not (File.Exists(pdf + ".legibyl.json"))
             review.Save pdf
             let saved = File.ReadAllText(pdf + ".legibyl.json")
             use suggester = new LayoutSuggester(pdf)
             let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> IPageLayoutSource).PageRegions(pdf, 1)
             let tagged = [ for region in regions -> region.Tag ]
-            click (button window "Don't Merge")
-            pump ()
+            // Its tag stays, and can still be changed.
+            let picker = descendants<ComboBox> window |> List.exactlyOne
+            let tagKept = string picker.SelectedItem, picker.IsEnabled
+            pickReadAs window "Its own region"
             let kept = review.Edits
             window.Close()
 
+            fresh |> should equal (Some "Its own region")
+            merged |> should equal (Some "Part of its neighbour")
+            tagKept |> should equal ("H", true)
             leftOut |> should contain "✎ merged into its neighbour: its text joins the nearest region kept"
             // Kept only once saved, with the layout the edit is on.
             unsaved |> should be True
@@ -165,23 +186,84 @@ let ``a region can be marked not read, tagged as an artifact, and read again`` (
             let window = show pdf review
             select (blockFor window "H")
             // Merged first: marking it not read undoes that, since merged text is still read.
-            click (button window "Merge into Neighbour")
-            pump ()
-            click (button window "Not Read (Artifact)")
-            pump ()
+            pickReadAs window "Part of its neighbour"
+            pickReadAs window "Not read"
             let notRead = review.Edits |> List.map (fun e -> e.Tag, e.Retag, e.Exclude)
+            // The Tag picker says so, and waits for Read as to read it again.
+            let picker = descendants<ComboBox> window |> List.exactlyOne
+            let tagShown = string picker.SelectedItem, picker.IsEnabled
             use suggester = new LayoutSuggester(pdf)
             let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> IPageLayoutSource).PageRegions(pdf, 1)
             let tagged = [ for region in regions -> region.Tag ]
-            click (button window "Read It")
-            pump ()
+            pickReadAs window "Its own region"
             let readAgain = review.Edits |> List.map (fun e -> e.Retag, e.Exclude)
+            let tagAgain = string (descendants<ComboBox> window |> List.exactlyOne).SelectedItem
             window.Close()
 
             notRead |> should equal [ "H", Some "Artifact", false ]
+            tagShown |> should equal ("Artifact", false)
+            tagAgain |> should equal "H"
             tagged |> should equal [ "Artifact"; "P" ]
             // Nothing left to change: the edit goes.
             readAgain |> should be Empty))
+
+[<Fact>]
+let ``picking Artifact as its tag reads it as not read, and not part of its neighbour`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = reviewOf pdf
+            let window = show pdf review
+            select (blockFor window "P")
+            pickReadAs window "Part of its neighbour"
+            (descendants<ComboBox> window |> List.exactlyOne).SelectedItem <- "Artifact"
+            pump ()
+            let shown = readAs window
+            let edits = review.Edits |> List.map (fun e -> e.Retag, e.Exclude)
+            window.Close()
+
+            shown |> should equal (Some "Not read")
+            edits |> should equal [ Some "Artifact", false ]))
+
+[<Fact>]
+let ``regions read differently show Mixed, and picking one reads them all that way`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = reviewOf pdf
+            let window = show pdf review
+            select (blockFor window "H")
+            pickReadAs window "Part of its neighbour"
+            clickBlock Input.KeyModifiers.Shift (blockFor window "P")
+            let chosen = readAs window
+            let saysMixed = texts window |> List.contains "Mixed"
+            pickReadAs window "Not read"
+            let both = review.Edits |> List.map (fun e -> e.Tag, e.Retag, e.Exclude) |> List.sort
+            let after = readAs window
+            window.Close()
+
+            chosen |> should equal (None: string option)
+            saysMixed |> should be True
+            both |> should equal [ "H", Some "Artifact", false; "P", Some "Artifact", false ]
+            after |> should equal (Some "Not read")))
+
+[<Fact>]
+let ``Read as is one tab stop, and the arrow keys move between its choices`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = reviewOf pdf
+            let window = show pdf review
+            select (blockFor window "P")
+            let tabStops = readings window |> List.filter _.IsTabStop |> List.map (fun b -> string b.Content)
+            let own = readings window |> List.find (fun b -> string b.Content = "Its own region")
+            own.Focus() |> ignore
+            own.RaiseEvent(Input.KeyEventArgs(RoutedEvent = Input.InputElement.KeyDownEvent, Key = Input.Key.Down, Source = own))
+            pump ()
+            let moved = readAs window
+            let edits = review.Edits |> List.map (fun e -> e.Tag, e.Exclude)
+            window.Close()
+
+            tabStops |> should equal [ "Its own region" ]
+            moved |> should equal (Some "Part of its neighbour")
+            edits |> should equal [ "P", true ]))
 
 [<Fact>]
 let ``a region can be given any suggested tag, which is kept and tagged`` () =
@@ -236,7 +318,7 @@ let ``reopening keeps what was found and merged`` () =
             for KeyValue(page, found) in reviewOf pdf |> _.Pages do review.Pages[page] <- found
             let window = show pdf review
             select (blockFor window "H")
-            click (button window "Merge into Neighbour")
+            pickReadAs window "Part of its neighbour"
             window.Close()
             review.Save pdf
 
