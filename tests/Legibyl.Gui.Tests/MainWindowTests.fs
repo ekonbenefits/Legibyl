@@ -191,7 +191,8 @@ let ``the summary above the list counts what the banner does`` () =
 
         shown |> should contain $"{failures} failures"
         shown |> should contain "1 warning"
-        shown |> List.exists (fun t -> t.StartsWith $"FAIL — {failures} of " && t.EndsWith "1 warning)") |> should be True)
+        // (Ending ", as checked …" when this session has checked it already.)
+        shown |> List.exists (fun t -> t.StartsWith $"FAIL — {failures} of " && t.Contains "; 1 warning)") |> should be True)
 
 [<Fact>]
 let ``a PDF 2.0 file is checked against PDF/UA-2 without choosing, and the banner says why`` () =

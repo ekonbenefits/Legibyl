@@ -33,9 +33,15 @@ type DocumentReview(modified: DateTime) =
     /// The auto fixes chosen for Export; None before any are (the dialog then starts with the
     /// safe ones the PDF needs).
     member val AutoFixes: PdfFixOptions option = None with get, set
-    /// What was last saved (or read): the dismissals, edits, title and auto fixes.
-    member val private Saved: Dismissals.Dismissed * RegionEdits.Edit list * string option * PdfFixOptions option =
-        (Map.empty, [], None, None) with get, set
+    /// The last validation's result (see SavedResults): as saved next to the PDF, or a newer one
+    /// Save hasn't kept yet.
+    member val Validation: ReviewFile.SavedValidation option = None with get, set
+    /// What was last saved (or read): the dismissals, edits, title, auto fixes and which validation.
+    member val private Saved: Dismissals.Dismissed * RegionEdits.Edit list * string option * PdfFixOptions option * (string * DateTime) option =
+        (Map.empty, [], None, None, None) with get, set
+
+    /// Which validation it has: the file checked, and when.
+    member private this.ValidationStamp = this.Validation |> Option.map (fun v -> v.Hash, v.CheckedAt)
 
     /// The warnings dismissed in the review carried inside the PDF.
     member this.CarriedDismissed = this.Carried |> Option.map Dismissals.ofSaved |> Option.defaultValue Map.empty
@@ -86,7 +92,8 @@ type DocumentReview(modified: DateTime) =
           Edits = (if edits.Length = 0 then null else edits)
           Title = Option.toObj this.Title
           Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null)
-          Fixes = (this.AutoFixes |> Option.map (RepairNames.ofOptions >> Array.ofList) |> Option.toObj) }
+          Fixes = (this.AutoFixes |> Option.map (RepairNames.ofOptions >> Array.ofList) |> Option.toObj)
+          Validation = Option.toObj this.Validation }
 
     /// Keeps the review in the file next to pdfPath (deleting it if there's nothing to keep).
     /// Throws IOException/UnauthorizedAccessException if it can't be written.
@@ -112,12 +119,12 @@ type DocumentReview(modified: DateTime) =
             | None -> own
         ReviewFile.forCopy (if ReviewFile.isEmpty file then None else Some file)
 
-    /// Whether there are changes Save hasn't kept: the dismissals, edits or title differ from
-    /// what was last saved (changing one back isn't a change).
-    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.AutoFixes) <> this.Saved
+    /// Whether there are changes Save hasn't kept: the dismissals, edits, title or auto fixes differ
+    /// from what was last saved (changing one back isn't a change), or there's a newer validation.
+    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.AutoFixes, this.ValidationStamp) <> this.Saved
 
     /// Takes what it has now as what's saved.
-    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.AutoFixes)
+    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.AutoFixes, this.ValidationStamp)
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
@@ -161,6 +168,7 @@ type DocumentReviews() =
                 review.Edits <- RegionEdits.editsIn saved
                 review.Title <- Option.ofObj saved.Title
                 review.AutoFixes <- Option.ofObj saved.Fixes |> Option.map RepairNames.toOptions
+                review.Validation <- Option.ofObj saved.Validation
                 match Option.ofObj saved.Layout |> Option.map (LayoutFile.current fullPath) with
                 | Some layout ->
                     review.LayoutKept <- true

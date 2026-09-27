@@ -410,6 +410,15 @@ the changes are written to a new copy. Three buttons under the details, and
   off. Until then your changes are only in the app: the window's title says
   **Edited**, and closing it, or opening another PDF, asks whether to save them.
   Changing something back to how it was saved isn't a change.
+  It keeps the validation's result too (`validation`, `SavedResults.fs`): the
+  findings without their messages, for the file's SHA-256 and the veraPDF and
+  Legibyl versions and standard that produced them. Reopening the PDF shows that
+  result at once, the banner ending ", as checked 27 Sep 2026", instead of
+  validating it again, as long as all of those match; if any differs (a byte of
+  the file, a new veraPDF or a new check in Legibyl), it's validated afresh. A
+  validation is a change like an edit (Save keeps it), and **Check Again**
+  always runs a fresh one. Exported copies' reviews don't carry it: a copy is
+  validated when it's exported. The CLI doesn't read or write it.
 - **Export…** (⌘E / Ctrl+E) writes the next version of the PDF (`flyer.v2.pdf`)
   with the chosen auto fixes and your changes, saved or not: your edits are
   always applied (not an auto fix), and an untagged PDF is tagged from its

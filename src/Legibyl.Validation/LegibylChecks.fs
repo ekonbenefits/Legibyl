@@ -240,6 +240,22 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! splitFigureFindings document context
           yield! missingBookmarkFindings document context ]
 
+/// Each check's message, by its TestNumber (as a saved validation reads it back).
+let messageFor (testNumber: int) : string option =
+    match all |> List.tryFind (fun check -> check.TestNumber = testNumber) with
+    | Some check -> Some check.Message
+    | None ->
+        match testNumber with
+        | 0 -> Some "Could not inspect the structure tree for Legibyl's structure checks."
+        | 3 -> Some TocHeadingMessage
+        | 4 -> Some TocEntryUnmatchedMessage
+        | 5 -> Some TocHeadingsUnrecoverableMessage
+        | 6 -> Some ParagraphListMessage
+        | 7 -> Some MissingBookmarksMessage
+        | 9 -> Some ParentTreeMessage
+        | 10 -> Some SplitFiguresMessage
+        | _ -> None
+
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
 let couldNotInspect (errorMessage: string) =
     warning "Could not inspect the structure tree for Legibyl's structure checks." errorMessage "StructTreeRoot" 0 PdfFixOptions.None null
