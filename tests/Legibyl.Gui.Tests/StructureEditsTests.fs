@@ -109,6 +109,24 @@ let ``figures offer alt text, and replacement text only where there is some`` ()
             paragraphs |> should equal [ [ "Edit Replacement Text…" ]; [] ]))
 
 [<Fact>]
+let ``the alt text prompt says what good alt text is`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show (structure null) pdf
+            (menuItems (blockFor window "Figure") |> List.find (fst >> (=) "Edit Alt Text…") |> snd).RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
+            pump ()
+            let prompt = window.OwnedWindows |> Seq.exactlyOne
+            let said = descendants<TextBlock> prompt |> List.map (fun t -> string t.Text) |> String.concat " "
+            let placeholder = (descendants<TextBox> prompt |> List.exactlyOne).PlaceholderText
+            prompt.Close()
+            pump ()
+            window.Close()
+
+            said |> should haveSubstring "Say what it's for here, not only what it shows"
+            said |> should haveSubstring "leave out \"image of\""
+            placeholder |> should equal "What it's for, in a sentence"))
+
+[<Fact>]
 let ``an edit is kept in the review, shown as not in the PDF yet, and listed on the Edits tab`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->

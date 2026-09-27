@@ -94,3 +94,27 @@ let ``findings that can't be fixed show no fix icon or details`` () =
         anchors |> should haveLength 1
         icons |> should equal [ "Failure" ]
         detailHeadings |> should not' (contain "Fixable"))
+
+let private texts (window: Window) = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
+
+[<Fact>]
+let ``an empty window says how to start`` () =
+    onUiThread (fun () ->
+        let window = HeadlessWindow.show 1200.0 720.0
+        let shown = texts window
+        window.Close()
+
+        shown |> should contain "Making a PDF accessible"
+        shown |> List.exists (fun t -> t.StartsWith "Open a PDF: Browse…") |> should be True)
+
+[<Fact>]
+let ``a PDF that passes says what automated checks can't judge`` () =
+    onUiThread (fun () ->
+        let window = openSample "pdfua1-pass.pdf"
+        let shown = texts window
+        window.Close()
+
+        shown |> should contain "Passes PDF/UA-1's automated checks"
+        shown |> List.exists (fun t -> t.StartsWith "Alt text: does each figure's say what it's for here") |> should be True
+        // Not the steps for an empty window.
+        shown |> should not' (contain "Making a PDF accessible"))
