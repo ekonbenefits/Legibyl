@@ -44,7 +44,7 @@ type DocumentReview(modified: DateTime) =
     member val Pages = Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>()
     member val LastPage = 1 with get, set
     /// What a person decided about the suggestions, as saved next to the PDF (see RegionEdits):
-    /// suggestions left out or retagged, figures' alt text, corrected OCR text.
+    /// suggestions merged into their neighbours or retagged, figures' alt text, corrected OCR text.
     member val Edits: RegionEdits.Edit list = [] with get, set
     member val LinkTitles = NotAsked with get, set
     /// The titles read for web addresses, by address.
@@ -252,7 +252,7 @@ type LayoutPrefetcher(suggester: LayoutSuggester, results: Collections.Concurren
         cancel.Cancel()
         worker.Wait()
 
-/// The regions to tag: each page's suggestions, with the review's edits layered on (left out,
+/// The regions to tag: each page's suggestions, with the review's edits layered on (merged into neighbours,
 /// retagged, alt text, corrected text).
 type ReviewedLayout(prefetcher: LayoutPrefetcher, review: DocumentReview) =
     interface IPageLayoutSource with

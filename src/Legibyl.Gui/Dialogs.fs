@@ -209,92 +209,80 @@ let promptText (owner: Window) (title: string) (prompt: string) (initial: string
 type private FixChoice =
     { Option: PdfFixOptions
       Title: string
-      Detail: string
-      /// Stays unticked even when found: it changes what the document says it is, or guesses.
-      OptIn: bool }
+      Detail: string }
+
+    /// Stays unticked even when found: it isn't one of the safe repairs (RepairNames.safe, as the
+    /// CLI's fix applies by default), since it changes what the document says it is, or guesses.
+    member choice.OptIn = not (RepairNames.safe.HasFlag choice.Option)
 
 /// The repairs, in the order they run: tagging first, then StructureFixes.orderedFixes, then
 /// veraPDF's metadata fix.
 let private fixChoices =
-    [ { Option = PdfFixOptions.TagFromLayout
-        Title = "Tag from the page layout"
-        Detail =
-          "Headings, paragraphs, lists, figures and reading order, found by a layout detector; the page looks the same. "
-          + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time."
-        OptIn = true }
-      { Option = PdfFixOptions.QrCodeLinks
+    // Tagging an untagged PDF isn't among them: it's tagged from its suggested structure.
+    [ { Option = PdfFixOptions.QrCodeLinks
         Title = "Link QR codes"
-        Detail = "With tagging: a borderless link over each QR code that encodes a web address."
-        OptIn = true }
+        Detail = "With tagging: a borderless link over each QR code that encodes a web address." }
       { Option = PdfFixOptions.LanguageFromText
         Title = "Declare the language"
-        Detail = "Set /Lang from the language the text is in, when there's enough text to be sure."
-        OptIn = true }
+        Detail = "Set /Lang from the language the text is in, when there's enough text to be sure." }
       { Option = PdfFixOptions.HeadingsFromToc
         Title = "Headings from the table of contents"
-        Detail = "Tag paragraphs a contents entry names as headings (H1–H6, from its indent), and point its links at them."
-        OptIn = true }
+        Detail = "Tag paragraphs a contents entry names as headings (H1–H6, from its indent), and point its links at them." }
       { Option = PdfFixOptions.RemoveEmptyParagraphs
         Title = "Remove empty paragraphs"
-        Detail = "Empty /P structure elements (optional cleanup)."
-        OptIn = true }
+        Detail = "Empty /P structure elements (optional cleanup)." }
       { Option = PdfFixOptions.RemoveEmptyTocEntries
         Title = "Remove empty contents entries"
-        Detail = "Empty table-of-contents entries (TOCI) (optional cleanup)."
-        OptIn = true }
+        Detail = "Empty table-of-contents entries (TOCI) (optional cleanup)." }
       { Option = PdfFixOptions.JoinSplitParagraphs
         Title = "Join split paragraphs"
         Detail =
           "Paragraphs the split-paragraph warning flags become one where a layout detector confirms they're one block of text; the page looks the same. "
-          + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time."
-        OptIn = true }
+          + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time." }
       { Option = PdfFixOptions.ListsFromParagraphs
         Title = "Tag lists"
-        Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become L/LI; the page looks the same."
-        OptIn = true }
+        Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become L/LI; the page looks the same." }
       { Option = PdfFixOptions.BookmarksFromHeadings
         Title = "Add bookmarks"
-        Detail = "Bookmarks for the H1 and H2 headings, when the document has none."
-        OptIn = false }
+        Detail = "Bookmarks for the H1 and H2 headings, when the document has none." }
       { Option = PdfFixOptions.AnnotationTabs
         Title = "Tab order for annotations"
-        Detail = "Set /Tabs /S on pages that contain annotations, so keyboard order follows the structure."
-        OptIn = false }
+        Detail = "Set /Tabs /S on pages that contain annotations, so keyboard order follows the structure." }
       { Option = PdfFixOptions.FontCidToGidMap
         Title = "Font glyph mapping"
-        Detail = "Write the /CIDToGIDMap /Identity embedded TrueType CID fonts leave out; readers already use it, so nothing changes on the page."
-        OptIn = false }
+        Detail = "Write the /CIDToGIDMap /Identity embedded TrueType CID fonts leave out; readers already use it, so nothing changes on the page." }
       { Option = PdfFixOptions.LinkContents
         Title = "Describe contents links"
-        Detail = "Give table-of-contents links without a description the entry's own text (/Contents)."
-        OptIn = false }
+        Detail = "Give table-of-contents links without a description the entry's own text (/Contents)." }
       { Option = PdfFixOptions.LinkTitlesFromWeb
         Title = "Describe web links from their pages"
         Detail =
           "Visits each web address a link without a description (or, with tagging, a QR code) goes to, and uses the page's title, "
           + "with the link's own site: \"Apply for benefits (example.com)\". Only public web pages are visited, and only their titles read; "
-          + "the sites see the visit. Check the descriptions."
-        OptIn = true }
+          + "the sites see the visit. Check the descriptions." }
       { Option = PdfFixOptions.DocumentTitle
         Title = "Document title"
-        Detail = "Use the title the document carries, and show it in place of the file name (/DisplayDocTitle)."
-        OptIn = false }
+        Detail = "Use the title the document carries, and show it in place of the file name (/DisplayDocTitle)." }
       { Option = PdfFixOptions.TitleFromFirstPage
         Title = "Title from the first page"
-        Detail = "If the document has no title anywhere, use the text of a short first page (a title page)."
-        OptIn = true }
+        Detail = "If the document has no title anywhere, use the text of a short first page (a title page)." }
       { Option = PdfFixOptions.Metadata
         Title = "Repair XMP metadata"
-        Detail = "veraPDF's repair: metadata stream, PDF/UA identifier, Info sync."
-        OptIn = false } ]
+        Detail = "veraPDF's repair: metadata stream, PDF/UA identifier, Info sync." } ]
 
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
 /// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
 /// Returns None if the user cancelled.
-/// tagNote, if any, says what tagging from the layout will use (edits on a suggested structure).
+/// tagNote, if any, says how an untagged PDF is tagged (from its suggested structure), shown
+/// above the repairs.
 /// chosen is what was chosen before, if anything; the first time, the safe repairs this PDF
 /// needs start ticked. Export writes the chosen repairs (and the user's edits) to a copy.
-let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) (chosen: PdfFixOptions option) : Task<PdfFixOptions option> =
+let chooseFixOptions
+    (owner: Window)
+    (report: ValidationReport)
+    (tagNote: string option)
+    (chosen: PdfFixOptions option)
+    : Task<PdfFixOptions option> =
     let window = dialogWindow "Auto Fixes" 560.0
     // Never taller than the screen: the list scrolls in whatever room is left. (All the repairs
     // at once are taller than a laptop screen.)
@@ -334,9 +322,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                     | 0 -> "none found"
                     | n -> $"{n} found"
                 let detail =
-                    if choice.Option = PdfFixOptions.TagFromLayout && tagNote.IsSome then
-                        $"{choice.Detail} {tagNote.Value}"
-                    elif choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
+                    if choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
                         $"{choice.Detail} Unticked: veraPDF only repairs metadata once every other failure is fixed, and some here can't be fixed automatically."
                     else
                         choice.Detail
@@ -408,7 +394,11 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                 Grid.rowDefinitions "Auto,Auto,*,Auto,Auto"
                 Grid.children [
                     TextBlock.create [
-                        TextBlock.text "Choose the repairs Export applies to a copy of this PDF:"
+                        TextBlock.text (
+                            match tagNote with
+                            | Some note -> $"{note}\n\nChoose the repairs Export applies to the copy:"
+                            | None -> "Choose the repairs Export applies to a copy of this PDF:"
+                        )
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                     ]
@@ -493,8 +483,12 @@ let private statusStyle (outcome: Result<FixResult, string>) =
     | Ok fix ->
         match fix.Status with
         | RepairStatus.Success ->
-            { Title = "Saved"
-              Detail = "Your edits and the chosen fixes changed the file, and a copy was saved with them."
+            { Title = "Exported"
+              Detail =
+                if fix.RequestedOptions.HasFlag PdfFixOptions.TagFromLayout then
+                    "A copy was tagged from the suggested structure, with your edits and the chosen fixes. Check its headings, figures and reading order in Structure… in the copy's window. The original is unchanged."
+                else
+                    "A copy was written with your edits and the chosen fixes. The original is unchanged."
               Glyph = "✓"
               ColorToken = Theme.Tokens.Success }
         | RepairStatus.IdRemoved ->
@@ -507,17 +501,17 @@ let private statusStyle (outcome: Result<FixResult, string>) =
               ColorToken = Theme.Tokens.Warning }
         | RepairStatus.NoAction ->
             { Title = "Nothing to change"
-              Detail = "Your edits and the chosen fixes had nothing to change in this file, so no copy was saved."
+              Detail = "Your edits and the chosen fixes had nothing to change in this file, so no copy was written."
               Glyph = "i"
               ColorToken = Theme.Tokens.Primary }
         | RepairStatus.WontFix ->
             { Title = "Couldn't repair"
-              Detail = "veraPDF found no way to fix these problems with the selected repairs, so no copy was saved."
+              Detail = "veraPDF found no way to fix these problems with the selected repairs, so no copy was written."
               Glyph = "!"
               ColorToken = Theme.Tokens.Warning }
         | _ ->
             { Title = "Repair failed"
-              Detail = "veraPDF tried to repair the metadata but failed, so no copy was saved."
+              Detail = "veraPDF tried to repair the metadata but failed, so no copy was written."
               Glyph = "✕"
               ColorToken = Theme.Tokens.Danger }
 
@@ -573,9 +567,9 @@ let private comparison (before: ValidationReport) (after: ValidationReport) : IV
     ]
 
 /// Shows the outcome of a Fix: a plain-language status, what changed, how the
-/// repaired copy validates compared with the original, and where it was saved.
+/// repaired copy validates compared with the original, and where it was written.
 let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: ValidationReport option) : Task =
-    let window = dialogWindow "Save" 540.0
+    let window = dialogWindow "Export" 540.0
     let style = statusStyle outcome
 
     let savedPath =
@@ -693,11 +687,11 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                         ]
                     | _ -> ()
 
-                    // Saved as
+                    // Written as
                     match savedPath with
                     | Some path ->
                         let folder = Path.GetDirectoryName path |> Option.ofObj |> Option.defaultValue ""
-                        sectionHeading "Saved as"
+                        sectionHeading "Exported as"
                         Grid.create [
                             Grid.columnDefinitions "*,Auto"
                             Grid.children [

@@ -101,15 +101,12 @@ let ``a page's suggestions are elements: list items in a list, links in the regi
     nodes[2].AlternateDescription |> should haveSubstring "https://example.com/apply"
 
 [<Fact>]
-let ``an untagged PDF's structure offers to suggest one, shown in View Structure`` () =
+let ``an untagged PDF's Suggest Structure… button shows its suggested structure`` () =
     withUntaggedPdf (fun pdf ->
         onUiThread (fun () ->
             let window = HeadlessWindow.show 1200.0 720.0
             HeadlessWindow.openPdf window pdf
-            click (descendants<Button> window |> List.find (fun b -> Automation.AutomationProperties.GetName b = "Structure…"))
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> window.OwnedWindows.Count = 1) |> ignore
-            let dialog = window.OwnedWindows |> Seq.exactlyOne
-            click (button dialog "Suggest Structure…")
+            click (descendants<Button> window |> List.find (fun b -> Automation.AutomationProperties.GetName b = "Suggest Structure…"))
             let suggested () = window.OwnedWindows |> Seq.filter (fun w -> w :? StructureTreeWindow) |> List.ofSeq
             HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 5.0) (fun () -> not (suggested ()).IsEmpty) |> ignore
             let opened = suggested () |> List.map _.Title
@@ -132,13 +129,13 @@ let ``the suggestions show as elements, said not to be tagged yet`` () =
             tags |> should equal [ "Document"; "H"; "P"; "Link" ]))
 
 [<Fact>]
-let ``a region can be left out and kept again, as an edit tagging takes`` () =
+let ``a region can be merged into its neighbour and kept again, as an edit tagging takes`` () =
     withUntaggedPdf (fun pdf ->
         onUiThread (fun () ->
             let review = reviewOf pdf
             let window = show pdf review
             select (blockFor window "H")
-            click (button window "Leave Out")
+            click (button window "Merge into Neighbour")
             pump ()
             let leftOut = texts window
             let unsaved = review.IsEdited && not (File.Exists(pdf + ".legibyl.json"))
@@ -147,18 +144,44 @@ let ``a region can be left out and kept again, as an edit tagging takes`` () =
             use suggester = new LayoutSuggester(pdf)
             let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> IPageLayoutSource).PageRegions(pdf, 1)
             let tagged = [ for region in regions -> region.Tag ]
-            click (button window "Keep")
+            click (button window "Don't Merge")
             pump ()
             let kept = review.Edits
             window.Close()
 
-            leftOut |> should contain "✎ left out: not tagged (its text joins the nearest region kept)"
+            leftOut |> should contain "✎ merged into its neighbour: its text joins the nearest region kept"
             // Kept only once saved, with the layout the edit is on.
             unsaved |> should be True
             saved |> should haveSubstring "\"exclude\": true"
             saved |> should haveSubstring "\"layout\""
             tagged |> should equal [ "P" ]
             kept |> List.exists _.Exclude |> should be False))
+
+[<Fact>]
+let ``a region can be marked not read, tagged as an artifact, and read again`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = reviewOf pdf
+            let window = show pdf review
+            select (blockFor window "H")
+            // Merged first: marking it not read undoes that, since merged text is still read.
+            click (button window "Merge into Neighbour")
+            pump ()
+            click (button window "Not Read (Artifact)")
+            pump ()
+            let notRead = review.Edits |> List.map (fun e -> e.Tag, e.Retag, e.Exclude)
+            use suggester = new LayoutSuggester(pdf)
+            let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> IPageLayoutSource).PageRegions(pdf, 1)
+            let tagged = [ for region in regions -> region.Tag ]
+            click (button window "Read It")
+            pump ()
+            let readAgain = review.Edits |> List.map (fun e -> e.Retag, e.Exclude)
+            window.Close()
+
+            notRead |> should equal [ "H", Some "Artifact", false ]
+            tagged |> should equal [ "Artifact"; "P" ]
+            // Nothing left to change: the edit goes.
+            readAgain |> should be Empty))
 
 [<Fact>]
 let ``a region can be given any suggested tag, which is kept and tagged`` () =
@@ -205,7 +228,7 @@ let ``a web link's description is an edit, which tagging writes`` () =
             review.LinkDescription review.WebLinks.Head |> should equal (Some "Apply for membership")))
 
 [<Fact>]
-let ``reopening keeps what was found and left out`` () =
+let ``reopening keeps what was found and merged`` () =
     withUntaggedPdf (fun pdf ->
         onUiThread (fun () ->
             let reviews = DocumentReviews()
@@ -213,7 +236,7 @@ let ``reopening keeps what was found and left out`` () =
             for KeyValue(page, found) in reviewOf pdf |> _.Pages do review.Pages[page] <- found
             let window = show pdf review
             select (blockFor window "H")
-            click (button window "Leave Out")
+            click (button window "Merge into Neighbour")
             window.Close()
             review.Save pdf
 
