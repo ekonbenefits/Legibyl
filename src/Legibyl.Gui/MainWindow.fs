@@ -53,7 +53,15 @@ type RuleViolationRow =
       /// Plain-English breadcrumb, e.g. "Document → Page 2 → Link annotation". Falls back to the raw context.
       FriendlyLocation: string
       /// A warning the user has dismissed (see Dismissals).
-      Dismissed: bool }
+      Dismissed: bool
+      /// How many findings break the same rule, it included.
+      Occurrences: int }
+
+    /// The rule it breaks, as the results group it, how many first (a long message is cut off at
+    /// the pane's edge): "6 × 7.1-3: Content shall be marked as…".
+    member row.Rule =
+        let count = if row.Occurrences > 1 then $"{row.Occurrences} × " else ""
+        $"{count}{row.Clause}-{row.TestNumber}: {row.Message}"
 
     static member Of(violation: RuleViolation) =
         let location = violation.Location
@@ -80,7 +88,8 @@ type RuleViolationRow =
             | NonNull location, _ -> location.Breadcrumb
             | Null, NonNull context -> context
             | Null, Null -> ""
-          Dismissed = false }
+          Dismissed = false
+          Occurrences = 1 }
 
 module private MainView =
     let profiles =
@@ -493,6 +502,9 @@ module private MainView =
                                     |> Seq.sortBy (fun row -> row.PageNumber |> Option.defaultValue Int32.MaxValue, row.Clause, row.TestNumber)
                                     |> Seq.map (fun row -> { row with Dismissed = Dismissals.isDismissed dismissed.Current row.Violation })
                                     |> List.ofSeq
+                                let rows =
+                                    let counts = rows |> List.countBy (fun r -> r.Clause, r.TestNumber, r.Message) |> Map.ofList
+                                    rows |> List.map (fun r -> { r with Occurrences = counts[(r.Clause, r.TestNumber, r.Message)] })
                                 outcome.Set(Validated(report, rows))
                                 refreshPending ()
                                 selectRow (rows |> List.tryFind (fun row -> showDismissed.Current || not row.Dismissed))
@@ -1031,6 +1043,18 @@ module private MainView =
 
             let gridFontSize = 12.0
 
+            // The findings grouped by rule, under a header saying how many; made again only when
+            // the rows are (a new view would reset the grid).
+            let groupedCache = ctx.useState ((None: (RuleViolationRow list * Avalonia.Collections.DataGridCollectionView) option), false)
+            let groupedRows (rows: RuleViolationRow list) =
+                match groupedCache.Current with
+                | Some(cached, view) when cached.Length = rows.Length && List.forall2 (fun a b -> obj.ReferenceEquals(a, b)) cached rows -> view
+                | _ ->
+                    let view = Avalonia.Collections.DataGridCollectionView(rows)
+                    view.GroupDescriptions.Add(Avalonia.Collections.DataGridPathGroupDescription "Rule")
+                    groupedCache.Set(Some(rows, view))
+                    view
+
             let resultsGrid =
                 DataGrid.create [
                     DataGrid.isReadOnly true
@@ -1041,6 +1065,13 @@ module private MainView =
                     DataGrid.borderThickness 1.0
                     DataGrid.contextMenu findingMenu
                     DataGrid.init (fun grid ->
+                        // A rule found many times starts collapsed to its header (with its count); its
+                        // first finding's details show beside the list, and the header expands it.
+                        grid.LoadingRowGroup.Add(fun e ->
+                            match e.RowGroupHeader.DataContext with
+                            | :? Avalonia.Collections.DataGridCollectionViewGroup as group when group.ItemCount > 3 ->
+                                Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> grid.CollapseRowGroup(group, false))
+                            | _ -> ())
                         // Shown dismissed warnings are dimmed (rows are rebuilt when that changes).
                         grid.LoadingRow.Add(fun e ->
                             e.Row.Opacity <-
@@ -1096,12 +1127,11 @@ module private MainView =
                             )
                         ]
                     ]
-                    DataGrid.items rows
-                    DataGrid.selectedIndex (
-                        match selectedRow.Current with
-                        | Some selected -> rows |> List.tryFindIndex (fun row -> obj.ReferenceEquals(row, selected)) |> Option.defaultValue -1
-                        | None -> -1
-                    )
+                    DataGrid.items (groupedRows rows)
+                    // By item: grouping orders them by rule.
+                    match selectedRow.Current with
+                    | Some row -> AttrBuilder<DataGrid>.CreateProperty<objnull>(DataGrid.SelectedItemProperty, box row, ValueNone)
+                    | None -> DataGrid.selectedIndex -1
                 ]
 
             /// What the details pane says when no finding is selected: how to start, in an empty window;
@@ -1487,6 +1517,13 @@ type MainWindow(shell: DocumentShell) as this =
         let headerStyle = Style(fun selector -> selector.OfType<DataGridColumnHeader>())
         headerStyle.Setters.Add(Setter(DataGridColumnHeader.FontSizeProperty, 12.0))
         this.Styles.Add headerStyle
+        // A group of findings is headed by its rule and how many there are, not "Rule:".
+        let groupStyle = Style(fun selector -> selector.OfType<DataGridRowGroupHeader>())
+        groupStyle.Setters.Add(Setter(DataGridRowGroupHeader.IsPropertyNameVisibleProperty, false))
+        // The count leads the header's text instead (see RuleViolationRow.Rule).
+        groupStyle.Setters.Add(Setter(DataGridRowGroupHeader.IsItemCountVisibleProperty, false))
+        groupStyle.Setters.Add(Setter(DataGridRowGroupHeader.FontSizeProperty, 12.0))
+        this.Styles.Add groupStyle
         let openElsewhere path changed =
             task {
                 let! window, report = MainWindow.Open(shell, path, this, changed)

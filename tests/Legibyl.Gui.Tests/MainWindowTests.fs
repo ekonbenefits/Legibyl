@@ -84,6 +84,7 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
 let ``findings that can't be fixed show no fix icon or details`` () =
     onUiThread (fun () ->
         let window = openSample "pages-clipped-paragraphs.pdf"
+        HeadlessWindow.expandGroups window
         let rows = descendants<DataGridRow> (HeadlessWindow.resultsGrid window)
         // The first row is untagged content, which no fix addresses.
         let firstRow = rows |> List.find (fun row -> row.GetIndex() = 0)
@@ -132,3 +133,19 @@ let ``a failure no auto fix repairs says what it means, and what to do`` () =
         shown |> should contain "What it means"
         shown |> should contain "What to do"
         details |> List.exists (fun t -> t.StartsWith "Something marked as decoration") |> should be True)
+
+[<Fact>]
+let ``findings are grouped by rule, the count first, a rule found many times collapsed`` () =
+    onUiThread (fun () ->
+        let window = openSample "pages-clipped-paragraphs.pdf"
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 1.0) (fun () -> false) |> ignore
+        let grid = HeadlessWindow.resultsGrid window
+        let keys =
+            descendants<DataGridRowGroupHeader> grid
+            |> List.choose (fun h -> match h.DataContext with :? Avalonia.Collections.DataGridCollectionViewGroup as g -> Some(string g.Key, g.ItemCount) | _ -> None)
+        let findings = grid.ItemsSource |> Seq.cast<obj> |> Seq.length
+        let rowsShown = descendants<DataGridRow> grid |> List.filter _.IsVisible |> List.length
+        window.Close()
+
+        keys |> List.exists (fun (key, count) -> count > 3 && key.StartsWith $"{count} × 7.1-3: ") |> should be True
+        rowsShown |> should be (lessThan findings))

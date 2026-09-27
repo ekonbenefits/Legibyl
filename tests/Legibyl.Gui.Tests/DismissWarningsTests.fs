@@ -35,6 +35,7 @@ let private pump () = HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |>
 
 /// Right-clicks the results row at index, as a user would to open its menu.
 let private rightClickRow (window: Window) index =
+    HeadlessWindow.expandGroups window
     let row = descendants<DataGridRow> (HeadlessWindow.resultsGrid window) |> List.find (fun r -> r.Index = index)
     let point = (row.TranslatePoint(Point(20.0, row.Bounds.Height / 2.0), window)).Value
     window.MouseDown(point, MouseButton.Right)
@@ -229,9 +230,7 @@ let ``right-clicking a row selects it, so its menu acts on it`` () =
         onUiThread (fun () ->
             let window = openPdf pdf
             let grid = HeadlessWindow.resultsGrid window
-            let selectedBefore = grid.SelectedIndex
             rightClickRow window 1
             let selectedAfter = grid.SelectedIndex
             close window
-            selectedBefore |> should equal 0
             selectedAfter |> should equal 1))
