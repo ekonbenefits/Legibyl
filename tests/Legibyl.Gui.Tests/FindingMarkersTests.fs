@@ -77,6 +77,22 @@ let ``each finding goes on the smallest element that holds its region`` () =
     placed.Count |> should equal 2
 
 [<Fact>]
+let ``a finding with no region goes on the element its location names: a figure that draws nothing`` () =
+    let empty = node "Figure" null []
+    let tree = node "StructTreeRoot" null [ node "Document" null [ section; empty ] ]
+    let at (context: string) =
+        { finding FindingSeverity.Failure "7.3" null "figure (Figure)" with LocationContext = context }
+    let noAlt = at "root/document[0]/StructTreeRoot[0](31 0 obj PDStructTreeRoot)/K[0](30 0 obj SEDocument Document)/K[1](49 0 obj SEFigure Figure)"
+    // No such element; and a path that's not to an element, but to a page's content.
+    let missing = at "root/document[0]/StructTreeRoot[0](31 0 obj PDStructTreeRoot)/K[0](30 0 obj SEDocument Document)/K[7](50 0 obj SEFigure Figure)"
+    let content = at "root/document[0]/pages[0](1 0 obj PDPage)/contentStream[0](4 0 obj PDContentStream)/content[3]"
+
+    let placed = FindingMarkers.place tree [ noAlt; missing; content ]
+
+    placed[empty] |> should equal [ noAlt ]
+    placed.Count |> should equal 1
+
+[<Fact>]
 let ``a block's failures come before its warnings`` () =
     let warning = finding FindingSeverity.Warning "7.3" (rect (72.0, 550.0, 172.0, 650.0)) null
     let failure = finding FindingSeverity.Failure "7.3" (rect (72.0, 550.0, 172.0, 650.0)) null

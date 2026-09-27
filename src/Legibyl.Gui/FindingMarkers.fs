@@ -4,6 +4,7 @@
 module Legibyl.Gui.FindingMarkers
 
 open System.Collections.Generic
+open System.Text.RegularExpressions
 open Legibyl.Validation
 
 /// The findings to mark, and how to show one in the main window's results.
@@ -37,10 +38,32 @@ let private coverage (box: StructureGeometry) (region: StructureGeometry) =
 let private aboutUntagged (finding: RuleViolation) =
     finding.Element |> Option.ofObj |> Option.exists (fun e -> e.StartsWith("content not in the tags", System.StringComparison.Ordinal))
 
+/// veraPDF's path to a structure element ("root/document[0]/StructTreeRoot[0](…)/K[0](…)/K[11](49 0
+/// obj SEFigure Figure)"): each element's index among its parent's elements, from the root's.
+let private elementPattern =
+    Regex(@"^root/document\[0\]/StructTreeRoot\[0\](?:\([^)]*\))?((?:/K\[\d+\](?:\([^)]*\))?)+)$", RegexOptions.Compiled)
+
+/// The element a finding's location names, if it names one there: for one with nowhere on a page
+/// (a figure that draws nothing, say), so it's marked all the same.
+let private elementNamed (root: StructureNode) (finding: RuleViolation) : StructureNode option =
+    match finding.LocationContext with
+    | NonNull context ->
+        let path = elementPattern.Match context
+        if not path.Success then None
+        else
+            Regex.Matches(path.Groups[1].Value, @"/K\[(\d+)\]")
+            |> Seq.map (fun m -> int m.Groups[1].Value)
+            |> Seq.fold
+                (fun (node: StructureNode option) index ->
+                    node |> Option.bind (fun node -> if index < node.Children.Count then Some node.Children[index] else None))
+                (Some root)
+    | Null -> None
+
 /// The findings on each block, failures first: each on the smallest element whose region holds
 /// most of the finding's (a figure's own, rather than the section it's in); one about content
-/// not in the tags, on the piece drawn outside them there. Those on no block (document-wide,
-/// like the metadata) are left out: the main window's results list them.
+/// not in the tags, on the piece drawn outside them there; one with no region, on the element its
+/// location names. Those on no block (document-wide, like the metadata) are left out: the main
+/// window's results list them.
 let place (root: StructureNode) (findings: RuleViolation list) : IReadOnlyDictionary<StructureNode, RuleViolation list> =
     let rec all (node: StructureNode) : StructureNode seq =
         seq {
@@ -59,7 +82,7 @@ let place (root: StructureNode) (findings: RuleViolation list) : IReadOnlyDictio
                 |> List.filter (fun n -> (n.Tag = "Untagged") = untagged && coverage (nonNull n.Geometry) region >= 0.5)
                 |> List.sortBy (fun n -> area (nonNull n.Geometry))
                 |> List.tryHead
-            | Null -> None
+            | Null -> elementNamed root finding
         match target with
         | Some node ->
             let existing = match onNodes.TryGetValue node with | true, list -> list | _ -> []
