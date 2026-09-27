@@ -210,8 +210,6 @@ module internal VeraPdf =
                                            | reference -> yield reference.GetObjNumber() ]
                          | _ -> Set.empty)
                 let languageUndeclared = not (DocumentLanguage.isDeclared document)
-                // Findings about a figure that draws nothing go away with it.
-                let emptyFigures = lazy (EmptyFigures.objectNumbers document context)
                 let fixOptionsFor (assertion: RuleViolation) =
                     let isIn (numbers: Lazy<Set<int>>) =
                         match assertion.Location with
@@ -269,7 +267,6 @@ module internal VeraPdf =
                                 options ||| PdfFixOptions.ParentTree
                             | _ -> options
                         | _ -> options
-                    let options = if isIn emptyFigures then options ||| PdfFixOptions.RemoveEmptyFigures else options
                     // Every "natural language ... shall be determined" rule falls back on /Lang.
                     if languageUndeclared && assertion.Message.Contains("Natural language", StringComparison.OrdinalIgnoreCase) then
                         options ||| PdfFixOptions.LanguageFromText

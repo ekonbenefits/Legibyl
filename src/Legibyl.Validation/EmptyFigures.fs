@@ -85,14 +85,6 @@ let visits (document: PdfDocument) context : StructElemVisit list =
 /// The figures that draw nothing (see visits).
 let find (document: PdfDocument) context : PdfDictionary list = visits document context |> List.map _.Element
 
-/// Their object numbers, to mark the findings about them fixable.
-let objectNumbers (document: PdfDocument) context : Set<int> =
-    set
-        [ for element in find document context do
-              match element.GetIndirectReference() with
-              | null -> ()
-              | reference -> yield reference.GetObjNumber() ]
-
 /// Takes each figure that draws nothing out of its parent's /K.
 let remove (document: PdfDocument) context : string list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot, find document context with
