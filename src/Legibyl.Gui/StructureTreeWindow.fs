@@ -766,7 +766,7 @@ module private StructureView =
             /// only warnings, and how many.
             let markerFor (node: StructureNode) =
                 let rec findingsIn (node: StructureNode) : RuleViolation list =
-                    (match placed.OnNodes.TryGetValue node with | true, found -> found | _ -> [])
+                    (match placed.TryGetValue node with | true, found -> found | _ -> [])
                     @ [ for child in node.Children do yield! findingsIn child ]
                 match findingsIn node with
                 | [] -> None
@@ -1020,7 +1020,7 @@ module private StructureView =
                   Edit = editNode
                   Suggested = isSuggested
                   Expanded = expanded
-                  Findings = placed.OnNodes
+                  Findings = placed
                   ShowFinding = findings.Show }
 
             // For a suggested layout: how many pages are found, and the titles of the pages its QR
@@ -1156,44 +1156,19 @@ module private StructureView =
                         // Its own component, so preview updates don't re-render (and re-diff) the layout.
                         Component.create("structure-layout", fun ctx ->
                             let root = ctx.usePassedRead root
-                            DockPanel.create [
-                                DockPanel.children [
-                                    // Findings no block is marked with: they're in the main window's results.
-                                    match placed.Elsewhere with
-                                    | [] -> ()
-                                    | elsewhere ->
-                                        let failures = elsewhere |> List.filter (fun f -> f.Severity = FindingSeverity.Failure) |> List.length
-                                        let warnings = elsewhere.Length - failures
-                                        let count (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
-                                        let what =
-                                            [ if failures > 0 then count failures "failure"
-                                              if warnings > 0 then count warnings "warning" ]
-                                            |> String.concat " and "
-                                        let verb = if elsewhere.Length = 1 then "isn't" else "aren't"
-                                        TextBlock.create [
-                                            DockPanel.dock Dock.Top
-                                            TextBlock.text
-                                                $"{what} {verb} on a block here: document-wide (like the metadata or the title), or on content not in the tags. The main window's results list them."
-                                            TextBlock.textWrapping TextWrapping.Wrap
-                                            TextBlock.fontSize 12.0
-                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                            TextBlock.margin (8.0, 6.0, 8.0, 6.0)
+                            ScrollViewer.create [
+                                ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
+                                ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                                Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
+                                ScrollViewer.content (
+                                    StackPanel.create [
+                                        StackPanel.margin 8.0
+                                        StackPanel.children [
+                                            let levels = levelsWithinBudget root.Current.Children
+                                            for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
                                         ]
-                                    ScrollViewer.create [
-                                        ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
-                                        ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
-                                        Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
-                                        ScrollViewer.content (
-                                            StackPanel.create [
-                                                StackPanel.margin 8.0
-                                                StackPanel.children [
-                                                    let levels = levelsWithinBudget root.Current.Children
-                                                    for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
-                                                ]
-                                            ]
-                                        )
                                     ]
-                                ]
+                                )
                             ])
                         GridSplitter.create [
                             Grid.column 1

@@ -17,12 +17,6 @@ type Findings =
 /// the untagged file, not the suggested blocks).
 let none = { Items = []; Show = ignore }
 
-/// Where the findings are: those on each block (failures first), by node, and the rest.
-type Placed =
-    { OnNodes: IReadOnlyDictionary<StructureNode, RuleViolation list>
-      /// Document-wide (metadata, the title), on content not in the tags, or not placed on a block.
-      Elsewhere: RuleViolation list }
-
 let private area (g: StructureGeometry) = max 0.0 (g.Right - g.Left) * max 0.0 (g.Top - g.Bottom)
 
 /// How much of region lies in box, 0 to 1; for a region with no area, whether its centre does.
@@ -44,9 +38,11 @@ let private aboutAnElement (finding: RuleViolation) =
     not (isNull finding.Geometry)
     && not (finding.Element |> Option.ofObj |> Option.exists (fun e -> e.StartsWith("content not in the tags", System.StringComparison.Ordinal)))
 
-/// Puts each finding on the smallest element whose region holds most of the finding's (a
-/// figure's own, rather than the section it's in).
-let place (root: StructureNode) (findings: RuleViolation list) : Placed =
+/// The findings on each block, failures first: each on the smallest element whose region holds
+/// most of the finding's (a figure's own, rather than the section it's in). Those on no block
+/// (document-wide, like the metadata, or on content not in the tags) are left out: the main
+/// window's results list them.
+let place (root: StructureNode) (findings: RuleViolation list) : IReadOnlyDictionary<StructureNode, RuleViolation list> =
     let rec all (node: StructureNode) : StructureNode seq =
         seq {
             for child in node.Children do
@@ -55,7 +51,6 @@ let place (root: StructureNode) (findings: RuleViolation list) : Placed =
         }
     let nodes = all root |> Seq.filter (fun n -> not (isNull n.Geometry)) |> List.ofSeq
     let onNodes = Dictionary<StructureNode, RuleViolation list>(HashIdentity.Reference)
-    let elsewhere = ResizeArray<RuleViolation>()
     for finding in findings do
         let target =
             if aboutAnElement finding then
@@ -70,7 +65,7 @@ let place (root: StructureNode) (findings: RuleViolation list) : Placed =
         | Some node ->
             let existing = match onNodes.TryGetValue node with | true, list -> list | _ -> []
             onNodes[node] <- existing @ [ finding ]
-        | None -> elsewhere.Add finding
+        | None -> ()
     for node in List.ofSeq onNodes.Keys do
         onNodes[node] <- onNodes[node] |> List.sortBy (fun f -> if f.Severity = FindingSeverity.Failure then 0 else 1)
-    { OnNodes = onNodes; Elsewhere = List.ofSeq elsewhere }
+    onNodes

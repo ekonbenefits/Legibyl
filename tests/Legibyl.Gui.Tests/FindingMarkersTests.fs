@@ -70,19 +70,17 @@ let ``each finding goes on the smallest element that holds its region`` () =
 
     let placed = FindingMarkers.place root [ linkWarning; noAlt; untagged; metadata ]
 
-    placed.OnNodes[figure] |> should equal [ noAlt ]
+    placed[figure] |> should equal [ noAlt ]
     // Inside the paragraph, but the link's own.
-    placed.OnNodes[link] |> should equal [ linkWarning ]
-    placed.OnNodes.ContainsKey paragraph |> should be False
-    placed.OnNodes.ContainsKey section |> should be False
+    placed[link] |> should equal [ linkWarning ]
     // Document-wide, or content in no element: not on a block.
-    placed.Elsewhere |> should equal [ untagged; metadata ]
+    placed.Count |> should equal 2
 
 [<Fact>]
 let ``a block's failures come before its warnings`` () =
     let warning = finding FindingSeverity.Warning "7.3" (rect (72.0, 550.0, 172.0, 650.0)) null
     let failure = finding FindingSeverity.Failure "7.3" (rect (72.0, 550.0, 172.0, 650.0)) null
-    (FindingMarkers.place root [ warning; failure ]).OnNodes[figure] |> should equal [ failure; warning ]
+    (FindingMarkers.place root [ warning; failure ])[figure] |> should equal [ failure; warning ]
 
 let private descendants<'T when 'T :> Visual> (root: Visual) : 'T list =
     root.GetVisualDescendants() |> Seq.choose (fun v -> match box v with :? 'T as c -> Some c | _ -> None) |> List.ofSeq
@@ -154,7 +152,6 @@ let ``a tagged PDF's Structure window marks the blocks with failures, and a mark
             let markedTags = marked |> List.map (fun m -> (blockOf m).Tag)
             let figureMarker = marked |> List.find (fun m -> (blockOf m).Tag = "Figure")
             let tip = string (ToolTip.GetTip figureMarker)
-            let texts = descendants<TextBlock> structureWindow |> List.map (fun t -> string t.Text)
             // Clicking it selects the finding in the main window's results.
             click figureMarker
             let grid = HeadlessWindow.resultsGrid window
@@ -167,8 +164,6 @@ let ``a tagged PDF's Structure window marks the blocks with failures, and a mark
             tip |> should haveSubstring "Failure: ISO 14289-1 7.3, test 1"
             // What it means, from the rule guide.
             tip |> should haveSubstring "a screen reader can only say it's an image"
-            // The document-wide failures (metadata, the title) aren't on a block.
-            texts |> List.exists (fun t -> t.Contains "on a block here: document-wide") |> should be True
             chosen |> should equal (Some("7.3", 1))))
 
 [<Fact>]
@@ -216,11 +211,9 @@ let ``a suggested structure has no markers: its findings are the untagged file's
             window.Show()
             pump ()
             let shownMarkers = markers window
-            let texts = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
             window.Close()
 
             shownMarkers |> should be Empty
-            texts |> List.exists (fun t -> t.Contains "on a block here") |> should be False
         finally
             Directory.Delete(folder, true))
 
