@@ -553,7 +553,7 @@ let private comparison (before: ValidationReport) (after: ValidationReport) : IV
     let rows =
         [ count "Failed checks" before.FailedCount after.FailedCount
           count "Warnings" before.WarningCount after.WarningCount
-          $"Compliant with {after.FlavourId.ToUpperInvariant()}",
+          $"Compliant with {PdfUaTarget.displayNameOfFlavour after.FlavourId}",
           yesNo before.IsCompliant,
           yesNo after.IsCompliant,
           (if after.IsCompliant = before.IsCompliant then None else Some after.IsCompliant) ]
