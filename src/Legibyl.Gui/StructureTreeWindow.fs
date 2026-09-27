@@ -254,36 +254,39 @@ module private StructureView =
         | null -> None
         | geometry -> RegionEdits.find edits geometry.PageNumber node.Tag geometry
 
-    /// For a paragraph: how it's in a merge the user chose, if it is (merges are only ever not in
-    /// the PDF yet where the paragraphs are still apart, as they are wherever a block shows them).
+    /// For a paragraph or figure: how it's in a merge the user chose, if it is (merges are only
+    /// ever not in the PDF yet where they're still apart, as they are wherever a block shows them).
     let mergeLine (edits: RegionEdits.Edit list) (node: StructureNode) =
         match node.Geometry with
-        | NonNull box when node.Tag = "P" ->
+        | NonNull box when node.Tag = "P" || node.Tag = "Figure" ->
+            let noun = if node.Tag = "P" then "paragraph" else "figure"
             match RegionEdits.findMerge edits box.PageNumber box with
             | Some merge ->
                 let others = merge.MergeWith.Length
-                Some(if others = 1 then "✎ merged with the next paragraph, not in the PDF yet" else $"✎ merged with the next {others} paragraphs, not in the PDF yet")
+                Some(if others = 1 then $"✎ merged with the next {noun}, not in the PDF yet" else $"✎ merged with the next {others} {noun}s, not in the PDF yet")
             | None ->
                 let merged =
                     edits
                     |> List.exists (fun e ->
                         e.Page = box.PageNumber && e.MergeWith |> List.exists (fun other -> RegionEdits.overlap other box >= RegionEdits.SameRegionOverlap))
-                if merged then Some "✎ merged into the paragraph before, not in the PDF yet" else None
+                if merged then Some $"✎ merged into the {noun} before, not in the PDF yet" else None
         | _ -> None
 
-    /// The selected blocks, if they're paragraphs that can be merged: two or more on one page,
-    /// none with alt text or replacement text (merging would lose them).
+    /// The selected blocks, if they're paragraphs or figures that can be merged: two or more of
+    /// one of them on one page. Paragraphs with no alt text or replacement text (merging would lose
+    /// it); figures with none, or all the same (a picture drawn in pieces).
     let mergeable (nodes: StructureNode list) =
         match nodes with
         | first :: _ :: _ when
-            nodes
-            |> List.forall (fun n ->
-                n.Tag = "P"
-                && isNull n.AlternateDescription
-                && isNull n.ActualText
-                && (match n.Geometry, first.Geometry with
-                    | NonNull box, NonNull firstBox -> box.PageNumber = firstBox.PageNumber
-                    | _ -> false))
+            (first.Tag = "P" || first.Tag = "Figure")
+            && nodes
+               |> List.forall (fun n ->
+                   n.Tag = first.Tag
+                   && isNull n.ActualText
+                   && (if n.Tag = "P" then isNull n.AlternateDescription else n.AlternateDescription = first.AlternateDescription)
+                   && (match n.Geometry, first.Geometry with
+                       | NonNull box, NonNull firstBox -> box.PageNumber = firstBox.PageNumber
+                       | _ -> false))
             ->
             Some nodes
         | _ -> None
@@ -1345,7 +1348,7 @@ module private StructureView =
                                             SubPatchOptions.Always
                                         )
                                     ]
-                                // Merging is for a tagged PDF's paragraphs.
+                                // Merging is for a tagged PDF's paragraphs, and figures drawn in pieces.
                                 let mergeable nodes = if isSuggested then None else mergeable nodes
                                 let pendingMerge =
                                     match mergeable selected.Current with
@@ -1359,21 +1362,25 @@ module private StructureView =
                                     Button.create [
                                         Button.content "Don't Merge These"
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
-                                        ToolTip.tip "Drop this merge: they stay separate paragraphs."
+                                        ToolTip.tip "Drop this merge: they stay separate."
                                         Button.onClick (
                                             (fun _ -> saveEdits (edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore),
                                             SubPatchOptions.Always
                                         )
                                     ]
-                                | Some paragraphs, None ->
+                                | Some nodes, None ->
+                                    let figures = nodes.Head.Tag = "Figure"
                                     Button.create [
-                                        Button.content $"Merge {paragraphs.Length} Paragraphs"
+                                        Button.content (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs")
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
-                                        ToolTip.tip "Make these paragraphs one."
+                                        ToolTip.tip (
+                                            if figures then "Make these one figure: a picture drawn in pieces. Then give the first alt text, or Not Read, for all of them."
+                                            else "Make these paragraphs one."
+                                        )
                                         Button.onClick (
                                             (fun _ ->
-                                                let boxes = paragraphs |> List.map (fun p -> nonNull p.Geometry)
-                                                saveEdits (RegionEdits.mergeParagraphs edits.Current boxes.Head.PageNumber boxes) |> ignore),
+                                                let boxes = nodes |> List.map (fun p -> nonNull p.Geometry)
+                                                saveEdits (RegionEdits.mergeElements edits.Current boxes.Head.PageNumber nodes.Head.Tag boxes) |> ignore),
                                             SubPatchOptions.Always
                                         )
                                     ]
@@ -1476,11 +1483,12 @@ module private StructureView =
                     /// which is read-only.
                     let row (carried: bool) (edit: RegionEdits.Edit) =
                         // A paragraph in about this place, if there is one.
+                        // An element with the edit's tag (a paragraph, or a figure) in about that place.
                         let paragraphAt (box: StructureGeometry) =
                             allNodes
                             |> List.exists (fun node ->
                                 match node.Geometry with
-                                | NonNull own when node.Tag = "P" && own.PageNumber = edit.Page ->
+                                | NonNull own when node.Tag = edit.Tag && own.PageNumber = edit.Page ->
                                     RegionEdits.overlap own box >= RegionEdits.SameRegionOverlap
                                 | _ -> false)
                         let status =
@@ -1502,6 +1510,7 @@ module private StructureView =
                                         Top = boxes |> List.map _.Top |> List.max }
                                 if boxes |> List.forall paragraphAt then "Not in this PDF yet: Export… writes it to a copy."
                                 elif paragraphAt all then "In this PDF."
+                                else if edit.Tag = "Figure" then "These figures aren't in this PDF, so Save can't merge them."
                                 else "These paragraphs aren't in this PDF, so Save can't merge them."
                             else
                                 match elementFor edit with
@@ -1549,7 +1558,8 @@ module private StructureView =
                                                             let text = text.Trim()
                                                             if text.Length > 50 then $", from \"{text[..49]}…\"" else $", from \"{text}\"")
                                                         |> Option.defaultValue ""
-                                                    detailLine $"merge: {edit.MergeWith.Length + 1} paragraphs into one{start}" false
+                                                    let noun = if edit.Tag = "Figure" then "figures" else "paragraphs"
+                                                    detailLine $"merge: {edit.MergeWith.Length + 1} {noun} into one{start}" false
                                                 detailLine status true
                                             ]
                                         ]
@@ -1583,7 +1593,7 @@ module private StructureView =
                                             elif isSuggested then
                                                 $"Your edits on the suggested structure. Save in the main window keeps them in {file} next to the PDF; Export… tags a copy with the layout and them."
                                             elif edits.Current.IsEmpty then
-                                                "No edits yet. In the Blocks tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs to merge them."
+                                                "No edits yet. In the Blocks tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs (or figures drawn in pieces) to merge them; select a figure that's only decoration to mark it Not Read."
                                             else
                                                 $"Your edits. Save in the main window keeps them in {file} next to the PDF; Export… writes the ones not in it yet to a copy."
                                         )

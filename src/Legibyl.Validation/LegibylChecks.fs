@@ -206,6 +206,22 @@ let private parentTreeFindings (document: PdfDocument) context =
             |> String.concat " "
         [ warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null ]
 
+// ---- Structure-10: a picture tagged in pieces, as many small figures (see SplitFigures) ----
+
+[<Literal>]
+let private SplitFiguresMessage =
+    "Small figures side by side look like one picture drawn in pieces: a screen reader announces each, and each needs alt text. In Structure…, shift-click them and Merge them into one, then describe it once, or mark it Not Read if it's decoration."
+
+let private splitFigureFindings (document: PdfDocument) context =
+    [ for run in SplitFigures.find document context ->
+          warning
+              SplitFiguresMessage
+              $"{run.Join.Indexes.Length} figures side by side on page {run.Join.Page}."
+              run.Path
+              10
+              PdfFixOptions.None
+              run.Box ]
+
 /// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
@@ -221,6 +237,7 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! parentTreeFindings document context
           yield! tocHeadingFindings document context
           yield! paragraphListFindings document context
+          yield! splitFigureFindings document context
           yield! missingBookmarkFindings document context ]
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

@@ -403,3 +403,40 @@ let ``a tagged PDF's figure's alt text prompt suggests Not Read for decoration``
             window.Close()
 
             said |> List.exists (fun t -> t.Contains "use Not Read (Artifact) instead") |> should be True))
+
+/// Two small figures side by side, the second with alt text if given.
+let private twoFigures (secondAlt: string | null) =
+    node "StructTreeRoot" null [
+        node "Document" null [
+            node "Figure" (rect 72.0 60.0 81.0 71.0) []
+            { node "Figure" (rect 82.0 60.0 91.0 71.0) [] with AlternateDescription = secondAlt }
+        ]
+    ]
+
+[<Fact>]
+let ``neighbouring figures can be merged as an edit, but not ones described differently`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let figureBlocks (window: Window) =
+                descendants<Border> window |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "Figure" | _ -> false)
+            let window = show (twoFigures null) pdf
+            let blocks = figureBlocks window
+            click blocks[0] false
+            click blocks[1] true
+            let mergeButton = descendants<Button> window |> List.tryFind (fun b -> string b.Content = "Merge 2 Figures")
+            mergeButton.Value.RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let recorded = window.Review.Edits |> List.map (fun e -> e.Tag, e.MergeWith.Length)
+            let line = texts window |> List.exists (fun t -> t = "✎ merged with the next figure, not in the PDF yet")
+            window.Close()
+
+            let described = show (twoFigures "A pencil") pdf
+            let blocks = figureBlocks described
+            click blocks[0] false
+            click blocks[1] true
+            let offered = descendants<Button> described |> List.exists (fun b -> (string b.Content).StartsWith "Merge ")
+            described.Close()
+
+            recorded |> should equal [ "Figure", 1 ]
+            line |> should be True
+            offered |> should be False))

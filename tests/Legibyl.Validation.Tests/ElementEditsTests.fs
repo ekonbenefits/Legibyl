@@ -59,7 +59,7 @@ let ``an edit is written to the element with its tag in about the same place`` (
 
     let result = applyEdits input.Path output.Path [ altEdit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
     figureAlt output.Path |> should equal "Tomato seedlings in a tray"
 
 [<Fact>]
@@ -96,7 +96,7 @@ let ``an edit with no element in about the same place isn't applied, and says so
 
     let result = applyEdits input.Path output.Path [ altEdit; elsewhere ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
     // Each edit that isn't applied is named, with why.
     result.NotApplied
     |> should
@@ -145,7 +145,7 @@ let ``paragraphs chosen to merge are joined into the first`` () =
 
     let result = applyEdits input.Path output.Path [ edit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
     paragraphTexts output.Path |> List.map (fun t -> t.Replace("  ", " "))
     |> should equal [ "Plots are assigned each spring, and members share the tools kept in the shed by the gate." ]
     ElementEdits.pending output.Path [ edit ] |> should equal 0
@@ -276,7 +276,7 @@ let ``a figure made not read leaves the tags, and its content is an artifact, st
 
     let result = applyEdits input.Path output.Path [ notReadEdit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
     let tags = VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.map _.Tag
     tags |> should not' (contain "Figure")
     tags |> should contain "P"
