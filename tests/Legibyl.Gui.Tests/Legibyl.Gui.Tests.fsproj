@@ -15,6 +15,7 @@
     <!-- Shared with the screenshot tool: drives MainWindow on Avalonia's headless platform. -->
     <Compile Include="..\..\tools\Legibyl.Screenshots\HeadlessWindow.fs" Link="HeadlessWindow.fs" />
     <Compile Include="HeadlessSession.fs" />
+    <Compile Include="Reviews.fs" />
     <Compile Include="MainWindowTests.fs" />
     <Compile Include="StructureTreeWindowTests.fs" />
     <Compile Include="StructureEditsTests.fs" />

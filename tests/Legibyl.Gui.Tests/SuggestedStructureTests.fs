@@ -48,7 +48,7 @@ let private block order tag bounds text : SuggestedBlock =
 /// A review of pdf with its first page's layout found already (so no model is needed): a
 /// heading and a paragraph with a link in it.
 let private reviewOf (pdf: string) =
-    let review = LayoutReview(File.GetLastWriteTimeUtc pdf)
+    let review = DocumentReview(File.GetLastWriteTimeUtc pdf)
     review.Pages[1] <-
         { PageNumber = 1
           Blocks = [ block 1 "H" (72.0, 715.0, 300.0, 735.0) "Hello"; block 2 "P" (72.0, 600.0, 400.0, 700.0) "Apply online today." ]
@@ -57,8 +57,8 @@ let private reviewOf (pdf: string) =
     review.WebLinks <- [ { Page = 1; Box = box (100.0, 640.0, 200.0, 655.0); Address = "https://example.com/apply" } ]
     review
 
-let private show (pdf: string) (review: LayoutReview) =
-    let window = StructureTreeWindow(Suggested review, pdf, ignore)
+let private show (pdf: string) (review: DocumentReview) =
+    let window = StructureTreeWindow(Suggested, pdf, review, ignore)
     window.Show()
     pump ()
     window
@@ -78,7 +78,7 @@ let private select (block: Border) =
 
 [<Fact>]
 let ``a page's suggestions are elements: list items in a list, links in the region they're in`` () =
-    let review = LayoutReview(DateTime.UtcNow)
+    let review = DocumentReview(DateTime.UtcNow)
     review.WebLinks <- [ { Page = 1; Box = box (100.0, 640.0, 200.0, 655.0); Address = "https://example.com/apply" } ]
     review.Titles <- Map [ "https://example.com/apply", "Apply" ]
     let page =
@@ -141,6 +141,8 @@ let ``a region can be left out and kept again, as an edit tagging takes`` () =
             click (button window "Leave Out")
             pump ()
             let leftOut = texts window
+            let unsaved = review.IsEdited && not (File.Exists(pdf + ".legibyl.json"))
+            review.Save pdf
             let saved = File.ReadAllText(pdf + ".legibyl.json")
             use suggester = new LayoutSuggester(pdf)
             let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> IPageLayoutSource).PageRegions(pdf, 1)
@@ -151,7 +153,8 @@ let ``a region can be left out and kept again, as an edit tagging takes`` () =
             window.Close()
 
             leftOut |> should contain "✎ left out: not tagged (its text joins the nearest region kept)"
-            // With the layout the edit is on.
+            // Kept only once saved, with the layout the edit is on.
+            unsaved |> should be True
             saved |> should haveSubstring "\"exclude\": true"
             saved |> should haveSubstring "\"layout\""
             tagged |> should equal [ "P" ]
@@ -170,11 +173,12 @@ let ``a region can be given any suggested tag, which is kept and tagged`` () =
             pump ()
             let shown = texts window
             window.Close()
+            review.Save pdf
 
             choices |> should equal LayoutFile.tags
             shown |> should contain "✎ your tag: \"Note\""
-            // An edit on the suggestion, which stays as found; a new session has it.
-            let later = LayoutReviews().For pdf
+            // An edit on the suggestion, which stays as found; once saved, a new session has it.
+            let later = DocumentReviews().For pdf
             later.Pages[1].Blocks[1].Tag |> should equal "P"
             later.Edits |> List.map (fun e -> e.Tag, e.Retag) |> should equal [ "P", Some "Note" ]))
 
@@ -204,21 +208,22 @@ let ``a web link's description is an edit, which tagging writes`` () =
 let ``reopening keeps what was found and left out`` () =
     withUntaggedPdf (fun pdf ->
         onUiThread (fun () ->
-            let reviews = LayoutReviews()
+            let reviews = DocumentReviews()
             let review = reviews.For pdf
             for KeyValue(page, found) in reviewOf pdf |> _.Pages do review.Pages[page] <- found
             let window = show pdf review
             select (blockFor window "H")
             click (button window "Leave Out")
             window.Close()
+            review.Save pdf
 
             // A new session: the layout and the edit come back from the file next to the PDF.
-            let later = LayoutReviews().For pdf
+            let later = DocumentReviews().For pdf
             later.Pages[1].Blocks |> List.map _.Tag |> should equal [ "H"; "P" ]
             later.Edits |> List.filter _.Exclude |> List.length |> should equal 1))
 
 [<Fact>]
-let ``the document title is prefilled from the document, and only a change is saved`` () =
+let ``the document title is prefilled from the document, and only a change is kept`` () =
     let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
     Directory.CreateDirectory folder |> ignore
     let pdf = Path.Combine(folder, "flyer.pdf")
@@ -228,21 +233,24 @@ let ``the document title is prefilled from the document, and only a change is sa
         document.GetDocumentInfo().SetTitle "Design" |> ignore
     try
         onUiThread (fun () ->
-            let reviews = LayoutReviews()
-            let window = show pdf (reviews.For pdf)
+            let reviews = DocumentReviews()
+            let review = reviews.For pdf
+            let window = show pdf review
             let titleBox () = descendants<TextBox> window |> List.find (fun b -> b.PlaceholderText = "What a screen reader and the title bar call this document")
             let prefilled = titleBox().Text
-            let savedAtFirst = File.Exists(pdf + ".legibyl.json")
+            let editedAtFirst = review.IsEdited
             titleBox().Text <- "Cub Scout Pack 721"
             pump ()
+            review.Save pdf
             let saved = File.ReadAllText(pdf + ".legibyl.json")
             titleBox().Text <- "Design"
             pump ()
+            review.Save pdf
             let removed = not (File.Exists(pdf + ".legibyl.json"))
             window.Close()
 
             prefilled |> should equal "Design"
-            savedAtFirst |> should be False
+            editedAtFirst |> should be False
             saved |> should haveSubstring "\"title\": \"Cub Scout Pack 721\""
             removed |> should be True
             (reviews.For pdf).DocumentTitle |> should equal (Some "Design"))
@@ -268,7 +276,7 @@ let ``the detector's regions are found in the background and fill in the structu
                 |> ignore
     try
         onUiThread (fun () ->
-            let window = show pdf (LayoutReview(File.GetLastWriteTimeUtc pdf))
+            let window = show pdf (DocumentReview(File.GetLastWriteTimeUtc pdf))
             let allFound () = texts window |> List.exists (fun t -> t.StartsWith "Every page's layout found.")
             HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 90.0) allFound |> ignore
             let found = allFound ()
@@ -294,7 +302,7 @@ let ``the reviewed layout leaves out discarded suggestions`` () =
     use suggester = new LayoutSuggester(Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"))
     let prefetcher = LayoutPrefetcher(suggester, Collections.Concurrent.ConcurrentDictionary())
     let all = (prefetcher.Find 1).Blocks
-    let review = LayoutReview(DateTime.UtcNow, Edits = RegionEdits.setExcluded [] 1 all.Head.Tag all.Head.Geometry true)
+    let review = DocumentReview(DateTime.UtcNow, Edits = RegionEdits.setExcluded [] 1 all.Head.Tag all.Head.Geometry true)
     let reviewed = ReviewedLayout(prefetcher, review) :> Legibyl.Validation.IPageLayoutSource
     let regions = reviewed.PageRegions("unused.pdf", 1)
     regions.Count |> should equal (all.Length - 1)

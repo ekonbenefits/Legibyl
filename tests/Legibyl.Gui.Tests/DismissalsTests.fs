@@ -58,23 +58,23 @@ let ``saved dismissals load back`` () =
             Map [ Dismissals.keyOf splitParagraph, splitParagraph.Message
                   Dismissals.ruleKeyOf emptyParagraph, emptyParagraph.Message ]
 
-        Dismissals.save pdf dismissed
+        Reviews.save pdf (fun review -> review.Dismissed <- dismissed)
 
         File.Exists(pdf + ".legibyl.json") |> should be True
-        Dismissals.load pdf |> should equal (Some dismissed))
+        (Reviews.read pdf).Dismissed |> should equal dismissed)
 
 [<Fact>]
 let ``no file or an unreadable one loads as nothing`` () =
     withPdfPath (fun pdf ->
-        Dismissals.load pdf |> should equal None
+        (Reviews.read pdf).Dismissed |> should be Empty
         File.WriteAllText(Dismissals.filePath pdf, "not json")
-        Dismissals.load pdf |> should equal None)
+        (Reviews.read pdf).Dismissed |> should be Empty)
 
 [<Fact>]
-let ``forgetting deletes the file`` () =
+let ``saving a review with nothing in it deletes the file`` () =
     withPdfPath (fun pdf ->
-        Dismissals.save pdf (Map [ Dismissals.keyOf splitParagraph, splitParagraph.Message ])
+        Reviews.save pdf (fun review -> review.Dismissed <- Map [ Dismissals.keyOf splitParagraph, splitParagraph.Message ])
 
-        Dismissals.forget pdf
+        Reviews.save pdf (fun review -> review.Dismissed <- Map.empty)
 
         File.Exists(Dismissals.filePath pdf) |> should be False)

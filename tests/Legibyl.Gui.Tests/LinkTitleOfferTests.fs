@@ -50,7 +50,7 @@ let private withPdf (links: bool) (test: string -> unit) =
     try test pdf finally Directory.Delete(folder, true)
 
 /// Opens the offer, waits for its scan, runs act on it, and returns once it's closed.
-let private runOffer pdf (review: LayoutReview) titles (act: Window -> unit) =
+let private runOffer pdf (review: DocumentReview) titles (act: Window -> unit) =
     let owner = HeadlessWindow.show 800.0 600.0
     let pending = LinkTitleOffer.offer owner pdf review titles
     let dialog () = owner.OwnedWindows |> Seq.tryHead
@@ -70,7 +70,7 @@ let private click (window: Window) (text: string) =
 let ``it lists links and QR codes, and reads the titles of the ticked ones`` () =
     withPdf true (fun pdf ->
         onUiThread (fun () ->
-            let review = LayoutReview(DateTime.UtcNow)
+            let review = DocumentReview(DateTime.UtcNow)
             let titles = FakeTitles(Map [ "https://example.com/apply", "Apply online"; "https://example.com/scan", "Scan me" ])
             let mutable listed = []
             runOffer pdf review titles (fun dialog ->
@@ -90,7 +90,7 @@ let ``it lists links and QR codes, and reads the titles of the ticked ones`` () 
 let ``skipping reads nothing`` () =
     withPdf true (fun pdf ->
         onUiThread (fun () ->
-            let review = LayoutReview(DateTime.UtcNow)
+            let review = DocumentReview(DateTime.UtcNow)
             let titles = FakeTitles(Map [ "https://example.com/apply", "Apply online" ])
             runOffer pdf review titles (fun dialog -> click dialog "Skip")
             review.LinkTitles |> should equal Skipped
@@ -101,12 +101,12 @@ let ``skipping reads nothing`` () =
 let ``a PDF that doesn't link to the web isn't asked about, and an answer isn't asked for again`` () =
     withPdf false (fun pdf ->
         onUiThread (fun () ->
-            let review = LayoutReview(DateTime.UtcNow)
+            let review = DocumentReview(DateTime.UtcNow)
             runOffer pdf review (FakeTitles Map.empty) ignore
             review.LinkTitles |> should equal NotAsked))
     withPdf true (fun pdf ->
         onUiThread (fun () ->
-            let review = LayoutReview(DateTime.UtcNow, LinkTitles = Skipped)
+            let review = DocumentReview(DateTime.UtcNow, LinkTitles = Skipped)
             let owner = HeadlessWindow.show 800.0 600.0
             let pending = LinkTitleOffer.offer owner pdf review (FakeTitles Map.empty)
             let asked = owner.OwnedWindows.Count
@@ -119,7 +119,7 @@ let ``a link is described as prefilled from its page's title, or as edited`` () 
     withPdf true (fun pdf ->
         use suggester = new LayoutSuggester(pdf)
         let link = { Page = 1; Box = { PageNumber = 1; Left = 72.0; Bottom = 700.0; Right = 192.0; Top = 714.0 }; Address = "https://example.com/apply" }
-        let review = LayoutReview(DateTime.UtcNow, WebLinks = [ link ], Titles = Map [ link.Address, "Apply online" ])
+        let review = DocumentReview(DateTime.UtcNow, WebLinks = [ link ], Titles = Map [ link.Address, "Apply online" ])
         let source = ReviewedLayout(LayoutPrefetcher(suggester, Collections.Concurrent.ConcurrentDictionary()), review) :> IPageLayoutSource
         source.LinkDescription(pdf, 1, link.Box) |> should equal "Apply online (example.com)"
         // Only a change from what was prefilled is recorded.

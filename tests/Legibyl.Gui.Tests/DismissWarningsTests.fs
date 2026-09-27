@@ -59,6 +59,13 @@ let private clickButton (window: Window) (text: string) =
     b.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
     pump ()
 
+/// Closes window, not saving its review if it asks.
+let private close (window: Window) =
+    window.Close()
+    pump ()
+    for asked in List.ofSeq window.OwnedWindows do
+        if asked.Title = "Save Your Review?" then clickButton asked "Don't Save"
+
 let private openPdf (pdf: string) =
     let window = HeadlessWindow.show 1200.0 720.0
     HeadlessWindow.openPdf window pdf
@@ -94,27 +101,84 @@ let ``a dismissed warning is hidden, counted, and can be shown and restored`` ()
             rightClickRow window (shown |> List.findIndex _.Dismissed)
             click (menuItem window "Restore warning")
             let restored = rows window
-            window.Close()
+            close window
             restored |> List.exists _.Dismissed |> should be False
             File.Exists(Dismissals.filePath pdf) |> should be False))
 
 [<Fact>]
-let ``remembered dismissals are saved next to the PDF and reloaded`` () =
+let ``dismissals are kept next to the PDF once saved, and reloaded`` () =
     withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
         onUiThread (fun () ->
             let window = openPdf pdf
             let before = rows window
             dismissFirstWarning window
-            click (menuItem window "Remember dismissals")
-            window.Close()
-            File.Exists(Dismissals.filePath pdf) |> should be True
+            let editedTitle = window.Title
+            let canSave = (descendants<Button> window |> List.find (fun b -> string b.Content = "Save")).IsEnabled
+            let unsaved = File.Exists(Dismissals.filePath pdf)
+            clickButton window "Save"
+            let savedTitle = window.Title
+            close window
 
             let reopened = openPdf pdf
             let reloaded = rows reopened
-            let remembering = (menuItem reopened "Remember dismissals").IsChecked
+            close reopened
+
+            editedTitle |> should equal "libreoffice-empty-paragraph.pdf — Edited — Legibyl"
+            canSave |> should be True
+            unsaved |> should be False
+            savedTitle |> should equal "libreoffice-empty-paragraph.pdf — Legibyl"
+            reloaded |> should haveLength (before.Length - 1)))
+
+[<Fact>]
+let ``closing with a dismissal not saved asks, and Don't Save drops it`` () =
+    withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
+        onUiThread (fun () ->
+            let window = openPdf pdf
+            let before = rows window
+            dismissFirstWarning window
+            window.Close()
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 5.0) (fun () -> window.OwnedWindows.Count = 1) |> ignore
+            let asked = window.OwnedWindows |> Seq.exactlyOne
+            let question = asked.Title
+            clickButton asked "Don't Save"
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 5.0) (fun () -> not window.IsVisible) |> ignore
+            let closed = not window.IsVisible
+
+            let reopened = openPdf pdf
+            let reloaded = rows reopened
             reopened.Close()
-            reloaded |> should haveLength (before.Length - 1)
-            remembering |> should be True))
+
+            question |> should equal "Save Your Review?"
+            closed |> should be True
+            File.Exists(Dismissals.filePath pdf) |> should be False
+            reloaded |> should haveLength before.Length))
+
+[<Fact>]
+let ``a warning dismissed in the review inside a saved copy stays dismissed, and can't be restored there`` () =
+    withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
+        onUiThread (fun () ->
+            let window = openPdf pdf
+            dismissFirstWarning window
+            clickButton window "Save"
+            close window
+            // A copy carrying that review, as Export writes one.
+            let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
+            Legibyl.Validation.VeraPdfValidator(Review = (Reviews.read pdf).ForCopy pdf)
+                .Fix(pdf, Legibyl.Validation.PdfProfile.PdfUa1, copy, Legibyl.Validation.PdfFixOptions.Metadata)
+            |> ignore
+
+            let opened = openPdf copy
+            let dismissedThere = texts opened |> List.exists (fun t -> t.Contains "1 dismissed")
+            clickButton opened "Show 1 dismissed"
+            rightClickRow opened (rows opened |> List.findIndex _.Dismissed)
+            let restore = menuItem opened "Restore warning"
+            let header, enabled = string restore.Header, restore.IsEnabled
+            close opened
+
+            dismissedThere |> should be True
+            header |> should equal "Restore warning (dismissed in the review saved inside this PDF)"
+            enabled |> should be False
+            File.Exists(Dismissals.filePath copy) |> should be False))
 
 [<Fact>]
 let ``ignoring a type of warning hides all of them until it's stopped`` () =
@@ -136,7 +200,7 @@ let ``ignoring a type of warning hides all of them until it's stopped`` () =
                 (HeadlessWindow.resultsGrid window).ContextMenu |> nonNull |> _.Items |> Seq.cast<obj> |> Seq.choose (function :? MenuItem as m -> Some(string m.Header) | _ -> None) |> List.ofSeq
             click (menuItem window "Stop ignoring")
             let restored = rows window
-            window.Close()
+            close window
             ignored |> should haveLength (before.Length - 1)
             headers |> should contain $"Stop ignoring {warning.Violation.RuleId} warnings"
             headers |> should not' (contain "Restore warning")
@@ -150,7 +214,7 @@ let ``failures can't be dismissed`` () =
             let window = openPdf pdf
             rightClickRow window (rows window |> List.findIndex (fun r -> r.Severity = "Failure"))
             let dismiss = menuItem window "Dismiss warning"
-            window.Close()
+            close window
             dismiss.IsEnabled |> should be False))
 
 [<Fact>]
@@ -162,6 +226,6 @@ let ``right-clicking a row selects it, so its menu acts on it`` () =
             let selectedBefore = grid.SelectedIndex
             rightClickRow window 1
             let selectedAfter = grid.SelectedIndex
-            window.Close()
+            close window
             selectedBefore |> should equal 0
             selectedAfter |> should equal 1))

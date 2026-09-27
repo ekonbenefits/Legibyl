@@ -73,7 +73,7 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
         anchors |> List.filter (not << isHiddenFromScreenReaders) |> should be Empty
 
         let details = descendants<TextBox> window |> List.map _.Text
-        details |> should contain "Remove empty /P structure elements. Choose it in Auto Fixes…, then Save… a copy of this PDF."
+        details |> should contain "Remove empty /P structure elements. Choose it in Auto Fixes…, then Export… a copy of this PDF."
 
         let preview = descendants<Image> window |> List.tryFind (fun image -> not (isNull image.Source))
         // The selected warning's page preview is shown.

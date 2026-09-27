@@ -231,11 +231,9 @@ Copy Summary/Save Report, and a **Show N dismissed** button beside those shows
 them again, dimmed, so they can be restored. **Ignore all *rule* warnings** in
 the same menu dismisses every warning of that type in the PDF, wherever it is,
 including ones that turn up later; **Stop ignoring** on any of them brings them
-back. Dismissals are kept in memory for
-the open PDF; **Remember dismissals for this PDF** in the same menu saves them
-to `<name>.pdf.legibyl.json` next to it, which is loaded automatically when the
-PDF is opened again (turning it off deletes that file). Failures can't be
-dismissed. The CLI applies their edits with `--edits` (see below).
+back. Dismissals are part of the PDF's review: **Save** keeps them, with your
+edits, in `<name>.pdf.legibyl.json` next to it, which is loaded automatically
+when the PDF is opened again (see Saving below). Failures can't be dismissed. The CLI applies their edits with `--edits` (see below).
 
 ### Terms
 
@@ -250,13 +248,14 @@ dismissed. The CLI applies their edits with `--edits` (see below).
   or leaving a region out. Each names what it's for by its `page`, `tag` and
   `box`, so it still applies after other repairs, or to another version of the
   PDF.
-- **Review**: everything kept for a PDF in `<name>.pdf.legibyl.json` (and inside
-  copies Legibyl saves): dismissed warnings, edits, the layout they're on, and a
-  title.
+- **Review**: everything decided about a PDF: dismissed warnings, edits, the
+  layout they're on, and a title. **Save** keeps it in `<name>.pdf.legibyl.json`
+  next to the PDF, and exported copies carry it inside them.
 
-### Saving: Structure, Auto Fixes and Save
+### Saving: Structure, Auto Fixes, Save and Export
 
-Changes are chosen first and written together. Three buttons under the details:
+The PDF you open is never changed. Your review of it is saved next to it, and
+the changes are written to a new copy. Four buttons under the details:
 
 - **Structure…** opens View Structure (for an untagged PDF, after offering to
   suggest a structure, which it then shows), where you make edits. Its badge
@@ -269,21 +268,26 @@ Changes are chosen first and written together. Three buttons under the details:
   when a PDF is opened; the first time the dialog opens, the safe repairs the PDF
   needs start ticked, and after that it shows what was chosen. Its badge counts
   the chosen ones.
-- **Save…** writes the next version of the PDF (`flyer.v2.pdf`) with the chosen
-  auto fixes and your changes: your edits are always applied (not an auto fix),
-  and an untagged PDF with a review is tagged from it. Then the saved copy is
-  opened and validated, and shown against the original. It's enabled when
-  there's something to write.
+- **Save** (⌘S / Ctrl+S) keeps your review (dismissed warnings, edits, the
+  title) in `<name>.pdf.legibyl.json` next to the PDF, to pick up where you left
+  off. Until then your changes are only in the app: the window's title says
+  **Edited**, and closing it, or opening another PDF, asks whether to save them.
+  Changing something back to how it was saved isn't a change.
+- **Export…** (⌘E / Ctrl+E) writes the next version of the PDF (`flyer.v2.pdf`)
+  with the chosen auto fixes and your changes, saved or not: your edits are
+  always applied (not an auto fix), and an untagged PDF with a review is tagged
+  from it. Then the exported copy is opened and validated, and shown against
+  the original. It's enabled when there's something to write.
 
-A copy the GUI saves carries the review it was made with — dismissals as the window has them, edits
-and the title given an untagged PDF — inside it: a compressed stream the
-catalog points to under a private key (`/LBYL_Review`), added as an incremental
-update, which PDF readers don't show. Opening a PDF uses the file next to it if
-there is one (it holds any changes made since), and otherwise the review inside
-it, so a repaired copy opens with its warnings still dismissed. Turning off
-**Remember dismissals** on such a copy leaves a file without them next to it, so
-the ones inside don't come back. The CLI embeds a review only with `--edits`
-or `--edits-from` (the one it applied).
+An exported copy carries the review it was made with (dismissals, edits and the
+title given an untagged PDF) inside it: a compressed stream the catalog points
+to under a private key (`/LBYL_Review`), added as an incremental update, which
+PDF readers don't show. That review is read-only: its edits are in the copy
+already (the Edits tab lists them apart, without **Remove**), and its dismissed
+warnings stay dismissed (they can't be restored there). The copy's own review
+starts empty and is saved next to it, and a copy exported from it carries both.
+The CLI embeds a review only with `--edits` or `--edits-from` (the one it
+applied).
 
 When a finding has a known region — its marked content, the structure
 element's content, or an annotation's `/Rect` (see `RuleViolation.Geometry`
@@ -331,9 +335,9 @@ quote) is selected, a **Tag** picker beside the preview gives it another tag —
 a heading tagged as a paragraph, say — as a `retag` edit; and when two or more
 neighbouring paragraphs on one page are selected (none with alt
 text or replacement text), **Merge N Paragraphs** records the merge as an edit,
-keyed by each paragraph's box; **Don't Merge These** drops it again. Save joins
+keyed by each paragraph's box; **Don't Merge These** drops it again. Export joins
 them into the first, as **Join split paragraphs** does. The **Edits** tab lists every edit and whether it's in the PDF
-yet, and removes ones you no longer want. **Save…** writes the ones not in it
+yet, and removes ones you no longer want. **Export…** writes the ones not in it
 yet to a copy (`ElementEdits.fs`), each to the element with its tag in about the
 same place, so they still apply after other repairs have rearranged the tree.
 
@@ -400,9 +404,9 @@ tagged PDF, they're read-only, and what you decide is layered on top as edits
 was found with, and its box — the same kind of edit View Structure makes on a
 tagged PDF's elements. Leaving a region out is an `exclude` edit, picking
 another tag a `retag` edit, and alt text and corrected text are edits too.
-Nothing is written to the PDF until **Save…** in the main window tags a copy
-with the regions and the edits on them. Once you've decided something, the
-edits are kept in the file next to the PDF, with the layout they're on recorded
+Nothing is written to the PDF: **Export…** in the main window tags a copy
+with the regions and the edits on them. Once you've decided something, **Save**
+keeps the edits in the file next to the PDF, with the layout they're on recorded
 as found (`layout`, in the same format as the CLI's `layout suggest`, see
 `LayoutFile.fs`): reopening the PDF, even in a later session, shows the pages
 found so far at once, without the detector, with your edits on them. Each
@@ -451,7 +455,7 @@ title fixes find one: the document's own title (Info, then XMP), else a short
 first page's text, else the first H1 the layout found. The other candidates are
 offered beside it with where they came from (e.g. "Cub Scout Pack 721 · first
 heading" when the document's own title is just "Design"). A title that's changed
-is saved as `title` in the file next to the PDF; tagging gives the document the
+is saved as `title` in the file next to the PDF (by **Save**); tagging gives the document the
 title as edited, or as shown prefilled if the structure was viewed, with
 `/DisplayDocTitle`. (The Auto Fixes dialog, tagging a file never reviewed, doesn't take
 a title from a heading.)
@@ -459,11 +463,11 @@ a title from a heading.)
 Figures can be given alt text, and OCR'd text corrected, on the suggested
 structure too: right-click a figure for **Edit Alt Text…** (a QR code's starts
 from where it links), and a region read with OCR for **Edit Replacement Text…**.
-When tagging (**Save…** with a review, or the Auto Fixes option), alt text is written as the
+When tagging (**Export…** with a review, or the Auto Fixes option), alt text is written as the
 figure's `/Alt`, and corrected text as the region's `/ActualText` (cleared
-meaning there's nothing to read there). Edits are saved as they're typed in the
+meaning there's nothing to read there). **Save** keeps edits in the
 `edits` section of the `<name>.pdf.legibyl.json` file next to the PDF, alongside
-any remembered dismissals, keyed by page, suggested tag and box; an OCR
+the dismissals, keyed by page, suggested tag and box; an OCR
 correction is recorded only if it differs from what OCR read. So they're filled
 in again whenever the layout is suggested again, even for a regenerated PDF, as
 long as the region is in about the same place (same page and tag, boxes

@@ -22,7 +22,7 @@
     <Compile Include="Dismissals.fs" />
     <Compile Include="RegionEdits.fs" />
     <Compile Include="BusyStatus.fs" />
-    <Compile Include="LayoutReview.fs" />
+    <Compile Include="DocumentReview.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="LinkTitleOffer.fs" />
     <Compile Include="MainWindow.fs" />

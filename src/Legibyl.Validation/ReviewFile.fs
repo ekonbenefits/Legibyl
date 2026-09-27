@@ -76,7 +76,7 @@ type SavedFile =
 let private jsonOptions =
     JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
 
-let private parse (json: string) : SavedFile option =
+let parse (json: string) : SavedFile option =
     try
         JsonSerializer.Deserialize<SavedFile>(json, jsonOptions) |> Option.ofObj
     with :? JsonException ->
@@ -108,21 +108,20 @@ let readFrom (path: string) : SavedFile option =
 /// file as it's saved.
 let toJson (file: SavedFile) = JsonSerializer.Serialize({ file with Version = 1 }, jsonOptions)
 
-/// Writes file next to pdfPath, or deletes it when there's nothing left in it. Throws
-/// IOException/UnauthorizedAccessException if it can't be written.
-let writeFile (pdfPath: string) (file: SavedFile) =
-    let path = filePath pdfPath
-    let empty (items: 'T array | null) =
+/// Whether file has nothing in it.
+let isEmpty (file: SavedFile) =
+    let none (items: 'T array | null) =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    if isNull file.DismissedWarnings && empty file.Edits && isNull file.Title && isNull file.Layout then
-        // An empty file still stands in for a review embedded in the PDF, so that one doesn't
-        // come back.
-        if (EmbeddedReview.read pdfPath).IsSome then
-            File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
-        elif File.Exists path then
-            File.Delete path
+    none file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout
+
+/// Writes file next to pdfPath, or deletes it when there's nothing in it. Throws
+/// IOException/UnauthorizedAccessException if it can't be written.
+let writeFile (pdfPath: string) (file: SavedFile) =
+    let path = filePath pdfPath
+    if isEmpty file then
+        if File.Exists path then File.Delete path
     else
         File.WriteAllText(path, JsonSerializer.Serialize(file, jsonOptions))
 
