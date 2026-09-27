@@ -94,6 +94,23 @@ type StructureGeometry =
       Right: float
       Top: float }
 
+/// Comparing boxes on a page, as an edit finds what it was made for again.
+module Boxes =
+    /// The box at least 2 pt each way: a hairline's (a rule tagged as a figure, say) has no
+    /// width or no height, so would overlap nothing, not even itself.
+    let visible (box: StructureGeometry) =
+        let grow (size: float) = max 0.0 (2.0 - size) / 2.0
+        let dx, dy = grow (box.Right - box.Left), grow (box.Top - box.Bottom)
+        { box with Left = box.Left - dx; Right = box.Right + dx; Bottom = box.Bottom - dy; Top = box.Top + dy }
+
+    /// The intersection over union of two boxes, each at least 2 pt each way.
+    let overlap (a: StructureGeometry) (b: StructureGeometry) =
+        let a, b = visible a, visible b
+        let area (box: StructureGeometry) = max 0.0 (box.Right - box.Left) * max 0.0 (box.Top - box.Bottom)
+        let intersection = max 0.0 (min a.Right b.Right - max a.Left b.Left) * max 0.0 (min a.Top b.Top - max a.Bottom b.Bottom)
+        let union = area a + area b - intersection
+        if union <= 0.0 then 0.0 else intersection / union
+
 /// A change a person made to a structure element (in View Structure) or to a suggested region
 /// (in Suggest Structure, or a layout's edits): its alt text, its replacement text, its tag,
 /// paragraphs merged into it, or (for a region) leaving it out. What it changes is left as it

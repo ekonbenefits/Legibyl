@@ -13,12 +13,8 @@ open Legibyl.Validation.StructureTreeObjects
 [<Literal>]
 let SameElementOverlap = 0.6
 
-/// The intersection over union of two boxes.
-let overlap (a: StructureGeometry) (b: StructureGeometry) =
-    let area (box: StructureGeometry) = max 0.0 (box.Right - box.Left) * max 0.0 (box.Top - box.Bottom)
-    let intersection = max 0.0 (min a.Right b.Right - max a.Left b.Left) * max 0.0 (min a.Top b.Top - max a.Bottom b.Bottom)
-    let union = area a + area b - intersection
-    if union <= 0.0 then 0.0 else intersection / union
+/// The intersection over union of two boxes (a hairline's taken as 2 pt wide; see Boxes).
+let overlap (a: StructureGeometry) (b: StructureGeometry) = Boxes.overlap a b
 
 // ---- Suggested regions ----
 

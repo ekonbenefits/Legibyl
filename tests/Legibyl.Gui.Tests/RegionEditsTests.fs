@@ -208,3 +208,15 @@ let ``the auto fixes chosen are saved by name, and choosing none is kept too`` (
         Reviews.save pdf (fun review -> review.AutoFixes <- Some PdfFixOptions.None)
         (Reviews.read pdf).AutoFixes |> should equal (Some PdfFixOptions.None)
         (Reviews.read pdf).IsEdited |> should be False)
+
+[<Fact>]
+let ``a hairline's edit is found again, so choosing twice doesn't add it twice`` () =
+    // A vertical rule, tagged as a figure: its box has no width.
+    let rule = box 47.0 70.0 47.0 754.0
+    let once = RegionEdits.setRetag [] 1 "Figure" rule "Artifact"
+    let twice = RegionEdits.setRetag once 1 "Figure" rule "Artifact"
+
+    twice |> should haveLength 1
+    RegionEdits.find twice 1 "Figure" rule |> Option.bind _.Retag |> should equal (Some "Artifact")
+    // And read again, it goes.
+    RegionEdits.setRetag twice 1 "Figure" rule "Figure" |> should be Empty
