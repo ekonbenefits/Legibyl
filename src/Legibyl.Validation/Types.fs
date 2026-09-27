@@ -47,7 +47,11 @@ type PdfFixOptions =
     /// Writes the edits a person made (alt text, replacement text; see ElementEdit) to the
     /// elements they were made for. Needs the edits (VeraPdfValidator.Edits).
     | ApplyEdits = 65536
-    | All = 131071
+    /// In a tagged PDF 2.0 file, points links, bookmarks and go-to actions within the document at
+    /// the elements they land on too (a structure destination, /SD), as PDF/UA-2 asks; see
+    /// LinkTargets. Does nothing to a PDF 1.x file.
+    | LinkTargets = 131072
+    | All = 262143
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.

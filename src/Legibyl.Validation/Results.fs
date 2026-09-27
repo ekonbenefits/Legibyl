@@ -21,6 +21,7 @@ module PdfFixDescriptions =
           PdfFixOptions.HeadingsFromToc, "Tag headings the table of contents lists (H1–H6) and point its links at them"
           PdfFixOptions.ListsFromParagraphs, "Tag paragraphs that start with list markers as a list"
           PdfFixOptions.BookmarksFromHeadings, "Add bookmarks for the H1 and H2 headings"
+          PdfFixOptions.LinkTargets, "Point links and bookmarks within a PDF 2.0 document at the tags they go to"
           PdfFixOptions.DocumentTitle, "Set a document title and show it in the title bar"
           PdfFixOptions.TitleFromFirstPage, "Title an untitled document from its title page's text"
           PdfFixOptions.JoinSplitParagraphs, "Join paragraphs tagged line by line where the page layout shows one block of text"

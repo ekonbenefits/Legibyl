@@ -130,6 +130,7 @@ let ``showing all repairs lists the ones this PDF doesn't need too, still in ord
               "Join split paragraphs"
               "Tag lists"
               "Add bookmarks"
+              "Point links at their tags"
               "Tab order for annotations"
               "Font glyph mapping"
               "Describe contents links"

@@ -153,6 +153,14 @@ module internal VeraPdf =
         | Some standard -> tagFromLayoutRules.Contains((standard, assertion.RuleId))
         | None -> false
 
+    let private linkAnnotationPattern = Regex(@"\((\d+) \d+ obj PDLinkAnnot\)", RegexOptions.Compiled)
+
+    /// The link annotations a finding's location names, by object number.
+    let private linkAnnotationNumbers (locationContext: string | null) =
+        match locationContext with
+        | NonNull context -> set [ for m in linkAnnotationPattern.Matches context -> int m.Groups[1].Value ]
+        | Null -> Set.empty
+
     /// Adds page regions to veraPDF's failures and appends Legibyl's own warnings.
     let withLegibylAnalysis (analysis: LegibylAnalysis) (assertions: RuleViolation list) =
         match analysis with
@@ -166,6 +174,21 @@ module internal VeraPdf =
                 let webLinkAnnotations = lazy (StructureFixes.webLinkAnnotationNumbers document)
                 let hasTitlePage = lazy (StructureFixes.titlePageText document |> Option.isSome)
                 let untagged = isNull (document.GetCatalog().GetPdfObject().Get iText.Kernel.Pdf.PdfName.StructTreeRoot)
+                // PDF/UA-2's links within the document that don't point to structure (8.8): those
+                // LinkTargets can place, and table-of-contents links whose headings the
+                // HeadingsFromToc fix tags (it points them at the headings).
+                let linkTargets = lazy (LinkTargets.find document context)
+                let tocHeadingLinks =
+                    lazy
+                        (match TocHeadings.analyse document context with
+                         | TocHeadings.Recoverable(headings, _) ->
+                             set
+                                 [ for heading in headings do
+                                       for annotation in heading.Entry.Links do
+                                           match annotation.GetIndirectReference() with
+                                           | null -> ()
+                                           | reference -> yield reference.GetObjNumber() ]
+                         | _ -> Set.empty)
                 let languageUndeclared = not (DocumentLanguage.isDeclared document)
                 let fixOptionsFor (assertion: RuleViolation) =
                     let isIn (numbers: Lazy<Set<int>>) =
@@ -195,6 +218,16 @@ module internal VeraPdf =
                             options ||| PdfFixOptions.TagFromLayout
                         else
                             options
+                    let options =
+                        match PdfUaTarget.ofSpecification assertion.Specification with
+                        | Some PdfProfile.PdfUa2 when assertion.RuleId = "8.8-1" || assertion.RuleId = "8.8-2" ->
+                            let links = linkAnnotationNumbers assertion.LocationContext
+                            let placed =
+                                if links.IsEmpty then linkTargets.Value |> List.exists (fun t -> match t.Holder with LinkTargets.Link _ -> false | _ -> true)
+                                else not (Set.intersect links (LinkTargets.linkNumbers linkTargets.Value)).IsEmpty
+                            let options = if placed then options ||| PdfFixOptions.LinkTargets else options
+                            if not (Set.intersect links tocHeadingLinks.Value).IsEmpty then options ||| PdfFixOptions.HeadingsFromToc else options
+                        | _ -> options
                     // Every "natural language ... shall be determined" rule falls back on /Lang.
                     if languageUndeclared && assertion.Message.Contains("Natural language", StringComparison.OrdinalIgnoreCase) then
                         options ||| PdfFixOptions.LanguageFromText

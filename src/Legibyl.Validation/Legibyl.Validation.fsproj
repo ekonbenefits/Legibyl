@@ -24,6 +24,7 @@
     <Compile Include="ParagraphLists.fs" />
     <Compile Include="ParagraphJoins.fs" />
     <Compile Include="Bookmarks.fs" />
+    <Compile Include="LinkTargets.fs" />
     <Compile Include="LinkTitles.fs" />
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="DocumentLanguage.fs" />
