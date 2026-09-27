@@ -249,7 +249,8 @@ let ``a region's bands no word covers are where more text may be drawn as outlin
     // A badge's name as text, and under it a line that isn't text (e.g. "5th grade" as outlines).
     let badge = region 70.0 600.0 200.0 640.0
     let name = region 72.0 626.0 150.0 638.0
-    LayoutSuggestions.uncoveredBands badge [ name ] |> should equal [ 600.0, 626.0 ]
+    // Less a quarter line beside the words, where their descenders are.
+    LayoutSuggestions.uncoveredBands badge [ name ] |> should equal [ 600.0, 623.0 ]
     // Leading between lines isn't a band; a region its words fill has none.
     let lines = [ region 72.0 626.0 150.0 638.0; region 72.0 612.0 150.0 624.0 ]
     LayoutSuggestions.uncoveredBands (region 70.0 611.0 200.0 639.0) lines |> should be Empty
@@ -260,4 +261,27 @@ let ``a region's bands no word covers are where more text may be drawn as outlin
 let ``OCR text is kept when it reads as words, not decoration`` () =
     LayoutSuggestions.looksLikeText "5th grade" |> should be True
     LayoutSuggestions.looksLikeText "C—O ———_" |> should be False
+    // A line's descenders, read on their own.
+    LayoutSuggestions.looksLikeText "FG en a ae re" |> should be False
     LayoutSuggestions.looksLikeText "|" |> should be False
+
+[<Fact>]
+let ``a paragraph all of whose text is text gets nothing from OCR`` () =
+    if not (LayoutModel.isDownloaded ()) then
+        Assert.Skip "The layout model isn't downloaded; open Suggest Structure in the app to fetch it."
+    use input = new TempPdf()
+    do
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(input.Path))
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(document.AddNewPage())
+        let bold = iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA_BOLD
+        let font = iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+        canvas.BeginText().SetFontAndSize(bold, 24f).MoveText(72.0, 720.0).ShowText("Riverside Community Garden").EndText() |> ignore
+        for i, line in List.indexed [ "Join your neighbours on Saturday to plant this year's beds."; "Tools and seedlings are provided." ] do
+            canvas.BeginText().SetFontAndSize(font, 12f).MoveText(72.0, 680.0 - 16.0 * float i).ShowText(line).EndText() |> ignore
+    use suggester = new LayoutSuggester(input.Path)
+
+    let paragraph = (suggester.Suggest 1).Blocks |> List.find (fun b -> b.Text.StartsWith "Join")
+
+    // Not the bottoms of its last line, read as "FG en a ae re".
+    paragraph.Text |> should equal "Join your neighbours on Saturday to plant this year's beds. Tools and seedlings are provided."
+    paragraph.Recognized |> should be False
