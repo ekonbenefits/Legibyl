@@ -133,14 +133,10 @@ module private MainView =
         use stream = new MemoryStream(pngBytes)
         new Bitmap(stream)
 
-    // 16x16 icons; the even-odd fill cuts the "!" and "×" out of the shapes.
-    // The wrench is a single outline (head, notch, handle) rotated 45°.
-    let private warningIcon =
-        Geometry.Parse "F0 M8,1 L15.5,14.5 L0.5,14.5 Z M7.2,5.5 L8.8,5.5 L8.6,10 L7.4,10 Z M7.1,11.2 L8.9,11.2 L8.9,13 L7.1,13 Z"
+    // 16x16 icons (see Icons). The wrench is a single outline (head, notch, handle) rotated 45°.
+    let private warningIcon = Icons.warning
 
-    let private failureIcon =
-        Geometry.Parse
-            "F0 M8,0.5 A7.5,7.5 0 1 1 7.99,0.5 Z M4.9,5.9 L5.9,4.9 L8,7 L10.1,4.9 L11.1,5.9 L9,8 L11.1,10.1 L10.1,11.1 L8,9 L5.9,11.1 L4.9,10.1 L7,8 Z"
+    let private failureIcon = Icons.failure
 
     let private fixIcon =
         Geometry.Parse
@@ -627,6 +623,46 @@ module private MainView =
                     | Null -> ()
                 | _ -> ()
 
+            /// Selects a finding in the results list, opening its group and scrolling to it, and
+            /// brings this window forward: from a marker in the Structure window.
+            let showFinding (violation: RuleViolation) =
+                match outcome.Current with
+                | Validated(_, rows) ->
+                    match rows |> List.tryFind (fun row -> obj.ReferenceEquals(row.Violation, violation)) with
+                    | Some row ->
+                        let grid: DataGrid option =
+                            Avalonia.VisualTree.VisualExtensions.GetVisualDescendants window
+                            |> Seq.tryPick (fun v -> match v with :? DataGrid as grid -> Some grid | _ -> None)
+                        // A collapsed group hides its rows (and would clear the selection).
+                        grid
+                        |> Option.iter (fun grid ->
+                            match grid.ItemsSource with
+                            | :? Avalonia.Collections.DataGridCollectionView as view ->
+                                match view.Groups with
+                                | NonNull groups ->
+                                    for group in groups do
+                                        match group with
+                                        | :? Avalonia.Collections.DataGridCollectionViewGroup as group when
+                                            group.Items |> Seq.cast<obj> |> Seq.exists (fun item -> obj.ReferenceEquals(item, row))
+                                            ->
+                                            grid.ExpandRowGroup(group, false)
+                                        | _ -> ()
+                                | Null -> ()
+                            | _ -> ())
+                        selectRow (Some row) |> ignore
+                        grid |> Option.iter (fun grid -> Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> grid.ScrollIntoView(row, null)))
+                        window.Activate()
+                    | None -> ()
+                | _ -> ()
+
+            /// The failures and warnings the Structure window marks on its blocks: those not dismissed.
+            let findingsToMark () : FindingMarkers.Findings =
+                match outcome.Current with
+                | Validated(_, rows) ->
+                    { Items = rows |> List.filter (fun row -> not row.Dismissed) |> List.map _.Violation
+                      Show = showFinding }
+                | _ -> FindingMarkers.none
+
             let viewStructure _ =
                 task {
                     let show (structure: StructureNode | null) (filePath: string) =
@@ -638,7 +674,8 @@ module private MainView =
                                 // Offer to read the titles of pages links go to, before the window opens.
                                 do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
                                 StructureTreeWindow(Suggested, filePath, review, refreshPending).Show window
-                            | structure -> StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending).Show window
+                            | structure ->
+                                StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending, findingsToMark ()).Show window
                         }
 
                     match selectedFile.Current with

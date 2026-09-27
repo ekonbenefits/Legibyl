@@ -550,7 +550,7 @@ let ``on a tagged PDF 2.0 file, lists and bookmarks keep it PDF/UA-2 compliant, 
 [<Fact>]
 let ``QR code links on a PDF 2.0 file are PDF/UA-2 compliant, with alt text a person wrote or not`` () =
     // PDF/UA-2 (8.9.4.2) wants a link's description and its element's alt text to agree.
-    for alt in [ null; "Scan to apply" ] do
+    for alt in [ (null: string | null); "Scan to apply" ] do
         use input = new TempPdf()
         use output = new TempPdf()
         createUntaggedPdf20 input.Path

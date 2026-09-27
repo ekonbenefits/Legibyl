@@ -17,12 +17,14 @@
   <ItemGroup>
     <Compile Include="Fonts.fs" />
     <Compile Include="Theme.fs" />
+    <Compile Include="Icons.fs" />
     <Compile Include="Dialogs.fs" />
     <Compile Include="StructureCache.fs" />
     <Compile Include="Dismissals.fs" />
     <Compile Include="RegionEdits.fs" />
     <Compile Include="BusyStatus.fs" />
     <Compile Include="DocumentReview.fs" />
+    <Compile Include="FindingMarkers.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="LinkTitleOffer.fs" />
     <Compile Include="RecentFiles.fs" />

@@ -147,7 +147,76 @@ module private StructureView =
           Suggested: bool
           /// Nodes whose collapsed children are shown anyway: those above a block selected on the
           /// page preview, to bring it into view.
-          Expanded: IReadable<StructureNode list> }
+          Expanded: IReadable<StructureNode list>
+          /// The failures and warnings on each block (see FindingMarkers), and how to show one in
+          /// the main window's results.
+          Findings: Collections.Generic.IReadOnlyDictionary<StructureNode, RuleViolation list>
+          ShowFinding: RuleViolation -> unit }
+
+    /// A finding as a marker's tooltip lists it: "Failure: ISO 14289-1 7.3, test 1: Figure …",
+    /// and what it means, where that's known.
+    let findingLine (finding: RuleViolation) =
+        let standard = finding.Specification.Split(':').[0]
+        let line = $"{finding.Severity}: {standard} {finding.Clause}, test {finding.TestNumber}: {finding.Message}"
+        match RuleGuide.forFinding finding with
+        | Some guide -> $"{line}\n    {guide.Meaning}"
+        | None -> line
+
+    /// A block's failures (or, with none, warnings) as a marker: its icon, and how many if more
+    /// than one; its tooltip lists them. Clicking it shows the first in the main window's results.
+    let findingMarker (selection: Selection) (node: StructureNode) : IView option =
+        match selection.Findings.TryGetValue node with
+        | true, findings when not findings.IsEmpty ->
+            let failures = findings |> List.filter (fun f -> f.Severity = FindingSeverity.Failure) |> List.length
+            let warnings = findings.Length - failures
+            let icon, color = if failures > 0 then Icons.failure, Theme.Tokens.Danger else Icons.warning, Theme.Tokens.Warning
+            let count (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
+            let summary =
+                [ if failures > 0 then count failures "failure"
+                  if warnings > 0 then count warnings "warning" ]
+                |> String.concat " and "
+            let tip =
+                String.concat "\n" [ $"{summary} (as validated; edits aren't checked until exported). Click to show it in the results."; yield! findings |> List.map findingLine ]
+            Some(
+                Button.create [
+                    Button.padding (4.0, 0.0)
+                    Button.margin (0.0, 0.0, 6.0, 0.0)
+                    Button.minHeight 0.0
+                    Button.verticalAlignment VerticalAlignment.Center
+                    Button.background Brushes.Transparent
+                    Button.borderThickness 0.0
+                    Button.tag "finding-marker"
+                    ToolTip.tip tip
+                    AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, $"{summary}: show in the results", ValueNone)
+                    Button.content (
+                        StackPanel.create [
+                            StackPanel.orientation Orientation.Horizontal
+                            StackPanel.spacing 3.0
+                            StackPanel.children [
+                                Avalonia.FuncUI.DSL.Path.create [
+                                    AttrBuilder<Shapes.Path>.CreateProperty<Geometry | null>(Shapes.Path.DataProperty, icon, ValueNone)
+                                    Shapes.Shape.stretch Stretch.Uniform
+                                    Control.width 13.0
+                                    Control.height 13.0
+                                    Control.verticalAlignment VerticalAlignment.Center
+                                    Theme.resources [ Shapes.Shape.FillProperty, color ]
+                                ]
+                                if findings.Length > 1 then
+                                    TextBlock.create [
+                                        TextBlock.text (string findings.Length)
+                                        TextBlock.fontSize 11.0
+                                        TextBlock.fontWeight FontWeight.SemiBold
+                                        TextBlock.verticalAlignment VerticalAlignment.Center
+                                        Theme.resources [ TextBlock.ForegroundProperty, color ]
+                                    ]
+                            ]
+                        ]
+                    )
+                    Button.onClick ((fun e -> e.Handled <- true; selection.ShowFinding findings.Head), SubPatchOptions.Always)
+                ]
+                :> IView
+            )
+        | _ -> None
 
     /// The edits an element can take. Alt text: figures and formulas, and anything that already
     /// has alt text. Replacement text: only what already has it (like OCR'd text), since writing
@@ -363,6 +432,9 @@ module private StructureView =
                 WrapPanel.margin (0.0, 0.0, 0.0, 4.0)
                 WrapPanel.children [
                     tagChip node.Tag borderColor headerColor
+                    match findingMarker selection node with
+                    | Some marker -> marker
+                    | None -> ()
                     if not attributes.IsEmpty then
                         TextBlock.create [
                             TextBlock.text (String.Join("  ", attributes))
@@ -628,10 +700,16 @@ module private StructureView =
         (prefetcher: LayoutPrefetcher option)
         (sourceFilePath: string)
         (onEditsChanged: unit -> unit)
+        (findings: FindingMarkers.Findings)
         =
         Component(fun ctx ->
             let suggested = prefetcher |> Option.map (fun prefetcher -> review, prefetcher)
             let isSuggested = suggested.IsSome
+            // The findings on each block: a tagged PDF's only (a suggested structure's findings are
+            // about the untagged file, not its blocks).
+            let placed =
+                ctx.useStateLazy(fun () ->
+                    FindingMarkers.place tagged (if isSuggested then [] else findings.Items)).Current
             // A suggested layout's pages as elements, by page: each built once, so a selection
             // stays with its elements as more pages are found.
             let pageNodes = ctx.useState (Collections.Generic.Dictionary<int, StructureNode list>(), false)
@@ -682,6 +760,19 @@ module private StructureView =
             let previewVersion = ctx.useState (0, false)
             // Draw only the selection on the preview, not every element on its page.
             let selectionOnly = ctx.useState selectionOnlyThisSession
+
+            /// A region's marker on the preview for the findings on it and on what's inside it (an
+            /// element's own block may be nested in the one outlined): red with failures, amber with
+            /// only warnings, and how many.
+            let markerFor (node: StructureNode) =
+                let rec findingsIn (node: StructureNode) : RuleViolation list =
+                    (match placed.OnNodes.TryGetValue node with | true, found -> found | _ -> [])
+                    @ [ for child in node.Children do yield! findingsIn child ]
+                match findingsIn node with
+                | [] -> None
+                | found ->
+                    let color = if found |> List.exists (fun f -> f.Severity = FindingSeverity.Failure) then 0xE53935u else 0xF9A825u
+                    Some(color, string found.Length)
 
             /// Shows the page the selection is on, every element on it outlined and numbered in
             /// reading order, the selected ones (or those inside a selected container) filled; and
@@ -741,13 +832,14 @@ module private StructureView =
                                                   { Geometry = nonNull element.Geometry
                                                     Label = if leftOut then $"× {i + 1} {tag}" else $"{i + 1} {tag}"
                                                     Color = if leftOut then leftOutColor else outlineColor tag
-                                                    Emphasised = within element } ]
+                                                    Emphasised = within element
+                                                    Marker = markerFor element } ]
                                         // A selection that isn't one of them (a span in a paragraph, say) is filled too.
                                         let extra =
                                             [ for node in nodes do
                                                   match node.Geometry with
                                                   | NonNull geometry when geometry.PageNumber = page && not (elements |> List.exists (fun e -> obj.ReferenceEquals(e, node))) ->
-                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true }
+                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true; Marker = markerFor node }
                                                   | _ -> () ]
                                         // Only the selection, when asked: the rest are still there to click.
                                         let drawn =
@@ -922,7 +1014,14 @@ module private StructureView =
                     |> Option.bind (fun (image, page, (x, y)) -> nodeAt root.Current page x y |> Option.map (fun node -> image, node))
                 | _ -> None
 
-            let selection = { Select = select; Edits = edits; Edit = editNode; Suggested = isSuggested; Expanded = expanded }
+            let selection =
+                { Select = select
+                  Edits = edits
+                  Edit = editNode
+                  Suggested = isSuggested
+                  Expanded = expanded
+                  Findings = placed.OnNodes
+                  ShowFinding = findings.Show }
 
             // For a suggested layout: how many pages are found, and the titles of the pages its QR
             // codes link to, read as they're found (if the offer before the window allowed it).
@@ -1056,21 +1155,46 @@ module private StructureView =
                     Grid.children [
                         // Its own component, so preview updates don't re-render (and re-diff) the layout.
                         Component.create("structure-layout", fun ctx ->
-                        let root = ctx.usePassedRead root
-                        ScrollViewer.create [
-                            ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
-                            ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
-                            Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
-                            ScrollViewer.content (
-                                StackPanel.create [
-                                    StackPanel.margin 8.0
-                                    StackPanel.children [
-                                        let levels = levelsWithinBudget root.Current.Children
-                                        for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
+                            let root = ctx.usePassedRead root
+                            DockPanel.create [
+                                DockPanel.children [
+                                    // Findings no block is marked with: they're in the main window's results.
+                                    match placed.Elsewhere with
+                                    | [] -> ()
+                                    | elsewhere ->
+                                        let failures = elsewhere |> List.filter (fun f -> f.Severity = FindingSeverity.Failure) |> List.length
+                                        let warnings = elsewhere.Length - failures
+                                        let count (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
+                                        let what =
+                                            [ if failures > 0 then count failures "failure"
+                                              if warnings > 0 then count warnings "warning" ]
+                                            |> String.concat " and "
+                                        let verb = if elsewhere.Length = 1 then "isn't" else "aren't"
+                                        TextBlock.create [
+                                            DockPanel.dock Dock.Top
+                                            TextBlock.text
+                                                $"{what} {verb} on a block here: document-wide (like the metadata or the title), or on content not in the tags. The main window's results list them."
+                                            TextBlock.textWrapping TextWrapping.Wrap
+                                            TextBlock.fontSize 12.0
+                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                            TextBlock.margin (8.0, 6.0, 8.0, 6.0)
+                                        ]
+                                    ScrollViewer.create [
+                                        ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
+                                        ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                                        Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
+                                        ScrollViewer.content (
+                                            StackPanel.create [
+                                                StackPanel.margin 8.0
+                                                StackPanel.children [
+                                                    let levels = levelsWithinBudget root.Current.Children
+                                                    for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
+                                                ]
+                                            ]
+                                        )
                                     ]
                                 ]
-                            )
-                        ])
+                            ])
                         GridSplitter.create [
                             Grid.column 1
                             GridSplitter.width 6.0
@@ -1705,7 +1829,9 @@ module private StructureView =
 open StructureView
 
 /// Edits change review; onEditsChanged is called after each (or a suggested layout's title changed).
-type StructureTreeWindow(source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit) as this =
+/// findings are marked on the blocks they're about (a tagged PDF's; see FindingMarkers).
+type StructureTreeWindow
+    (source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit, findings: FindingMarkers.Findings) as this =
     inherit
         HostWindow(
             Title = (match source with Tagged _ -> "Structure" | Suggested -> "Suggested Structure"),
@@ -1725,10 +1851,14 @@ type StructureTreeWindow(source: StructureSource, sourceFilePath: string, review
         | Tagged _ -> None
     do
         let tagged = match source with Tagged root -> root | Suggested -> SuggestedTree.build []
-        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged
+        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged findings
 
     /// The review its edits change.
     member _.Review = review
+
+    /// Without findings to mark.
+    new(source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit) =
+        new StructureTreeWindow(source, sourceFilePath, review, onEditsChanged, FindingMarkers.none)
 
     /// A tagged PDF's structure, with a review of its own (read from the file next to it).
     new(root: StructureNode, sourceFilePath: string) =

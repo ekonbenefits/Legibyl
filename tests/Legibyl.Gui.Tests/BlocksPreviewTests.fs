@@ -69,7 +69,7 @@ let private show root pdf =
 let private clickAt (image: Image) (x: float) (y: float) (extend: bool) =
     // Each selection renders the page again: wait for it.
     HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> not (isNull image.Source)) |> ignore
-    let bitmap = image.Source :?> Bitmap
+    let bitmap = match image.Source with :? Bitmap as bitmap -> bitmap | _ -> failwith "The preview isn't rendered."
     let size = bitmap.Size
     let bounds = image.Bounds.Size
     let fit = min (bounds.Width / size.Width) (bounds.Height / size.Height)
