@@ -28,6 +28,7 @@
     <Compile Include="CopyNamesTests.fs" />
     <Compile Include="ElementEditsTests.fs" />
     <Compile Include="MoveEditsTests.fs" />
+    <Compile Include="ReadingJumpTests.fs" />
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
     <Compile Include="EmptyFiguresTests.fs" />

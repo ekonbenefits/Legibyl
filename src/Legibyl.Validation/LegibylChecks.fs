@@ -14,8 +14,8 @@
 ///
 /// Checks that look at the document as a whole rather than one element at a time (like
 /// the table-of-contents heading checks, Structure-3 to 5, lists tagged as paragraphs,
-/// Structure-6, missing bookmarks, Structure-7, and figures that draw nothing, Structure-11) are
-/// added in `run` directly.
+/// Structure-6, missing bookmarks, Structure-7, figures that draw nothing, Structure-11, and pages
+/// read out of order, Structure-12) are added in `run` directly.
 module internal Legibyl.Validation.LegibylChecks
 
 open System
@@ -234,6 +234,89 @@ let private emptyFigureFindings (document: PdfDocument) context =
           let detail = visit.Page |> Option.map (fun page -> $"On page {page}.") |> Option.toObj
           warning EmptyFigureMessage detail visit.Path 11 PdfFixOptions.RemoveEmptyFigures null ]
 
+// ---- Structure-12: a page read out of order, by a big jump ----
+
+[<Literal>]
+let private ReadingJumpMessage =
+    "A page's tags aren't in the order the page reads: something that spans the page (a masthead, a heading over two columns) is read after content below it. In Structure…, Order by Page Layout suggests the page's order; Move Up and Move Down change it by hand."
+
+/// The document's top-level elements: those in its one Document (or Part, Art, Sect, Div), else
+/// the structure tree's own.
+let private topLevel (structTreeRoot: PdfDictionary) context =
+    let elementsIn (kids: PdfObject | null) =
+        match resolve kids with
+        | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match resolve (array.Get i) with :? PdfDictionary as d when not (isNull (d.GetAsName PdfName.S)) -> yield d | _ -> () ]
+        | :? PdfDictionary as d when not (isNull (d.GetAsName PdfName.S)) -> [ d ]
+        | _ -> []
+    let wrappers = set [ "Document"; "Part"; "Art"; "Sect"; "Div" ]
+    match elementsIn (structTreeRoot.Get PdfName.K) with
+    | [ only ] when wrappers.Contains(standardTag only context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue "") ->
+        elementsIn (only.Get PdfName.K)
+    | elements -> elements
+
+/// For each page, the first element that spans columns (it's across two elements side by side,
+/// above them) but is read after something below it, under it, with the first such thing. Reading
+/// the right column after the left isn't one; running headers and footers (short, in the top or
+/// bottom tenth of the page) aren't counted, either way.
+let private readingJumps (document: PdfDocument) context =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
+    | null -> []
+    | structTreeRoot ->
+        let elements =
+            [ for element in topLevel structTreeRoot context do
+                  match subtreeGeometry element context (ancestorPage element context) with
+                  | Some box -> yield element, box
+                  | None -> () ]
+        [ for page, onPage in elements |> List.groupBy (fun (_, box) -> box.PageNumber) do
+              let size = document.GetPage(page).GetPageSize()
+              let bottom, top, height = float (size.GetBottom()), float (size.GetTop()), float (size.GetHeight())
+              let furniture (box: StructureGeometry) =
+                  box.Top - box.Bottom < 0.1 * height && (box.Bottom > top - 0.1 * height || box.Top < bottom + 0.1 * height)
+              let content = onPage |> List.filter (snd >> furniture >> not)
+              let sideBySide (a: StructureGeometry) (b: StructureGeometry) =
+                  (a.Right <= b.Left || b.Right <= a.Left) && min a.Top b.Top > max a.Bottom b.Bottom
+              let across (wide: StructureGeometry) (narrow: StructureGeometry) = wide.Left < narrow.Right && narrow.Left < wide.Right
+              let spans (index: int) (box: StructureGeometry) =
+                  let others = content |> List.indexed |> List.filter (fun (i, _) -> i <> index) |> List.map (snd >> snd)
+                  others
+                  |> List.exists (fun a -> others |> List.exists (fun b -> sideBySide a b && across box a && across box b && box.Top >= max a.Top b.Top))
+              let jump =
+                  content
+                  |> List.indexed
+                  |> List.tryPick (fun (index, (element, box)) ->
+                      if spans index box then
+                          content
+                          |> List.take index
+                          |> List.tryFind (fun (_, earlier) -> earlier.Top <= box.Bottom && across box earlier)
+                          |> Option.map (fun (earlier, _) -> element, box, earlier)
+                      else None)
+              match jump with
+              | Some jump -> yield page, jump
+              | None -> () ]
+
+let private readingJumpFindings (document: PdfDocument) context =
+    let quoted (element: PdfDictionary) (page: int) =
+        match (extractText element context (Some page)).Trim() |> fun t -> Regex.Replace(t, @"\s+", " ") with
+        | "" ->
+            let tag = standardTag element context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue "element"
+            $"the <{tag}>"
+        | text when text.Length > 40 -> $"\"{text.Substring(0, 40).TrimEnd()}…\""
+        | text -> $"\"{text}\""
+    let pathOf =
+        match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
+        | null -> fun _ -> None
+        | root ->
+            let visits = walk root context |> List.ofSeq
+            fun (element: PdfDictionary) -> visits |> List.tryFind (fun v -> obj.ReferenceEquals(v.Element, element)) |> Option.map _.Path
+    [ for page, (element, box, earlier) in readingJumps document context ->
+          warning
+              ReadingJumpMessage
+              $"Page {page}: {quoted element page} spans the page but comes after {quoted earlier page}, below it."
+              (pathOf element |> Option.defaultValue "StructTreeRoot")
+              12
+              PdfFixOptions.None
+              box ]
+
 /// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
@@ -251,6 +334,7 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! paragraphListFindings document context
           yield! splitFigureFindings document context
           yield! emptyFigureFindings document context
+          yield! readingJumpFindings document context
           yield! missingBookmarkFindings document context ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
@@ -268,6 +352,7 @@ let messageFor (testNumber: int) : string option =
         | 9 -> Some ParentTreeMessage
         | 10 -> Some SplitFiguresMessage
         | 11 -> Some EmptyFigureMessage
+        | 12 -> Some ReadingJumpMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
