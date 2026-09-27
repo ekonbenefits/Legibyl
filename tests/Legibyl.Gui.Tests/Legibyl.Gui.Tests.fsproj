@@ -29,6 +29,7 @@
     <Compile Include="SaveWorkflowTests.fs" />
     <Compile Include="BusyStatusTests.fs" />
     <Compile Include="SuggestedStructureTests.fs" />
+    <Compile Include="DocumentWindowsTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

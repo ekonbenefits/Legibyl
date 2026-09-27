@@ -1541,7 +1541,7 @@ open StructureView
 type StructureTreeWindow(source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit) as this =
     inherit
         HostWindow(
-            Title = (match source with Tagged _ -> "Document Structure" | Suggested _ -> "Suggested Structure"),
+            Title = (match source with Tagged _ -> "Document Structure" | Suggested -> "Suggested Structure"),
             Width = 1000.0,
             Height = 760.0,
             MinWidth = 500.0,

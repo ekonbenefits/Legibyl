@@ -24,6 +24,18 @@ open Legibyl.Rendering
 open Legibyl.Validation
 open Legibyl.Gui.BusyStatus
 
+/// What the document windows (one per PDF) share: the reviews of the PDFs open, and the
+/// structures read.
+[<Sealed>]
+type DocumentShell() =
+    member val Reviews = DocumentReviews()
+    member val Structures = StructureCache()
+    /// The app's.
+    static member val Shared = DocumentShell()
+
+/// A PDF for a window to open, and what's told its report once it's validated.
+type OpenRequest = { Path: string; Opened: TaskCompletionSource<ValidationReport option> }
+
 /// Flattened, display-friendly view of a RuleViolation for the results grid.
 type RuleViolationRow =
     { Violation: RuleViolation
@@ -295,12 +307,20 @@ module private MainView =
         | Some(Fixing _) -> [ ProgressBar.isIndeterminate true ]
         | _ -> [ ProgressBar.isIndeterminate true ]
 
-    let view (window: Window) (openRequests: IReadable<string option>) =
+    /// A document window's view: one PDF. opened is told the PDF it opens; openElsewhere opens
+    /// another PDF (in the window showing it, or a new one), with that window and its report.
+    let view
+        (window: Window)
+        (shell: DocumentShell)
+        (openRequests: IReadable<OpenRequest option>)
+        (opened: string -> unit)
+        (openElsewhere: string -> Task<Window * ValidationReport option>)
+        =
         Component(fun ctx ->
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
             let renderer = ctx.useStateLazy(fun () -> new PdfRegionRenderer()).Current
-            let structureCache = ctx.useStateLazy(fun () -> StructureCache()).Current
-            let layoutReviews = ctx.useStateLazy(fun () -> DocumentReviews()).Current
+            let structureCache = shell.Structures
+            let layoutReviews = shell.Reviews
             let selectedFile = ctx.useState (None: string option)
             let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
@@ -450,6 +470,7 @@ module private MainView =
             /// Opens a file and validates it with the current profile, naming that activity.
             let openFileAs (activity: string) (path: string) =
                 selectedFile.Set(Some path)
+                opened path
                 clearResults ()
                 pending.Set noChanges
                 let review = layoutReviews.For path
@@ -481,7 +502,7 @@ module private MainView =
                 task {
                     match selectedFile.Current with
                     | Some path when (layoutReviews.For path).IsEdited ->
-                        match! Dialogs.askToSave window (Path.GetFileName path) with
+                        match! Dialogs.askToSave window (string (Path.GetFileName path)) with
                         | Some true -> return! saveReview ()
                         | Some false ->
                             layoutReviews.Forget path
@@ -499,8 +520,12 @@ module private MainView =
                     if leave then return! openFileAs activity path else return None
                 }
 
-            // Auto-validate as soon as a file is picked/dropped.
-            let setSelectedFile (path: string) = switchTo "Validating" path |> ignore
+            /// Opens a PDF picked or dropped: here if this window has none yet (or has it), else in
+            /// its own window.
+            let setSelectedFile (path: string) =
+                match selectedFile.Current with
+                | Some current when Path.GetFullPath current <> Path.GetFullPath path -> openElsewhere path |> ignore
+                | _ -> openFileAs "Validating" path |> ignore
 
             // Closing with changes not saved asks about them first.
             let closing = ctx.useState (false, false)
@@ -520,11 +545,16 @@ module private MainView =
                 [ EffectTrigger.AfterInit ]
             )
 
-            // Files opened from outside the view (e.g. by the headless screenshot harness).
+            // PDFs this window is asked to open (a new window's, or the headless harness's).
             ctx.useEffect (
                 (fun () ->
                     match openRequests.Current with
-                    | Some path -> setSelectedFile path
+                    | Some request ->
+                        task {
+                            let! report = switchTo "Validating" request.Path
+                            request.Opened.TrySetResult report |> ignore
+                        }
+                        |> ignore
                     | None -> ()),
                 [ EffectTrigger.AfterChange openRequests ]
             )
@@ -717,34 +747,57 @@ module private MainView =
                                         isBusy.Set false
                                 }
 
-                            // Switch to the repaired copy and validate it (after clearing the busy
-                            // flag, so the validation can start) to show what improved.
-                            let! repairedReport =
+                            // Open the exported copy in its own window, where it's validated, to show
+                            // what improved; this one stays on the original.
+                            let! shownIn, repairedReport =
                                 match fixOutcome with
                                 | Ok fix when fix.WasFixed ->
                                     match fix.OutputPath with
-                                    | NonNull path -> switchTo "Validating the exported copy" path
-                                    | Null -> Task.FromResult None
-                                | _ -> Task.FromResult None
+                                    | NonNull path -> openElsewhere path
+                                    | Null -> Task.FromResult(window, None)
+                                | _ -> Task.FromResult(window, None)
 
-                            do! Dialogs.showFixResult window fixOutcome repairedReport
+                            do! Dialogs.showFixResult shownIn fixOutcome repairedReport
                     | _ -> ()
                 }
                 |> ignore
 
-            // ⌘S / Ctrl+S saves the review, ⌘E / Ctrl+E exports.
+            // The File menu: in the menu bar on macOS (with its ⌘ shortcuts), and at the top of the
+            // window elsewhere (where the keys below are Ctrl+O, Ctrl+W, Ctrl+S and Ctrl+E).
+            let menuItems = ctx.useState ((None: (NativeMenuItem * NativeMenuItem) option), false)
             ctx.useEffect (
                 (fun () ->
-                    window.KeyDown.Add(fun e ->
-                        if e.KeyModifiers.HasFlag KeyModifiers.Meta || e.KeyModifiers.HasFlag KeyModifiers.Control then
-                            match e.Key with
-                            | Key.S when not isBusy.Current && edited.Current ->
-                                e.Handled <- true
-                                saveReview () |> ignore
-                            | Key.E when not isBusy.Current ->
-                                e.Handled <- true
-                                export ()
-                            | _ -> ())),
+                    let mac = OperatingSystem.IsMacOS()
+                    let item (header: string) (key: Key) (action: unit -> unit) =
+                        let item = NativeMenuItem(header)
+                        if mac then item.Gesture <- KeyGesture(key, KeyModifiers.Meta)
+                        item.Click.Add(fun _ -> action ())
+                        item
+                    let save = item "Save" Key.S (fun () -> if not isBusy.Current && edited.Current then saveReview () |> ignore)
+                    let exportItem = item "Export…" Key.E (fun () -> if not isBusy.Current then export ())
+                    let file = NativeMenu()
+                    file.Items.Add(item "Open…" Key.O (fun () -> browse ()))
+                    file.Items.Add(NativeMenuItemSeparator())
+                    file.Items.Add(item "Close Window" Key.W (fun () -> window.Close()))
+                    file.Items.Add(save)
+                    file.Items.Add(exportItem)
+                    let menu = NativeMenu()
+                    menu.Items.Add(NativeMenuItem("File", Menu = file))
+                    NativeMenu.SetMenu(window, menu)
+                    menuItems.Set(Some(save, exportItem))
+                    if not mac then
+                        window.KeyDown.Add(fun e ->
+                            if e.KeyModifiers.HasFlag KeyModifiers.Control then
+                                match e.Key with
+                                | Key.O -> e.Handled <- true; browse ()
+                                | Key.W -> e.Handled <- true; window.Close()
+                                | Key.S when not isBusy.Current && edited.Current ->
+                                    e.Handled <- true
+                                    saveReview () |> ignore
+                                | Key.E when not isBusy.Current ->
+                                    e.Handled <- true
+                                    export ()
+                                | _ -> ())),
                 [ EffectTrigger.AfterInit ]
             )
 
@@ -1105,175 +1158,239 @@ module private MainView =
                     ]
                 ]
 
-            Grid.create [
-                Grid.margin 12.0
-                // A background makes the whole window area a drop target.
-                Grid.background "Transparent"
-                Grid.allowDrop true
-                Grid.onDragOver (fun e ->
-                    e.DragEffects <- if e.DataTransfer.Contains DataFormat.File then DragDropEffects.Copy else DragDropEffects.None
-                    e.Handled <- true)
-                Grid.onDrop onDrop
-                Grid.rowDefinitions "Auto,Auto,Auto,*,Auto"
-                Grid.children [
-                    fileRow
-                    StackPanel.create [
-                        Grid.row 1
-                        StackPanel.isVisible busy
-                        StackPanel.margin (0.0, 0.0, 0.0, 8.0)
-                        StackPanel.children [
-                            ProgressBar.create [
-                                ProgressBar.height 4.0
-                                ProgressBar.minHeight 4.0
-                                yield! progressBarState busyProgress.Current
+            // Kept in step with the buttons.
+            match menuItems.Current with
+            | Some(save, exportItem) ->
+                save.IsEnabled <- not busy && edited.Current
+                exportItem.IsEnabled <- not busy && selectedFile.Current.IsSome && saveOptions () <> PdfFixOptions.None
+            | None -> ()
+
+            DockPanel.create [
+              DockPanel.children [
+                // The File menu, where the platform has no menu bar of its own (not macOS).
+                ContentControl.create [ DockPanel.dock Dock.Top; ContentControl.content (NativeMenuBar()) ]
+                Grid.create [
+                    Grid.margin 12.0
+                    // A background makes the whole window area a drop target.
+                    Grid.background "Transparent"
+                    Grid.allowDrop true
+                    Grid.onDragOver (fun e ->
+                        e.DragEffects <- if e.DataTransfer.Contains DataFormat.File then DragDropEffects.Copy else DragDropEffects.None
+                        e.Handled <- true)
+                    Grid.onDrop onDrop
+                    Grid.rowDefinitions "Auto,Auto,Auto,*,Auto"
+                    Grid.children [
+                        fileRow
+                        StackPanel.create [
+                            Grid.row 1
+                            StackPanel.isVisible busy
+                            StackPanel.margin (0.0, 0.0, 0.0, 8.0)
+                            StackPanel.children [
+                                ProgressBar.create [
+                                    ProgressBar.height 4.0
+                                    ProgressBar.minHeight 4.0
+                                    yield! progressBarState busyProgress.Current
+                                ]
+                                match busyProgress.Current with
+                                | Some progress when busy -> progressLine progress
+                                | _ -> ()
                             ]
-                            match busyProgress.Current with
-                            | Some progress when busy -> progressLine progress
-                            | _ -> ()
                         ]
-                    ]
-                    match statusBanner with
-                    | Some banner -> banner
-                    | None -> ()
-                    Grid.create [
-                        Grid.row 3
-                        Grid.columnDefinitions [
-                            ColumnDefinition(GridLength(5.0, GridUnitType.Star), MinWidth = 360.0)
-                            ColumnDefinition(GridLength 6.0)
-                            ColumnDefinition(GridLength(7.0, GridUnitType.Star), MinWidth = 420.0)
-                        ]
-                        Grid.children [
-                            Grid.create [
-                                Grid.rowDefinitions "*,Auto"
-                                Grid.children [
-                                    resultsGrid
-                                    DockPanel.create [
-                                      Grid.row 1
-                                      DockPanel.margin (0.0, 8.0, 0.0, 0.0)
-                                      DockPanel.children [
-                                        if dismissedCount > 0 then
-                                            Button.create [
-                                                DockPanel.dock Dock.Left
-                                                Button.verticalAlignment VerticalAlignment.Center
-                                                Button.padding (8.0, 4.0)
-                                                Button.content (
-                                                    if showDismissed.Current then $"Hide {dismissedCount} dismissed"
-                                                    else $"Show {dismissedCount} dismissed"
-                                                )
-                                                Button.onClick (fun _ -> showDismissed.Set(not showDismissed.Current))
+                        match statusBanner with
+                        | Some banner -> banner
+                        | None -> ()
+                        Grid.create [
+                            Grid.row 3
+                            Grid.columnDefinitions [
+                                ColumnDefinition(GridLength(5.0, GridUnitType.Star), MinWidth = 360.0)
+                                ColumnDefinition(GridLength 6.0)
+                                ColumnDefinition(GridLength(7.0, GridUnitType.Star), MinWidth = 420.0)
+                            ]
+                            Grid.children [
+                                Grid.create [
+                                    Grid.rowDefinitions "*,Auto"
+                                    Grid.children [
+                                        resultsGrid
+                                        DockPanel.create [
+                                          Grid.row 1
+                                          DockPanel.margin (0.0, 8.0, 0.0, 0.0)
+                                          DockPanel.children [
+                                            if dismissedCount > 0 then
+                                                Button.create [
+                                                    DockPanel.dock Dock.Left
+                                                    Button.verticalAlignment VerticalAlignment.Center
+                                                    Button.padding (8.0, 4.0)
+                                                    Button.content (
+                                                        if showDismissed.Current then $"Hide {dismissedCount} dismissed"
+                                                        else $"Show {dismissedCount} dismissed"
+                                                    )
+                                                    Button.onClick (fun _ -> showDismissed.Set(not showDismissed.Current))
+                                                ]
+                                            StackPanel.create [
+                                            DockPanel.dock Dock.Right
+                                            StackPanel.orientation Orientation.Horizontal
+                                            StackPanel.horizontalAlignment HorizontalAlignment.Right
+                                            StackPanel.children [
+                                                Button.create [
+                                                    Button.content "Copy Summary"
+                                                    Button.padding (12.0, 4.0)
+                                                    Button.margin (0.0, 0.0, 8.0, 0.0)
+                                                    Button.isEnabled report.IsSome
+                                                    Button.onClick (fun _ ->
+                                                        report |> Option.iter (withoutDismissed >> ValidationReportTextFormatter.BuildReport >> copyText))
+                                                ]
+                                                Button.create [
+                                                    Button.content "Save Report…"
+                                                    Button.padding (12.0, 4.0)
+                                                    Button.isEnabled report.IsSome
+                                                    Button.onClick saveReport
+                                                ]
                                             ]
-                                        StackPanel.create [
-                                        DockPanel.dock Dock.Right
-                                        StackPanel.orientation Orientation.Horizontal
-                                        StackPanel.horizontalAlignment HorizontalAlignment.Right
-                                        StackPanel.children [
-                                            Button.create [
-                                                Button.content "Copy Summary"
-                                                Button.padding (12.0, 4.0)
-                                                Button.margin (0.0, 0.0, 8.0, 0.0)
-                                                Button.isEnabled report.IsSome
-                                                Button.onClick (fun _ ->
-                                                    report |> Option.iter (withoutDismissed >> ValidationReportTextFormatter.BuildReport >> copyText))
                                             ]
-                                            Button.create [
-                                                Button.content "Save Report…"
-                                                Button.padding (12.0, 4.0)
-                                                Button.isEnabled report.IsSome
-                                                Button.onClick saveReport
-                                            ]
+                                          ]
                                         ]
-                                        ]
-                                      ]
                                     ]
                                 ]
+                                GridSplitter.create [
+                                    Grid.column 1
+                                    GridSplitter.width 6.0
+                                    GridSplitter.horizontalAlignment HorizontalAlignment.Stretch
+                                    Theme.resources [ GridSplitter.BackgroundProperty, Theme.Tokens.Border ]
+                                    GridSplitter.resizeDirection GridResizeDirection.Columns
+                                ]
+                                match selectedRow.Current with
+                                | Some row -> findingDetails row
+                                | None -> ()
                             ]
-                            GridSplitter.create [
-                                Grid.column 1
-                                GridSplitter.width 6.0
-                                GridSplitter.horizontalAlignment HorizontalAlignment.Stretch
-                                Theme.resources [ GridSplitter.BackgroundProperty, Theme.Tokens.Border ]
-                                GridSplitter.resizeDirection GridResizeDirection.Columns
-                            ]
-                            match selectedRow.Current with
-                            | Some row -> findingDetails row
-                            | None -> ()
                         ]
-                    ]
-                    StackPanel.create [
-                        Grid.row 4
-                        StackPanel.orientation Orientation.Horizontal
-                        StackPanel.horizontalAlignment HorizontalAlignment.Right
-                        StackPanel.margin (0.0, 8.0, 0.0, 0.0)
-                        StackPanel.children [
-                            let changes = pending.Current.Changes
-                            let chosen =
-                                autoFixes.Current
-                                |> Option.map (fun options -> Enum.GetValues<PdfFixOptions>() |> Seq.filter (fun o -> o <> PdfFixOptions.None && o <> PdfFixOptions.All && options.HasFlag o) |> Seq.length)
-                                |> Option.defaultValue 0
-                            // The counts are part of what a screen reader says for the buttons.
-                            let structureName =
-                                match changes with
-                                | 0 -> "Structure…"
-                                | 1 -> "Structure…, 1 edit not in the PDF yet"
-                                | n -> $"Structure…, {n} edits not in the PDF yet"
-                            let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
-                            Button.create [
-                                Button.content (badged "Structure…" changes)
-                                AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, structureName, ValueNone)
-                                Button.padding (12.0, 4.0)
-                                Button.margin (0.0, 0.0, 8.0, 0.0)
-                                Button.isEnabled (not busy && selectedFile.Current.IsSome)
-                                ToolTip.tip
-                                    "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements, or for an untagged PDF, suggests a layout to tag it from. The count is your edits not in it yet, which Export writes."
-                                Button.onClick viewStructure
-                            ]
-                            Button.create [
-                                Button.content (badged "Auto Fixes…" chosen)
-                                AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, autoFixesName, ValueNone)
-                                Button.padding (12.0, 4.0)
-                                Button.margin (0.0, 0.0, 8.0, 0.0)
-                                Button.isEnabled (not busy && canAttemptFix)
-                                ToolTip.tip
-                                    "Choose best-effort repairs for Export to apply, like XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
-                                Button.onClick chooseAutoFixes
-                            ]
-                            Button.create [
-                                Button.content "Save"
-                                Button.padding (12.0, 4.0)
-                                Button.margin (0.0, 0.0, 8.0, 0.0)
-                                Button.isEnabled (not busy && edited.Current)
-                                ToolTip.tip
-                                    "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed."
-                                Button.onClick (fun _ -> saveReview () |> ignore)
-                            ]
-                            Button.create [
-                                Button.content "Export…"
-                                Button.padding (12.0, 4.0)
-                                Button.margin (0.0, 0.0, 8.0, 0.0)
-                                Button.isEnabled (not busy && selectedFile.Current.IsSome && saveOptions () <> PdfFixOptions.None)
-                                ToolTip.tip
-                                    "Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and opens it. The original isn't changed."
-                                Button.onClick export
+                        StackPanel.create [
+                            Grid.row 4
+                            StackPanel.orientation Orientation.Horizontal
+                            StackPanel.horizontalAlignment HorizontalAlignment.Right
+                            StackPanel.margin (0.0, 8.0, 0.0, 0.0)
+                            StackPanel.children [
+                                let changes = pending.Current.Changes
+                                let chosen =
+                                    autoFixes.Current
+                                    |> Option.map (fun options -> Enum.GetValues<PdfFixOptions>() |> Seq.filter (fun o -> o <> PdfFixOptions.None && o <> PdfFixOptions.All && options.HasFlag o) |> Seq.length)
+                                    |> Option.defaultValue 0
+                                // The counts are part of what a screen reader says for the buttons.
+                                let structureName =
+                                    match changes with
+                                    | 0 -> "Structure…"
+                                    | 1 -> "Structure…, 1 edit not in the PDF yet"
+                                    | n -> $"Structure…, {n} edits not in the PDF yet"
+                                let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
+                                Button.create [
+                                    Button.content (badged "Structure…" changes)
+                                    AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, structureName, ValueNone)
+                                    Button.padding (12.0, 4.0)
+                                    Button.margin (0.0, 0.0, 8.0, 0.0)
+                                    Button.isEnabled (not busy && selectedFile.Current.IsSome)
+                                    ToolTip.tip
+                                        "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements, or for an untagged PDF, suggests a layout to tag it from. The count is your edits not in it yet, which Export writes."
+                                    Button.onClick viewStructure
+                                ]
+                                Button.create [
+                                    Button.content (badged "Auto Fixes…" chosen)
+                                    AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, autoFixesName, ValueNone)
+                                    Button.padding (12.0, 4.0)
+                                    Button.margin (0.0, 0.0, 8.0, 0.0)
+                                    Button.isEnabled (not busy && canAttemptFix)
+                                    ToolTip.tip
+                                        "Choose best-effort repairs for Export to apply, like XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
+                                    Button.onClick chooseAutoFixes
+                                ]
+                                Button.create [
+                                    Button.content "Save"
+                                    Button.padding (12.0, 4.0)
+                                    Button.margin (0.0, 0.0, 8.0, 0.0)
+                                    Button.isEnabled (not busy && edited.Current)
+                                    ToolTip.tip
+                                        "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed."
+                                    Button.onClick (fun _ -> saveReview () |> ignore)
+                                ]
+                                Button.create [
+                                    Button.content "Export…"
+                                    Button.padding (12.0, 4.0)
+                                    Button.margin (0.0, 0.0, 8.0, 0.0)
+                                    Button.isEnabled (not busy && selectedFile.Current.IsSome && saveOptions () <> PdfFixOptions.None)
+                                    ToolTip.tip
+                                        "Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and opens it. The original isn't changed."
+                                    Button.onClick export
+                                ]
                             ]
                         ]
                     ]
                 ]
+              ]
             ])
 
 open MainView
 
-type MainWindow() as this =
+/// A document window: one PDF, validated, with its review. Opening a PDF brings forward the
+/// window showing it, or opens it in a new one (see Open).
+type MainWindow(shell: DocumentShell) as this =
     inherit HostWindow(Title = "Legibyl — PDF/UA Validator", Width = 1200.0, Height = 720.0, MinWidth = 900.0, MinHeight = 560.0)
 
-    let openRequests: IWritable<string option> = new State<_>(None)
+    static let windows = ResizeArray<MainWindow>()
+
+    let openRequests: IWritable<OpenRequest option> = new State<_>(None)
+    let mutable filePath: string option = None
 
     do
+        windows.Add this
+        this.Closed.Add(fun _ -> windows.Remove this |> ignore)
         // Semi's column headers are larger than the 12pt cells; match them so short
         // headers aren't clipped in the narrow results pane.
         let headerStyle = Style(fun selector -> selector.OfType<DataGridColumnHeader>())
         headerStyle.Setters.Add(Setter(DataGridColumnHeader.FontSizeProperty, 12.0))
         this.Styles.Add headerStyle
-        this.Content <- view this openRequests
+        let openElsewhere path =
+            task {
+                let! window, report = MainWindow.Open(shell, path, this)
+                return (window :> Window), report
+            }
+        this.Content <- view this shell openRequests (fun path -> filePath <- Some path) openElsewhere
 
-    /// Opens and validates a PDF, as if it had been picked or dropped.
-    member _.OpenFile(path: string) = openRequests.Set(Some path)
+    /// A window of the app's, not showing a PDF yet.
+    new() = new MainWindow(DocumentShell.Shared)
+
+    /// The PDF it shows, if any.
+    member _.FilePath = filePath
+
+    /// Opens and validates a PDF in this window, as if it had been picked or dropped.
+    member this.OpenFile(path: string) = this.OpenFileAsync path |> ignore
+
+    /// Opens and validates a PDF in this window; its report once validated (None if it couldn't be).
+    member _.OpenFileAsync(path: string) : Task<ValidationReport option> =
+        let request = { Path = path; Opened = TaskCompletionSource<ValidationReport option>() }
+        openRequests.Set(Some request)
+        request.Opened.Task
+
+    /// The document windows open.
+    static member Windows = List.ofSeq windows
+
+    /// Opens path: brings forward the window showing it, or opens it in a new window (a little
+    /// below and right of from, if given). That window, and its report once validated (None if it
+    /// was open already).
+    static member Open(shell: DocumentShell, path: string, ?from: Window) : Task<MainWindow * ValidationReport option> =
+        let comparison = if OperatingSystem.IsLinux() then StringComparison.Ordinal else StringComparison.OrdinalIgnoreCase
+        let showing (window: MainWindow) =
+            window.FilePath |> Option.exists (fun shown -> String.Equals(Path.GetFullPath shown, Path.GetFullPath path, comparison))
+        match windows |> Seq.tryFind showing with
+        | Some window ->
+            window.Activate()
+            Task.FromResult((window, None))
+        | None ->
+            let window = new MainWindow(shell)
+            match from with
+            | Some from ->
+                window.WindowStartupLocation <- WindowStartupLocation.Manual
+                window.Position <- PixelPoint(from.Position.X + 28, from.Position.Y + 28)
+            | None -> ()
+            window.Show()
+            task {
+                let! report = window.OpenFileAsync path
+                return window, report
+            }
