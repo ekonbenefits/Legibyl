@@ -127,7 +127,8 @@ let ``RenderPageWithRegions outlines each region in its color, filling the empha
         { Geometry = { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
           Label = "1 P"
           Color = color
-          Emphasised = emphasised }
+          Emphasised = emphasised
+          Marker = None }
 
     let png =
         renderer.RenderPageWithRegions(
@@ -141,6 +142,23 @@ let ``RenderPageWithRegions outlines each region in its color, filling the empha
     outline.Green |> should be (greaterThan outline.Red)
     let filled = colorAt png 350.0 150.0
     filled.Red |> should be (greaterThan filled.Green)
+
+[<Fact>]
+let ``RenderPageWithRegions draws a region's marker at its top-right corner`` () =
+    use renderer = new PdfRegionRenderer()
+    let region =
+        { Geometry = { PageNumber = 1; Left = 100.0; Bottom = 100.0; Right = 200.0; Top = 200.0 }
+          Label = "1 Figure"
+          Color = 0x00C000u
+          Emphasised = false
+          Marker = Some(0xE53935u, "2") }
+
+    let png = renderer.RenderPageWithRegions(corpusFile "pdfua1-fail.pdf", 1, [ region ])
+
+    // Just inside the corner, off the marker's text.
+    let marker = colorAt png 196.0 196.0
+    marker.Red |> should be (greaterThan 200uy)
+    marker.Green |> should be (lessThan 100uy)
 
 [<Fact>]
 let ``PDFium draws each page at the requested scale, and refuses pages that don't exist`` () =

@@ -32,7 +32,9 @@ type PageRegion =
       /// 0xRRGGBB.
       Color: uint32
       /// Drawn filled and thicker, e.g. the selected one.
-      Emphasised: bool }
+      Emphasised: bool
+      /// A marker at its top-right corner, e.g. for its failures: (0xRRGGBB, its text).
+      Marker: (uint32 * string) option }
 
 type IPdfRegionRenderer =
     /// Renders the page containing location as a PNG, highlighting the failing object's
@@ -128,6 +130,19 @@ module private Rendering =
         use tab = new SKPaint(Color = color, Style = SKPaintStyle.Fill)
         canvas.DrawRect(SKRect(box.Left, tabTop, box.Left + width + 6f * scale, tabTop + tabHeight), tab)
         canvas.DrawText(region.Label, box.Left + 3f * scale, tabTop + font.Size, font, text)
+        match region.Marker with
+        | Some(markerColor, markerText) ->
+            let radius = 8f * scale
+            // On the page, over the corner.
+            let x = min (float32 bitmap.Width - radius) (max radius box.Right)
+            let y = min (height - radius) (max radius box.Top)
+            use dot = new SKPaint(Color = SKColor(byte (markerColor >>> 16), byte (markerColor >>> 8), byte markerColor), Style = SKPaintStyle.Fill, IsAntialias = true)
+            use ring = new SKPaint(Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f * scale, IsAntialias = true)
+            canvas.DrawCircle(x, y, radius, dot)
+            canvas.DrawCircle(x, y, radius, ring)
+            use markerFont = new SKFont(SKTypeface.Default, 10f * scale, Embolden = true)
+            canvas.DrawText(markerText, x, y + markerFont.Size * 0.35f, SKTextAlign.Center, markerFont, text)
+        | None -> ()
 
     /// "PDLinkAnnot" -> "Link": the PdfPig annotation type veraPDF's object type corresponds to.
     let private expectedAnnotationTypeName (objectType: string | null) =
