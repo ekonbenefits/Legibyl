@@ -114,6 +114,13 @@ Use `-r osx-arm64`, `-r osx-x64`, or `-r linux-x64` for other platforms.
 The published output bundles IKVM's translated JRE (`IKVM.Java.dll`), so
 the app runs standalone with no external Java installation.
 
+The CLI publishes the same way (`src/Legibyl.Cli/Legibyl.Cli.fsproj`). Published
+for a runtime, it's compiled ahead of time (ReadyToRun), except `IKVM.Java.dll`,
+so a run starts faster: a cold `validate` of a small PDF takes about 1.85 s
+instead of 2.16 s, for a publish of 308 MB instead of 270 MB. Compiling
+`IKVM.Java.dll` too would save another ~0.35 s but add 100 MB. The GUI doesn't
+need it as much: it gets veraPDF ready in the background as it starts.
+
 ## Windows installer (MSI)
 
 `installer/Legibyl.Gui.Installer` builds a WiX v6 MSI (`LegibylSetup.msi`)
