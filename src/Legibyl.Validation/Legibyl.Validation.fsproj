@@ -48,6 +48,7 @@
     <Compile Include="RepairNames.fs" />
     <Compile Include="ReviewFile.fs" />
     <Compile Include="VeraPdfValidator.fs" />
+    <Compile Include="SavedResults.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -85,5 +86,10 @@
            Text="SHA-256 mismatch for $(VeraPdfJarUrl): expected $(VeraPdfSha256), got $(_VeraPdfActualSha256). If you are upgrading veraPDF, update VeraPdfSha256 in Directory.Build.props." />
     <Move SourceFiles="$(VeraPdfJar).download" DestinationFiles="$(VeraPdfJar)" />
   </Target>
+
+  <ItemGroup>
+    <!-- The veraPDF version its results come from (see VeraPdfValidator.EngineVersion). -->
+    <AssemblyMetadata Include="VeraPdfVersion" Value="$(VeraPdfVersion)" />
+  </ItemGroup>
 
 </Project>

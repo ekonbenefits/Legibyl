@@ -19,6 +19,9 @@ module internal VeraPdf =
     let private initLock = obj ()
     let mutable private initialised = false
 
+    /// Each profile's rules' descriptions, by specification, clause and test (read once).
+    let ruleDescriptions = Collections.Concurrent.ConcurrentDictionary<PdfProfile, Map<string * string * int, string>>()
+
     let ensureInitialised () =
         if not initialised then
             lock initLock (fun () ->
@@ -756,6 +759,32 @@ type VeraPdfValidator() =
     /// one-time setup (a second or two), and a validation of a tiny PDF, so the code the first
     /// real validation runs is compiled already (most of a second more). Safe to run alongside
     /// validations; they wait for the setup if it's still under way.
+    /// The veraPDF version its results come from (stamped from VeraPdfVersion in
+    /// Directory.Build.props).
+    static member EngineVersion =
+        typeof<VeraPdfValidator>.Assembly.GetCustomAttributes(typeof<Reflection.AssemblyMetadataAttribute>, false)
+        |> Seq.cast<Reflection.AssemblyMetadataAttribute>
+        |> Seq.tryFind (fun a -> a.Key = "VeraPdfVersion")
+        |> Option.bind (fun a -> Option.ofObj a.Value)
+        |> Option.defaultValue "unknown"
+
+    /// What a rule of profile's says (its description, as a failure's message has it), by its
+    /// specification ("ISO 14289-1:2014"), clause and test; None for a rule it doesn't have.
+    static member RuleDescription(profile: PdfProfile, specification: string, clause: string, testNumber: int) : string option =
+        ensureInitialised ()
+        let table =
+            ruleDescriptions.GetOrAdd(
+                profile,
+                fun profile ->
+                    let validationProfile = Profiles.getVeraProfileDirectory().getValidationProfileByFlavour (toJavaFlavour profile)
+                    [ for item in javaSeq (validationProfile.getRules ()) do
+                          let rule = item :?> Rule
+                          let id = rule.getRuleId ()
+                          yield (id.getSpecification().ToString(), id.getClause (), id.getTestNumber ()), rule.getDescription () ]
+                    |> Map.ofList
+            )
+        table |> Map.tryFind (specification, clause, testNumber)
+
     static member Warm() =
         ensureInitialised ()
         let pdf = Path.Combine(Path.GetTempPath(), $"legibyl-warm-{Guid.NewGuid():N}.pdf")

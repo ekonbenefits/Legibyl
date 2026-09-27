@@ -392,6 +392,9 @@ module private MainView =
             // preview); and the rules opened or closed, by key (see RuleGroup.ExpandedAtFirst).
             let selectedRule = ctx.useState (None: RuleGroup option)
             let ruleExpanded = ctx.useState (Map.empty: Map<string, bool>)
+            // When the results shown were checked, if they're the review's saved ones (see
+            // SavedResults); None for a validation just run.
+            let checkedAt = ctx.useState (None: DateTime option)
             let preview = ctx.useState noPreview
             // Bumped on every selection change so a slow page render for an earlier
             // selection can't overwrite the preview for the current one.
@@ -427,6 +430,7 @@ module private MainView =
                 selectedRow.Set None
                 selectedRule.Set None
                 ruleExpanded.Set Map.empty
+                checkedAt.Set None
                 preview.Set noPreview
                 previewVersion.Set(previewVersion.Current + 1)
 
@@ -527,22 +531,37 @@ module private MainView =
 
             /// Validates the selected file, returning its report (None if it couldn't be validated).
             /// activity names it in the progress row ("Validating", "Validating the repaired copy").
-            let runValidation (activity: string) : Task<ValidationReport option> =
+            /// Validates the selected file, or, unless fresh, shows the result its review saved for
+            /// these exact bytes (see SavedResults). A validation run is a change to the review, as an
+            /// edit is: Save keeps it, so the file opens with it next time.
+            let runValidation (activity: string) (fresh: bool) : Task<ValidationReport option> =
                 task {
                     match selectedFile.Current with
                     | Some filePath when not isBusy.Current ->
                         isBusy.Set true
                         clearResults ()
                         busyProgress.Set None
+                        let review = layoutReviews.For filePath
+                        let saved = if fresh then None else review.Validation
                         // Created on the UI thread, so its reports arrive there too.
                         let progress = Progress<ValidationProgress>(fun p -> busyProgress.Set(Some(Validating(activity, p))))
                         try
                             try
                                 // Against the PDF/UA its PDF version calls for (see PdfUaTarget).
-                                let! report =
+                                let! report, hash, fromSaved =
                                     Task.Run(fun () ->
                                         let profile, _ = PdfUaTarget.detect filePath
-                                        { validator.Validate(filePath, profile, progress) with ProfileDetected = true })
+                                        let hash = SavedResults.hashOf filePath
+                                        match saved with
+                                        | Some saved when SavedResults.isCurrent saved hash profile ->
+                                            SavedResults.toReport saved filePath, hash, Some saved.CheckedAt
+                                        | _ -> { validator.Validate(filePath, profile, progress) with ProfileDetected = true }, hash, None)
+                                match fromSaved with
+                                | Some _ -> ()
+                                | None ->
+                                    review.Validation <- Some(SavedResults.ofReport report hash DateTime.Now)
+                                    edited.Set review.IsEdited
+                                checkedAt.Set fromSaved
                                 let rows =
                                     report.Findings
                                     |> Seq.map RuleViolationRow.Of
@@ -576,7 +595,7 @@ module private MainView =
                 dismissed.Set review.Dismissed
                 edited.Set review.IsEdited
                 showDismissed.Set false
-                runValidation activity
+                runValidation activity false
 
             /// Keeps the selected file's review in the file next to it; false if it couldn't be
             /// written (and says why).
@@ -1019,7 +1038,8 @@ module private MainView =
                             ToolTip.tip "Check this PDF again, after it's changed on disk."
                             Button.padding (16.0, 4.0)
                             Button.isEnabled (not busy && selectedFile.Current.IsSome)
-                            Button.onClick (fun _ -> runValidation "Validating" |> ignore)
+                            // Always a fresh check, whatever the review saved.
+                            Button.onClick (fun _ -> runValidation "Validating" true |> ignore)
                         ]
                     ]
                 ]
@@ -1060,13 +1080,18 @@ module private MainView =
                         | 0 -> $"{shownWarnings} warnings"
                         | hidden when shownWarnings = 1 -> $"1 warning, {hidden} dismissed"
                         | hidden -> $"{shownWarnings} warnings, {hidden} dismissed"
+                    // Shown from the review's saved result: when it was checked.
+                    let asChecked =
+                        match checkedAt.Current with
+                        | Some date -> ", as checked " + date.ToString("d MMM yyyy", Globalization.CultureInfo.InvariantCulture)
+                        | None -> ""
                     Some(
                         if report.IsCompliant then
-                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({why}{report.TotalAssertions} checks, {warnings})"
+                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({why}{report.TotalAssertions} checks, {warnings}){asChecked}"
                         else
                             banner
                                 Theme.Tokens.Danger
-                                $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({why}{warnings})"
+                                $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({why}{warnings}){asChecked}"
                     )
 
             let allRows =

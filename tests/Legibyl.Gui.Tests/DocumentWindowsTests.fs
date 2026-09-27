@@ -68,8 +68,9 @@ let ``the File menu opens, closes, saves and exports, in step with the buttons``
             window.Close()
 
             items |> List.map fst |> should equal [ "Open…"; "Open Recent"; "Close Window"; "Save"; "Export…" ]
-            // Nothing to save or export until there's a change or a fix chosen.
-            saveAtFirst |> should be False
+            // The validation just run is kept by Save (see SavedResults); nothing to export until
+            // there's a change or a fix chosen.
+            saveAtFirst |> should be True
             exportAtFirst |> should be False))
 
 [<Fact>]

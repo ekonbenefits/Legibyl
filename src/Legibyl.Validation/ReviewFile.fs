@@ -50,6 +50,52 @@ type SavedEdit =
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
       Exclude: bool }
 
+/// A finding as a saved validation keeps it: where it is and what fixes it, without its message
+/// (which comes from the rule, when it's read back; see SavedResults).
+[<CLIMutable>]
+type SavedFinding =
+    { [<JsonPropertyName "specification">] Specification: string
+      [<JsonPropertyName "clause">] Clause: string
+      [<JsonPropertyName "test">] TestNumber: int
+      /// "Failure" or "Warning".
+      [<JsonPropertyName "severity">] Severity: string
+      [<JsonPropertyName "locationContext">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      LocationContext: string | null
+      /// Page, left, bottom, right, top.
+      [<JsonPropertyName "region">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Region: float array | null
+      [<JsonPropertyName "element">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Element: string | null
+      /// What fixes it, as PdfFixOptions' value.
+      [<JsonPropertyName "fixOptions">] FixOptions: int
+      /// The detail a Legibyl warning gives ("12 figures side by side on page 1."); veraPDF's.
+      [<JsonPropertyName "errorMessage">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      ErrorMessage: string | null }
+
+/// A validation's result, kept with the review so reopening the PDF shows it at once. It's the
+/// result for the exact bytes validated (their SHA-256), by these versions of veraPDF and
+/// Legibyl, against this standard; if any of them differs, the PDF is validated again.
+[<CLIMutable>]
+type SavedValidation =
+    { [<JsonPropertyName "hash">] Hash: string
+      [<JsonPropertyName "veraPdfVersion">] VeraPdfVersion: string
+      [<JsonPropertyName "legibylVersion">] LegibylVersion: string
+      /// "ua1" or "ua2".
+      [<JsonPropertyName "standard">] Standard: string
+      /// "file" (from its PDF version) or "--ua" (asked for).
+      [<JsonPropertyName "standardFrom">] StandardFrom: string
+      [<JsonPropertyName "pdfVersion">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      PdfVersion: string | null
+      [<JsonPropertyName "checkedAt">] CheckedAt: DateTime
+      [<JsonPropertyName "isCompliant">] IsCompliant: bool
+      [<JsonPropertyName "totalAssertions">] TotalAssertions: int
+      [<JsonPropertyName "findings">] Findings: SavedFinding array }
+
 /// The review: remembered dismissals and edits, either of which may be missing (null).
 [<CLIMutable>]
 type SavedFile =
@@ -73,7 +119,11 @@ type SavedFile =
       /// The auto fixes chosen, by name (see RepairNames); null if none have been.
       [<JsonPropertyName "fixes">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Fixes: string array | null }
+      Fixes: string array | null
+      /// The last validation's result, as saved (see SavedValidation); never in a copy's review.
+      [<JsonPropertyName "validation">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Validation: SavedValidation | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf's") in a
 // file they may open by hand.
@@ -153,7 +203,7 @@ let isEmpty (file: SavedFile) =
         | Null -> true
     // Fixes chosen as none is still a choice, as is none dismissed (over a review carried inside
     // the PDF that has some).
-    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes
+    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes && isNull file.Validation
 
 /// Writes file next to pdfPath, or deletes it when there's nothing in it. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
@@ -241,7 +291,8 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
 /// has elements instead). Nothing for no review.
 let forCopy (saved: SavedFile option) =
     Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null>(fun tagged ->
-        match saved with
+        // A copy is validated afresh: a result inside it would be a stale claim about itself.
+        match saved |> Option.map (fun saved -> { saved with Validation = null }) with
         | Some saved when tagged.Count = 0 -> toJson saved
         | Some saved ->
             let moved = rekey (edits saved) tagged
