@@ -454,7 +454,7 @@ module private MainView =
                 pending.Set noChanges
                 let review = layoutReviews.For path
                 autoFixes.Set review.AutoFixes
-                dismissed.Set review.AllDismissed
+                dismissed.Set review.Dismissed
                 edited.Set review.IsEdited
                 showDismissed.Set false
                 runValidation activity
@@ -771,8 +771,7 @@ module private MainView =
                     if isDismissed then review.Dismissed.Add(key row.Violation, row.Message)
                     else review.Dismissed.Remove(key row.Violation)
                 edited.Set true
-                // With those carried inside the PDF, which stay.
-                let next = review.AllDismissed
+                let next = review.Dismissed
                 dismissed.Set next
                 match outcome.Current with
                 | Validated(report, rows) ->
@@ -916,16 +915,8 @@ module private MainView =
                     ContextMenu.viewItems [
                         match selected with
                         | Some row when row.Dismissed ->
-                            // Those dismissed in the review carried inside the PDF stay: it's read-only.
-                            let own =
-                                selectedFile.Current |> Option.map (fun path -> (layoutReviews.For path).Dismissed) |> Option.defaultValue Map.empty
                             let restore (header: string) (key: RuleViolation -> Dismissals.Key) =
-                                let carried = not (own.ContainsKey(key row.Violation))
-                                MenuItem.create [
-                                    MenuItem.header (if carried then $"{header} (dismissed in the review saved inside this PDF)" else header)
-                                    MenuItem.isEnabled (not carried)
-                                    MenuItem.onClick (fun _ -> setDismissed row key false)
-                                ]
+                                MenuItem.create [ MenuItem.header header; MenuItem.onClick (fun _ -> setDismissed row key false) ]
                             if dismissed.Current.ContainsKey(Dismissals.keyOf row.Violation) then
                                 restore "Restore warning" Dismissals.keyOf
                             if Dismissals.isRuleIgnored dismissed.Current row.Violation then

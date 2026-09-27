@@ -284,10 +284,13 @@ An exported copy carries the review it was made with (dismissals, edits, the
 title given an untagged PDF, and the auto fixes it was made with) inside it: a
 compressed stream the catalog points
 to under a private key (`/LBYL_Review`), added as an incremental update, which
-PDF readers don't show. That review is read-only: its edits are in the copy
-already (the Edits tab lists them apart, without **Remove**), and its dismissed
-warnings stay dismissed (they can't be restored there). The copy's own review
-starts empty and is saved next to it, and a copy exported from it carries both.
+PDF readers don't show. That review is read-only. Its edits and auto fixes are in
+the copy already, for reference: the Edits tab lists its edits apart, without
+**Remove**, and the copy's own edits start empty. Its dismissed warnings are
+where the copy's own start: they can be restored like any other, and once the
+copy's review is saved, the file next to it (even saying none are dismissed)
+overrides the ones inside. A copy exported from the copy carries both reviews'
+edits, and the dismissals as they are.
 The CLI embeds a review only with `--edits` or `--edits-from` (the one it
 applied).
 
