@@ -96,11 +96,23 @@ let ``an edit with no element in about the same place isn't applied, and says so
 
     let result = applyEdits input.Path output.Path [ altEdit; elsewhere ]
 
-    result.AppliedFixes
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
+    // Each edit that isn't applied is named, with why.
+    result.NotApplied
     |> should
         contain
-        "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs); 1 weren't, as no element with their tag is in about the same place."
+        "Your edit for the <Figure> on page 1 at [300, 100, 400, 200] wasn't applied: no <Figure> is in about that place (its box overlapping at least 60%). Check its page, tag and box against legibyl structure."
     ElementEdits.pending input.Path [ elsewhere ] |> should equal 0
+
+[<Fact>]
+let ``an edit the PDF has already, or with nothing to change, says so`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path
+    (applyEdits input.Path output.Path [ altEdit ]).WasFixed |> should be True
+
+    ElementEdits.unapplied output.Path [ altEdit ]
+    |> should equal [ "Your edit for the <Figure> on page 1 at [73, 551, 171, 649] changed nothing: the PDF says that already." ]
 
 /// Three lines tagged a paragraph each.
 let private createLines (path: string) =

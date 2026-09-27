@@ -243,3 +243,21 @@ let ``the link scanner finds undescribed web links and QR codes, without the lay
 
     scanner.WebLinks() |> List.map (fun l -> l.Page, l.Address) |> should equal [ 1, "https://example.com/apply" ]
     scanner.QrCodes 1 |> List.map fst |> should equal [ "https://example.com/scan" ]
+
+[<Fact>]
+let ``a region's bands no word covers are where more text may be drawn as outlines`` () =
+    // A badge's name as text, and under it a line that isn't text (e.g. "5th grade" as outlines).
+    let badge = region 70.0 600.0 200.0 640.0
+    let name = region 72.0 626.0 150.0 638.0
+    LayoutSuggestions.uncoveredBands badge [ name ] |> should equal [ 600.0, 626.0 ]
+    // Leading between lines isn't a band; a region its words fill has none.
+    let lines = [ region 72.0 626.0 150.0 638.0; region 72.0 612.0 150.0 624.0 ]
+    LayoutSuggestions.uncoveredBands (region 70.0 611.0 200.0 639.0) lines |> should be Empty
+    // Words elsewhere on the page don't count.
+    LayoutSuggestions.uncoveredBands badge [ region 300.0 626.0 350.0 638.0 ] |> should be Empty
+
+[<Fact>]
+let ``OCR text is kept when it reads as words, not decoration`` () =
+    LayoutSuggestions.looksLikeText "5th grade" |> should be True
+    LayoutSuggestions.looksLikeText "C—O ———_" |> should be False
+    LayoutSuggestions.looksLikeText "|" |> should be False

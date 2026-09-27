@@ -543,6 +543,9 @@ type VeraPdfValidator() =
                         match this.LayoutSource with
                         | NonNull source -> Some { StructureFixes.Source = source; StructureFixes.PdfPath = pdfPath; StructureFixes.Report = report FixStage.Repairing }
                         | Null -> None
+                    // Edits of elements (not regions, which tagging takes) that won't change anything, and why.
+                    if options.HasFlag PdfFixOptions.ApplyEdits && not (options.HasFlag PdfFixOptions.TagFromLayout) then
+                        notApplied.AddRange(ElementEdits.unapplied currentInput (List.ofSeq this.Edits))
                     match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) with
                     | [] ->
                         tryDeleteTemporary tempOutput

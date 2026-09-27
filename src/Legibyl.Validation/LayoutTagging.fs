@@ -259,7 +259,13 @@ type private Tally =
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
     match region.Tag with
-    | "H1" -> "H1"
+    // A level a person gave (a retag edit) is kept.
+    | "H1"
+    | "H2"
+    | "H3"
+    | "H4"
+    | "H5"
+    | "H6" -> region.Tag
     // Levels below the title aren't known from the layout; one level under it keeps the
     // outline from skipping levels.
     | "H" -> if hasTitle then "H2" else "H1"
@@ -380,7 +386,11 @@ let tag
                             let element = newElement document tag documentElement.Dictionary (Some page)
                             match tag with
                             | "H1"
-                            | "H2" -> tally.Headings <- tally.Headings + 1
+                            | "H2"
+                            | "H3"
+                            | "H4"
+                            | "H5"
+                            | "H6" -> tally.Headings <- tally.Headings + 1
                             | "Figure" ->
                                 tally.Figures <- tally.Figures + 1
                                 // Alt text a person wrote comes first; the QR code's own is kept
@@ -641,10 +651,12 @@ let tag
                 annotation.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI address) |> ignore
                 annotation.SetBorder(PdfArray([| 0.0; 0.0; 0.0 |])) |> ignore
                 annotation.SetFlags PdfAnnotation.PRINT |> ignore
+                // What a person wrote for the figure says where it goes better than its address.
                 let contents =
-                    match pageTitle address with
-                    | Some title -> $"QR code link to {title} ({address})"
-                    | None -> $"QR code link to {address}"
+                    match (fst regions[index]).Alt, pageTitle address with
+                    | NonNull alt, _ when not (String.IsNullOrWhiteSpace alt) -> alt.Trim()
+                    | _, Some title -> $"QR code link to {title} ({address})"
+                    | _, None -> $"QR code link to {address}"
                 annotation.SetContents(PdfString(contents, PdfEncodings.UNICODE_BIG)) |> ignore
                 page.AddAnnotation annotation |> ignore
                 let dictionary = annotation.GetPdfObject()

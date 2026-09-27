@@ -108,8 +108,9 @@ let current (pdfPath: string) (layout: SavedLayout) : SavedLayout =
                     | NonNull fingerprint -> Map.tryFind page.Page now = Some fingerprint
                     | Null -> true) }
 
-/// The tags a region can have.
-let tags = [ "H1"; "H"; "P"; "LI"; "Figure"; "Table"; "Caption"; "Note"; "Formula"; "Lbl"; "Artifact" ]
+/// The tags a region can have. H is a heading whose level tagging decides (the next under the
+/// title); H1 to H6 are kept as they are.
+let tags = [ "H1"; "H"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "LI"; "Figure"; "Table"; "Caption"; "Note"; "Formula"; "Lbl"; "Artifact" ]
 
 let private jsonOptions =
     JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
@@ -228,3 +229,34 @@ type FileRegions(layout: SavedLayout, fallback: IPageLayoutSource option) =
 /// Whether layout has every one of pageCount pages (so tagging from it needs nothing else).
 let covers (layout: SavedLayout) (pageCount: int) =
     [ 1..pageCount ] |> List.forall (fun page -> layout.Pages |> Array.exists (fun p -> p.Page = page))
+
+/// The tags tagging from a layout writes as they are; any other a region has is written as a
+/// paragraph (P), its text read as text.
+let taggedAsIs = set [ "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "LI"; "Figure"; "Note"; "Artifact" ]
+
+/// Why each of edits won't do what it says when tagging from layout: it matches no region (by
+/// page, tag and box), or it retags to a tag tagging writes as a paragraph. Links' descriptions
+/// and merges are left out: they're written after tagging, to what it made (and said then), as are
+/// edits on pages the layout doesn't have yet.
+let unmatched (layout: SavedLayout) (edits: ElementEdit list) : string list =
+    [ for edit in edits do
+          if edit.Tag <> "Link" && edit.MergeWith.IsEmpty then
+              match layout.Pages |> Array.tryFind (fun page -> page.Page = edit.Page) with
+              | Some page ->
+                  let matches =
+                      page.Regions
+                      |> Array.exists (fun region ->
+                          region.Tag = edit.Tag
+                          && region.Box.Length = 4
+                          && ElementEdits.overlap
+                              { PageNumber = page.Page; Left = region.Box[0]; Bottom = region.Box[1]; Right = region.Box[2]; Top = region.Box[3] }
+                              edit.Box
+                             >= ElementEdits.SameElementOverlap)
+                  if not matches then
+                      $"Your edit for the {ElementEdits.describe edit} wasn't applied: no region of the layout with that tag is in about that place (its box overlapping at least 60%%). An edit names a region by the tag it was suggested with, not one it's given."
+                  else
+                      match edit.Retag with
+                      | NonNull tag when not (taggedAsIs.Contains tag) ->
+                          $"Your retag of the {ElementEdits.describe edit} to <{tag}> is written as a paragraph (P): tagging from a layout writes headings, P, LI, Figure, Note and Artifact. Retag it with legibyl fix once the copy's tagged."
+                      | _ -> ()
+              | None -> () ]
