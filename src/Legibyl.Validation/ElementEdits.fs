@@ -54,16 +54,17 @@ let onRegions (edits: ElementEdit list) (regions: LayoutRegion seq) : LayoutRegi
               | _ -> yield region
           | None -> yield region ]
 
-// ---- Merging paragraphs ----
+// ---- Merging paragraphs, and figures ----
 
-/// The paragraphs on page, each with its parent, its position in its parent's /K, and its box.
-let private paragraphsOn (structTreeRoot: PdfDictionary) context (page: int) =
+/// The elements with tag (P, or Figure) on page, each with its parent, its position in its
+/// parent's /K, and its box.
+let private elementsOn (structTreeRoot: PdfDictionary) context (page: int) (tag: string) =
     [ for visit in walk structTreeRoot context do
           match resolve (visit.Element.Get(PdfName.K)) with
           | :? PdfArray as kids ->
               for i in 0 .. kids.Size() - 1 do
                   match resolve (kids.Get i) with
-                  | :? PdfDictionary as kid when isParagraph kid context ->
+                  | :? PdfDictionary as kid when PdfName(tag).Equals(standardTag kid context) ->
                       match ancestorPage kid context with
                       | Some p when p = page ->
                           match subtreeGeometry kid context (Some p) with
@@ -73,14 +74,14 @@ let private paragraphsOn (structTreeRoot: PdfDictionary) context (page: int) =
                   | _ -> ()
           | _ -> () ]
 
-/// The paragraphs a merge edit is for, as a run to join: each found by its box, all under one
-/// parent, one after another. None when they aren't (so, once joined, it's in the PDF).
+/// The paragraphs (or figures) a merge edit is for, as a run to join: each found by its box, all
+/// under one parent, one after another. None when they aren't (so, once joined, it's in the PDF).
 let internal mergeRun (document: PdfDocument) context (edit: ElementEdit) : ParagraphJoins.JoinRun option =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> None
     | _ when edit.MergeWith.IsEmpty -> None
     | structTreeRoot ->
-        let paragraphs = paragraphsOn structTreeRoot context edit.Page
+        let paragraphs = elementsOn structTreeRoot context edit.Page edit.Tag
         let found =
             (edit.Box :: edit.MergeWith)
             |> List.map (fun box ->
@@ -99,8 +100,26 @@ let internal mergeRun (document: PdfDocument) context (edit: ElementEdit) : Para
 
 // ---- Alt text and replacement text ----
 
-/// Each edit with its element, for the edits whose element is found.
-let internal find (document: PdfDocument) context (edits: ElementEdit list) : (ElementEdit * PdfDictionary) list =
+/// The box of what a merge makes: all its elements' boxes together.
+let private mergedBox (merge: ElementEdit) =
+    let boxes = merge.Box :: merge.MergeWith
+    { merge.Box with
+        Left = boxes |> List.map _.Left |> List.min
+        Bottom = boxes |> List.map _.Bottom |> List.min
+        Right = boxes |> List.map _.Right |> List.max
+        Top = boxes |> List.map _.Top |> List.max }
+
+/// Where an edit's element can be: its own box, and, for an edit made on the first of a merge
+/// (alt text for figures drawn in pieces, say), the box of what the merge makes of them.
+let private boxesOf (merges: ElementEdit list) (edit: ElementEdit) =
+    edit.Box
+    :: [ for merge in merges do
+             if merge.Page = edit.Page && merge.Tag = edit.Tag && overlap merge.Box edit.Box >= SameElementOverlap then
+                 mergedBox merge ]
+
+/// Each edit with its element, for the edits whose element is found (in any of the places boxes
+/// gives for it).
+let private findIn (document: PdfDocument) context (boxes: ElementEdit -> StructureGeometry list) (edits: ElementEdit list) : (ElementEdit * PdfDictionary) list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
     | _ when edits.IsEmpty -> []
@@ -121,11 +140,15 @@ let internal find (document: PdfDocument) context (edits: ElementEdit list) : (E
         |> List.choose (fun edit ->
             candidates
             |> List.filter (fun (tag, box, _) -> List.contains tag (tagsOf edit) && box.PageNumber = edit.Page)
-            |> List.map (fun (_, box, element) -> element, overlap box edit.Box)
+            |> List.map (fun (_, box, element) -> element, boxes edit |> List.map (overlap box) |> List.max)
             |> List.filter (fun (_, o) -> o >= SameElementOverlap)
             |> List.sortByDescending snd
             |> List.tryHead
             |> Option.map (fun (element, _) -> edit, element))
+
+/// Each edit with its element, for the edits whose element is found.
+let internal find (document: PdfDocument) context (edits: ElementEdit list) : (ElementEdit * PdfDictionary) list =
+    findIn document context (fun edit -> [ edit.Box ]) edits
 
 let private textOf (element: PdfDictionary) (key: PdfName) =
     element.GetAsString key |> Option.ofObj |> Option.map _.ToUnicodeString()
@@ -242,7 +265,7 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
     let runs = merges |> List.choose (mergeRun document context)
     ParagraphJoins.join runs |> ignore
-    let found = find document context edits
+    let found = findIn document context (boxesOf merges) edits
     // Those made artifacts leave the tags; the rest are changed where they are.
     let artifacts, found = found |> List.partition (fst >> isArtifact)
     let seen = Collections.Generic.HashSet<obj>(Collections.Generic.ReferenceEqualityComparer.Instance)
@@ -256,7 +279,7 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
               if not changes.IsEmpty then yield () ]
     let count = applied.Length + runs.Length + artifacts.Length
     // Those that don't apply are said by unapplied, one by one.
-    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)." ]
+    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)." ]
 
 /// An edit, as a report names it: its tag, page and box.
 let describe (edit: ElementEdit) =
@@ -273,7 +296,7 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
         use document = new PdfDocument(new PdfReader(pdfPath))
         let context = createContext document pdfPath
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
-        let found = find document context edits
+        let found = findIn document context (boxesOf merges) edits
         [ for edit in edits do
               match found |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
               | None when isArtifact edit ->
@@ -285,7 +308,8 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
               | Some _ -> ()
           for merge in merges do
               if (mergeRun document context merge).IsNone then
-                  $"Your merge of {merge.MergeWith.Length + 1} paragraphs from the {describe merge} wasn't applied: they aren't paragraphs next to each other under one parent here (or they're merged already)." ]
+                  let what = if merge.Tag = "Figure" then "figures" else "paragraphs"
+                  $"Your merge of {merge.MergeWith.Length + 1} {what} from the {describe merge} wasn't applied: they aren't {what} next to each other under one parent here (or they're merged already)." ]
 
 /// How many of edits would change pdfPath: their element is found and doesn't already say it, or
 /// the paragraphs to merge are still apart.
@@ -297,4 +321,4 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         let context = createContext document pdfPath
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
         (merges |> List.choose (mergeRun document context) |> List.length)
-        + (find document context edits |> List.filter (not << List.isEmpty << changes) |> List.length)
+        + (findIn document context (boxesOf merges) edits |> List.filter (not << List.isEmpty << changes) |> List.length)

@@ -125,14 +125,18 @@ let toElementEdits (edits: Edit list) : ElementEdit list =
 let onRegions (edits: Edit list) (blocks: SuggestedBlock list) : LayoutRegion list =
     ElementEdits.onRegions (toElementEdits edits) (LayoutSuggestions.toRegions blocks)
 
-/// The merge of paragraphs (boxes, first to last) on page, added to edits. Merges it overlaps
-/// are replaced: a paragraph is merged once.
-let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry list) : Edit list =
+/// The merge of elements with tag (paragraphs, or figures; boxes, first to last) on page, added
+/// to edits. Merges it overlaps are replaced: an element is merged once.
+let mergeElements (edits: Edit list) (page: int) (tag: string) (boxes: StructureGeometry list) : Edit list =
     let same (a: StructureGeometry) (b: StructureGeometry) = overlap a b >= SameRegionOverlap
     let involves (e: Edit) =
         e.Page = page && not e.MergeWith.IsEmpty && (e.Box :: e.MergeWith) |> List.exists (fun box -> boxes |> List.exists (same box))
     (edits |> List.filter (not << involves))
-    @ [ { Page = page; Tag = "P"; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false } ]
+    @ [ { Page = page; Tag = tag; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false } ]
+
+/// Paragraphs to merge into the first, by box, replacing any merge that involves them.
+let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry list) : Edit list =
+    mergeElements edits page "P" boxes
 
 /// The merge that starts at box on page, if any.
 let findMerge (edits: Edit list) (page: int) (box: StructureGeometry) : Edit option =

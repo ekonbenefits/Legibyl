@@ -471,7 +471,13 @@ a heading tagged as a paragraph, say — as a `retag` edit; and when two or more
 neighbouring paragraphs on one page are selected (none with alt
 text or replacement text), **Merge N Paragraphs** records the merge as an edit,
 keyed by each paragraph's box; **Don't Merge These** drops it again. Export joins
-them into the first, as **Join split paragraphs** does. A figure that's only
+them into the first, as **Join split paragraphs** does. Figures merge the same
+way (**Merge N Figures**: neighbours on one page, with no alt text or all the
+same), for a picture some tools tag in pieces; alt text or Not Read given to the
+first then applies to the whole merged figure. Legibyl warns about three or more
+small figures side by side (`SplitFigures.fs`, Structure-10: each at most 36 pt,
+at most 6 pt apart, none described), pointing to Merge N Figures: which pieces
+make one picture is a person's call, so there's no auto fix for it. A figure that's only
 decoration (a rule, a background, a border, which some tools tag as figures) can
 be made **Not Read (Artifact)** (shift-click for several; **Read It** undoes it),
 as a `retag` edit to `Artifact`, as on a suggested structure: export marks its
