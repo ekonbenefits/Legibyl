@@ -128,7 +128,7 @@ let askToSave (owner: Window) (fileName: string) : Task<bool option> =
                 StackPanel.spacing 16.0
                 StackPanel.children [
                     TextBlock.create [
-                        TextBlock.text $"Save your review of {fileName}? Your edits and dismissed warnings are lost if you don't. The PDF isn't changed either way."
+                        TextBlock.text $"Save your review of {fileName}? Your edits, dismissed warnings and chosen auto fixes are lost if you don't. The PDF isn't changed either way."
                         TextBlock.textWrapping TextWrapping.Wrap
                     ]
                     DockPanel.create [

@@ -249,7 +249,7 @@ when the PDF is opened again (see Saving below). Failures can't be dismissed. Th
   `box`, so it still applies after other repairs, or to another version of the
   PDF.
 - **Review**: everything decided about a PDF: dismissed warnings, edits, the
-  layout they're on, and a title. **Save** keeps it in `<name>.pdf.legibyl.json`
+  layout they're on, a title, and the auto fixes chosen. **Save** keeps it in `<name>.pdf.legibyl.json`
   next to the PDF, and exported copies carry it inside them.
 
 ### Saving: Structure, Auto Fixes, Save and Export
@@ -264,12 +264,13 @@ the changes are written to a new copy. Four buttons under the details:
   structure (and a changed title). Edits
   already in the PDF are reference, and for importing into another version of
   it; they don't count.
-- **Auto Fixes…** chooses repairs (the dialog doesn't save). Nothing is chosen
-  when a PDF is opened; the first time the dialog opens, the safe repairs the PDF
-  needs start ticked, and after that it shows what was chosen. Its badge counts
-  the chosen ones.
+- **Auto Fixes…** chooses repairs (the dialog doesn't export). They're part of
+  the review, so **Save** keeps them (as `fixes`, by the names `--fixes` takes)
+  and they're chosen again when the PDF is reopened. Until some are chosen, the
+  first time the dialog opens the safe repairs the PDF needs start ticked; after
+  that it shows what was chosen. Its badge counts the chosen ones.
 - **Save** (⌘S / Ctrl+S) keeps your review (dismissed warnings, edits, the
-  title) in `<name>.pdf.legibyl.json` next to the PDF, to pick up where you left
+  title, the auto fixes chosen) in `<name>.pdf.legibyl.json` next to the PDF, to pick up where you left
   off. Until then your changes are only in the app: the window's title says
   **Edited**, and closing it, or opening another PDF, asks whether to save them.
   Changing something back to how it was saved isn't a change.
@@ -279,8 +280,9 @@ the changes are written to a new copy. Four buttons under the details:
   from it. Then the exported copy is opened and validated, and shown against
   the original. It's enabled when there's something to write.
 
-An exported copy carries the review it was made with (dismissals, edits and the
-title given an untagged PDF) inside it: a compressed stream the catalog points
+An exported copy carries the review it was made with (dismissals, edits, the
+title given an untagged PDF, and the auto fixes it was made with) inside it: a
+compressed stream the catalog points
 to under a private key (`/LBYL_Review`), added as an incremental update, which
 PDF readers don't show. That review is read-only: its edits are in the copy
 already (the Edits tab lists them apart, without **Remove**), and its dismissed

@@ -107,7 +107,7 @@ let ``a layout with an unknown tag or a bad box says what's wrong`` () =
 
 /// A review with edits on regions (by the page, tag and box the layout found them with).
 let private edits (title: string | null) (edits: ReviewFile.SavedEdit list) : ReviewFile.SavedFile =
-    { Version = 1; DismissedWarnings = null; Edits = Array.ofList edits; Title = title; Layout = null }
+    { Version = 1; DismissedWarnings = null; Edits = Array.ofList edits; Title = title; Layout = null; Fixes = null }
 
 let private editOn tag box : ReviewFile.SavedEdit =
     { Page = 1; Tag = tag; Box = box; Alt = null; Text = null; MergeWith = null; Retag = null; Exclude = false }
