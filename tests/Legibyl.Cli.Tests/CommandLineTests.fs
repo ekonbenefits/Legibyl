@@ -84,7 +84,8 @@ let private writeReview (path: string) (alt: string) =
           Title = null
           Layout = null
           Fixes = null
-          Validation = null }
+          Validation = null
+          Checklist = null }
     File.WriteAllText(path, ReviewFile.toJson review)
 
 [<Fact>]
@@ -111,7 +112,8 @@ let ``--edits with a figure retagged Artifact makes it decoration`` () =
               Title = null
               Layout = null
               Fixes = null
-              Validation = null }
+              Validation = null
+              Checklist = null }
         File.WriteAllText(ReviewFile.filePath pdf, ReviewFile.toJson review)
         let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
 
@@ -131,7 +133,8 @@ let ``--edits gives a tagged PDF the review's title`` () =
               Title = "The Community Garden"
               Layout = null
               Fixes = null
-              Validation = null }
+              Validation = null
+              Checklist = null }
         File.WriteAllText(ReviewFile.filePath pdf, ReviewFile.toJson review)
         let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
 

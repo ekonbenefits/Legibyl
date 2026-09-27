@@ -34,6 +34,7 @@
     <Compile Include="ElementEdits.fs" />
     <Compile Include="StructureFixes.fs" />
     <Compile Include="DocumentTitles.fs" />
+    <Compile Include="DocumentFacts.fs" />
     <!-- Legibyl's own warnings; see the header of LegibylChecks.fs to add one. -->
     <Compile Include="LegibylChecks.fs" />
     <Compile Include="FindingGeometry.fs" />

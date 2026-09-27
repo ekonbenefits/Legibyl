@@ -103,17 +103,42 @@ let ``an empty window says how to start`` () =
         shown |> should contain "Making a PDF accessible"
         shown |> List.exists (fun t -> t.StartsWith "Open a PDF: Browse…") |> should be True)
 
+/// Waits for the Pass row's checklist to be read.
+let private waitForChecklist (window: Window) =
+    HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> texts window |> List.exists (fun t -> t.StartsWith "1. Title")) |> ignore
+
 [<Fact>]
-let ``a PDF that passes says what automated checks can't judge`` () =
+let ``a PDF that passes opens on its Pass row: the steps a person checks, for this file`` () =
     onUiThread (fun () ->
         let window = openSample "pdfua1-pass.pdf"
+        waitForChecklist window
+        let selected = (HeadlessWindow.resultsList window).SelectedItem
+        let first = HeadlessWindow.resultItems window |> List.head
         let shown = texts window
+        let facts = DocumentFacts.read (corpusFile "pdfua1-pass.pdf")
         window.Close()
 
-        shown |> should contain "Passes PDF/UA-1's automated checks"
-        shown |> List.exists (fun t -> t.StartsWith "Alt text: does each figure's say what it's for here") |> should be True
-        // Not the steps for an empty window.
-        shown |> should not' (contain "Making a PDF accessible"))
+        (match selected with :? ResultItem as PassItem _ -> true | _ -> false) |> should be True
+        (match first with PassItem progress -> progress | _ -> "") |> should equal "Passes PDF/UA-1's automated checks"
+        shown |> should contain "Passes PDF/UA-1's automated checks. PDF/UA also needs a person to check:"
+        // The file's own title and language, as written.
+        shown |> List.exists (fun t -> t.StartsWith "Title: " || t = "No title of its own") |> should be True
+        shown |> List.exists (fun t -> t.StartsWith "Language: " || t = "No language declared") |> should be True
+        // Only the steps that apply to it.
+        (shown |> List.exists (fun t -> t.EndsWith ". Tables"))  |> should equal (facts.Tables > 0)
+        (shown |> List.exists (fun t -> t.EndsWith ". Links")) |> should equal (facts.Links > 0)
+        shown |> List.exists (fun t -> t.EndsWith ". Colour") |> should be True
+        // Not the steps for an empty window; and no failures to count.
+        shown |> should not' (contain "Making a PDF accessible")
+        shown |> List.exists (fun t -> t.EndsWith " failures" || t = "1 failure") |> should be False)
+
+[<Fact>]
+let ``a PDF that fails has no Pass row, and opens on its first finding`` () =
+    onUiThread (fun () ->
+        let window = openSample "pdfua1-fail.pdf"
+        let items = HeadlessWindow.resultItems window
+        window.Close()
+        items |> List.exists (function PassItem _ -> true | _ -> false) |> should be False)
 
 [<Fact>]
 let ``a failure no auto fix repairs says what it means, and what to do`` () =
