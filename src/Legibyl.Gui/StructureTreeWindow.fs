@@ -1155,21 +1155,21 @@ module private StructureView =
                     Grid.children [
                         // Its own component, so preview updates don't re-render (and re-diff) the layout.
                         Component.create("structure-layout", fun ctx ->
-                            let root = ctx.usePassedRead root
-                            ScrollViewer.create [
-                                ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
-                                ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
-                                Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
-                                ScrollViewer.content (
-                                    StackPanel.create [
-                                        StackPanel.margin 8.0
-                                        StackPanel.children [
-                                            let levels = levelsWithinBudget root.Current.Children
-                                            for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
-                                        ]
+                        let root = ctx.usePassedRead root
+                        ScrollViewer.create [
+                            ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
+                            ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                            Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
+                            ScrollViewer.content (
+                                StackPanel.create [
+                                    StackPanel.margin 8.0
+                                    StackPanel.children [
+                                        let levels = levelsWithinBudget root.Current.Children
+                                        for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
                                     ]
-                                )
-                            ])
+                                ]
+                            )
+                        ])
                         GridSplitter.create [
                             Grid.column 1
                             GridSplitter.width 6.0
