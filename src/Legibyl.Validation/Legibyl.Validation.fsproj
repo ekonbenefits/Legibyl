@@ -37,6 +37,7 @@
     <Compile Include="CopyNames.fs" />
     <Compile Include="EmbeddedReview.fs" />
     <Compile Include="LayoutFile.fs" />
+    <Compile Include="RuleGuide.fs" />
     <Compile Include="RepairNames.fs" />
     <Compile Include="ReviewFile.fs" />
     <Compile Include="VeraPdfValidator.fs" />

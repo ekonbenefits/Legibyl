@@ -14,7 +14,12 @@ type FailureDetail =
       /// Page region the finding refers to, in PDF points (origin bottom-left), if known.
       Region: StructureGeometry | null
       IsFixable: bool
-      FixOptions: string | null }
+      /// The repairs that fix it, by the names --fixes takes ("tag-from-layout" for tagging an
+      /// untagged PDF, which `layout apply` does too); empty when none do.
+      Fixes: string array
+      /// What it means for a reader, in plain language, for the common PDF/UA-1 failures (see
+      /// RuleGuide); null for others.
+      Meaning: string | null }
 
     static member Of(violation: RuleViolation) =
         { Specification = violation.Specification
@@ -25,7 +30,8 @@ type FailureDetail =
           LocationContext = violation.LocationContext
           Region = violation.Geometry
           IsFixable = violation.IsFixable
-          FixOptions = if violation.IsFixable then violation.FixOptions.ToString() else null }
+          Fixes = RepairNames.ofOptions violation.FixOptions |> Array.ofList
+          Meaning = RuleGuide.forFinding violation |> Option.map _.Meaning |> Option.toObj }
 
 /// `validate`'s result for one file. Field names are camelCased on output.
 type ValidationResult =

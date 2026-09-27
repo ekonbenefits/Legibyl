@@ -210,7 +210,11 @@ those with no `pages[N]` in their context, such as document-level metadata
 checks — sort to the end). It keeps only the short clause, test, page, and
 friendly location columns visible. Selecting a row shows its full, wrapped
 message, friendly location, raw veraPDF location context, and page preview
-in a resizable details panel beside the list. All detail text is selectable,
+in a resizable details panel beside the list. For the PDF/UA-1 failures a
+document commonly has, it also says **What it means** in plain language (what
+it does to someone using a screen reader), and, where no auto fix repairs it,
+**What to do**: where in Legibyl to fix it (Structure…, Suggest Structure…), or
+that it's fixed where the PDF was made or in a PDF editor (`RuleGuide.fs`). All detail text is selectable,
 and **Copy Finding** copies the selected rule, message, error detail, and
 both location forms. **Copy Summary** and **Save Report** sit below the
 results list and include the same location information for every finding.
@@ -678,7 +682,8 @@ report to a file. `--structure` also includes each file's structure tree, as
         "locationContext": "root/document[0]/pages[0](11 0 obj PDPage)/contentStream[0](21 0 obj PDSemanticContentStream)/content[10]{mcid:22}/contentItem[0]{mcid:22}",
         "region": { "pageNumber": 1, "left": 70.96, "bottom": 73.47, "right": 540.56, "top": 104.85 },
         "isFixable": false,
-        "fixOptions": null
+        "fixes": [],
+        "meaning": "Something marked as decoration (an artifact, which isn't read) is inside tagged content, so it's both skipped and part of the text."
       }
     ],
     "warnings": [],
@@ -692,6 +697,11 @@ report to a file. `--structure` also includes each file's structure tree, as
 If a file can't be validated at all (missing, corrupt, encrypted), its entry has
 `"error": "<message>"` and the other fields are `null` — check `error` first
 before reading `isCompliant`.
+
+Each failure's `fixes` names the repairs that fix it, as `--fixes` takes them
+(`tag-from-layout` is what `layout apply` does), and `meaning` says what it
+means for a reader in plain language, for the common PDF/UA-1 failures (`null`
+for others); the text format prints it as `means:`.
 
 ### fix
 

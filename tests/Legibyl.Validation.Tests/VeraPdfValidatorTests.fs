@@ -141,3 +141,20 @@ let ``warming up gets veraPDF ready, and leaves nothing behind`` () =
     // And validations still work, alongside it or after.
     let report = VeraPdfValidator().Validate(IO.Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), PdfProfile.PdfUa1)
     report.IsCompliant |> should be True
+
+[<Fact>]
+let ``common PDF/UA failures are explained in plain language, with what to do`` () =
+    let untagged = RuleGuide.forRule "7.1" 3 |> Option.get
+    untagged.Meaning |> should haveSubstring "neither tagged nor marked as decoration"
+    untagged.WhatToDo |> should haveSubstring "Suggest Structure…"
+    (RuleGuide.forRule "7.3" 1).Value.WhatToDo |> should haveSubstring "Edit Alt Text…"
+    // Every test of a clause the guide covers as a whole.
+    RuleGuide.forRule "7.21.6" 4 |> Option.isSome |> should be True
+    // Rules it doesn't cover have only veraPDF's own text.
+    RuleGuide.forRule "7.15" 1 |> should equal None
+    // Only PDF/UA-1's rules: a PDF/A rule with the same numbers isn't one of them.
+    let finding (specification: string) : RuleViolation =
+        { Specification = specification; Clause = "7.1"; TestNumber = 3; Passed = false; Message = ""; ErrorMessage = null
+          LocationContext = null; Severity = FindingSeverity.Failure; FixOptions = PdfFixOptions.None; Geometry = null }
+    RuleGuide.forFinding (finding "ISO 14289-1:2014") |> Option.isSome |> should be True
+    RuleGuide.forFinding (finding "ISO 19005-2:2011") |> should equal None
