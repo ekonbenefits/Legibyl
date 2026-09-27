@@ -136,7 +136,11 @@ let ``warming up gets veraPDF ready, and leaves nothing behind`` () =
 
     VeraPdfValidator.Warm()
 
-    // Whatever other warm-ups (tests run in parallel) leave in flight isn't this one's.
+    // Other warm-ups (tests run in parallel, the GUI tests' in another process) come and go in the
+    // same folder: wait them out. One this warm-up left behind would stay.
+    let deadline = DateTime.UtcNow.AddSeconds 20.0
+    while not (Set.difference (warmFiles ()) before).IsEmpty && DateTime.UtcNow < deadline do
+        Threading.Thread.Sleep 100
     Set.difference (warmFiles ()) before |> should be Empty
     // And validations still work, alongside it or after.
     let report = VeraPdfValidator().Validate(IO.Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), PdfProfile.PdfUa1)

@@ -59,7 +59,7 @@ let ``an edit is written to the element with its tag in about the same place`` (
 
     let result = applyEdits input.Path output.Path [ altEdit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
     figureAlt output.Path |> should equal "Tomato seedlings in a tray"
 
 [<Fact>]
@@ -96,7 +96,7 @@ let ``an edit with no element in about the same place isn't applied, and says so
 
     let result = applyEdits input.Path output.Path [ altEdit; elsewhere ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
     // Each edit that isn't applied is named, with why.
     result.NotApplied
     |> should
@@ -145,7 +145,7 @@ let ``paragraphs chosen to merge are joined into the first`` () =
 
     let result = applyEdits input.Path output.Path [ edit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
     paragraphTexts output.Path |> List.map (fun t -> t.Replace("  ", " "))
     |> should equal [ "Plots are assigned each spring, and members share the tools kept in the shed by the gate." ]
     ElementEdits.pending output.Path [ edit ] |> should equal 0
@@ -257,3 +257,34 @@ let ``a link's description is its annotation's, read and written from an edit`` 
     // On the annotation, not as the element's alt text.
     after.AlternateDescription |> should be Null
     ElementEdits.pending output.Path [ described ] |> should equal 0
+
+/// Making the figure decoration: Not Read (Artifact) in View Structure.
+let private notReadEdit = { altEdit with Alt = null; Retag = "Artifact" }
+
+let private render (path: string) =
+    use document = new Legibyl.Rendering.PdfiumDocument(path)
+    use page = document.Render(1, 1f)
+    page.Pixels |> Array.map (fun c -> c.Red, c.Green, c.Blue, c.Alpha)
+
+[<Fact>]
+let ``a figure made not read leaves the tags, and its content is an artifact, still drawn`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path
+    let failedBefore = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    failedBefore |> should contain "7.3-1"
+
+    let result = applyEdits input.Path output.Path [ notReadEdit ]
+
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
+    let tags = VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.map _.Tag
+    tags |> should not' (contain "Figure")
+    tags |> should contain "P"
+    let failed = VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    // No alt text needed; its content isn't untagged; the paragraph is still found through the parent tree.
+    failed |> should not' (contain "7.3-1")
+    failed |> should not' (contain "7.1-3")
+    render output.Path |> should equal (render input.Path)
+    // Once written, the edit says it's done.
+    ElementEdits.unapplied output.Path [ notReadEdit ] |> List.exactlyOne |> should haveSubstring "it may be decoration already"
+    ElementEdits.pending input.Path [ notReadEdit ] |> should equal 1

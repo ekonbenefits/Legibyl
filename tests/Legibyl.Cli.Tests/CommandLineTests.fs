@@ -94,11 +94,30 @@ let ``--edits writes the review next to the PDF into the repaired copy, and carr
 
         let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
 
-        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, tags and merged paragraphs)."
+        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
         figureAlt copy |> should equal (Some "Tomato seedlings")
         // Only the edits: no other repair was asked for.
         strings result.Value "applied" |> should haveLength 1
         EmbeddedReview.read copy |> Option.isSome |> should be True)
+
+[<Fact>]
+let ``--edits with a figure retagged Artifact makes it decoration`` () =
+    withTaggedPdf (fun pdf ->
+        let review: ReviewFile.SavedFile =
+            { Version = 1
+              DismissedWarnings = null
+              Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = null; Text = null; MergeWith = null; Retag = "Artifact"; Exclude = false } |]
+              Title = null
+              Layout = null
+              Fixes = null }
+        File.WriteAllText(ReviewFile.filePath pdf, ReviewFile.toJson review)
+        let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
+
+        let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
+
+        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)."
+        let rec tags (node: StructureNode) : string list = node.Tag :: [ for child in node.Children do yield! tags child ]
+        VeraPdfValidator().ReadStructureTree copy |> nonNull |> tags |> should not' (contain "Figure"))
 
 [<Fact>]
 let ``--edits-from reads another review, such as an earlier version's`` () =
