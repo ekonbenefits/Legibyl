@@ -118,8 +118,9 @@ let isEmpty (file: SavedFile) =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    // Fixes chosen as none is still a choice.
-    none file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes
+    // Fixes chosen as none is still a choice, as is none dismissed (over a review carried inside
+    // the PDF that has some).
+    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes
 
 /// Writes file next to pdfPath, or deletes it when there's nothing in it. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.

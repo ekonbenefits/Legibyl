@@ -36,7 +36,7 @@ let private fixCarrying (pdf: string) (output: string) (dismissed: Dismissals.Di
     |> ignore
 
 [<Fact>]
-let ``the fixed copy carries the review it was fixed with, read-only`` () =
+let ``the fixed copy carries the review it was fixed with: edits for reference, dismissals to start from`` () =
     withPdf (fun pdf output ->
         Reviews.save pdf (fun review ->
             review.Edits <- RegionEdits.setAlt [] 1 "Figure" logo "The garden's logo"
@@ -46,34 +46,39 @@ let ``the fixed copy carries the review it was fixed with, read-only`` () =
 
         File.Exists(Dismissals.filePath output) |> should be False
         let copy = Reviews.read output
-        // Carried, not the copy's own review: that starts empty.
+        // Its edits are in the copy already: reference, not the copy's own.
         copy.Edits |> should be Empty
-        copy.Dismissed |> should be Empty
         copy.CarriedEdits |> List.map _.Alt |> should equal [ Some "The garden's logo" ]
         copy.Carried |> Option.map _.Title |> should equal (Some "Joining the garden")
-        // Its dismissals still hold.
-        copy.AllDismissed |> should equal (Map [ splitParagraphs, "Likely split paragraph" ]))
+        // Its dismissals are where the copy's start, not a change to save.
+        copy.Dismissed |> should equal (Map [ splitParagraphs, "Likely split paragraph" ])
+        copy.IsEdited |> should be False)
 
 [<Fact>]
-let ``saving a fixed copy's review keeps the one in it as it was`` () =
+let ``the file next to a fixed copy overrides the dismissals inside it, even with none`` () =
     withPdf (fun pdf output ->
         fixCarrying pdf output (Map [ splitParagraphs, "Likely split paragraph" ])
         let other = { Dismissals.Rule = "Legibyl Structure-1"; Dismissals.Location = "StructTreeRoot/K[0]" }
 
         Reviews.save output (fun review -> review.Dismissed <- Map [ other, "Empty paragraph" ])
+        let overridden = Reviews.read output
 
-        let copy = Reviews.read output
-        copy.Dismissed |> should equal (Map [ other, "Empty paragraph" ])
-        copy.CarriedDismissed |> should equal (Map [ splitParagraphs, "Likely split paragraph" ])
-        copy.AllDismissed.Count |> should equal 2)
+        Reviews.save output (fun review -> review.Dismissed <- Map.empty)
+        let restored = Reviews.read output
+
+        overridden.Dismissed |> should equal (Map [ other, "Empty paragraph" ])
+        // The copy itself is unchanged.
+        overridden.CarriedDismissed |> should equal (Map [ splitParagraphs, "Likely split paragraph" ])
+        File.Exists(Dismissals.filePath output) |> should be True
+        restored.Dismissed |> should be Empty)
 
 [<Fact>]
-let ``a copy of a copy carries both reviews`` () =
+let ``a copy of a copy carries the dismissals as its original has them`` () =
     withPdf (fun pdf output ->
         fixCarrying pdf output (Map [ splitParagraphs, "Likely split paragraph" ])
         let other = { Dismissals.Rule = "Legibyl Structure-1"; Dismissals.Location = "StructTreeRoot/K[0]" }
         let review = Reviews.read output
-        review.Dismissed <- Map [ other, "Empty paragraph" ]
+        review.Dismissed <- review.Dismissed.Add(other, "Empty paragraph")
         let third = Path.ChangeExtension(output, ".v3.pdf") |> nonNull
 
         // Another repair: the copy's tab order is fixed already.

@@ -20,12 +20,13 @@ type LinkTitlesChoice =
 /// for an untagged PDF, each page's layout found so far (as found: the edits are on top). Save
 /// keeps it in the "<name>.pdf.legibyl.json" file next to the PDF (see ReviewFile); until then
 /// it's only here, and IsEdited says so. The PDF itself is never changed. A review carried
-/// inside the PDF (a copy Legibyl saved) is read-only: its edits are in the PDF already, and its
-/// dismissals still hold, under any made since.
+/// inside the PDF (a copy Legibyl saved) is read-only: its edits and auto fixes are in the PDF
+/// already, for reference; its dismissals are where the PDF's own start, until the file next to
+/// it has its own.
 [<Sealed>]
 type DocumentReview(modified: DateTime) =
     member _.Modified = modified
-    /// Warnings dismissed.
+    /// Warnings dismissed: as the file next to the PDF has them, else as the review carried inside it.
     member val Dismissed: Dismissals.Dismissed = Map.empty with get, set
     /// The review saved inside the PDF, if it's a copy Legibyl saved: read-only.
     member val Carried: ReviewFile.SavedFile option = None with get, set
@@ -40,8 +41,6 @@ type DocumentReview(modified: DateTime) =
     member this.CarriedDismissed = this.Carried |> Option.map Dismissals.ofSaved |> Option.defaultValue Map.empty
     /// The edits in the review carried inside the PDF (in it already).
     member this.CarriedEdits = this.Carried |> Option.map RegionEdits.editsIn |> Option.defaultValue []
-    /// Every warning dismissed: here, and in the review carried inside the PDF.
-    member this.AllDismissed = this.Dismissed |> Map.fold (fun all key message -> Map.add key message all) this.CarriedDismissed
     member val Pages = Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>()
     member val LastPage = 1 with get, set
     /// What a person decided about the suggestions, as saved next to the PDF (see RegionEdits):
@@ -81,7 +80,9 @@ type DocumentReview(modified: DateTime) =
     member this.ToFile(pdfPath: string) : ReviewFile.SavedFile =
         let edits = RegionEdits.toElementEdits this.Edits |> List.map ReviewFile.ofElementEdit |> Array.ofList
         { Version = 1
-          DismissedWarnings = Dismissals.toSaved this.Dismissed
+          // None dismissed, where the review carried inside the PDF has some, is kept as none.
+          DismissedWarnings =
+            if this.Dismissed.IsEmpty && not this.CarriedDismissed.IsEmpty then [||] else Dismissals.toSaved this.Dismissed
           Edits = (if edits.Length = 0 then null else edits)
           Title = Option.toObj this.Title
           Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null)
@@ -96,8 +97,8 @@ type DocumentReview(modified: DateTime) =
         this.MarkSaved()
 
     /// The review a copy of pdfPath carries (see VeraPdfValidator.Review): this one, saved or not,
-    /// with the one carried inside pdfPath under it; its edits moved to the elements tagging made.
-    /// Its auto fixes are those the copy was made with.
+    /// with the edits carried inside pdfPath under its own; its edits moved to the elements tagging
+    /// made. Its dismissals are this one's; its auto fixes those the copy was made with.
     member this.ForCopy(pdfPath: string) =
         let own = this.ToFile pdfPath
         let file =
@@ -105,7 +106,6 @@ type DocumentReview(modified: DateTime) =
             | Some carried ->
                 let edits = Array.append (Option.ofObj carried.Edits |> Option.defaultValue [||]) (Option.ofObj own.Edits |> Option.defaultValue [||])
                 { own with
-                    DismissedWarnings = Dismissals.toSaved this.AllDismissed
                     Edits = (if edits.Length = 0 then null else edits)
                     Title = (if isNull own.Title then carried.Title else own.Title)
                     Fixes = own.Fixes }
@@ -155,9 +155,9 @@ type DocumentReviews() =
             // The review saved next to the PDF, and the layout recorded with it: its pages that
             // haven't changed since count as found.
             let review = DocumentReview modified
-            match ReviewFile.readFile (ReviewFile.filePath fullPath) with
+            let file = ReviewFile.readFile (ReviewFile.filePath fullPath)
+            match file with
             | Some saved ->
-                review.Dismissed <- Dismissals.ofSaved saved
                 review.Edits <- RegionEdits.editsIn saved
                 review.Title <- Option.ofObj saved.Title
                 review.AutoFixes <- Option.ofObj saved.Fixes |> Option.map RepairNames.toOptions
@@ -168,8 +168,13 @@ type DocumentReviews() =
                         review.Pages[page.Page] <- LayoutSuggestions.ofLayoutPage page
                 | None -> ()
             | None -> ()
-            review.MarkSaved()
             review.Carried <- if File.Exists fullPath then EmbeddedReview.read fullPath |> Option.bind ReviewFile.parse else None
+            // The file's dismissals, if it has any (even none), override those carried inside.
+            review.Dismissed <-
+                match file with
+                | Some saved when not (isNull saved.DismissedWarnings) -> Dismissals.ofSaved saved
+                | _ -> review.CarriedDismissed
+            review.MarkSaved()
             review
         reviews.AddOrUpdate(
             fullPath,

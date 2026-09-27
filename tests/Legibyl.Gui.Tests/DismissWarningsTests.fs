@@ -154,7 +154,7 @@ let ``closing with a dismissal not saved asks, and Don't Save drops it`` () =
             reloaded |> should haveLength before.Length))
 
 [<Fact>]
-let ``a warning dismissed in the review inside a saved copy stays dismissed, and can't be restored there`` () =
+let ``a warning dismissed in the review inside a saved copy stays dismissed, until restored and saved there`` () =
     withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
         onUiThread (fun () ->
             let window = openPdf pdf
@@ -171,14 +171,18 @@ let ``a warning dismissed in the review inside a saved copy stays dismissed, and
             let dismissedThere = texts opened |> List.exists (fun t -> t.Contains "1 dismissed")
             clickButton opened "Show 1 dismissed"
             rightClickRow opened (rows opened |> List.findIndex _.Dismissed)
-            let restore = menuItem opened "Restore warning"
-            let header, enabled = string restore.Header, restore.IsEnabled
+            click (menuItem opened "Restore warning")
+            clickButton opened "Save"
             close opened
 
+            let reopened = openPdf copy
+            let dismissedAfter = rows reopened |> List.exists _.Dismissed || texts reopened |> List.exists (fun t -> t.Contains "dismissed")
+            close reopened
+
             dismissedThere |> should be True
-            header |> should equal "Restore warning (dismissed in the review saved inside this PDF)"
-            enabled |> should be False
-            File.Exists(Dismissals.filePath copy) |> should be False))
+            // The file next to the copy says none, over the review inside it.
+            File.ReadAllText(Dismissals.filePath copy) |> should haveSubstring "\"dismissedWarnings\": []"
+            dismissedAfter |> should be False))
 
 [<Fact>]
 let ``ignoring a type of warning hides all of them until it's stopped`` () =
