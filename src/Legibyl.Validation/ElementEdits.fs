@@ -271,6 +271,60 @@ let private untaggedPieces (document: PdfDocument) (edits: ElementEdit list) =
           | NonNull _, Some piece -> yield edit, piece
           | _ -> () ]
 
+// ---- Moves among siblings ----
+
+/// Each parent's children that moves reorder, where they change its order: the parent's /K, the
+/// slots its elements are in (their index and entry), and its entries in their new order. Other
+/// kids (marked content, annotations) keep their places.
+let private reorders (document: PdfDocument) context (moved: (ElementEdit * PdfDictionary) list) =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
+    | null -> []
+    | _ when moved.IsEmpty -> []
+    | structTreeRoot ->
+        let moveOf = Collections.Generic.Dictionary<PdfDictionary, ElementMove>(HashIdentity.Reference)
+        for edit, element in moved do
+            edit.Move |> Option.iter (fun move -> moveOf[element] <- move)
+        let seen = Collections.Generic.HashSet<PdfDictionary>(HashIdentity.Reference)
+        let parents = structTreeRoot :: [ for visit in walk structTreeRoot context -> visit.Element ] |> List.filter seen.Add
+        [ for parent in parents do
+              match resolve (parent.Get PdfName.K) with
+              | :? PdfArray as kids ->
+                  let slots =
+                      [ for i in 0 .. kids.Size() - 1 do
+                            match resolve (kids.Get i) with
+                            | :? PdfDictionary as kid when not (isNull (kid.GetAsName PdfName.S)) -> yield i, kids.Get i, kid
+                            | _ -> () ]
+                  if slots |> List.exists (fun (_, _, kid) -> moveOf.ContainsKey kid) then
+                      let ordered =
+                          SiblingOrder.reorder
+                              [ for _, entry, kid in slots ->
+                                    (entry, kid),
+                                    subtreeGeometry kid context (ancestorPage kid context),
+                                    (match moveOf.TryGetValue kid with
+                                     | true, move -> Some move
+                                     | _ -> None) ]
+                      if ordered |> List.map snd |> List.forall2 (fun (_, _, kid) moved -> obj.ReferenceEquals(kid, moved)) slots |> not then
+                          yield kids, slots, ordered
+              | _ -> () ]
+
+/// The elements whose place moves change.
+let private movedElements (document: PdfDocument) context (moved: (ElementEdit * PdfDictionary) list) =
+    let changed = Collections.Generic.HashSet<PdfDictionary>(HashIdentity.Reference)
+    for _, slots, ordered in reorders document context moved do
+        for (_, _, before), (_, after) in List.zip slots ordered do
+            if not (obj.ReferenceEquals(before, after)) then changed.Add after |> ignore
+    changed
+
+/// Puts moved elements in their places; returns how many moved.
+let private moveElements (document: PdfDocument) context (moved: (ElementEdit * PdfDictionary) list) =
+    let mutable count = 0
+    for kids, slots, ordered in reorders document context moved do
+        for (index, _, before), (entry, after) in List.zip slots ordered do
+            if not (obj.ReferenceEquals(before, after)) then
+                kids.Set(index, entry) |> ignore
+                count <- count + 1
+    count
+
 /// Writes the edits that change something, merges first (joining paragraphs moves nothing else);
 /// says how many (and how many elements weren't found), or nothing if none changed anything.
 let internal apply (document: PdfDocument) context (edits: ElementEdit list) : string list =
@@ -298,9 +352,12 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
                   // A tag is a name; the rest are text.
                   dictionary.Put(key, (if key.Equals PdfName.S then PdfName value :> PdfObject else textString value)) |> ignore
               if not changes.IsEmpty then yield () ]
+    // Last, once nothing else will change what's where: elements moved among their siblings.
+    let moved = moveElements document context (found |> List.filter (fun (e, _) -> e.Move.IsSome))
     let count = applied.Length + runs.Length + artifacts.Length + outsideWritten
     // Those that don't apply are said by unapplied, one by one.
-    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)." ]
+    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)."
+      if moved > 0 then $"Put {moved} element(s) in the reading order you gave them." ]
 
 // ---- The document's title ----
 
@@ -372,6 +429,8 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
         let outsideFound = untaggedPieces document outside
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
         let found = findIn document context (boxesOf merges) edits
+        let moves = found |> List.filter (fun (e, _) -> e.Move.IsSome)
+        let moving = movedElements document context moves
         [ for edit in outside do
               match outsideFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
               | Some(_, piece) when piece.Kind = UntaggedContent.Text && edit.Retag = "Artifact" ->
@@ -386,8 +445,9 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
                   $"Your edit making the {describe edit} decoration wasn't applied: no <{edit.Tag}> is in about that place (it may be decoration already)."
               | None ->
                   $"Your edit for the {describe edit} wasn't applied: no <{edit.Tag}> is in about that place (its box overlapping at least 60%%). Check its page, tag and box against legibyl structure."
-              | Some pair when (changes pair).IsEmpty ->
-                  $"Your edit for the {describe edit} changed nothing: the PDF says that already."
+              | Some(_, element) as pair when (changes pair.Value).IsEmpty && not (edit.Move.IsSome && moving.Contains element) ->
+                  if edit.Move.IsSome then $"Your move of the {describe edit} changed nothing: it's in that place in the reading order already."
+                  else $"Your edit for the {describe edit} changed nothing: the PDF says that already."
               | Some _ -> ()
           for merge in merges do
               if (mergeRun document context merge).IsNone then
@@ -407,4 +467,6 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         // (Text asked to be made decoration never is.)
         (untaggedPieces document outside |> List.filter (fun (e, piece) -> not (piece.Kind = UntaggedContent.Text && e.Retag = "Artifact")) |> List.length)
         + (merges |> List.choose (mergeRun document context) |> List.length)
-        + (findIn document context (boxesOf merges) edits |> List.filter (not << List.isEmpty << changes) |> List.length)
+        + (let found = findIn document context (boxesOf merges) edits
+           let moving = movedElements document context (found |> List.filter (fun (e, _) -> e.Move.IsSome))
+           found |> List.filter (fun ((_, element) as pair) -> not (changes pair).IsEmpty || moving.Contains element) |> List.length)

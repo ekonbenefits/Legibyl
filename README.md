@@ -525,6 +525,17 @@ content as an artifact (its `/Tag <</MCID n>> BDC` becomes `/Artifact BMC`), so
 it's still drawn but not read, and takes it out of the tags; the preview draws
 it grey until then.
 
+The reading order can be changed by hand: **Move Up** and **Move Down** move the
+selected element one place among its siblings (not out of its parent, not past a
+sibling on another page, and not inside a table or a table of contents). The
+blocks and the preview's numbers follow at once, and the block says it's moved,
+not in the PDF yet. Each is recorded as the fewest moves that give the order,
+each on the element that moves (`moveAfter`, the box of the sibling it now
+follows, or `moveFirst`); the Edits tab lists them ("moved: after "Masthead"")
+and Remove puts one back. Export reorders the parent's `/K` last, once nothing
+else will change what's where; what each element holds doesn't change, so the
+parent tree needs nothing.
+
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
 the tagged blocks, in a **Not in the tags** group per page, a block per piece
@@ -1010,6 +1021,7 @@ an edit gives it), and changing it with any of:
 | `alt` | a `Link` (tagged PDF) | Its description, what a screen reader announces (the annotation's `/Contents`). |
 | `text` | text read with OCR | The text, corrected (`""` for nothing to read), written as replacement text (`/ActualText`). |
 | `mergeWith` | a paragraph (tagged PDF) | The boxes of the paragraphs after it to merge into it. |
+| `moveAfter` (and `moveAfterPage`), or `moveFirst: true` | an element (tagged PDF) | Moves it among its siblings in the reading order: after the sibling with that box (on `moveAfterPage`, when it's another page), or first. Those not moved keep their order. |
 | `retag` | something outside every tag (`"tag": "Untagged"`, its `box` from `structure`) | `"Artifact"`: decoration, not read (its drawing is wrapped in `/Artifact BMC … EMC`; never text, which stays readable). `"Figure"` (with `alt`) or `"P"`: tagged, in reading order after what's tagged before it on its page. |
 
 A field an edit doesn't have (`"description"`, say) or a `retag` that isn't a

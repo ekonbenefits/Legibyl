@@ -48,7 +48,20 @@ type SavedEdit =
       /// For a suggested region: leave it out of the structure.
       [<JsonPropertyName "exclude">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
-      Exclude: bool }
+      Exclude: bool
+      /// For an element moved among its siblings (Structure's Move Up and Move Down): the box of
+      /// the sibling it now follows, like Box...
+      [<JsonPropertyName "moveAfter">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      MoveAfter: float array | null
+      /// ...and that sibling's page, when it isn't Page (0 when it is)...
+      [<JsonPropertyName "moveAfterPage">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
+      MoveAfterPage: int
+      /// ...or that it's first among them.
+      [<JsonPropertyName "moveFirst">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
+      MoveFirst: bool }
 
 /// A finding as a saved validation keeps it: where it is and what fixes it, without its message
 /// (which comes from the rule, when it's read back; see SavedResults).
@@ -186,7 +199,7 @@ let readFrom (path: string) : SavedFile option =
     else readFile path
 
 /// The fields an edit can have.
-let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mergeWith" ]
+let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mergeWith"; "moveAfter"; "moveAfterPage"; "moveFirst" ]
 
 /// The tags an edit can give (retag): PDF's standard structure types, and Artifact for a
 /// suggested region that's page furniture.
@@ -210,7 +223,7 @@ let problems (json: string) : string list =
                       for field in edit.EnumerateObject() do
                           if not (List.contains field.Name editFields) then
                               let hint = if field.Name = "description" || field.Name = "contents" then " (a link's description is its \"alt\")" else ""
-                              $"edits[{index}] has \"{field.Name}\", which isn't a field of an edit{hint}. An edit has page, tag and box, and any of alt, text, retag, exclude and mergeWith."
+                              $"edits[{index}] has \"{field.Name}\", which isn't a field of an edit{hint}. An edit has page, tag and box, and any of alt, text, retag, exclude, mergeWith, and moveAfter (with moveAfterPage) or moveFirst."
                       match edit.TryGetProperty "retag" with
                       | true, retag when retag.ValueKind = JsonValueKind.String && not (retagTags.Contains(retag.GetString() |> string)) ->
                           $"edits[{index}] retags to \"{retag.GetString()}\", which isn't a standard tag (e.g. H1 to H6, P, LI, Figure, Caption, Note, Artifact)."
@@ -254,7 +267,15 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
             match saved.MergeWith with
             | NonNull boxes -> boxes |> Array.choose geometry |> List.ofArray
             | Null -> []
-        if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude then
+        let move =
+            if saved.MoveFirst then Some First
+            else
+                match saved.MoveAfter with
+                | NonNull [| left; bottom; right; top |] ->
+                    let page = if saved.MoveAfterPage > 0 then saved.MoveAfterPage else saved.Page
+                    Some(After { PageNumber = page; Left = left; Bottom = bottom; Right = right; Top = top })
+                | _ -> None
+        if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude && move.IsNone then
             None
         else
             Some
@@ -265,7 +286,8 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
                   Text = saved.Text
                   MergeWith = mergeWith
                   Retag = saved.Retag
-                  Exclude = saved.Exclude }
+                  Exclude = saved.Exclude
+                  Move = move }
     | None -> None
 
 /// The edit as it's saved.
@@ -278,7 +300,10 @@ let ofElementEdit (e: ElementEdit) : SavedEdit =
       Text = e.Text
       MergeWith = if e.MergeWith.IsEmpty then null else e.MergeWith |> List.map saved |> Array.ofList
       Retag = e.Retag
-      Exclude = e.Exclude }
+      Exclude = e.Exclude
+      MoveAfter = (match e.Move with Some(After box) -> saved box | _ -> null)
+      MoveAfterPage = (match e.Move with Some(After box) when box.PageNumber <> e.Page -> box.PageNumber | _ -> 0)
+      MoveFirst = (e.Move = Some First) }
 
 /// The review's edits, as the ApplyEdits fix takes them.
 let edits (saved: SavedFile) : ElementEdit list =
@@ -308,7 +333,7 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
                   |> List.tryHead
                   |> Option.map (fun (tag, box, _) -> { e with Tag = tag; Box = box; Retag = null })
               match moved with
-              | Some moved when isNull moved.Alt && isNull moved.Text && moved.MergeWith.IsEmpty -> ()
+              | Some moved when isNull moved.Alt && isNull moved.Text && moved.MergeWith.IsEmpty && moved.Move.IsNone -> ()
               | Some moved -> yield moved
               | None -> yield e ]
 

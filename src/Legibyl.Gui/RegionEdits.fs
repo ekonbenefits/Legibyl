@@ -25,7 +25,9 @@ type Edit =
       /// The tag to give it instead of the one it was found with.
       Retag: string option
       /// For a suggested region: merge it into its neighbour (its text joins the nearest region kept).
-      Exclude: bool }
+      Exclude: bool
+      /// For an element of a tagged PDF: where it goes among its siblings (Move Up and Move Down).
+      Move: ElementMove option }
 
 /// How much two boxes must overlap to be the same region: their intersection over their
 /// union. A regenerated PDF can move things a little; different regions rarely overlap this much.
@@ -59,9 +61,9 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
     let edited =
         change (
             existing
-            |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = []; Retag = None; Exclude = false }
+            |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = []; Retag = None; Exclude = false; Move = None }
         )
-    if edited.Alt.IsNone && edited.Text.IsNone && edited.Retag.IsNone && not edited.Exclude then others
+    if edited.Alt.IsNone && edited.Text.IsNone && edited.Retag.IsNone && not edited.Exclude && edited.Move.IsNone then others
     else others @ [ { edited with Box = box } ]
 
 /// A figure's alt text set, or removed if blank.
@@ -72,6 +74,10 @@ let setAlt edits page tag box (alt: string) =
 /// recorded only if it differs from what was prefilled; "" if cleared.
 let setAltAgainst edits page tag box (prefilled: string) (alt: string) =
     update edits page tag box (fun e -> { e with Alt = (if alt = prefilled then None else Some alt) })
+
+/// An element moved among its siblings (to move), or back where it was read (None).
+let setMove edits page tag box (move: ElementMove option) =
+    update edits page tag box (fun e -> { e with Move = move })
 
 /// A region's OCR text corrected, recorded only if it differs from what OCR read.
 let setText edits page tag box (ocr: string) (text: string) =
@@ -112,7 +118,8 @@ let toElementEdits (edits: Edit list) : ElementEdit list =
              Text = Option.toObj e.Text
              MergeWith = e.MergeWith
              Retag = Option.toObj e.Retag
-             Exclude = e.Exclude }
+             Exclude = e.Exclude
+             Move = e.Move }
           : ElementEdit) ]
 
 /// A page's suggestions as tagging takes them: with the edits layered on (see
@@ -127,7 +134,7 @@ let mergeElements (edits: Edit list) (page: int) (tag: string) (boxes: Structure
     let involves (e: Edit) =
         e.Page = page && not e.MergeWith.IsEmpty && (e.Box :: e.MergeWith) |> List.exists (fun box -> boxes |> List.exists (same box))
     (edits |> List.filter (not << involves))
-    @ [ { Page = page; Tag = tag; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false } ]
+    @ [ { Page = page; Tag = tag; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false; Move = None } ]
 
 /// Paragraphs to merge into the first, by box, replacing any merge that involves them.
 let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry list) : Edit list =
@@ -153,7 +160,8 @@ let ofElementEdit (e: ElementEdit) : Edit =
       Text = Option.ofObj e.Text
       MergeWith = e.MergeWith
       Retag = Option.ofObj e.Retag
-      Exclude = e.Exclude }
+      Exclude = e.Exclude
+      Move = e.Move }
 
 /// The edits in a review.
 let editsIn (saved: SavedFile) : Edit list = ReviewFile.edits saved |> List.map ofElementEdit

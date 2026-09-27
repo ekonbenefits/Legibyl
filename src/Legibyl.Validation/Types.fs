@@ -119,6 +119,14 @@ module Boxes =
 /// paragraphs merged into it, or (for a region) leaving it out. What it changes is left as it
 /// was found; the edit is layered on top. The element is found again by its page, its tag and about the same box,
 /// so the edit still applies after repairs have rearranged the structure tree.
+/// Where an element goes among its siblings (Structure's Move Up and Move Down): what it now
+/// follows.
+type ElementMove =
+    /// First among them.
+    | First
+    /// After the sibling in about this place.
+    | After of StructureGeometry
+
 type ElementEdit =
     { Page: int
       /// Its standard tag, e.g. "Figure".
@@ -135,7 +143,55 @@ type ElementEdit =
       Retag: string | null
       /// For a suggested region: leave it out of the structure (its text joins the nearest region
       /// kept; anything else it holds is decoration).
-      Exclude: bool }
+      Exclude: bool
+      /// Where it goes among its siblings, if it's moved.
+      Move: ElementMove option }
+
+/// The order of an element's children once some are moved (see ElementMove): those moved are
+/// taken out and put where their moves say, the rest keeping the order they were read in. The
+/// Structure window shows this order, and the ApplyEdits fix writes it.
+module SiblingOrder =
+    /// siblings, as read, each with its box (None for one with no place on a page) and its move,
+    /// if it's moved: in the order the moves make. A move whose sibling isn't found leaves that
+    /// one where it was; several put after one sibling (or first) go in the order they were read.
+    let reorder (siblings: ('T * StructureGeometry option * ElementMove option) list) : 'T list =
+        let items = Array.ofList siblings
+        let n = items.Length
+        let boxOf i = let _, box, _ = items[i] in box
+        // Where each moved one goes: Some -1 for first, Some j for after sibling j; None to stay.
+        let target =
+            Array.init n (fun i ->
+                let _, _, move = items[i]
+                match move with
+                | Some First -> Some -1
+                | Some(After place) ->
+                    [ for j in 0 .. n - 1 do
+                          match boxOf j with
+                          | Some box when j <> i && box.PageNumber = place.PageNumber -> yield j, Boxes.overlap box place
+                          | _ -> () ]
+                    |> List.filter (fun (_, o) -> o >= 0.6)
+                    |> List.sortByDescending snd
+                    |> List.tryHead
+                    |> Option.map fst
+                | None -> None)
+        let order = ResizeArray<int>([ for i in 0 .. n - 1 do if target[i].IsNone then i ])
+        // After each place, how many moved ones are in already, so the next goes after them.
+        let placedAfter = Collections.Generic.Dictionary<int, int>()
+        let pending = ResizeArray<int>([ for i in 0 .. n - 1 do if target[i].IsSome then i ])
+        let mutable progress = true
+        while pending.Count > 0 && progress do
+            progress <- false
+            for i in List.ofSeq pending do
+                let place = target[i].Value
+                if place = -1 || order.Contains place then
+                    let already = match placedAfter.TryGetValue place with | true, count -> count | _ -> 0
+                    order.Insert((if place = -1 then 0 else order.IndexOf place + 1) + already, i)
+                    placedAfter[place] <- already + 1
+                    pending.Remove i |> ignore
+                    progress <- true
+        // Moves after each other in a circle: where they were, at the end.
+        order.AddRange pending
+        [ for i in order -> let item, _, _ = items[i] in item ]
 
 /// A region of a page to tag, e.g. one a layout detector found (see Legibyl.Layout).
 type LayoutRegion =
