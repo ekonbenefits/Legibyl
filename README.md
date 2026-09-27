@@ -512,7 +512,21 @@ be made **Not Read (Artifact)** (shift-click for several; **Read It** undoes it)
 as a `retag` edit to `Artifact`, as on a suggested structure: export marks its
 content as an artifact (its `/Tag <</MCID n>> BDC` becomes `/Artifact BMC`), so
 it's still drawn but not read, and takes it out of the tags; the preview draws
-it grey until then. The **Edits** tab lists every edit and whether it's in the PDF
+it grey until then.
+
+What a tagged page draws outside every tag (a page's background, rules under
+headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
+the tagged blocks, in a **Not in the tags** group per page, a block per piece
+(strokes drawn together are one piece), outlined dashed on the preview and with
+its failures marked on it. The most likely decoration comes first (a whole-page
+fill, then rules and thin borders, then other drawing, then images, then text),
+with a hint, but nothing is marked until a person chooses: **Not Read
+(Artifact)** makes drawing decoration (wrapped in `/Artifact BMC … EMC` on
+export, still drawn), **Tag as Figure** tags it (then **Edit Alt Text…**), and
+**Tag as Paragraph** tags text, which is never made decoration; **Keep Untagged**
+drops the choice. **Mark All Like This…** marks every piece of the same kind and
+about the same size, on any page, as decoration, after showing how many and where.
+A tagged piece goes in reading order after what's tagged before it on its page. The **Edits** tab lists every edit and whether it's in the PDF
 yet, and removes ones you no longer want. **Export…** writes the ones not in it
 yet to a copy (`ElementEdits.fs`), each to the element with its tag in about the
 same place, so they still apply after other repairs have rearranged the tree.

@@ -401,6 +401,48 @@ module private StructureView =
         | null -> $"Select: no page geometry is available for this {noun}."
         | geometry -> $"Select: highlight this {what} on page {geometry.PageNumber}."
 
+    // ---- Content outside every tag (see UntaggedContent) ----
+
+    /// Whether it's a piece of what a page draws outside every tag.
+    let isUntagged (node: StructureNode) = node.Tag = "Untagged"
+
+    /// Whether a piece outside the tags is text, which is never made decoration.
+    let isUntaggedText (node: StructureNode) = (string node.Content).StartsWith "text "
+
+    /// What kind of piece it is, as its description starts: "a fill", "a line", "an image"…
+    let untaggedKind (node: StructureNode) = (string node.Content).Split(',').[0]
+
+    /// How likely a piece outside the tags is decoration, most likely first: a page's background,
+    /// then rules and thin borders, then other drawing, then images, then text. Only a hint:
+    /// nothing is marked until a person chooses.
+    let decorationRank (node: StructureNode) =
+        let content = string node.Content
+        let thin =
+            match node.Geometry with
+            | NonNull g -> min (g.Right - g.Left) (g.Top - g.Bottom) <= 4.0
+            | Null -> false
+        if content.StartsWith "a fill" && content.EndsWith "(the whole page)" then 0
+        elif content.StartsWith "a line" || thin then 1
+        elif content.StartsWith "a fill" || content.StartsWith "a drawing" then 2
+        elif content.StartsWith "an image" then 3
+        else 4
+
+    /// The hint a piece's block gives, if it's likely decoration.
+    let decorationHint (node: StructureNode) =
+        match decorationRank node with
+        | 0 -> Some "likely decoration: the page's background"
+        | 1 -> Some "likely decoration: a rule or border"
+        | _ -> None
+
+    /// The structure with each page's pieces outside the tags in order of how likely they're
+    /// decoration.
+    let sortUntagged (root: StructureNode) =
+        { root with
+            Children =
+                [| for child in root.Children ->
+                       if child.Tag = "NotInTags" then { child with Children = child.Children |> List.ofSeq |> List.sortBy decorationRank |> Array.ofList }
+                       else child |] }
+
     /// Blocks the Layout view draws up front. Big documents' deeper levels start collapsed
     /// (click to expand) so the window opens quickly; most documents fit and show in full.
     let private layoutBudget = 2000
@@ -440,7 +482,7 @@ module private StructureView =
             WrapPanel.create [
                 WrapPanel.margin (0.0, 0.0, 0.0, 4.0)
                 WrapPanel.children [
-                    tagChip node.Tag borderColor headerColor
+                    tagChip (if node.Tag = "NotInTags" then "Not in the tags" else node.Tag) borderColor headerColor
                     match findingMarker selection node with
                     | Some marker -> marker
                     | None -> ()
@@ -474,7 +516,11 @@ module private StructureView =
                     header
                     match node.AlternateDescription with NonNull alt -> detailLine $"alt: \"{alt}\"" true | Null -> ()
                     match node.LinkDescription with NonNull description -> detailLine $"description: \"{description}\"" true | Null -> ()
-                    if not (editKinds node).IsEmpty || canRetag selection.Suggested node then
+                    if isUntagged node then
+                        match decorationHint node with
+                        | Some hint -> detailLine hint true
+                        | None -> ()
+                    if not (editKinds node).IsEmpty || canRetag selection.Suggested node || isUntagged node then
                         // Its own component, so an edit re-renders just this line.
                         Component.create("pending-edit", fun ctx ->
                             let edits = ctx.usePassedRead selection.Edits
@@ -485,6 +531,8 @@ module private StructureView =
                                     for label, text in lines do
                                         match label, text with
                                         | "tag", "Artifact" when not selection.Suggested -> detailLine "✎ not read (decoration), not in the PDF yet" true
+                                        | "tag", "Figure" when isUntagged node -> detailLine "✎ tagged as a figure, not in the PDF yet" true
+                                        | "tag", "P" when isUntagged node -> detailLine "✎ tagged as a paragraph, not in the PDF yet" true
                                         | _ when selection.Suggested -> detailLine $"✎ your {label}: \"{text}\"" true
                                         | _ -> detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
                                     if editFor edits.Current node |> Option.exists _.Exclude then
@@ -713,6 +761,8 @@ module private StructureView =
         (onEditsChanged: unit -> unit)
         (findings: FindingMarkers.Findings)
         =
+        // What's drawn outside every tag, most likely decoration first.
+        let tagged = sortUntagged tagged
         Component(fun ctx ->
             let suggested = prefetcher |> Option.map (fun prefetcher -> review, prefetcher)
             let isSuggested = suggested.IsSome
@@ -842,8 +892,10 @@ module private StructureView =
                                                   let leftOut = edit |> Option.exists _.Exclude
                                                   { Geometry = nonNull element.Geometry
                                                     Label = if leftOut then $"× {i + 1} {tag}" else $"{i + 1} {tag}"
-                                                    // Not a region of its own, or not read: grey.
-                                                    Color = if leftOut || tag = "Artifact" then leftOutColor else outlineColor tag
+                                                    // Not a region of its own, not read, or outside every tag: grey.
+                                                    Color = if leftOut || tag = "Artifact" || tag = "Untagged" then leftOutColor else outlineColor tag
+                                                    // Outside every tag (whatever's chosen for it): dashed.
+                                                    Dashed = isUntagged element
                                                     Emphasised = within element
                                                     Marker = markerFor element } ]
                                         // A selection that isn't one of them (a span in a paragraph, say) is filled too.
@@ -851,7 +903,7 @@ module private StructureView =
                                             [ for node in nodes do
                                                   match node.Geometry with
                                                   | NonNull geometry when geometry.PageNumber = page && not (elements |> List.exists (fun e -> obj.ReferenceEquals(e, node))) ->
-                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true; Marker = markerFor node }
+                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true; Marker = markerFor node; Dashed = isUntagged node }
                                                   | _ -> () ]
                                         // Only the selection, when asked: the rest are still there to click.
                                         let drawn =
@@ -956,8 +1008,10 @@ module private StructureView =
                                 let decoration =
                                     if isSuggested || node.Tag = "Figure" then " If it's only decoration, close this and use Not Read (Artifact) instead."
                                     else ""
+                                // A piece outside the tags is given alt text as the figure it's tagged as.
+                                let shownTag = if isUntagged node then "Figure" else node.Tag
                                 "Alt Text",
-                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. "
+                                $"Alt text for this <{shownTag}> on page {page}: what a screen reader says for it. "
                                 + "Say what it's for here, not only what it shows: \"Map of the route to the campsite\", not \"map\". "
                                 + $"Keep it to a sentence or so, and leave out \"image of\": the reader says it's an image.{decoration}",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.AlternateDescription),
@@ -1025,6 +1079,44 @@ module private StructureView =
                         pointOnPage image bitmap (e.GetPosition image) |> Option.map (fun point -> image, page, point))
                     |> Option.bind (fun (image, page, (x, y)) -> nodeAt root.Current page x y |> Option.map (fun node -> image, node))
                 | _ -> None
+
+            /// Marks every piece outside the tags like this one (the same kind, about the same size,
+            /// on any page) as decoration, once a person has seen how many and where.
+            let markAllLike (piece: StructureNode) =
+                task {
+                    let size (n: StructureNode) = let g = nonNull n.Geometry in g.Right - g.Left, g.Top - g.Bottom
+                    let width, height = size piece
+                    let near (a: float) (b: float) = abs (a - b) <= max 2.0 (b * 0.1)
+                    let rec all (node: StructureNode) : StructureNode list =
+                        node :: [ for child in node.Children do yield! all child ]
+                    let alike =
+                        all root.Current
+                        |> List.filter (fun n ->
+                            isUntagged n
+                            && not (isNull n.Geometry)
+                            && untaggedKind n = untaggedKind piece
+                            && (let w, h = size n in near w width && near h height)
+                            && (editFor edits.Current n |> Option.bind _.Retag) <> Some "Artifact")
+                    let pages = alike |> List.map (fun n -> (nonNull n.Geometry).PageNumber) |> List.distinct |> List.sort
+                    let where =
+                        match pages with
+                        | [ page ] -> $"page {page}"
+                        | pages -> "pages " + (pages |> List.map string |> String.concat ", ")
+                    let n (value: float) = Math.Round(value).ToString(Globalization.CultureInfo.InvariantCulture)
+                    let count = if alike.Length = 1 then "1 piece" else $"{alike.Length} pieces"
+                    let! confirmed =
+                        Dialogs.showMessageWithAction
+                            window
+                            $"Mark {count} like this ({untaggedKind piece}, about {n width} × {n height} pt), on {where}, as decoration? Each is still drawn, but a screen reader skips it. Check none is a chart or picture that needs describing."
+                            "Mark All Like This"
+                            $"Mark {count} as Decoration"
+                    if confirmed then
+                        do!
+                            alike
+                            |> List.fold (fun edits n -> let box = nonNull n.Geometry in RegionEdits.setRetag edits box.PageNumber n.Tag box "Artifact") edits.Current
+                            |> saveEdits
+                }
+                |> ignore
 
             let selection =
                 { Select = select
@@ -1353,6 +1445,52 @@ module private StructureView =
                                                 |> ignore),
                                             SubPatchOptions.Always
                                         )
+                                    ]
+                                // What's drawn outside every tag: made decoration (never text), or tagged as a
+                                // figure or a paragraph, as a person chooses; several at once.
+                                match (if isSuggested then [] else selected.Current |> List.filter (fun n -> isUntagged n && not (isNull n.Geometry))) with
+                                | [] -> ()
+                                | pieces ->
+                                    let chosenFor (n: StructureNode) = editFor edits.Current n |> Option.bind _.Retag
+                                    let text = pieces |> List.filter isUntaggedText
+                                    let what = if pieces.Length = 1 then "" else $" {pieces.Length} Pieces"
+                                    let setAll (retag: string) =
+                                        pieces
+                                        |> List.fold (fun all n -> let box = nonNull n.Geometry in RegionEdits.setRetag all box.PageNumber n.Tag box retag) edits.Current
+                                        |> saveEdits
+                                        |> ignore
+                                    let action (label: string) (tip: string) (onClick: unit -> unit) =
+                                        Button.create [
+                                            Button.content label
+                                            Button.margin (0.0, 0.0, 8.0, 8.0)
+                                            ToolTip.tip tip
+                                            Button.onClick ((fun _ -> onClick ()), SubPatchOptions.Always)
+                                        ]
+                                    WrapPanel.create [
+                                        WrapPanel.children [
+                                            if text.IsEmpty then
+                                                action
+                                                    $"Not Read (Artifact){what}"
+                                                    "Decoration a screen reader should skip, like a background, a rule or a border: on export it's still drawn, but marked as an artifact."
+                                                    (fun () -> setAll "Artifact")
+                                                action
+                                                    $"Tag as Figure{what}"
+                                                    "It's content, like a chart or a diagram: on export it's tagged as a figure, which then needs alt text."
+                                                    (fun () -> setAll "Figure")
+                                            elif text.Length = pieces.Length then
+                                                action $"Tag as Paragraph{what}" "Text should be read: on export it's tagged as a paragraph, in reading order after what's tagged before it." (fun () -> setAll "P")
+                                            if pieces |> List.exists (fun n -> (chosenFor n).IsSome) then
+                                                action "Keep Untagged" "Drop what was chosen for it: it stays outside the tags." (fun () -> setAll "Untagged")
+                                            match pieces with
+                                            | [ single ] when chosenFor single = Some "Figure" ->
+                                                action "Edit Alt Text…" "What a screen reader says for it: what it's for here, in a sentence." (fun () -> editNode single AltText)
+                                            | [ single ] when not (isUntaggedText single) ->
+                                                action
+                                                    "Mark All Like This…"
+                                                    "Every piece like this one (the same kind, about the same size, on any page) as decoration, once you've seen the list."
+                                                    (fun () -> markAllLike single)
+                                            | _ -> ()
+                                        ]
                                     ]
                                 // Merging is for a tagged PDF's paragraphs, and figures drawn in pieces.
                                 let mergeable nodes = if isSuggested then None else mergeable nodes

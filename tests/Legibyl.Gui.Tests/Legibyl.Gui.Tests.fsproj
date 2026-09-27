@@ -23,6 +23,7 @@
     <Compile Include="FindingMarkersTests.fs" />
     <Compile Include="SavedValidationTests.fs" />
     <Compile Include="PassChecklistTests.fs" />
+    <Compile Include="UntaggedStructureTests.fs" />
     <Compile Include="StructureCacheTests.fs" />
     <Compile Include="DismissalsTests.fs" />
     <Compile Include="RegionEditsTests.fs" />
