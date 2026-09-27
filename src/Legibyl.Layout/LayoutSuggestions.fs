@@ -158,7 +158,13 @@ module LayoutSuggestions =
             let heights = inside |> List.map (fun w -> w.Top - w.Bottom) |> List.sort
             let lineHeight = heights[heights.Length / 2]
             // Down from the region's top: each gap above a word's span, then what's below the last.
-            let spans = inside |> List.map (fun w -> max region.Bottom w.Bottom, min region.Top w.Top) |> List.sortByDescending snd
+            // A word's box is about its letters, not their descenders and ascenders, so each span
+            // is widened by a quarter of a line: reading those alone gives OCR nonsense.
+            let margin = 0.25 * lineHeight
+            let spans =
+                inside
+                |> List.map (fun w -> max region.Bottom (w.Bottom - margin), min region.Top (w.Top + margin))
+                |> List.sortByDescending snd
             let gaps, lowest =
                 spans
                 |> List.fold
@@ -168,14 +174,14 @@ module LayoutSuggestions =
             |> List.filter (fun (bottom, top) -> top - bottom >= 0.8 * lineHeight)
             |> List.sortByDescending snd
 
-    /// Whether text OCR read looks like words rather than decoration read as text ("C—O ———_"):
-    /// mostly letters and digits, with a word of two or more.
+    /// Whether text OCR read looks like words rather than decoration or the edge of a line read as
+    /// text ("C—O ———_", "FG en a ae re"): mostly letters and digits, with a word of three or more.
     let looksLikeText (text: string) =
         let visible = text |> Seq.filter (not << Char.IsWhiteSpace) |> Seq.length
         let alphanumeric = text |> Seq.filter Char.IsLetterOrDigit |> Seq.length
         visible > 0
         && float alphanumeric / float visible >= 0.6
-        && text.Split(' ', StringSplitOptions.RemoveEmptyEntries) |> Array.exists (fun w -> (w |> Seq.filter Char.IsLetterOrDigit |> Seq.length) >= 2)
+        && text.Split(' ', StringSplitOptions.RemoveEmptyEntries) |> Array.exists (fun w -> (w |> Seq.filter Char.IsLetterOrDigit |> Seq.length) >= 3)
 
     // Items of one list start within this many points of each other.
     [<Literal>]
