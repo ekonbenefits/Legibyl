@@ -28,7 +28,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="ProfileNames.fs" />
     <Compile Include="Results.fs" />
     <Compile Include="FixNames.fs" />
     <Compile Include="Program.fs" />

@@ -205,3 +205,41 @@ let ``validate explains common failures, and names their fixes as --fixes does``
         [ for name in language.GetProperty("fixes").EnumerateArray() -> string (name.GetString()) ] |> should equal [ "language" ]
         // Where it is, readably: the paragraph the text is in.
         language.GetProperty("location").GetString() |> should startWith "Document → Page 1 → paragraph (P) \"The community garden")
+
+/// validate's results for all files, with its exit code.
+let private validateAll (args: string list) =
+    let output = Path.GetTempFileName()
+    try
+        let code = Legibyl.Cli.Program.main (Array.ofList ("validate" :: args @ [ "--output"; output ]))
+        let results = [ for r in JsonDocument.Parse(File.ReadAllText output).RootElement.EnumerateArray() -> r.Clone() ]
+        code, results
+    finally
+        File.Delete output
+
+[<Fact>]
+let ``each file is checked against the PDF/UA its PDF version calls for, unless --ua says which`` () =
+    withTaggedPdf (fun pdf17 ->
+        let pdf20 = Path.Combine(Path.GetDirectoryName pdf17 |> nonNull, "pdf20.pdf")
+        do
+            use document = new PdfDocument(new PdfWriter(pdf20, WriterProperties().SetPdfVersion(PdfVersion.PDF_2_0)))
+            PdfCanvas(document.AddNewPage()).BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 12f)
+                .MoveText(72.0, 720.0).ShowText("A PDF 2.0 page.").EndText()
+            |> ignore
+
+        let _, detected = validateAll [ pdf17; pdf20 ]
+        let code, asked = validateAll [ pdf17; "--ua"; "2" ]
+
+        let summary (r: JsonElement) =
+            r.GetProperty("standard").GetString(), r.GetProperty("flavourId").GetString(), r.GetProperty("pdfVersion").GetString(), r.GetProperty("standardFrom").GetString()
+        detected |> List.map summary |> should equal [ ("PDF/UA-1", "ua1", "1.7", "file"); ("PDF/UA-2", "ua2", "2.0", "file") ]
+        // Measured against PDF/UA-2 before upgrading it: it fails.
+        asked |> List.map summary |> should equal [ ("PDF/UA-2", "ua2", "1.7", "--ua") ]
+        asked.Head.GetProperty("isCompliant").GetBoolean() |> should be False
+        code |> should equal 1)
+
+[<Fact>]
+let ``--profile and list profiles are gone, and --ua takes 1 or 2`` () =
+    withTaggedPdf (fun pdf ->
+        Legibyl.Cli.Program.main [| "validate"; pdf; "--profile"; "pdfua1" |] |> should equal 64
+        Legibyl.Cli.Program.main [| "list"; "profiles" |] |> should equal 64
+        Legibyl.Cli.Program.main [| "validate"; pdf; "--ua"; "3" |] |> should equal 64)
