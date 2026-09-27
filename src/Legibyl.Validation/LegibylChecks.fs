@@ -14,7 +14,8 @@
 ///
 /// Checks that look at the document as a whole rather than one element at a time (like
 /// the table-of-contents heading checks, Structure-3 to 5, lists tagged as paragraphs,
-/// Structure-6, and missing bookmarks, Structure-7) are added in `run` directly.
+/// Structure-6, missing bookmarks, Structure-7, and figures that draw nothing, Structure-11) are
+/// added in `run` directly.
 module internal Legibyl.Validation.LegibylChecks
 
 open System
@@ -222,6 +223,17 @@ let private splitFigureFindings (document: PdfDocument) context =
               PdfFixOptions.None
               run.Box ]
 
+// ---- Structure-11: a figure that draws nothing (see EmptyFigures) ----
+
+[<Literal>]
+let private EmptyFigureMessage =
+    "Figure tag around nothing on the page: a screen reader announces an image that isn't there, and it fails for having no alt text though there's nothing to describe. An auto fix can remove it."
+
+let private emptyFigureFindings (document: PdfDocument) context =
+    [ for visit in EmptyFigures.visits document context ->
+          let detail = visit.Page |> Option.map (fun page -> $"On page {page}.") |> Option.toObj
+          warning EmptyFigureMessage detail visit.Path 11 PdfFixOptions.RemoveEmptyFigures null ]
+
 /// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
@@ -238,6 +250,7 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! tocHeadingFindings document context
           yield! paragraphListFindings document context
           yield! splitFigureFindings document context
+          yield! emptyFigureFindings document context
           yield! missingBookmarkFindings document context ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
@@ -254,6 +267,7 @@ let messageFor (testNumber: int) : string option =
         | 7 -> Some MissingBookmarksMessage
         | 9 -> Some ParentTreeMessage
         | 10 -> Some SplitFiguresMessage
+        | 11 -> Some EmptyFigureMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
