@@ -27,6 +27,13 @@ let pickSavePath (topLevel: TopLevel) (options: FilePickerSaveOptions) (nearPath
         return file |> Option.ofObj |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath()))
     }
 
+/// The most a dialog can be tall on owner's screen, so its buttons stay on it (its content
+/// scrolls in whatever room is left).
+let private screenLimit (owner: Window) =
+    match owner.Screens.ScreenFromWindow owner with
+    | NonNull screen -> float screen.WorkingArea.Height / screen.Scaling * 0.9
+    | Null -> 700.0
+
 let private dialogWindow (title: string) (width: float) =
     HostWindow(
         Title = title,
@@ -292,10 +299,7 @@ let chooseFixOptions
     let window = dialogWindow "Auto Fixes" 560.0
     // Never taller than the screen: the list scrolls in whatever room is left. (All the repairs
     // at once are taller than a laptop screen.)
-    window.MaxHeight <-
-        match owner.Screens.ScreenFromWindow owner with
-        | NonNull screen -> float screen.WorkingArea.Height / screen.Scaling * 0.9
-        | Null -> 700.0
+    window.MaxHeight <- screenLimit owner
     // Its size is set once it opens, room enough for most of the repairs: showing all of them
     // then scrolls the list rather than resizing the window, which grew down from where it
     // opened, past the bottom of the screen.
@@ -602,153 +606,167 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
     let openFolder (folder: string) =
         window.Launcher.LaunchDirectoryInfoAsync(DirectoryInfo folder) |> ignore
 
+    // Never taller than the screen: the results scroll, OK stays below them.
+    window.MaxHeight <- screenLimit owner
+
     window.Content <-
         Component(fun _ ->
-            StackPanel.create [
-                StackPanel.margin 20.0
-                StackPanel.children [
-                    // Status headline
-                    Grid.create [
-                        Grid.columnDefinitions "Auto,*"
-                        Grid.children [
-                            Border.create [
-                                Border.width 36.0
-                                Border.height 36.0
-                                Border.cornerRadius 18.0
-                                Border.margin (0.0, 0.0, 14.0, 0.0)
-                                Border.verticalAlignment VerticalAlignment.Top
-                                Theme.resources [ Border.BackgroundProperty, style.ColorToken ]
-                                Border.child (
-                                    TextBlock.create [
-                                        TextBlock.text style.Glyph
-                                        TextBlock.fontSize 18.0
-                                        TextBlock.fontWeight FontWeight.Bold
-                                        TextBlock.foreground Brushes.White
-                                        TextBlock.horizontalAlignment HorizontalAlignment.Center
-                                        TextBlock.verticalAlignment VerticalAlignment.Center
-                                    ]
-                                )
-                            ]
+            Grid.create [
+                Grid.margin 20.0
+                Grid.rowDefinitions "*,Auto"
+                Grid.children [
+                    ScrollViewer.create [
+                        ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                        ScrollViewer.content (
                             StackPanel.create [
-                                Grid.column 1
                                 StackPanel.children [
-                                    TextBlock.create [
-                                        TextBlock.text style.Title
-                                        TextBlock.fontSize 18.0
-                                        TextBlock.fontWeight FontWeight.SemiBold
-                                    ]
-                                    SelectableTextBlock.create [
-                                        SelectableTextBlock.text style.Detail
-                                        SelectableTextBlock.textWrapping TextWrapping.Wrap
-                                        SelectableTextBlock.margin (0.0, 4.0, 0.0, 0.0)
-                                        Theme.resources [ SelectableTextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                // Status headline
+                                Grid.create [
+                                    Grid.columnDefinitions "Auto,*"
+                                    Grid.children [
+                                        Border.create [
+                                            Border.width 36.0
+                                            Border.height 36.0
+                                            Border.cornerRadius 18.0
+                                            Border.margin (0.0, 0.0, 14.0, 0.0)
+                                            Border.verticalAlignment VerticalAlignment.Top
+                                            Theme.resources [ Border.BackgroundProperty, style.ColorToken ]
+                                            Border.child (
+                                                TextBlock.create [
+                                                    TextBlock.text style.Glyph
+                                                    TextBlock.fontSize 18.0
+                                                    TextBlock.fontWeight FontWeight.Bold
+                                                    TextBlock.foreground Brushes.White
+                                                    TextBlock.horizontalAlignment HorizontalAlignment.Center
+                                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                                ]
+                                            )
+                                        ]
+                                        StackPanel.create [
+                                            Grid.column 1
+                                            StackPanel.children [
+                                                TextBlock.create [
+                                                    TextBlock.text style.Title
+                                                    TextBlock.fontSize 18.0
+                                                    TextBlock.fontWeight FontWeight.SemiBold
+                                                ]
+                                                SelectableTextBlock.create [
+                                                    SelectableTextBlock.text style.Detail
+                                                    SelectableTextBlock.textWrapping TextWrapping.Wrap
+                                                    SelectableTextBlock.margin (0.0, 4.0, 0.0, 0.0)
+                                                    Theme.resources [ SelectableTextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                ]
+                                            ]
+                                        ]
                                     ]
                                 ]
+
+                                // Before → after
+                                match outcome, after with
+                                | Ok fix, Some after ->
+                                    sectionHeading "Result (original → repaired copy)"
+                                    comparison fix.OriginalReport after
+                                | _ -> ()
+
+                                // Changes made
+                                match outcome with
+                                | Ok fix when fix.AppliedFixes.Count > 0 ->
+                                    sectionHeading "Changes made"
+                                    StackPanel.create [
+                                        StackPanel.spacing 4.0
+                                        StackPanel.children [
+                                            for change in fix.AppliedFixes ->
+                                                Grid.create [
+                                                    Grid.columnDefinitions "Auto,*"
+                                                    Grid.children [
+                                                        TextBlock.create [
+                                                            TextBlock.text "✓"
+                                                            TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+                                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Success ]
+                                                        ]
+                                                        TextBlock.create [
+                                                            Grid.column 1
+                                                            TextBlock.text change
+                                                            TextBlock.textWrapping TextWrapping.Wrap
+                                                        ]
+                                                    ]
+                                                ]
+                                        ]
+                                    ]
+                                | _ -> ()
+
+                                // Attempted but not kept
+                                match outcome with
+                                | Ok fix when fix.NotApplied.Count > 0 ->
+                                    sectionHeading "Not repaired"
+                                    StackPanel.create [
+                                        StackPanel.spacing 4.0
+                                        StackPanel.children [
+                                            for reason in fix.NotApplied ->
+                                                Grid.create [
+                                                    Grid.columnDefinitions "Auto,*"
+                                                    Grid.children [
+                                                        TextBlock.create [
+                                                            TextBlock.text "!"
+                                                            TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+                                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Warning ]
+                                                        ]
+                                                        TextBlock.create [
+                                                            Grid.column 1
+                                                            TextBlock.text reason
+                                                            TextBlock.textWrapping TextWrapping.Wrap
+                                                        ]
+                                                    ]
+                                                ]
+                                        ]
+                                    ]
+                                | _ -> ()
+
+                                // Written as
+                                match savedPath with
+                                | Some path ->
+                                    let folder = Path.GetDirectoryName path |> Option.ofObj |> Option.defaultValue ""
+                                    sectionHeading "Exported as"
+                                    Grid.create [
+                                        Grid.columnDefinitions "*,Auto"
+                                        Grid.children [
+                                            StackPanel.create [
+                                                StackPanel.children [
+                                                    SelectableTextBlock.create [
+                                                        SelectableTextBlock.text (match Path.GetFileName path with NonNull name -> name | Null -> path)
+                                                        SelectableTextBlock.fontWeight FontWeight.SemiBold
+                                                    ]
+                                                    SelectableTextBlock.create [
+                                                        SelectableTextBlock.text folder
+                                                        SelectableTextBlock.textWrapping TextWrapping.Wrap
+                                                        Theme.resources [ SelectableTextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                    ]
+                                                    TextBlock.create [
+                                                        TextBlock.text "Legibyl is now showing this copy."
+                                                        TextBlock.margin (0.0, 4.0, 0.0, 0.0)
+                                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                    ]
+                                                ]
+                                            ]
+                                            Button.create [
+                                                Grid.column 1
+                                                Button.content "Open folder"
+                                                Button.margin (12.0, 0.0, 0.0, 0.0)
+                                                Button.verticalAlignment VerticalAlignment.Top
+                                                Button.isEnabled (folder <> "")
+                                                Button.onClick (fun _ -> openFolder folder)
+                                            ]
+                                        ]
+                                    ]
+                                | None -> ()
+                                ]
                             ]
-                        ]
+                        )
                     ]
-
-                    // Before → after
-                    match outcome, after with
-                    | Ok fix, Some after ->
-                        sectionHeading "Result (original → repaired copy)"
-                        comparison fix.OriginalReport after
-                    | _ -> ()
-
-                    // Changes made
-                    match outcome with
-                    | Ok fix when fix.AppliedFixes.Count > 0 ->
-                        sectionHeading "Changes made"
-                        StackPanel.create [
-                            StackPanel.spacing 4.0
-                            StackPanel.children [
-                                for change in fix.AppliedFixes ->
-                                    Grid.create [
-                                        Grid.columnDefinitions "Auto,*"
-                                        Grid.children [
-                                            TextBlock.create [
-                                                TextBlock.text "✓"
-                                                TextBlock.margin (0.0, 0.0, 8.0, 0.0)
-                                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Success ]
-                                            ]
-                                            TextBlock.create [
-                                                Grid.column 1
-                                                TextBlock.text change
-                                                TextBlock.textWrapping TextWrapping.Wrap
-                                            ]
-                                        ]
-                                    ]
-                            ]
-                        ]
-                    | _ -> ()
-
-                    // Attempted but not kept
-                    match outcome with
-                    | Ok fix when fix.NotApplied.Count > 0 ->
-                        sectionHeading "Not repaired"
-                        StackPanel.create [
-                            StackPanel.spacing 4.0
-                            StackPanel.children [
-                                for reason in fix.NotApplied ->
-                                    Grid.create [
-                                        Grid.columnDefinitions "Auto,*"
-                                        Grid.children [
-                                            TextBlock.create [
-                                                TextBlock.text "!"
-                                                TextBlock.margin (0.0, 0.0, 8.0, 0.0)
-                                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Warning ]
-                                            ]
-                                            TextBlock.create [
-                                                Grid.column 1
-                                                TextBlock.text reason
-                                                TextBlock.textWrapping TextWrapping.Wrap
-                                            ]
-                                        ]
-                                    ]
-                            ]
-                        ]
-                    | _ -> ()
-
-                    // Written as
-                    match savedPath with
-                    | Some path ->
-                        let folder = Path.GetDirectoryName path |> Option.ofObj |> Option.defaultValue ""
-                        sectionHeading "Exported as"
-                        Grid.create [
-                            Grid.columnDefinitions "*,Auto"
-                            Grid.children [
-                                StackPanel.create [
-                                    StackPanel.children [
-                                        SelectableTextBlock.create [
-                                            SelectableTextBlock.text (match Path.GetFileName path with NonNull name -> name | Null -> path)
-                                            SelectableTextBlock.fontWeight FontWeight.SemiBold
-                                        ]
-                                        SelectableTextBlock.create [
-                                            SelectableTextBlock.text folder
-                                            SelectableTextBlock.textWrapping TextWrapping.Wrap
-                                            Theme.resources [ SelectableTextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                        ]
-                                        TextBlock.create [
-                                            TextBlock.text "Legibyl is now showing this copy."
-                                            TextBlock.margin (0.0, 4.0, 0.0, 0.0)
-                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                        ]
-                                    ]
-                                ]
-                                Button.create [
-                                    Grid.column 1
-                                    Button.content "Open folder"
-                                    Button.margin (12.0, 0.0, 0.0, 0.0)
-                                    Button.verticalAlignment VerticalAlignment.Top
-                                    Button.isEnabled (folder <> "")
-                                    Button.onClick (fun _ -> openFolder folder)
-                                ]
-                            ]
-                        ]
-                    | None -> ()
 
                     // Footnote and OK
                     Grid.create [
+                        Grid.row 1
                         Grid.margin (0.0, 20.0, 0.0, 0.0)
                         Grid.columnDefinitions "*,Auto"
                         Grid.children [
