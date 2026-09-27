@@ -81,12 +81,12 @@ let private splitParagraph context (visit: StructElemVisit) =
 let all: Check list =
     [ { TestNumber = 1
         Message =
-          "Empty semantic /P structure element. It can add meaningless stops to the screen-reader structure tree and can be removed as an auto fix."
+          "Empty paragraph tag. A screen reader stops on it with nothing to read; an auto fix can remove it."
         FixOptions = PdfFixOptions.RemoveEmptyParagraphs
         Inspect = emptyParagraph }
       { TestNumber = 2
         Message =
-          "Likely split paragraph: adjacent /P structure elements look like visual line fragments from the same sentence. This is best fixed in the source document if possible; an auto fix can join them where the page layout shows one block of text."
+          "Likely split paragraph: neighbouring paragraph tags look like lines of the same sentence, so a screen reader reads one sentence as several paragraphs. Best fixed where the PDF was made; an auto fix can join them where the page shows one block of text."
         FixOptions = PdfFixOptions.JoinSplitParagraphs
         Inspect = splitParagraph }
       { TestNumber = 8

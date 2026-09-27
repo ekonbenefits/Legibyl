@@ -772,11 +772,6 @@ module private StructureView =
                     showPage selected.Current
                 }
 
-            /// What Export does with an edit.
-            let savedHow =
-                if isSuggested then "Export… in the main window tags a copy with it."
-                else "Export… in the main window writes it to a copy."
-
             let editNode (node: StructureNode) (kind: EditKind) =
                 match node.Geometry with
                 | null -> ()
@@ -795,18 +790,18 @@ module private StructureView =
                                 "Alt Text",
                                 $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. "
                                 + "Say what it's for here, not only what it shows: \"Map of the route to the campsite\", not \"map\". "
-                                + $"Keep it to a sentence or so, and leave out \"image of\": the reader says it's an image.{decoration} {savedHow}",
+                                + $"Keep it to a sentence or so, and leave out \"image of\": the reader says it's an image.{decoration}",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.AlternateDescription),
                                 "What it's for, in a sentence"
                             | LinkDescription ->
                                 let target = match node.LinkUri with NonNull uri -> $" (it goes to {uri})" | Null -> ""
                                 "Link Description",
-                                $"What a screen reader announces for this link on page {page}{target}: where it goes, e.g. \"Apply for benefits (example.com)\". {savedHow}",
+                                $"What a screen reader announces for this link on page {page}{target}: where it goes, e.g. \"Apply for benefits (example.com)\".",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.LinkDescription),
                                 "Where the link goes"
                             | ReplacementText ->
                                 "Replacement Text",
-                                $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn. {savedHow}",
+                                $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn.",
                                 existing |> Option.bind _.Text |> Option.defaultValue (string node.ActualText),
                                 "Nothing to read here (cleared)"
                         match! Dialogs.promptText window title prompt current placeholder with
@@ -1026,9 +1021,9 @@ module private StructureView =
                                                     Automation.AutomationProperties.NameProperty, $"Tag for this <{single.Tag}>", ValueNone)
                                                 ToolTip.tip (
                                                     if isSuggested then
-                                                        "The tag to give it: H1 (the title), H (a heading), P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read). An edit on the suggestion: Export… in the main window tags a copy with it."
+                                                        "The tag to give it: H1 (the title), H (a heading, given the next level under the title when tagged, since one page can't tell), H2 to H6, P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
                                                     else
-                                                        "Give this element another tag, e.g. a heading tagged as a paragraph (as an edit: Export… in the main window writes it to a copy)."
+                                                        "Give this element another tag, e.g. a heading tagged as a paragraph."
                                                 )
                                                 // Each render's handler, for the element selected now; and
                                                 // only while it is (moving the selection sets the picker to
@@ -1119,7 +1114,7 @@ module private StructureView =
                                     Button.create [
                                         Button.content $"Merge {paragraphs.Length} Paragraphs"
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
-                                        ToolTip.tip "Make these paragraphs one, as an edit: Export… in the main window writes it to a copy."
+                                        ToolTip.tip "Make these paragraphs one."
                                         Button.onClick (
                                             (fun _ ->
                                                 let boxes = paragraphs |> List.map (fun p -> nonNull p.Geometry)
@@ -1308,11 +1303,11 @@ module private StructureView =
                                         TextBlock.text (
                                             let file = Path.GetFileName(Dismissals.filePath sourceFilePath)
                                             if edits.Current.IsEmpty && isSuggested then
-                                                "No edits yet. In the Layout tab, select a region to give it another tag, merge it into its neighbour, or mark it not read (shift-click to select several); right-click a figure or a link to describe it, or text read with OCR to correct it."
+                                                "No edits yet. In the Blocks tab, select a region to give it another tag, merge it into its neighbour, or mark it not read (shift-click to select several); right-click a figure or a link to describe it, or text read with OCR to correct it."
                                             elif isSuggested then
-                                                $"Your edits on the suggested layout. Save in the main window keeps them in {file} next to the PDF; Export… tags a copy with the layout and them."
+                                                $"Your edits on the suggested structure. Save in the main window keeps them in {file} next to the PDF; Export… tags a copy with the layout and them."
                                             elif edits.Current.IsEmpty then
-                                                "No edits yet. In the Layout tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs to merge them."
+                                                "No edits yet. In the Blocks tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs to merge them."
                                             else
                                                 $"Your edits. Save in the main window keeps them in {file} next to the PDF; Export… writes the ones not in it yet to a copy."
                                         )
@@ -1465,11 +1460,8 @@ module private StructureView =
                                 ]
                                 secondary (
                                     "This PDF has no tags, so this is the structure a layout detector suggests from what each page looks like: "
-                                    + "its regions, the tag each suggests, and their reading order (the numbers on the page). The suggestions stay as found; "
-                                    + "what you change (another tag, merging a region into its neighbour, marking it not read, alt text, corrected text) is kept as edits on top (Save in the main window keeps them next to the PDF), "
-                                    + "and Export… in the main window tags a copy with them. "
-                                    + "Headings are H because their levels aren't known from one page, runs of paragraphs that start with list markers are "
-                                    + "list items (LI), and Artifact marks page furniture like running headers and page numbers."
+                                    + "its regions, the tag each suggests, and their reading order (the numbers on the page). "
+                                    + "What you change is kept as edits on top: Save in the main window keeps them, and Export… tags a copy with them."
                                 )
                                 secondary (String.Join(" ", progress))
                                 if not modelReady.Current then
@@ -1522,7 +1514,8 @@ module private StructureView =
                     TabControl.create [
                         Grid.row 1
                         TabControl.viewItems [
-                            TabItem.create [ TabItem.header "Layout"; TabItem.content layoutTab ]
+                            // "Layout" is a suggested structure's: this is the elements drawn as blocks.
+                            TabItem.create [ TabItem.header "Blocks"; TabItem.content layoutTab ]
                             TabItem.create [ TabItem.header "Tree"; TabItem.content treeTab ]
                             TabItem.create [
                                 TabItem.header (if edits.Current.IsEmpty then "Edits" else $"Edits ({edits.Current.Length})")
@@ -1568,7 +1561,7 @@ open StructureView
 type StructureTreeWindow(source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit) as this =
     inherit
         HostWindow(
-            Title = (match source with Tagged _ -> "Document Structure" | Suggested -> "Suggested Structure"),
+            Title = (match source with Tagged _ -> "Structure" | Suggested -> "Suggested Structure"),
             Width = 1000.0,
             Height = 760.0,
             MinWidth = 500.0,

@@ -224,16 +224,16 @@ let private fixChoices =
         Detail = "With tagging: a borderless link over each QR code that encodes a web address." }
       { Option = PdfFixOptions.LanguageFromText
         Title = "Declare the language"
-        Detail = "Set /Lang from the language the text is in, when there's enough text to be sure." }
+        Detail = "Say what language the document is in, detected from its text when there's enough to be sure, so a screen reader reads it with the right voice (/Lang)." }
       { Option = PdfFixOptions.HeadingsFromToc
         Title = "Headings from the table of contents"
         Detail = "Tag paragraphs a contents entry names as headings (H1–H6, from its indent), and point its links at them." }
       { Option = PdfFixOptions.RemoveEmptyParagraphs
         Title = "Remove empty paragraphs"
-        Detail = "Empty /P structure elements (optional cleanup)." }
+        Detail = "Paragraph tags with nothing in them, which a screen reader stops on." }
       { Option = PdfFixOptions.RemoveEmptyTocEntries
         Title = "Remove empty contents entries"
-        Detail = "Empty table-of-contents entries (TOCI) (optional cleanup)." }
+        Detail = "Entries in the table of contents' tags with nothing in them, which a screen reader stops on." }
       { Option = PdfFixOptions.JoinSplitParagraphs
         Title = "Join split paragraphs"
         Detail =
@@ -241,19 +241,19 @@ let private fixChoices =
           + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time." }
       { Option = PdfFixOptions.ListsFromParagraphs
         Title = "Tag lists"
-        Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become L/LI; the page looks the same." }
+        Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become a list, so a screen reader announces it and its number of items; the page looks the same." }
       { Option = PdfFixOptions.BookmarksFromHeadings
         Title = "Add bookmarks"
         Detail = "Bookmarks for the H1 and H2 headings, when the document has none." }
       { Option = PdfFixOptions.AnnotationTabs
         Title = "Tab order for annotations"
-        Detail = "Set /Tabs /S on pages that contain annotations, so keyboard order follows the structure." }
+        Detail = "On pages with links or other annotations, the Tab key moves through them in reading order (/Tabs /S)." }
       { Option = PdfFixOptions.FontCidToGidMap
         Title = "Font glyph mapping"
-        Detail = "Write the /CIDToGIDMap /Identity embedded TrueType CID fonts leave out; readers already use it, so nothing changes on the page." }
+        Detail = "Some embedded fonts leave out how their character codes map to their glyphs; readers assume the usual mapping, and this writes it down (/CIDToGIDMap). Nothing changes on the page." }
       { Option = PdfFixOptions.LinkContents
         Title = "Describe contents links"
-        Detail = "Give table-of-contents links without a description the entry's own text (/Contents)." }
+        Detail = "Give table-of-contents links without a description the entry's own text, which a screen reader announces for them." }
       { Option = PdfFixOptions.LinkTitlesFromWeb
         Title = "Describe web links from their pages"
         Detail =
@@ -262,13 +262,13 @@ let private fixChoices =
           + "the sites see the visit. Check the descriptions." }
       { Option = PdfFixOptions.DocumentTitle
         Title = "Document title"
-        Detail = "Use the title the document carries, and show it in place of the file name (/DisplayDocTitle)." }
+        Detail = "Use the title the document carries, and have readers show it in place of the file name." }
       { Option = PdfFixOptions.TitleFromFirstPage
         Title = "Title from the first page"
         Detail = "If the document has no title anywhere, use the text of a short first page (a title page)." }
       { Option = PdfFixOptions.Metadata
         Title = "Repair XMP metadata"
-        Detail = "veraPDF's repair: metadata stream, PDF/UA identifier, Info sync." } ]
+        Detail = "Write the metadata PDF/UA asks for, and the identifier saying the file follows PDF/UA (veraPDF's repair)." } ]
 
 /// Lets the user pick which repairs to run, showing how many of the report's findings each
 /// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
@@ -349,7 +349,8 @@ let chooseFixOptions
                                                 TextBlock.create [ TextBlock.text choice.Title; TextBlock.fontWeight FontWeight.SemiBold ]
                                                 if choice.OptIn then
                                                     TextBlock.create [
-                                                        TextBlock.text "opt-in"
+                                                        TextBlock.text "off at first"
+                                                        ToolTip.tip "It guesses, or changes what the document says it is, so it's only used when you tick it."
                                                         TextBlock.fontSize 11.0
                                                         TextBlock.margin (8.0, 2.0, 0.0, 0.0)
                                                         Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]

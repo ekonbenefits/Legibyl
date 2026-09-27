@@ -37,7 +37,7 @@ let ``BuildFinding describes available fixes in plain words`` () =
         ValidationReportTextFormatter.BuildFinding
             { violation with FixOptions = PdfFixOptions.Metadata ||| PdfFixOptions.RemoveEmptyParagraphs }
 
-    text |> should haveSubstring "Fixable: Fix XMP metadata; Remove empty /P structure elements"
+    text |> should haveSubstring "Fixable: Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP); Remove empty paragraph tags"
 
 [<Fact>]
 let ``BuildFinding omits fixable when no fix applies`` () =

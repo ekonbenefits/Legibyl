@@ -927,7 +927,7 @@ module private MainView =
                             TextBox.margin (0.0, 0.0, 8.0, 0.0)
                             TextBox.verticalContentAlignment VerticalAlignment.Center
                             TextBox.isReadOnly true
-                            TextBox.text (selectedFile.Current |> Option.defaultValue "Drop a PDF here or click Browse...")
+                            TextBox.text (selectedFile.Current |> Option.defaultValue "Drop a PDF here or click Browse…")
                         ]
                         Button.create [
                             Grid.column 1
@@ -983,7 +983,10 @@ module private MainView =
                 | NotValidated -> None
                 | ValidationFailed message -> Some(banner Theme.Tokens.Warning $"Error: {message}")
                 | Validated(report, _) ->
-                    let flavour = report.FlavourId.ToUpperInvariant()
+                    // As the profile picker names it ("PDF/UA-1"), not its id ("UA1").
+                    let flavour =
+                        profiles |> List.tryFind (fun (_, profile) -> profile = report.Profile) |> Option.map fst
+                        |> Option.defaultValue (report.FlavourId.ToUpperInvariant())
                     let shownWarnings = (withoutDismissed report).WarningCount
                     let warnings =
                         match report.WarningCount - shownWarnings with
@@ -1219,7 +1222,14 @@ module private MainView =
                                         detailTitle
                                             row.Violation
                                             (TextBlock.create [
-                                                TextBlock.text $"{row.Severity}: clause {row.Clause}, test {row.TestNumber} — {row.PageDisplay}"
+                                                // veraPDF's rules by the standard's clause; Legibyl's own by its check.
+                                                TextBlock.text (
+                                                    if row.Violation.Specification = "Legibyl" then
+                                                        $"Legibyl warning: {row.Clause}-{row.TestNumber} — {row.PageDisplay}"
+                                                    else
+                                                        let standard = row.Violation.Specification.Split(':').[0]
+                                                        $"{row.Severity}: {standard} {row.Clause}, test {row.TestNumber} — {row.PageDisplay}"
+                                                )
                                                 TextBlock.fontSize 16.0
                                                 TextBlock.fontWeight FontWeight.SemiBold
                                                 TextBlock.textWrapping TextWrapping.Wrap
@@ -1471,7 +1481,7 @@ module private MainView =
                                     Button.margin (0.0, 0.0, 8.0, 0.0)
                                     Button.isEnabled (not busy && canAttemptFix)
                                     ToolTip.tip
-                                        "Choose best-effort repairs for Export to apply, like XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
+                                        "Choose the repairs Export applies, like the document's language, title and metadata; it lists the ones this PDF needs. Disabled when it passes with no warnings, since there's nothing left to fix."
                                     Button.onClick chooseAutoFixes
                                 ]
                                 Button.create [
