@@ -352,6 +352,9 @@ module private MainView =
                 | Validated(report, _) -> Some report
                 | _ -> None
 
+            /// Whether the PDF has no structure tree: it's tagged from a suggested structure.
+            let untagged () = report |> Option.exists (fun r -> r.FixableCount PdfFixOptions.TagFromLayout > 0)
+
             /// Whether it's worth offering fixes right now. The current fixers target known
             /// validation failures, so hide them once the file is already compliant.
             let canAttemptFix = report |> Option.exists (fun r -> not r.IsCompliant || r.WarningCount > 0)
@@ -399,7 +402,7 @@ module private MainView =
                 |> ignore
 
             /// Counts the user's changes Save would write for the selected file: for an untagged PDF,
-            /// its edits on the suggested structure (regions left out, other edits, a title); otherwise its
+            /// its edits on the suggested structure (regions merged into their neighbours, other edits, a title); otherwise its
             /// edits that aren't in it yet, which means reading it, off the UI thread.
             let refreshPending () =
                 task {
@@ -408,6 +411,8 @@ module private MainView =
                     | Some path, Validated(report, _) when report.FixableCount PdfFixOptions.TagFromLayout > 0 ->
                         let review = layoutReviews.For path
                         let changes = review.Edits.Length + (if review.Title.IsSome then 1 else 0)
+                        // Tagged from on Export once it's been suggested (Suggest Structure… opened, or
+                        // a layout kept from before), or there are edits on it.
                         pending.Set { Changes = changes; TagsFromReview = review.Pages.Count > 0 || changes > 0 }
                     | Some path, Validated _ ->
                         let! count =
@@ -591,20 +596,11 @@ module private MainView =
                         task {
                             match structure with
                             | null ->
-                                let! suggest =
-                                    Dialogs.showMessageWithAction
-                                        window
-                                        ("This PDF has no structure tree at all — it is completely untagged, so there is no "
-                                         + "semantic hierarchy for a screen reader to use.\n\n"
-                                         + "Suggest Structure shows the structure a layout detector finds on each page: headings, "
-                                         + "paragraphs, figures, tables and their reading order. You can edit it; the PDF isn't changed (Export writes a copy).")
-                                        "Document Structure"
-                                        "Suggest Structure…"
-                                if suggest then
-                                    let review = layoutReviews.For filePath
-                                    // Offer to read the titles of pages links go to, before the window opens.
-                                    do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
-                                    StructureTreeWindow(Suggested, filePath, review, refreshPending).Show window
+                                // Untagged: the button says Suggest Structure…, and that's what it does.
+                                let review = layoutReviews.For filePath
+                                // Offer to read the titles of pages links go to, before the window opens.
+                                do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
+                                StructureTreeWindow(Suggested, filePath, review, refreshPending).Show window
                             | structure -> StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending).Show window
                         }
 
@@ -638,29 +634,12 @@ module private MainView =
                     match selectedFile.Current, report with
                     | Some sourcePath, Some report ->
                         let review = layoutReviews.For sourcePath
+                        // An untagged PDF is tagged from its suggested structure, not by a repair.
                         let reviewNote =
-                            let alt =
-                                let written = review.Edits |> List.filter _.Alt.IsSome |> List.length
-                                let corrected = review.Edits |> List.filter _.Text.IsSome |> List.length
-                                let figures =
-                                    match written with
-                                    | 0 -> ""
-                                    | 1 -> " 1 figure has alt text written for it."
-                                    | n -> $" {n} figures have alt text written for them."
-                                let texts =
-                                    match corrected with
-                                    | 0 -> ""
-                                    | 1 -> " 1 region's OCR text is corrected."
-                                    | n -> $" {n} regions' OCR text is corrected."
-                                figures + texts
-                            match review.Pages.Count, review.Edits |> List.filter _.Exclude |> List.length with
-                            | _ when pending.Current.TagsFromReview ->
-                                Some("Export tags from your review on the suggested structure, ticked or not." + alt)
-                            | 0, 0 when alt = "" -> None
-                            | 0, 0 -> Some(alt.Trim())
-                            | _, 0 -> Some("Uses the layout suggested in View Structure." + alt)
-                            | _, 1 -> Some("Uses your edits on the suggested structure: 1 region left out." + alt)
-                            | _, discarded -> Some($"Uses your edits on the suggested structure: {discarded} regions left out." + alt)
+                            if untagged () then
+                                Some "This PDF has no tags: Export… tags a copy from its suggested structure (Suggest Structure…), with your edits on it."
+                            else
+                                None
                         match! Dialogs.chooseFixOptions window report reviewNote autoFixes.Current with
                         | Some options ->
                             // Part of the review: Save keeps them.
@@ -675,10 +654,15 @@ module private MainView =
             /// What Export writes: the chosen auto fixes, the user's edits not in the PDF yet, and for
             /// an untagged PDF with edits on its suggested structure, tags from them.
             let saveOptions () =
-                let chosen = autoFixes.Current |> Option.defaultValue PdfFixOptions.None
-                chosen
-                ||| (if pending.Current.TagsFromReview then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
-                ||| (if pending.Current.Changes > 0 && not pending.Current.TagsFromReview then PdfFixOptions.ApplyEdits else PdfFixOptions.None)
+                // Tagging isn't an auto fix here: an untagged PDF is tagged from its suggested
+                // structure, and only once that's been suggested.
+                let chosen = autoFixes.Current |> Option.defaultValue PdfFixOptions.None &&& ~~~PdfFixOptions.TagFromLayout
+                if untagged () && not pending.Current.TagsFromReview then
+                    PdfFixOptions.None
+                else
+                    chosen
+                    ||| (if pending.Current.TagsFromReview then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
+                    ||| (if pending.Current.Changes > 0 && not pending.Current.TagsFromReview then PdfFixOptions.ApplyEdits else PdfFixOptions.None)
 
             /// Writes the next version of the PDF with saveOptions (its review, saved or not, goes in
             /// it too), then opens it.
@@ -1113,7 +1097,14 @@ module private MainView =
                                         if row.Violation.IsFixable then
                                             fixableHeading (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
                                             |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
-                                            detailText $"{row.Fixable}. Choose it in Auto Fixes…, then Export… a copy of this PDF." false []
+                                            // Tagging from the layout takes a detector's guesses: they're
+                                            // worth checking first.
+                                            let next =
+                                                if row.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then
+                                                    "Open Suggest Structure… to see the headings, figures and reading order suggested for each page; Export… then tags a copy from it."
+                                                else
+                                                    "Choose it in Auto Fixes…, then Export… a copy of this PDF."
+                                            detailText $"{row.Fixable}. {next}" false []
                                         TextBlock.create [
                                             TextBlock.text "Location"
                                             TextBlock.fontWeight FontWeight.SemiBold
@@ -1294,20 +1285,32 @@ module private MainView =
                                     |> Option.map (fun options -> Enum.GetValues<PdfFixOptions>() |> Seq.filter (fun o -> o <> PdfFixOptions.None && o <> PdfFixOptions.All && options.HasFlag o) |> Seq.length)
                                     |> Option.defaultValue 0
                                 // The counts are part of what a screen reader says for the buttons.
+                                // For an untagged PDF, suggesting its structure is the next step, and what
+                                // Export waits for: said, and shown in the warning colour.
+                                let suggest = untagged ()
+                                let structureLabel = if suggest then "Suggest Structure…" else "Structure…"
                                 let structureName =
                                     match changes with
-                                    | 0 -> "Structure…"
-                                    | 1 -> "Structure…, 1 edit not in the PDF yet"
-                                    | n -> $"Structure…, {n} edits not in the PDF yet"
+                                    | 0 -> structureLabel
+                                    | 1 -> $"{structureLabel}, 1 edit not in the PDF yet"
+                                    | n -> $"{structureLabel}, {n} edits not in the PDF yet"
                                 let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
                                 Button.create [
-                                    Button.content (badged "Structure…" changes)
+                                    Button.content (badged structureLabel changes)
                                     AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, structureName, ValueNone)
                                     Button.padding (12.0, 4.0)
                                     Button.margin (0.0, 0.0, 8.0, 0.0)
                                     Button.isEnabled (not busy && selectedFile.Current.IsSome)
-                                    ToolTip.tip
-                                        "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements, or for an untagged PDF, suggests a layout to tag it from. The count is your edits not in it yet, which Export writes."
+                                    // Semi's filled button, in its warning colour.
+                                    if suggest then
+                                        Button.classes [ "Warning" ]
+                                        Theme.resources [ Button.ThemeProperty, "SolidButton" ]
+                                    ToolTip.tip (
+                                        if suggest then
+                                            "This PDF has no tags. Suggest Structure… shows the structure a layout detector finds on each page (headings, paragraphs, figures, reading order), to check and edit; Export… then tags a copy from it."
+                                        else
+                                            "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements. The count is your edits not in it yet, which Export writes."
+                                    )
                                     Button.onClick viewStructure
                                 ]
                                 Button.create [

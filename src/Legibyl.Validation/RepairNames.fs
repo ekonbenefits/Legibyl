@@ -20,6 +20,16 @@ let names =
       "title-from-first-page", PdfFixOptions.TitleFromFirstPage
       "metadata", PdfFixOptions.Metadata ]
 
+/// The repairs that need no guesswork about the document's meaning: what the CLI's `fix` applies
+/// by default, and what the GUI's Auto Fixes start with ticked. The title only moves across a
+/// title the author did write, in Info or in XMP; a title is never invented from the file name.
+let safe =
+    PdfFixOptions.Metadata
+    ||| PdfFixOptions.AnnotationTabs
+    ||| PdfFixOptions.LinkContents
+    ||| PdfFixOptions.DocumentTitle
+    ||| PdfFixOptions.FontCidToGidMap
+
 /// The names of the repairs in options, in the order they run.
 let ofOptions (options: PdfFixOptions) =
     [ for name, option in names do if options.HasFlag option then name ]

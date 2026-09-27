@@ -7,15 +7,8 @@ open Legibyl.Validation
 /// Each repair's name on the command line, in the order they run.
 let names = RepairNames.names
 
-/// The repairs that need no guesswork about the document's meaning: what `fix` applies by default. The
-/// title only moves across a title the author did write, in Info or in XMP; a title is never
-/// invented from the file name.
-let safe =
-    PdfFixOptions.Metadata
-    ||| PdfFixOptions.AnnotationTabs
-    ||| PdfFixOptions.LinkContents
-    ||| PdfFixOptions.DocumentTitle
-    ||| PdfFixOptions.FontCidToGidMap
+/// The repairs that need no guesswork: what `fix` applies by default (see RepairNames.safe).
+let safe = RepairNames.safe
 
 /// Every repair but the one that visits web pages, which has to be named.
 let all =

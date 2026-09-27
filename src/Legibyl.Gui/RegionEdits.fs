@@ -24,7 +24,7 @@ type Edit =
       MergeWith: StructureGeometry list
       /// The tag to give it instead of the one it was found with.
       Retag: string option
-      /// For a suggested region: leave it out.
+      /// For a suggested region: merge it into its neighbour (its text joins the nearest region kept).
       Exclude: bool }
 
 /// How much two boxes must overlap to be the same region: their intersection over their
@@ -82,7 +82,7 @@ let setAltAgainst edits page tag box (prefilled: string) (alt: string) =
 let setText edits page tag box (ocr: string) (text: string) =
     update edits page tag box (fun e -> { e with Text = (if text = ocr then None else Some text) })
 
-/// A suggested region left out, or kept again.
+/// A suggested region merged into its neighbour, or kept as its own again.
 let setExcluded edits page tag box (exclude: bool) =
     update edits page tag box (fun e -> { e with Exclude = exclude })
 
@@ -90,7 +90,7 @@ let setExcluded edits page tag box (exclude: bool) =
 let setRetag edits page (tag: string) box (newTag: string) =
     update edits page tag box (fun e -> { e with Retag = (if newTag = e.Tag then None else Some newTag) })
 
-/// Whether the suggestion is left out.
+/// Whether the suggestion is merged into its neighbour.
 let isExcluded edits page (block: SuggestedBlock) =
     find edits page block.Tag block.Geometry |> Option.exists _.Exclude
 

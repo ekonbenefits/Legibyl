@@ -402,7 +402,7 @@ module private StructureView =
                                         if selection.Suggested then detailLine $"✎ your {label}: \"{text}\"" true
                                         else detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
                                     if editFor edits.Current node |> Option.exists _.Exclude then
-                                        detailLine "✎ left out: not tagged (its text joins the nearest region kept)" true
+                                        detailLine "✎ merged into its neighbour: its text joins the nearest region kept" true
                                     match mergeLine edits.Current node with
                                     | Some line -> detailLine line true
                                     | None -> ()
@@ -562,7 +562,7 @@ module private StructureView =
                 ]
             ]
 
-    /// A suggested region left out is outlined grey.
+    /// A suggested region merged into its neighbour is outlined grey.
     let leftOutColor = 0x9E9E9Eu
 
     /// Edits change review (Save in the main window keeps it); onEditsChanged is called after each
@@ -676,7 +676,7 @@ module private StructureView =
                                     page
                                     |> Option.map (fun page ->
                                         let elements = pageElements tree page
-                                        // As edited: given another tag, or left out.
+                                        // As edited: given another tag, or merged into its neighbour.
                                         let outlined =
                                             [ for i, element in List.indexed elements ->
                                                   let edit = editFor currentEdits element
@@ -1041,32 +1041,52 @@ module private StructureView =
                                         ]
                                     ]
                                 | _ -> ()
-                                // A suggested region can be left out, or kept again; several at once.
+                                // A suggested region can be merged into its neighbour (its text still read), or kept
+                                // from being read at all (an artifact), and back again; several at once.
                                 match (if isSuggested then regionsIn selected.Current else []) with
                                 | [] -> ()
                                 | regions ->
-                                    let leftOut = regions |> List.forall (fun r -> editFor edits.Current r |> Option.exists _.Exclude)
                                     let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"
-                                    Button.create [
-                                        Button.content (if leftOut then $"Keep{what}" else $"Leave Out{what}")
-                                        Button.margin (0.0, 0.0, 0.0, 8.0)
-                                        Button.horizontalAlignment HorizontalAlignment.Left
-                                        ToolTip.tip (
-                                            if leftOut then "Tag it after all."
-                                            else "Don't tag it: its text joins the nearest region kept; its images and lines are decoration."
-                                        )
-                                        Button.onClick (
-                                            (fun _ ->
-                                                regions
-                                                |> List.fold
-                                                    (fun all r ->
-                                                        let box = nonNull r.Geometry
-                                                        RegionEdits.setExcluded all box.PageNumber r.Tag box (not leftOut))
-                                                    edits.Current
-                                                |> saveEdits
-                                                |> ignore),
-                                            SubPatchOptions.Always
-                                        )
+                                    let merged = regions |> List.forall (fun r -> editFor edits.Current r |> Option.exists _.Exclude)
+                                    let tagOf (r: StructureNode) = editFor edits.Current r |> Option.bind _.Retag |> Option.defaultValue r.Tag
+                                    let notRead = regions |> List.forall (fun r -> tagOf r = "Artifact")
+                                    let change (edit: RegionEdits.Edit list -> StructureNode -> StructureGeometry -> RegionEdits.Edit list) =
+                                        regions |> List.fold (fun all r -> edit all r (nonNull r.Geometry)) edits.Current |> saveEdits |> ignore
+                                    WrapPanel.create [
+                                        WrapPanel.margin (0.0, 0.0, 0.0, 8.0)
+                                        WrapPanel.children [
+                                            Button.create [
+                                                Button.content (if merged then $"Don't Merge{what}" else $"Merge into Neighbour{what}")
+                                                Button.margin (0.0, 0.0, 8.0, 0.0)
+                                                ToolTip.tip (
+                                                    if merged then "Keep it as a region of its own."
+                                                    else "Not a region of its own: its text joins the nearest region kept, so it's still read; its images and lines are decoration. To keep it from being read at all, use Not Read."
+                                                )
+                                                Button.onClick (
+                                                    (fun _ ->
+                                                        change (fun all r box -> RegionEdits.setExcluded all box.PageNumber r.Tag box (not merged))),
+                                                    SubPatchOptions.Always
+                                                )
+                                            ]
+                                            Button.create [
+                                                Button.content (if notRead then $"Read It{what}" else $"Not Read (Artifact){what}")
+                                                ToolTip.tip (
+                                                    if notRead then "Read it after all: tag it as it was suggested (a paragraph, if it was suggested as an artifact)."
+                                                    else "Page furniture a screen reader should skip, like a running header or a page number: tagged as an artifact, so it isn't read."
+                                                )
+                                                Button.onClick (
+                                                    (fun _ ->
+                                                        change (fun all r box ->
+                                                            let page = box.PageNumber
+                                                            if notRead then
+                                                                RegionEdits.setRetag all page r.Tag box (if r.Tag = "Artifact" then "P" else r.Tag)
+                                                            else
+                                                                // An artifact isn't read, so it isn't merged into a neighbour either.
+                                                                RegionEdits.setExcluded (RegionEdits.setRetag all page r.Tag box "Artifact") page r.Tag box false)),
+                                                    SubPatchOptions.Always
+                                                )
+                                            ]
+                                        ]
                                     ]
                                 // Merging is for a tagged PDF's paragraphs.
                                 let mergeable nodes = if isSuggested then None else mergeable nodes
@@ -1228,7 +1248,7 @@ module private StructureView =
                                                 match edit.Retag with
                                                 | Some tag -> detailLine $"tag: {tag}" false
                                                 | None -> ()
-                                                if edit.Exclude then detailLine "left out: not tagged" false
+                                                if edit.Exclude then detailLine "merged into its neighbour" false
                                                 match edit.Alt with
                                                 | Some alt when edit.Tag = "Link" -> detailLine $"description: \"{alt}\"" false
                                                 | Some alt -> detailLine $"alt: \"{alt}\"" false
@@ -1281,7 +1301,7 @@ module private StructureView =
                                         TextBlock.text (
                                             let file = Path.GetFileName(Dismissals.filePath sourceFilePath)
                                             if edits.Current.IsEmpty && isSuggested then
-                                                "No edits yet. In the Layout tab, select a region to give it another tag or leave it out (shift-click to select several); right-click a figure or a link to describe it, or text read with OCR to correct it."
+                                                "No edits yet. In the Layout tab, select a region to give it another tag, merge it into its neighbour, or mark it not read (shift-click to select several); right-click a figure or a link to describe it, or text read with OCR to correct it."
                                             elif isSuggested then
                                                 $"Your edits on the suggested layout. Save in the main window keeps them in {file} next to the PDF; Export… tags a copy with the layout and them."
                                             elif edits.Current.IsEmpty then
@@ -1439,8 +1459,8 @@ module private StructureView =
                                 secondary (
                                     "This PDF has no tags, so this is the structure a layout detector suggests from what each page looks like: "
                                     + "its regions, the tag each suggests, and their reading order (the numbers on the page). The suggestions stay as found; "
-                                    + "what you change (another tag, leaving a region out, alt text, corrected text) is kept as edits on top (Save in the main window keeps them next to the PDF), "
-                                    + "and Export… in the main window tags a copy with them (a region left out has its text join the nearest region kept). "
+                                    + "what you change (another tag, merging a region into its neighbour, marking it not read, alt text, corrected text) is kept as edits on top (Save in the main window keeps them next to the PDF), "
+                                    + "and Export… in the main window tags a copy with them. "
                                     + "Headings are H because their levels aren't known from one page, runs of paragraphs that start with list markers are "
                                     + "list items (LI), and Artifact marks page furniture like running headers and page numbers."
                                 )

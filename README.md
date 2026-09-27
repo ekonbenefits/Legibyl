@@ -290,17 +290,20 @@ when the PDF is opened again (see Saving below). Failures can't be dismissed. Th
 The PDF you open is never changed. Your review of it is saved next to it, and
 the changes are written to a new copy. Four buttons under the details:
 
-- **Structure…** opens View Structure (for an untagged PDF, after offering to
-  suggest a structure, which it then shows), where you make edits. Its badge
+- **Structure…** opens View Structure, where you make edits. For an untagged PDF
+  it's **Suggest Structure…**, in the warning colour: the next step, which opens
+  the structure a layout detector suggests, to check and edit. Its badge
   counts your edits that aren't in this PDF yet: for a tagged PDF, edits its
   elements don't have yet; for an untagged one, its edits on the suggested
   structure (and a changed title). Edits
   already in the PDF are reference, and for importing into another version of
   it; they don't count.
-- **Auto Fixes…** chooses repairs (the dialog doesn't export). They're part of
-  the review, so **Save** keeps them (as `fixes`, by the names `--fixes` takes)
+- **Auto Fixes…** chooses repairs (the dialog doesn't export); tagging an
+  untagged PDF isn't one of them, since it's tagged from its suggested
+  structure. The repairs are part of the review, so **Save** keeps them (as `fixes`, by the names `--fixes` takes)
   and they're chosen again when the PDF is reopened. Until some are chosen, the
-  first time the dialog opens the safe repairs the PDF needs start ticked; after
+  first time the dialog opens the safe repairs the PDF needs start ticked (the
+  same ones as the CLI's `safe`); after
   that it shows what was chosen. Its badge counts the chosen ones.
 - **Save** (⌘S / Ctrl+S) keeps your review (dismissed warnings, edits, the
   title, the auto fixes chosen) in `<name>.pdf.legibyl.json` next to the PDF, to pick up where you left
@@ -309,9 +312,12 @@ the changes are written to a new copy. Four buttons under the details:
   Changing something back to how it was saved isn't a change.
 - **Export…** (⌘E / Ctrl+E) writes the next version of the PDF (`flyer.v2.pdf`)
   with the chosen auto fixes and your changes, saved or not: your edits are
-  always applied (not an auto fix), and an untagged PDF with a review is tagged
-  from it. Then the exported copy is opened and validated, and shown against
-  the original. It's enabled when there's something to write.
+  always applied (not an auto fix), and an untagged PDF is tagged from its
+  suggested structure with your edits on it (so Export waits until Suggest
+  Structure… has been opened). Then the exported copy is opened in its own
+  window, validated, and shown against the original; a copy tagged this way is
+  the place to check and edit its headings, figures and reading order further.
+  It's enabled when there's something to write.
 
 An exported copy carries the review it was made with (dismissals, edits, the
 title given an untagged PDF, and the auto fixes it was made with) inside it: a
@@ -417,9 +423,9 @@ a link (or a table-of-contents entry with one) that goes somewhere in the
 document also renders the page it goes to below, with the destination marked
 in blue: the line the view starts at, the rectangle a `/FitR` destination
 shows, or the whole page when the destination names no position.
-If the file has no structure tree at all (completely untagged), the button
-reports that instead of an empty tree, and offers **Suggest Structure…**, which
-opens View Structure on the structure a layout detector suggests for each page
+If the file has no structure tree at all (completely untagged), the button is
+**Suggest Structure…**, which opens View Structure on the structure a layout
+detector suggests for each page
 (PaddleOCR's PP-DocLayoutV3, via the pure C# [PaddleOCR](https://www.nuget.org/packages/PaddleOCR)
 port in `Legibyl.Layout`), under a banner saying it isn't tagged yet. It's one
 outline of the whole document, filling in as each page's layout is found: each
@@ -431,17 +437,21 @@ items (LI), in a list, by the same rules as the lists-from-paragraphs fix; a web
 link without a description is a `Link` inside the region it's in. Selecting a
 region gives a **Tag** picker for another tag (H1, H, H2 to H6, P, LI, Figure,
 Table, Caption, Note, Formula, Lbl, Artifact) — a heading the detector took for a
-paragraph, say — and **Leave Out** (or **Keep**); shift-click selects several,
-and selecting a list or the document leaves out or keeps every region in it.
-The preview draws a region left out in grey, and every region with its tag as
-edited.
+paragraph, say — **Merge into Neighbour** (or **Don't Merge**), for a region
+that isn't one of its own (its text joins the nearest region kept, so it's
+still read), and **Not Read (Artifact)** (or **Read It**), for page furniture a
+screen reader should skip, like a running header or a page number.
+Shift-click selects several, and selecting a list or the document applies to
+every region in it. The preview draws a region merged into its neighbour in
+grey, and every region with its tag as edited.
 
 The layout itself is never changed: like a structure read from a
 tagged PDF, they're read-only, and what you decide is layered on top as edits
 (`ElementEdits.onRegions`), each naming the region by its page, the tag it
 was found with, and its box — the same kind of edit View Structure makes on a
-tagged PDF's elements. Leaving a region out is an `exclude` edit, picking
-another tag a `retag` edit, and alt text and corrected text are edits too.
+tagged PDF's elements. Merging a region into its neighbour is an `exclude`
+edit, marking it not read a `retag` to `Artifact`, picking another tag a
+`retag` edit, and alt text and corrected text are edits too.
 Nothing is written to the PDF: **Export…** in the main window tags a copy
 with the regions and the edits on them. Once you've decided something, **Save**
 keeps the edits in the file next to the PDF, with the layout they're on recorded
@@ -470,9 +480,9 @@ reads as words rather than decoration. The preview marks that text **OCR:**. Tes
 has native libraries for Windows, Linux and Apple Silicon Macs; elsewhere (Intel
 Macs) OCR is skipped and those regions show no text.
 
-The Auto Fixes dialog's **Tag from the page layout** option
-(off by default, and only for a document with no structure tree) writes those
-regions as tags, before the other fixes run, so they can build on them
+Tagging from the layout (Export… for an untagged PDF in the GUI, and
+`tag-from-layout`, or `layout apply`, in the CLI; only for a document with no
+structure tree) writes those regions as tags, before the other fixes run, so they can build on them
 (`PdfFixOptions.TagFromLayout`, `LayoutTagging.fs`; the fixer gets the regions
 from an `IPageLayoutSource`, which `Legibyl.Layout` provides). Each piece of
 content goes to the smallest region it's drawn in, and is marked in the page's
@@ -499,13 +509,13 @@ offered beside it with where they came from (e.g. "Cub Scout Pack 721 · first
 heading" when the document's own title is just "Design"). A title that's changed
 is saved as `title` in the file next to the PDF (by **Save**); tagging gives the document the
 title as edited, or as shown prefilled if the structure was viewed, with
-`/DisplayDocTitle`. (The Auto Fixes dialog, tagging a file never reviewed, doesn't take
-a title from a heading.)
+`/DisplayDocTitle`. (The CLI, tagging a file never reviewed, doesn't take a title
+from a heading.)
 
 Figures can be given alt text, and OCR'd text corrected, on the suggested
 structure too: right-click a figure for **Edit Alt Text…** (a QR code's starts
 from where it links), and a region read with OCR for **Edit Replacement Text…**.
-When tagging (**Export…** with a review, or the Auto Fixes option), alt text is written as the
+When tagging (**Export…** from the suggested structure, or the CLI), alt text is written as the
 figure's `/Alt`, and corrected text as the region's `/ActualText` (cleared
 meaning there's nothing to read there). **Save** keeps edits in the
 `edits` section of the `<name>.pdf.legibyl.json` file next to the PDF, alongside

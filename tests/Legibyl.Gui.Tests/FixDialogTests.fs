@@ -94,8 +94,8 @@ let ``the fix dialog lists what this PDF needs, in the order repairs run, tickin
         shown
         |> should
             equal
-            [ "Tag from the page layout", (false, "1 found")
-              "Link QR codes", (false, "with tagging")
+            // Not tagging itself: an untagged PDF is tagged from its suggested structure.
+            [ "Link QR codes", (false, "with tagging")
               "Tag lists", (false, "3 found")
               "Tab order for annotations", (true, "2 found")
               "Font glyph mapping", (true, "1 found")
@@ -119,8 +119,7 @@ let ``showing all repairs lists the ones this PDF doesn't need too, still in ord
         shown |> List.map fst
         |> should
             equal
-            [ "Tag from the page layout"
-              "Link QR codes"
+            [ "Link QR codes"
               "Declare the language"
               "Headings from the table of contents"
               "Remove empty paragraphs"
@@ -170,14 +169,23 @@ let ``continuing applies the ticked repairs`` () =
             )))
 
 [<Fact>]
-let ``tagging from the layout says when it uses a review from Suggest Structure`` () =
+let ``for an untagged PDF, the dialog says it's tagged from its suggested structure`` () =
     onUiThread (fun () ->
-        let mutable text = ""
-        withDialogNoted (Some "Uses your review in Suggest Structure: 2 regions discarded.") findings (fun dialog ->
-            text <- rowText dialog "Tag from the page layout")
+        let mutable texts = []
+        withDialogNoted (Some "This PDF has no tags: Export… tags a copy from its suggested structure.") findings (fun dialog ->
+            texts <- descendants<TextBlock> dialog |> List.map (fun t -> string t.Text))
         |> ignore
 
-        text |> should haveSubstring "Uses your review in Suggest Structure: 2 regions discarded.")
+        texts |> List.exists (fun t -> t.StartsWith "This PDF has no tags: Export… tags a copy from its suggested structure.") |> should be True
+        texts |> should not' (contain "Tag from the page layout"))
+
+[<Fact>]
+let ``only the CLI's safe repairs start ticked: bookmarks don't`` () =
+    onUiThread (fun () ->
+        let mutable shown = Map.empty
+        withDialog (finding PdfFixOptions.BookmarksFromHeadings :: findings) (fun dialog -> shown <- options dialog) |> ignore
+
+        fst shown["Add bookmarks"] |> should be False)
 
 [<Fact>]
 let ``with every repair shown on a short screen, the list scrolls and the buttons stay on screen`` () =

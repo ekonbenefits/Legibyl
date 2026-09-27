@@ -149,10 +149,50 @@ let ``an untagged PDF's edits on its suggested structure count on Structure, and
         withPdf false (fun pdf ->
             Reviews.saveEdits pdf (RegionEdits.setAlt [] 1 "Figure" (rect (70.0, 548.0, 175.0, 652.0)) "Tomato seedlings")
             let window = openPdf pdf
-            waitFor (fun () -> name (button window "Structure…") <> "Structure…")
-            let structure = name (button window "Structure…")
+            waitFor (fun () -> name (button window "Suggest Structure…") <> "Suggest Structure…")
+            let structure = name (button window "Suggest Structure…")
             let canExport = (button window "Export…").IsEnabled
             window.Close()
 
-            structure |> should equal "Structure…, 1 edit not in the PDF yet"
+            structure |> should equal "Suggest Structure…, 1 edit not in the PDF yet"
             canExport |> should be True))
+
+[<Fact>]
+let ``an untagged PDF waits for Suggest Structure… before it can be exported, and is tagged from it`` () =
+    onUiThread (fun () ->
+        withPdf false (fun pdf ->
+            let window = openPdf pdf
+            let suggest = button window "Suggest Structure…"
+            let prominent = suggest.Classes.Contains "Warning"
+            let before = (button window "Export…").IsEnabled
+            // Its first page's layout found, as opening Suggest Structure… does.
+            let review = DocumentShell.Shared.Reviews.For pdf
+            review.Pages[1] <-
+                { PageNumber = 1
+                  Blocks =
+                    [ { Order = 1; Label = "text"; Tag = "P"; Score = 0.9; Geometry = rect (70.0, 695.0, 300.0, 715.0); Text = "The garden in spring."
+                        ListNumbering = None; Recognized = false; QrText = None } ]
+                  HasText = true
+                  Rotated = false }
+            // Counted again, as it is when the window's back in front (here, validating it again).
+            HeadlessWindow.openPdf window pdf
+            let after = (button window "Export…").IsEnabled
+            window.Close()
+
+            prominent |> should be True
+            before |> should be False
+            after |> should be True))
+
+[<Fact>]
+let ``an untagged PDF's findings point to Suggest Structure…`` () =
+    onUiThread (fun () ->
+        withPdf false (fun pdf ->
+            let window = openPdf pdf
+            let rows = (HeadlessWindow.resultsGrid window).ItemsSource |> Seq.cast<RuleViolationRow> |> List.ofSeq
+            HeadlessWindow.selectRow window (rows |> List.findIndex (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout))
+            let texts = descendants<TextBox> window |> List.map (fun t -> string t.Text)
+            window.Close()
+
+            texts
+            |> List.exists (fun t -> t.EndsWith "Open Suggest Structure… to see the headings, figures and reading order suggested for each page; Export… then tags a copy from it.")
+            |> should be True))
