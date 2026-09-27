@@ -65,29 +65,48 @@ module internal VeraPdf =
         | Some(_, repairStatus) -> repairStatus
         | None -> raise (ArgumentOutOfRangeException(nameof status, string status, "Unknown veraPDF repair status"))
 
-    let private determineFixOptions (message: string | null) =
-        let text = Option.ofObj message |> Option.defaultValue ""
-        let contains (value: string) = text.Contains(value, StringComparison.OrdinalIgnoreCase)
-        if contains "Tabs" && contains "annotation" && contains "S" then
-            PdfFixOptions.AnnotationTabs
-        elif contains "Contents key" then
-            PdfFixOptions.LinkContents
-        elif contains "CIDToGIDMap" then
-            PdfFixOptions.FontCidToGidMap
-        elif contains "dc:title" then
-            PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle
-        elif contains "DisplayDocTitle" then
-            PdfFixOptions.DocumentTitle
-        elif
-            contains "metadata"
-            || contains "PDF/UA Identification"
-            || contains "PDF/A Identification"
-            || contains "conformance level"
-            || contains "XMP"
-        then
-            PdfFixOptions.Metadata
-        else
-            PdfFixOptions.None
+    /// What repairs each rule's failure, by standard and rule ("clause-test", as veraPDF numbers
+    /// them). PDF/UA-1 and PDF/UA-2 number the same requirements differently. Anything else has
+    /// no repair here (though withLegibylAnalysis adds some, from what's in the file).
+    let private fixesByRule: Map<PdfProfile * string, PdfFixOptions> =
+        let ua1 rule options = (PdfProfile.PdfUa1, rule), options
+        let ua2 rule options = (PdfProfile.PdfUa2, rule), options
+        let metadataAndTitle = PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle
+        Map.ofList
+            [ // The PDF/UA identifier in the metadata (pdfuaid:part, and PDF/UA-1's amd and
+              // corr or PDF/UA-2's rev).
+              ua1 "5-1" PdfFixOptions.Metadata
+              ua1 "5-3" PdfFixOptions.Metadata
+              ua1 "5-4" PdfFixOptions.Metadata
+              ua1 "5-5" PdfFixOptions.Metadata
+              ua2 "5-1" PdfFixOptions.Metadata
+              ua2 "5-2" PdfFixOptions.Metadata
+              ua2 "5-3" PdfFixOptions.Metadata
+              ua2 "5-4" PdfFixOptions.Metadata
+              ua2 "5-5" PdfFixOptions.Metadata
+              // No metadata stream; no dc:title in it; DisplayDocTitle not set.
+              ua1 "7.1-8" PdfFixOptions.Metadata
+              ua1 "7.1-9" metadataAndTitle
+              ua1 "7.1-10" PdfFixOptions.DocumentTitle
+              ua2 "8.11.1-2" PdfFixOptions.Metadata
+              ua2 "8.11.1-1" metadataAndTitle
+              ua2 "8.11.2-1" PdfFixOptions.DocumentTitle
+              // The metadata's language (PDF/UA-2 has no such rule).
+              ua1 "7.2-33" PdfFixOptions.Metadata
+              // Annotations' descriptions (PDF/UA-2 doesn't require one on links).
+              ua1 "7.18.1-2" PdfFixOptions.LinkContents
+              ua1 "7.18.5-2" PdfFixOptions.LinkContents
+              // Tab order on pages with annotations.
+              ua1 "7.18.3-1" PdfFixOptions.AnnotationTabs
+              ua2 "8.9.3.3-1" PdfFixOptions.AnnotationTabs
+              // CIDToGIDMap on embedded Type 2 CIDFonts.
+              ua1 "7.21.3.2-1" PdfFixOptions.FontCidToGidMap
+              ua2 "8.4.5.3.2-1" PdfFixOptions.FontCidToGidMap ]
+
+    let private determineFixOptions (assertion: RuleViolation) =
+        match PdfUaTarget.ofSpecification assertion.Specification with
+        | Some standard -> fixesByRule |> Map.tryFind (standard, assertion.RuleId) |> Option.defaultValue PdfFixOptions.None
+        | None -> PdfFixOptions.None
 
     /// Legibyl's own read of the file (iText and PdfPig): its structure-tree warnings, plus
     /// the open document and context needed to place veraPDF's findings on the page.
@@ -120,10 +139,19 @@ module internal VeraPdf =
         with _ ->
             ()
 
-    /// The PDF/UA-1 rules an untagged document fails that tagging it from its layout fixes:
-    /// no MarkInfo (6.2-1) or structure tree (7.1-11), untagged content (7.1-3), untagged
-    /// annotations and links (7.18.1-2, 7.18.5-1), and pages with links but no tab order (7.18.3-1).
-    let private tagFromLayoutRules = set [ "6.2-1"; "7.1-3"; "7.1-11"; "7.18.1-2"; "7.18.3-1"; "7.18.5-1" ]
+    /// The rules an untagged document fails that tagging it from its layout fixes: no MarkInfo
+    /// (6.2-1 in both), no structure tree (PDF/UA-1's 7.1-11, PDF/UA-2's 8.2.1-1), untagged content
+    /// (7.1-3; 8.2.2-1), untagged annotations (7.18.1-2; 8.9.2.3-1) and links (7.18.5-1;
+    /// 8.2.5.20-1), and pages with links but no tab order (7.18.3-1; 8.9.3.3-1).
+    let private tagFromLayoutRules =
+        set
+            [ for rule in [ "6.2-1"; "7.1-3"; "7.1-11"; "7.18.1-2"; "7.18.3-1"; "7.18.5-1" ] -> PdfProfile.PdfUa1, rule
+              for rule in [ "6.2-1"; "8.2.1-1"; "8.2.2-1"; "8.9.2.3-1"; "8.2.5.20-1"; "8.9.3.3-1" ] -> PdfProfile.PdfUa2, rule ]
+
+    let private tagFromLayoutFixes (assertion: RuleViolation) =
+        match PdfUaTarget.ofSpecification assertion.Specification with
+        | Some standard -> tagFromLayoutRules.Contains((standard, assertion.RuleId))
+        | None -> false
 
     /// Adds page regions to veraPDF's failures and appends Legibyl's own warnings.
     let withLegibylAnalysis (analysis: LegibylAnalysis) (assertions: RuleViolation list) =
@@ -163,7 +191,7 @@ module internal VeraPdf =
                             options
                     // What tagging an untagged document from its layout addresses.
                     let options =
-                        if untagged && tagFromLayoutRules.Contains assertion.RuleId then
+                        if untagged && tagFromLayoutFixes assertion then
                             options ||| PdfFixOptions.TagFromLayout
                         else
                             options
@@ -274,17 +302,19 @@ module internal VeraPdf =
                   // "extra context" field (almost always null). The real per-failure tree-walk
                   // path (e.g. "root/Catalog[0]/StructTreeRoot[0]/.../TH[3]") — the same value
                   // veraPDF's own report writer uses — lives on assertion.getLocation().getContext().
-                  { Specification = ruleId.getSpecification().ToString()
-                    Clause = ruleId.getClause ()
-                    TestNumber = ruleId.getTestNumber ()
-                    Passed = (assertion.getStatus () = TestAssertion.Status.PASSED)
-                    Message = assertion.getMessage ()
-                    ErrorMessage = assertion.getErrorMessage ()
-                    LocationContext = assertion.getLocation () |?> _.getContext()
-                    Severity = FindingSeverity.Failure
-                    FixOptions = determineFixOptions (assertion.getMessage ())
-                    Geometry = null
-                    Element = null } ]
+                  let violation =
+                      { Specification = ruleId.getSpecification().ToString()
+                        Clause = ruleId.getClause ()
+                        TestNumber = ruleId.getTestNumber ()
+                        Passed = (assertion.getStatus () = TestAssertion.Status.PASSED)
+                        Message = assertion.getMessage ()
+                        ErrorMessage = assertion.getErrorMessage ()
+                        LocationContext = assertion.getLocation () |?> _.getContext()
+                        Severity = FindingSeverity.Failure
+                        FixOptions = PdfFixOptions.None
+                        Geometry = null
+                        Element = null }
+                  { violation with FixOptions = determineFixOptions violation } ]
 
         { FilePath = pdfPath
           Profile = profile

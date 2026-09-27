@@ -1,12 +1,13 @@
-# What PDF/UA-1's failures mean in plain language, and what to do about those no auto fix
+# What PDF/UA's failures mean in plain language, and what to do about those no auto fix
 # repairs (see RuleGuide.fs, which reads this). veraPDF says what the standard requires ("Content
 # shall be marked as Artifact or tagged as real content"), which says little to someone who
 # doesn't know PDF's insides.
 #
-# Each entry is for a clause of ISO 14289-1 (or several clauses), and the tests of it listed, or
-# every test of it when none are. The first entry that matches a failure is its guide; a rule no
-# entry matches has only veraPDF's own text. Check a rule's clause, test and description with
-# veraPDF's PDF/UA-1 profile.
+# rules is PDF/UA-1's (ISO 14289-1), pdfUa2Rules PDF/UA-2's (ISO 14289-2), and tagNestingRules
+# ISO 32005's, which PDF/UA-2 includes. Each entry is for a clause (or several clauses), and the
+# tests of it listed, or every test of it when none are. The first entry that matches a failure
+# is its guide; a rule no entry matches has only veraPDF's own text. Check a rule's clause, test
+# and description with veraPDF's PDF/UA-1 profile (PDFUA-1.xml).
 #
 # meaning: what the failure means for someone using a screen reader or other assistive
 #   technology, in plain language.
@@ -187,3 +188,176 @@ rules:
   - clause: "7.21.7"
     meaning: "Some text uses a font that doesn't say which characters it draws, so a screen reader (or copying the text) gets nothing, or the wrong letters."
     whatToDo: *fonts
+
+# PDF/UA-2 (ISO 14289-2), for PDF 2.0 files: the same, by its own clauses. Check them with
+# veraPDF's PDF/UA-2 profile (PDFUA-2-ISO32005.xml).
+pdfUa2Rules:
+
+  - clause: "5"
+    meaning: "The PDF doesn't say in its metadata that it follows PDF/UA-2, so tools that look for accessible PDFs won't treat it as one."
+    whatToDo: "Choose Repair XMP metadata in Auto Fixes… (veraPDF only adds it once every other failure is fixed)."
+
+  - clause: "6.2"
+    tests: [1]
+    meaning: "The PDF isn't marked as tagged, so assistive technology may ignore its tags."
+    whatToDo: "Tagging it sets this. For a PDF with tags already, export it again from the tool that made it with tags turned on."
+
+  - clause: "8.2.1"
+    tests: [1]
+    meaning: "The PDF has no tags at all, so a screen reader has nothing to go on but the raw text, in whatever order it's drawn."
+    whatToDo: "Suggest Structure… tags it from its pages' layout."
+
+  - clause: "8.2.1"
+    tests: [2]
+    meaning: "A tag in the PDF's structure doesn't say what it belongs to, so the structure is broken there."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.2"
+    meaning: "Some of the page (text, images or lines) is neither tagged nor marked as decoration, so a screen reader can't tell whether to read it."
+    whatToDo: "The tool that made the PDF left this out of its tags: fix it where the PDF was made, and export it again with tags, or in a PDF editor's tags panel."
+
+  - clause: "8.2.4"
+    tests: [1, 4]
+    meaning: "The PDF uses tag names of its own without saying which standard tag each means, so a screen reader can't tell what they are (a heading, a list, a paragraph)."
+    whatToDo: "Add each name to the role map in a PDF editor, or fix it where the PDF was made, and export it again with tags, or in a PDF editor's tags panel."
+
+  - clause: "8.2.4"
+    tests: [2, 3]
+    meaning: "The PDF's role map, which says what its own tag names mean, is broken: it goes round in a circle, or maps a tag to another of the same kind."
+    whatToDo: "Correct the role map in a PDF editor, or fix it where the PDF was made, and export it again with tags."
+
+  - clause: "8.2.5.2"
+    meaning: "The tags don't start with a single Document tag (from PDF 2.0's tag set), which PDF/UA-2 needs for a screen reader to find its way in."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.8"
+    meaning: "An entry in the table of contents doesn't say which part of the document it points to, so a screen reader can't follow it."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.12"
+    meaning: "A heading is tagged as a plain H, which PDF/UA-2 doesn't allow: it doesn't say the heading's level, so the outline a screen reader navigates by is unclear."
+    whatToDo: "In Structure…, give the headings numbered levels (H1 to H6) with the Tag picker."
+
+  - clause: "8.2.5.14"
+    meaning: "A footnote or endnote is tagged wrongly (as Note, which PDF/UA-2 replaces with FENote, or with no link from where it's referred to), so a screen reader can't take the reader between the two."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.20"
+    tests: [1]
+    meaning: "A link isn't tagged as a link, so a screen reader doesn't announce it as one."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.20"
+    tests: [2, 3]
+    meaning: "Links are grouped wrongly: links to different places share a Link tag, or the parts of one link are in separate ones, so a screen reader announces them wrongly."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.25"
+    meaning: "A list's tags are shaped wrongly (an item's content outside its body, or numbering not declared), so a screen reader can't announce it properly as a list."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.26"
+    meaning: "A table's tags are shaped wrongly (rows of different lengths, overlapping cells), or its header cells can't be matched to its cells, so a screen reader can't move through it or say which header goes with a cell."
+    whatToDo: "Fix the table in the tool that made the PDF (mark its header row, avoid merged cells where you can) and export it again, or in a PDF editor's table tools."
+
+  - clause: "8.2.5.27"
+    meaning: "A caption isn't the first or last thing in what it captions, so a screen reader may read it apart from its figure or table."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.28.2"
+    meaning: "A figure has no alt text, so a screen reader can only say it's an image."
+    whatToDo: "In Structure…, right-click the figure and choose Edit Alt Text…: say what it's for here, in a sentence. If it's only decoration, it should be marked as an artifact instead, in a PDF editor or where the PDF was made."
+
+  - clauses: ["8.4.3", "8.6"]
+    meaning: "Some text uses private characters (from Unicode's Private Use Area) that mean nothing to a screen reader, and has no replacement text to read instead."
+    whatToDo: &privateCharacters "Use standard characters where the PDF was made (a symbol font's icons often cause this), or add replacement text (ActualText) in a PDF editor."
+
+  - clause: "8.4.4"
+    tests: [1]
+    meaning: "The document's language isn't declared, so a screen reader may read it with the wrong voice and pronunciation."
+    whatToDo: "Choose Declare the language in Auto Fixes… (it needs enough text to tell the language), or set the document's language in the tool that made it."
+
+  - clause: "8.4.4"
+    tests: [2]
+    meaning: "A language is declared, but not as a language code a screen reader understands (like en-US)."
+    whatToDo: *inTheSource
+
+  - clause: "8.4.5.3.2"
+    meaning: "A font leaves out how its character codes map to its glyphs; readers assume the usual mapping, but the standard wants it said."
+    whatToDo: "Choose Font glyph mapping in Auto Fixes…."
+
+  - clause: "8.4.5.5.1"
+    tests: [1]
+    meaning: "A font isn't embedded, so the text may look different, or not read the same, on another computer."
+    whatToDo: *fonts
+
+  - clause: "8.4.5.8"
+    meaning: "Some text uses a font that doesn't say which characters it draws, so a screen reader (or copying the text) gets nothing, or the wrong letters."
+    whatToDo: *fonts
+
+  - clauses: ["8.4.5.3.1", "8.4.5.4", "8.4.5.5.1", "8.4.5.6", "8.4.5.7", "8.4.5.9"]
+    meaning: "A font in the PDF is incomplete or inconsistent, which can make its text display or read wrongly."
+    whatToDo: *fonts
+
+  - clause: "8.7"
+    meaning: "A layer (optional content) setting has no name, or switches layers automatically, so a reader can't tell what's shown or choose it."
+    whatToDo: "Name the layers, and don't set them to change on their own, in the tool that made the PDF or a PDF editor's layers panel."
+
+  - clause: "8.8"
+    meaning: "A link or bookmark within the document points to a place on a page rather than to a part of the structure, so a screen reader can't take the reader to the right element."
+    whatToDo: *inTheSource
+
+  - clauses: ["8.9.2.2", "8.9.2.4.13", "8.9.2.4.14"]
+    meaning: "An annotation that isn't shown (hidden, zero-sized, or a printer's mark) isn't marked as decoration, so a screen reader may announce something that isn't there."
+    whatToDo: *inTheSource
+
+  - clauses: ["8.9.2.3", "8.9.2.4.16"]
+    tests: [1]
+    meaning: "An annotation (a comment or stamp, say) isn't in the tags, so a screen reader won't find it in reading order."
+    whatToDo: *inTheSource
+
+  - clauses: ["8.9.2.4.7", "8.9.2.4.8", "8.9.2.4.12", "8.9.2.4.19"]
+    meaning: "An annotation has no description, so a screen reader can't say what it is."
+    whatToDo: "Give it a description (its Contents) in a PDF editor, or remove it if it isn't needed."
+
+  - clause: "8.9.2.4.11"
+    meaning: "The PDF has a sound or movie annotation, which PDF/UA-2 doesn't allow."
+    whatToDo: "Remove it in a PDF editor, and link to the media, with a description, instead."
+
+  - clause: "8.9.3.3"
+    meaning: "A page with links or other annotations doesn't set the keyboard's tab order to follow the structure."
+    whatToDo: "Choose Tab order for annotations in Auto Fixes…."
+
+  - clause: "8.10.1"
+    tests: [1, 2]
+    meaning: "A form field isn't tagged as a form field (each in its own Form tag), so a screen reader doesn't announce it as one."
+    whatToDo: *inTheSource
+
+  - clause: "8.10.2.3"
+    meaning: "A form field has no label or tooltip, which is what a screen reader says when it's reached."
+    whatToDo: "Give the field a tooltip in a PDF editor's form tools, or in the tool that made the form."
+
+  - clause: "8.11.1"
+    tests: [1]
+    meaning: "The PDF has no title in its metadata, so a screen reader and the reader's title bar name it by its file name."
+    whatToDo: "Choose Document title in Auto Fixes… if it has a title elsewhere, or Title from the first page; or set the title in the tool that made it."
+
+  - clause: "8.11.1"
+    tests: [2]
+    meaning: "The PDF has no metadata (XMP) for its title, language and PDF/UA claim to go in."
+    whatToDo: "Choose Repair XMP metadata in Auto Fixes…."
+
+  - clause: "8.11.2"
+    meaning: "The reader shows the file name in its title bar instead of the document's title."
+    whatToDo: "Choose Document title in Auto Fixes…."
+
+  - clause: "8.14.1"
+    meaning: "A file attached to the PDF has no description, so a screen reader can only say its file name."
+    whatToDo: "Give the attachment a description in a PDF editor's attachments panel."
+
+# ISO 32005's rules for which tags may contain which, which PDF/UA-2 checks too. They're one
+# entry, for every one of its rules.
+tagNestingRules:
+
+  - meaning: "A tag is inside one it can't be in under PDF 2.0's rules (a paragraph straight under the structure's root, say, or a link inside a link), so a screen reader may misreport or skip it."
+    whatToDo: "Fix it where the PDF was made, and export it again with tags, or move the tag in a PDF editor's tags panel."

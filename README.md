@@ -258,7 +258,7 @@ warning), fix icon, clause, test, page and location. Selecting a row shows its f
 message, friendly location (ending with what's there: the element that owns the
 content, like paragraph (P) "The garden in spring…", or content not in the tags and
 what's drawn there), raw veraPDF location context, and page preview
-in a resizable details panel beside the list. For the PDF/UA-1 failures a
+in a resizable details panel beside the list. For the PDF/UA-1 and PDF/UA-2 failures a
 document commonly has, it also says **What it means** in plain language (what
 it does to someone using a screen reader), and, where no auto fix repairs it,
 **What to do**: where in Legibyl to fix it (Structure…, Suggest Structure…), or
@@ -757,7 +757,7 @@ element that owns the content, by its tag and first words, or "content not in th
 tags" and what's drawn there (`locationContext` is veraPDF's own path). Its `fixes`
 names the repairs that fix it, as `--fixes` takes them
 (`tag-from-layout` is what `layout apply` does), and `meaning` says what it
-means for a reader in plain language, for the common PDF/UA-1 failures (`null`
+means for a reader in plain language, for the common PDF/UA-1 and PDF/UA-2 failures (`null`
 for others); the text format prints it as `means:`.
 
 ### fix
