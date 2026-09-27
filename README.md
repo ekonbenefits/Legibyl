@@ -1,10 +1,41 @@
 # Legibyl
 
-An easy-to-use wrapper around [veraPDF](https://verapdf.org/): a .NET (Avalonia)
-desktop GUI plus a scriptable CLI for PDF/UA (and PDF/A) validation, powered
-by the real veraPDF Java validation engine embedded via
-[IKVM.NET](https://ikvm.org/) — no separate JDK/JRE install or external
-process required.
+Legibyl checks PDFs for accessibility (PDF/UA, and PDF/A) and helps fix them:
+a desktop app (Avalonia, on Windows, macOS and Linux), and a command-line tool
+for scripts and AI agents. It explains each failure in plain language, repairs
+what it safely can, lets you check and edit the tags a screen reader uses (alt
+text, headings, link descriptions), and tags untagged PDFs from what their pages
+look like. Checking is done by the real [veraPDF](https://verapdf.org/)
+validator, embedded via [IKVM.NET](https://ikvm.org/): no Java to install, and no
+separate process.
+
+## Using the app
+
+1. **Open a PDF**: **Browse…**, drop it on the window, or **File › Open…**. Each
+   PDF opens in a window of its own.
+2. **Read what's found.** Failures (red) are what PDF/UA requires; warnings
+   (orange) are worth a look. Each says **What it means** and, where no auto fix
+   repairs it, **What to do**. A wrench marks what an auto fix repairs; a wand,
+   what tagging from the suggested structure fixes.
+3. **Structure…** shows the tags a screen reader uses. Check the headings, the
+   figures' alt text and the reading order, and edit them there. A PDF with no
+   tags gets **Suggest Structure…** instead, to check and edit what a layout
+   detector suggests.
+4. **Auto Fixes…** chooses repairs, like the document's language and title.
+5. **Export…** writes a fixed copy and opens it beside the original, to check
+   again. The PDF you opened is never changed. **File › Save** keeps your review
+   (edits, dismissed warnings, chosen fixes) next to it, to pick up later.
+
+Automated checks can't judge everything: whether alt text says what a figure is
+for, heading levels, reading order and table headers still need a person.
+
+## Using the command line
+
+`legibyl validate`, `legibyl fix`, `legibyl structure`, and `legibyl layout
+suggest` / `apply`, with JSON output and exit codes meant for scripts and AI
+agents: see [Command-line tool](#command-line-tool-for-scripts--ai-agents).
+
+The rest of this README is the detail, including how it works inside.
 
 ## How it works
 
@@ -207,8 +238,10 @@ check them.
 
 The results list is sorted by page number by default (unlocated failures —
 those with no `pages[N]` in their context, such as document-level metadata
-checks — sort to the end). It keeps only the short clause, test, page, and
-friendly location columns visible. Selecting a row shows its full, wrapped
+checks — sort to the end), grouped by the rule they break under a header that
+leads with how many there are ("6 × 7.1-3: …"; a rule found more than three
+times starts collapsed). Its columns are each finding's type (failure or
+warning), fix icon, clause, test, page and location. Selecting a row shows its full, wrapped
 message, friendly location (ending with what's there: the element that owns the
 content, like paragraph (P) "The garden in spring…", or content not in the tags and
 what's drawn there), raw veraPDF location context, and page preview
@@ -285,15 +318,16 @@ when the PDF is opened again (see Saving below). Failures can't be dismissed. Th
 
 ### Terms
 
-- **Structure**: a tagged PDF's tag tree, made of **elements** (the Layout tab
-  of View Structure draws each as a block). Read from the PDF; never changed in
-  place.
-- **Layout**: an untagged PDF's suggested structure, made of **regions**, each
-  with the tag it suggests, found by the layout model. Recorded as found; never
+- **Structure**: a tagged PDF's tag tree, made of **elements** (the Blocks tab
+  of the Structure window draws each as a block). Read from the PDF; never
   changed in place.
+- **Layout**: what the layout model finds on an untagged PDF's pages, made of
+  **regions**, each with the tag it suggests. The app shows it as the
+  **suggested structure**; the CLI reads and writes it as layout files.
+  Recorded as found; never changed in place.
 - **Edits**: what a person changes, layered on either one: alt text, replacement
   (or corrected OCR) text, another tag, merged paragraphs, a link's description,
-  or leaving a region out. Each names what it's for by its `page`, `tag` and
+  or merging a region into its neighbour, or marking it not read. Each names what it's for by its `page`, `tag` and
   `box`, so it still applies after other repairs, or to another version of the
   PDF.
 - **Review**: everything decided about a PDF: dismissed warnings, edits, the
@@ -306,7 +340,7 @@ The PDF you open is never changed. Your review of it is saved next to it, and
 the changes are written to a new copy. Three buttons under the details, and
 **File › Save**:
 
-- **Structure…** opens View Structure, where you make edits. For an untagged PDF
+- **Structure…** opens the Structure window, where you make edits. For an untagged PDF
   it's **Suggest Structure…**, in the warning colour: the next step, which opens
   the structure a layout detector suggests, to check and edit. Its badge
   counts your edits that aren't in this PDF yet: for a tagged PDF, edits its
@@ -368,7 +402,7 @@ available.
 
 ## Document structure (semantic hierarchy)
 
-**Structure…** (View Structure) shows the PDF's tagged logical structure tree — the
+**Structure…** opens the Structure window, which shows the PDF's tagged logical structure tree — the
 same heading/paragraph/list/table/link hierarchy and reading order that a
 screen reader uses to present the document (the Catalog's `StructTreeRoot`).
 It's read directly from veraPDF's own PD model (independent of a
@@ -378,7 +412,7 @@ fills page by page while it loads. The last structure read is kept, so
 reopening the window for the same, unchanged file is immediate.
 
 Alt text and replacement text can be edited there: right-click a block in
-the **Layout** tab for **Edit Alt Text…** (figures, formulas, and anything
+the **Blocks** tab for **Edit Alt Text…** (figures, formulas, and anything
 that already has alt text) or **Edit Replacement Text…** (only elements that
 already have `/ActualText`, like OCR'd text, since writing it over real text
 would hide what the page says) or **Edit Link Description…** (a link: what a
@@ -404,10 +438,10 @@ same place, so they still apply after other repairs have rearranged the tree.
 Edits made on a suggested structure are the same kind of edit, keyed to the
 regions suggested. A copy tagged from them carries them moved to the elements
 tagging made (the tag it wrote, like `H1` for a suggested `H`, and the box of
-what the element holds), so in View Structure they're edits of those elements:
+what the element holds), so in the Structure window they're edits of those elements:
 shown as in the PDF, and updated rather than duplicated when edited there. The
 original's file keeps them keyed to the regions, for its suggested structure.
-The default **Layout** tab renders that hierarchy like an HTML document with
+The default **Blocks** tab renders that hierarchy like an HTML document with
 visible borders around block elements, so nesting is obvious at a glance
 (headings, lists, tables, links, figures, etc. use different colors).
 Semantic tables are rendered as an actual grid: `Table` contains visual rows
@@ -423,10 +457,14 @@ destination only to the underlying link annotation, so Legibyl follows tagged
 annotation references and uses a conservative same-page geometry fallback
 when needed. Table-of-contents entries (`TOCI`) render as row-like layout
 items and inherit the first descendant link target when the PDF stores the
-click target on a separate child link fragment. The **Tree** tab keeps the compact outline view. So large documents open
-quickly, the Layout tab draws about 2,000 blocks up front: it shows whole
+click target on a separate child link fragment. The **Tree** tab keeps the compact outline view. **Export JSON…** saves the
+whole hierarchy — each node's `content` text, geometry, link targets and form
+field metadata — as JSON, the same shape as the CLI's `structure` command, for
+AI agents or other tooling that need to know what's under each tag, not only
+the PDF/UA failures. So large documents open
+quickly, the Blocks tab draws about 2,000 blocks up front: it shows whole
 levels while they fit and collapses the rest behind "▸ N child elements"
-buttons that expand on click (most documents fit and show in full). Layout
+buttons that expand on click (most documents fit and show in full). The
 blocks are selectable. The side preview shows a page overview: the page the
 selection is on (the first page, until something's selected) with every
 element that owns content there outlined in its tag's color and numbered in
@@ -440,7 +478,7 @@ document also renders the page it goes to below, with the destination marked
 in blue: the line the view starts at, the rectangle a `/FitR` destination
 shows, or the whole page when the destination names no position.
 If the file has no structure tree at all (completely untagged), the button is
-**Suggest Structure…**, which opens View Structure on the structure a layout
+**Suggest Structure…**, which opens the Structure window (titled Suggested Structure) on the structure a layout
 detector suggests for each page
 (PaddleOCR's PP-DocLayoutV3, via the pure C# [PaddleOCR](https://www.nuget.org/packages/PaddleOCR)
 port in `Legibyl.Layout`), under a banner saying it isn't tagged yet. It's one
@@ -464,7 +502,7 @@ grey, and every region with its tag as edited.
 The layout itself is never changed: like a structure read from a
 tagged PDF, they're read-only, and what you decide is layered on top as edits
 (`ElementEdits.onRegions`), each naming the region by its page, the tag it
-was found with, and its box — the same kind of edit View Structure makes on a
+was found with, and its box — the same kind of edit the Structure window makes on a
 tagged PDF's elements. Merging a region into its neighbour is an `exclude`
 edit, marking it not read a `retag` to `Artifact`, picking another tag a
 `retag` edit, and alt text and corrected text are edits too.
@@ -518,7 +556,7 @@ that needs OCR. Text drawn as outlines is tagged as its region's element, with
 the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
 and the report asks for it to be checked. It doesn't describe links outside a table of contents.
 
-For an untagged PDF, View Structure also has a **Document title** field, prefilled the way the
+For an untagged PDF, the Structure window also has a **Document title** field, prefilled the way the
 title fixes find one: the document's own title (Info, then XMP), else a short
 first page's text, else the first H1 the layout found. The other candidates are
 offered beside it with where they came from (e.g. "Cub Scout Pack 721 · first
@@ -540,7 +578,7 @@ correction is recorded only if it differs from what OCR read. So they're filled
 in again whenever the layout is suggested again, even for a regenerated PDF, as
 long as the region is in about the same place (same page and tag, boxes
 overlapping at least 60%). The file is read automatically when it's named after
-the PDF; **Import Edits…** (in View Structure, tagged or not) takes one with another name, such as the one saved
+the PDF; **Import Edits…** (in the Structure window, tagged or not) takes one with another name, such as the one saved
 for an earlier version, or another PDF: the edits saved for it, or inside it (a
 copy Legibyl saved, like the tagged copy of an earlier version).
 
@@ -604,7 +642,7 @@ The addresses come from the document, so they are fetched defensively:
   link's own host is always named alongside it, so a page (or a link shortener
   it redirects through) can't pass itself off as another site.
 
-The sites do see the visit, which is why it's opt-in.
+The sites do see the visit, which is why it's off unless you tick it.
 
 The Auto Fixes dialog's **Declare the language** option (off by default)
 sets the catalog's `/Lang` when a document has none, which PDF/UA needs for
@@ -616,11 +654,6 @@ and any `/ActualText`/`/Alt` (so OCR'd outlines count) with
 declared only when there are at least 100 letters and it's at least 90% sure. It
 runs first among the structural fixes, so the bookmarks fix (which needs a
 language) can follow it.
-**Export JSON…** in that window saves the whole hierarchy — including each
-node's `content` text, geometry, link targets, and form field metadata — as
-JSON, the same shape produced by the CLI's `--structure` flag. This is intended for AI agents
-or other tooling that needs to understand what text and interactive controls
-are present under each semantic role, not just the raw PDF/UA rule failures.
 
 ## Command-line tool (for scripts / AI agents)
 
@@ -813,7 +846,7 @@ when OCR read it because it's drawn rather than written), a QR code's `qrText`,
 and a `title` — to stdout, or with `--output <path>` to a file (stdout then
 gets a summary). Each figure also gets `textBefore` and `textAfter`, the text of
 the regions just before and after it (a caption, the paragraph about it), since
-good alt text says why a figure is there. It's what View Structure shows for an untagged PDF.
+good alt text says why a figure is there. It's what the Structure window shows for an untagged PDF.
 Downloads the layout model the first time; several seconds a page, with
 progress on stderr.
 
