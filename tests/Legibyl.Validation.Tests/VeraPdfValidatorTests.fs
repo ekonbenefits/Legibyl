@@ -200,3 +200,34 @@ let ``a PDF 2.0 file checked as PDF/UA-2 is checked by veraPDF's PDF/UA-2 profil
     report.IsCompliant |> should be False
     // Its failures are ISO 14289-2's.
     report.FailedAssertions |> Seq.forall (fun f -> f.Specification.StartsWith "ISO 14289-2") |> should be True
+
+[<Fact>]
+let ``Validate known good PDF/UA-2 document reports compliant, detected from its PDF version`` () =
+    let path = corpusFile "pdfua2-pass.pdf"
+    let profile, version = PdfUaTarget.detect path
+    profile |> should equal PdfProfile.PdfUa2
+    version |> should equal (Some "2.0")
+
+    let report = VeraPdfValidator().Validate(path, profile)
+
+    report.IsCompliant |> should be True
+    report.FlavourId |> should equal "ua2"
+    report.TotalAssertions |> should be (greaterThan 0)
+    report.FailedAssertions |> should be Empty
+
+[<Fact>]
+let ``Validate known bad PDF/UA-2 document reports non-compliant with ISO 14289-2 failures`` () =
+    let path = corpusFile "pdfua2-fail.pdf"
+
+    let report = VeraPdfValidator().Validate(path, fst (PdfUaTarget.detect path))
+
+    report.IsCompliant |> should be False
+    report.FlavourId |> should equal "ua2"
+    report.FailedAssertions |> Seq.map (fun a -> a.Specification, a.Clause) |> should contain ("ISO 14289-2:2024", "5")
+
+[<Fact>]
+let ``a PDF/UA-2 file checked as PDF/UA-1 fails: its identifier claims the other part`` () =
+    let report = VeraPdfValidator().Validate(corpusFile "pdfua2-pass.pdf", PdfProfile.PdfUa1)
+
+    report.FlavourId |> should equal "ua1"
+    report.IsCompliant |> should be False

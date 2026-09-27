@@ -11,6 +11,18 @@ test corpus:
 Used here, unmodified, to assert expected pass/fail PDF/UA-1 validation
 outcomes in `VeraPdfValidatorTests`.
 
+`pdfua2-pass.pdf` and `pdfua2-fail.pdf` are PDF 2.0 files from the same
+corpus, for PDF/UA-2:
+
+- Commit: `bb75f4f0073d9350dfd058c0162a367e6fadf25e` (2026-09-16)
+- Path: `PDF_UA-2/5 Version identification/5-t02-pass-a.pdf` and
+  `PDF_UA-2/5 Version identification/5-t02-fail-a.pdf`
+- License: CC BY 4.0, as above
+
+Used unmodified in `VeraPdfValidatorTests` to check that a PDF 2.0 file is
+checked against PDF/UA-2, and that the pass sample complies and the fail
+sample doesn't.
+
 `pages-clipped-paragraphs.pdf` was made for this project by exporting a
 three-paragraph document from Apple Pages (with blank lines between
 paragraphs, which Pages drops rather than tagging as empty `/P`s). Its first
@@ -42,7 +54,9 @@ upstream paths. `technique-info.yaml` labels a sample Pass or Fail and lists
 the Matterhorn Protocol checkpoints it covers; `matterhorn.yaml` says whether
 each checkpoint is machine-checkable (M) or needs a person (H).
 
-`TechniqueSampleTests` validates every sample as PDF/UA-1:
+`TechniqueSampleTests` validates every sample against the standard its PDF
+version calls for, as the app does. All of them are PDF 1.5–1.7, so that's
+PDF/UA-1:
 
 - Pass samples must be compliant.
 - Fail samples covering a machine-checkable checkpoint must fail some rule

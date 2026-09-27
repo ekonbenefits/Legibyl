@@ -96,8 +96,9 @@ let private knownVeraPdfGaps =
 [<Literal>]
 let private MissingPdfUaIdentifierRule = "5-1"
 
+/// Against the standard its PDF version calls for, as the app does: all PDF/UA-1 so far (none is PDF 2.0).
 let private validate (sample: Sample) =
-    VeraPdfValidator().Validate(sample.PdfPath, PdfProfile.PdfUa1)
+    VeraPdfValidator().Validate(sample.PdfPath, fst (PdfUaTarget.detect sample.PdfPath))
 
 let private failuresBesidesMissingIdentifier (report: ValidationReport) =
     report.FailedAssertions
