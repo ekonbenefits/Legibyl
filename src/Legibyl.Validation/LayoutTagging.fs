@@ -301,6 +301,15 @@ let tag
         root.MakeIndirect document |> ignore
         let documentElement = newElement document "Document" root None
         root.Put(PdfName.K, documentElement.Dictionary) |> ignore
+        // PDF/UA-2 (for PDF 2.0) wants the Document in PDF 2.0's namespace. The elements under
+        // it are the same in PDF 1.7's, which is the default and is allowed there too.
+        if document.GetPdfVersion().CompareTo PdfVersion.PDF_2_0 >= 0 then
+            let pdf20 = PdfDictionary()
+            pdf20.Put(PdfName.Type, PdfName.Namespace) |> ignore
+            pdf20.Put(PdfName.NS, PdfString "http://iso.org/pdf2/ssn") |> ignore
+            pdf20.MakeIndirect document |> ignore
+            documentElement.Dictionary.Put(PdfName.NS, pdf20) |> ignore
+            root.Put(PdfName.Namespaces, PdfArray(pdf20 :> PdfObject)) |> ignore
 
         let parentTree = PdfArray()
         let tally =

@@ -468,3 +468,81 @@ let ``tagging from regions with a review writes its alt text and title`` () =
     flatten root |> List.find (fun n -> n.Tag = "Figure") |> _.AlternateDescription |> should equal "Red, green and blue squares"
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetDocumentInfo().GetTitle() |> should equal "Squares"
+
+
+/// The untagged page as a PDF 2.0 file, its text in an embedded font (PDF/UA-2 wants every font
+/// embedded), and enough of it for its language to be told.
+let private createUntaggedPdf20 (path: string) =
+    use document = new PdfDocument(new PdfWriter(path, WriterProperties().SetPdfVersion(PdfVersion.PDF_2_0)))
+    let page = document.AddNewPage PageSize.LETTER
+    let canvas = PdfCanvas page
+    let font = PdfFontFactory.CreateFont(corpusFile "fonts/Lato-Regular.ttf", iText.IO.Font.PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED)
+    let text (x: float) (y: float) (size: float32) (value: string) =
+        canvas.BeginText().SetFontAndSize(font, size).MoveText(x, y).ShowText(value).EndText() |> ignore
+    text 72.0 750.0 10f "Running header"
+    text 72.0 700.0 20f "The Title"
+    text 72.0 660.0 12f "An opening paragraph, written in plain English so its language can be told."
+    text 90.0 630.0 12f "• First item"
+    text 90.0 612.0 12f "• Second item"
+    let pixels = [| 255uy; 0uy; 0uy; 0uy; 255uy; 0uy; 0uy; 0uy; 255uy; 255uy; 255uy; 0uy |]
+    canvas.AddImageWithTransformationMatrix(ImageDataFactory.Create(2, 2, 3, 8, pixels, null), 100f, 0f, 0f, 100f, 72f, 450f, true) |> ignore
+    text 72.0 400.0 12f "Visit the site."
+    let link = PdfLinkAnnotation(Rectangle(72f, 395f, 80f, 15f))
+    link.SetAction(PdfAction.CreateURI "https://example.com") |> ignore
+    page.AddAnnotation link |> ignore
+    text 300.0 40.0 10f "Page 1"
+
+let private reviewedRegions = regions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = "Four coloured squares" } else r)
+
+let private failedUa2Rules (path: string) =
+    let report = VeraPdfValidator().Validate(path, PdfProfile.PdfUa2)
+    report.FlavourId |> should equal "ua2"
+    report.FailedAssertions |> Seq.map (fun f -> $"{f.Specification} {f.RuleId}") |> List.ofSeq
+
+[<Fact>]
+let ``a PDF 2.0 file tagged from its layout, with the safe fixes, is PDF/UA-2 compliant`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntaggedPdf20 input.Path
+    let validator = VeraPdfValidator(LayoutSource = FixedLayout(reviewedRegions, "The example site", "The Title"))
+
+    let result = validator.Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.LanguageFromText)
+
+    failedUa2Rules output.Path |> should be Empty
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetPdfVersion() |> should equal PdfVersion.PDF_2_0
+    // Its Document is in PDF 2.0's namespace, as PDF/UA-2 (8.2.5.2) asks.
+    let documentElement = document.GetStructTreeRoot().GetKids() |> Seq.exactlyOne :?> iText.Kernel.Pdf.Tagging.PdfStructElem
+    documentElement.GetRole() |> should equal PdfName.Document
+    documentElement.GetPdfObject().GetAsDictionary(PdfName.NS).GetAsString(PdfName.NS).GetValue() |> should equal "http://iso.org/pdf2/ssn"
+    // It claims PDF/UA-2, of 2024 (veraPDF writes no year), and says so.
+    let xmp = iText.Kernel.XMP.XMPMetaFactory.ParseFromBuffer(document.GetXmpMetadataBytes())
+    xmp.GetPropertyString(iText.Kernel.XMP.XMPConst.NS_PDFUA_ID, "part") |> should equal "2"
+    xmp.GetPropertyString(iText.Kernel.XMP.XMPConst.NS_PDFUA_ID, "rev") |> should equal "2024"
+    result.AppliedFixes |> Seq.filter (fun fix -> fix.Contains "'rev'") |> Seq.toList |> should equal [ "Added property 'rev' with value '2024' to Identification schema" ]
+
+[<Fact>]
+let ``on a tagged PDF 2.0 file, lists and bookmarks keep it PDF/UA-2 compliant, bookmarks pointing to the structure`` () =
+    use input = new TempPdf()
+    use tagged = new TempPdf()
+    use output = new TempPdf()
+    createUntaggedPdf20 input.Path
+    // The bullets tagged as paragraphs, for the list fix to find.
+    let bulletsAsParagraphs = reviewedRegions |> List.map (fun r -> if r.Tag = "LI" then { r with Tag = "P"; ListNumbering = null } else r)
+    VeraPdfValidator(LayoutSource = FixedLayout(bulletsAsParagraphs, "The example site", "The Title"))
+        .Fix(input.Path, PdfProfile.PdfUa2, tagged.Path, PdfFixOptions.TagFromLayout) |> ignore
+
+    let result =
+        VeraPdfValidator().Fix(tagged.Path, PdfProfile.PdfUa2, output.Path,
+                               RepairNames.safe ||| PdfFixOptions.LanguageFromText ||| PdfFixOptions.ListsFromParagraphs ||| PdfFixOptions.BookmarksFromHeadings)
+
+    result.AppliedFixes |> should contain "Tagged 1 run(s) of marked paragraphs as lists."
+    result.AppliedFixes |> should contain "Added 1 bookmark(s) for the H1 and H2 headings."
+    failedUa2Rules output.Path |> should be Empty
+    // The bookmark goes to the heading's element (PDF/UA-2 8.8), and its page for older readers.
+    use document = new PdfDocument(new PdfReader(output.Path))
+    let bookmark = document.GetOutlines(false).GetAllChildren() |> Seq.exactlyOne
+    let action = bookmark.GetContent().GetAsDictionary(PdfName.A)
+    action.GetAsName(PdfName.S) |> should equal PdfName.GoTo
+    (action.GetAsArray(PdfName.SD).GetAsDictionary 0).GetAsName(PdfName.S) |> should equal PdfName.H1
+    action.GetAsArray(PdfName.D) |> should not' (be Null)
