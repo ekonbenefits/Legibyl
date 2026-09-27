@@ -70,6 +70,13 @@ let private noAltFailures (path: string) =
     |> Seq.map (fun a -> a.FixOptions.HasFlag PdfFixOptions.RemoveEmptyFigures)
     |> List.ofSeq
 
+/// Legibyl's warnings about figures that draw nothing: whether each can be fixed.
+let private emptyFigureWarnings (path: string) =
+    VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
+    |> Seq.filter (fun a -> a.Specification = "Legibyl" && a.TestNumber = 11)
+    |> Seq.map (fun a -> a.FixOptions = PdfFixOptions.RemoveEmptyFigures)
+    |> List.ofSeq
+
 let private tags (path: string) =
     let root = VeraPdfValidator().ReadStructureTree path |> notNull
     (Seq.exactlyOne root.Children).Children |> Seq.map _.Tag |> List.ofSeq
@@ -81,6 +88,8 @@ let ``a figure that draws nothing has its alt text failure fixed by removing it`
 
     // The two that draw nothing can be removed; the image, form and shape need alt text.
     noAltFailures input.Path |> List.sort |> should equal [ false; false; false; true; true ]
+    // And they're told apart from those by a warning of their own.
+    emptyFigureWarnings input.Path |> should equal [ true; true ]
 
 [<Fact>]
 let ``the fix removes the figures that draw nothing, and the page looks the same`` () =
@@ -93,6 +102,7 @@ let ``the fix removes the figures that draw nothing, and the page looks the same
     result.AppliedFixes |> should contain "Removed 2 figure tag(s) that draw nothing."
     tags output.Path |> should equal [ "P"; "Figure"; "Figure"; "Figure" ]
     noAltFailures output.Path |> should equal [ false; false; false ]
+    emptyFigureWarnings output.Path |> should be Empty
     use renderer = new PdfRegionRenderer()
     let page = { PageNumber = 1; Left = 0.0; Bottom = 0.0; Right = 1.0; Top = 1.0 }
     renderer.RenderPageWithHighlight(output.Path, page).PngBytes

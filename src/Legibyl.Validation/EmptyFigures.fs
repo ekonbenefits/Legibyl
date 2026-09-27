@@ -43,7 +43,7 @@ let private hasText (element: PdfDictionary) (key: PdfName) =
 /// The figures that draw nothing: a Figure without alt text or replacement text, holding only
 /// marked content on its page that's there and draws nothing (no elements, annotations, or content
 /// in a form XObject).
-let find (document: PdfDocument) context : PdfDictionary list =
+let visits (document: PdfDocument) context : StructElemVisit list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> []
     | root ->
@@ -80,7 +80,10 @@ let find (document: PdfDocument) context : PdfDictionary list =
                       | :? PdfArray as kids -> Seq.init (kids.Size()) kids.Get |> Seq.forall (kidEmpty visit.Page)
                       | kid -> kidEmpty visit.Page kid
                   if empty then
-                      yield element ]
+                      yield visit ]
+
+/// The figures that draw nothing (see visits).
+let find (document: PdfDocument) context : PdfDictionary list = visits document context |> List.map _.Element
 
 /// Their object numbers, to mark the findings about them fixable.
 let objectNumbers (document: PdfDocument) context : Set<int> =
