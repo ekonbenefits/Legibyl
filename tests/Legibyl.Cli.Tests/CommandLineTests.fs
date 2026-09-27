@@ -202,4 +202,6 @@ let ``validate explains common failures, and names their fixes as --fixes does``
         let failures = [ for f in result.Value.GetProperty("failures").EnumerateArray() -> f ]
         let language = failures |> List.find (fun f -> f.GetProperty("clause").GetString() = "7.2" && f.GetProperty("testNumber").GetInt32() = 34)
         language.GetProperty("meaning").GetString() |> should haveSubstring "language of some text isn't declared"
-        [ for name in language.GetProperty("fixes").EnumerateArray() -> string (name.GetString()) ] |> should equal [ "language" ])
+        [ for name in language.GetProperty("fixes").EnumerateArray() -> string (name.GetString()) ] |> should equal [ "language" ]
+        // Where it is, readably: the paragraph the text is in.
+        language.GetProperty("location").GetString() |> should startWith "Document → Page 1 → paragraph (P) \"The community garden")

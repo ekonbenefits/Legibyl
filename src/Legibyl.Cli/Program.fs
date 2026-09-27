@@ -212,6 +212,9 @@ let private validationText (results: ValidationResult list) =
                     match f.Meaning with
                     | NonNull meaning -> line $"    means: {meaning}"
                     | Null -> ()
+                    match f.Location with
+                    | NonNull location -> line $"    where: {location}"
+                    | Null -> ()
                     if not (String.IsNullOrEmpty f.LocationContext) then
                         line $"    at: {f.LocationContext}"
                     match f.Region with

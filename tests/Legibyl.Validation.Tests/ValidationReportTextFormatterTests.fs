@@ -18,7 +18,8 @@ let private violation =
       LocationContext = RawLocation
       Severity = FindingSeverity.Failure
       FixOptions = PdfFixOptions.None
-      Geometry = null }
+      Geometry = null
+      Element = null }
 
 [<Fact>]
 let ``BuildFinding includes friendly and raw locations`` () =

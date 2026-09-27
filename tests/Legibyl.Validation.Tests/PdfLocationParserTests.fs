@@ -68,3 +68,26 @@ let ``Parse unrecognisable string falls back to raw value`` () =
 
     location.PageNumber.HasValue |> should be False
     location.Breadcrumb |> should equal "!!! not a real location context ???"
+
+[<Fact>]
+let ``marked content segments read as content, and root alone as the document`` () =
+    let location =
+        PdfLocationParser.Parse "root/document[0]/pages[0](11 0 obj PDPage)/contentStream[0](21 0 obj PDSemanticContentStream)/content[10]{mcid:22}/contentItem[0]{mcid:22}"
+        |> nonNull
+    location.Breadcrumb |> should equal "Document → Page 1 → Content stream → Content → Content item"
+    (PdfLocationParser.Parse "root" |> nonNull).Breadcrumb |> should equal "Document"
+
+[<Fact>]
+let ``a finding's location names what's there: the element, or content no element has`` () =
+    let breadcrumbs name =
+        VeraPdfValidator().Validate(corpusFile name, PdfProfile.PdfUa1).Findings
+        |> Seq.choose (fun f -> f.Location |> Option.ofObj |> Option.map _.Breadcrumb)
+        |> List.ofSeq
+    // Marked content an element has: that element, by tag and text.
+    breadcrumbs "pdfua1-fail.pdf"
+    |> should contain "Document → Page 1 → text span (Span) \"Artifacts may also be used to describe a…\""
+    // Marked content no element has: what's drawn there.
+    breadcrumbs "pages-clipped-paragraphs.pdf"
+    |> should contain "Document → Page 1 → content not in the tags \"First paragraph of the document.\""
+    // Legibyl's own warnings: the element they're about.
+    breadcrumbs "libreoffice-empty-paragraph.pdf" |> should contain "Structure tree → paragraph (P)"

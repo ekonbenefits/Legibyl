@@ -184,7 +184,10 @@ module internal VeraPdf =
                         else
                             { assertion with
                                 Geometry = FindingGeometry.locate context document assertion |> Option.toObj
+                                Element = FindingGeometry.describe context document assertion |> Option.toObj
                                 FixOptions = fixOptionsFor assertion })
+                // Legibyl's own warnings name their elements the same way.
+                let warnings = warnings |> List.map (fun w -> { w with Element = FindingGeometry.describe context document w |> Option.toObj })
                 located @ warnings
             with
             | :? iText.Kernel.Exceptions.PdfException
@@ -284,7 +287,8 @@ module internal VeraPdf =
                     LocationContext = assertion.getLocation () |?> _.getContext()
                     Severity = FindingSeverity.Failure
                     FixOptions = determineFixOptions (assertion.getMessage ())
-                    Geometry = null } ]
+                    Geometry = null
+                    Element = null } ]
 
         { FilePath = pdfPath
           Profile = profile

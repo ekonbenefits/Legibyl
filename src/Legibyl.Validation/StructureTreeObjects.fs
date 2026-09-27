@@ -152,6 +152,23 @@ let rec extractText (obj: PdfObject | null) context (inheritedPage: int option) 
         | _ -> extractText (dictionary.Get(PdfName.K)) context (structElemPage dictionary context inheritedPage)
     | _ -> ""
 
+/// An element as a finding's location names it: its tag, in words, and the start of its text (or
+/// its alt text), e.g. paragraph (P) "The garden in spring…".
+let describeElement (element: PdfDictionary) context (inheritedPage: int option) =
+    let tag = standardTag element context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue "element"
+    let friendly = PdfLocationParser.friendlyTag tag
+    let name =
+        if friendly.Contains '(' || String.Equals(friendly, tag, StringComparison.OrdinalIgnoreCase) then friendly
+        else $"{friendly} ({tag})"
+    let text =
+        let own = Text.RegularExpressions.Regex.Replace(extractText element context (structElemPage element context inheritedPage), @"\s+", " ").Trim()
+        if own <> "" then own
+        else element.GetAsString PdfName.Alt |> Option.ofObj |> Option.map (fun alt -> alt.ToUnicodeString().Trim()) |> Option.defaultValue ""
+    match text with
+    | "" -> name
+    | text when text.Length > 40 -> $"{name} \"{text.Substring(0, 40).TrimEnd()}…\""
+    | text -> $"{name} \"{text}\""
+
 let rec private collectGeometries (obj: PdfObject | null) context (inheritedPage: int option) : StructureGeometry list =
     match resolve obj with
     | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do yield! collectGeometries (array.Get i) context inheritedPage ]

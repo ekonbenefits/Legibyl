@@ -156,7 +156,7 @@ let ``common PDF/UA failures are explained in plain language, with what to do`` 
     // Only PDF/UA-1's rules: a PDF/A rule with the same numbers isn't one of them.
     let finding (specification: string) : RuleViolation =
         { Specification = specification; Clause = "7.1"; TestNumber = 3; Passed = false; Message = ""; ErrorMessage = null
-          LocationContext = null; Severity = FindingSeverity.Failure; FixOptions = PdfFixOptions.None; Geometry = null }
+          LocationContext = null; Severity = FindingSeverity.Failure; FixOptions = PdfFixOptions.None; Geometry = null; Element = null }
     RuleGuide.forFinding (finding "ISO 14289-1:2014") |> Option.isSome |> should be True
     RuleGuide.forFinding (finding "ISO 19005-2:2011") |> should equal None
 

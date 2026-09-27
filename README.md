@@ -209,7 +209,9 @@ The results list is sorted by page number by default (unlocated failures —
 those with no `pages[N]` in their context, such as document-level metadata
 checks — sort to the end). It keeps only the short clause, test, page, and
 friendly location columns visible. Selecting a row shows its full, wrapped
-message, friendly location, raw veraPDF location context, and page preview
+message, friendly location (ending with what's there: the element that owns the
+content, like paragraph (P) "The garden in spring…", or content not in the tags and
+what's drawn there), raw veraPDF location context, and page preview
 in a resizable details panel beside the list. For the PDF/UA-1 failures a
 document commonly has, it also says **What it means** in plain language (what
 it does to someone using a screen reader), and, where no auto fix repairs it,
@@ -680,6 +682,7 @@ report to a file. `--structure` also includes each file's structure tree, as
         "message": "Content marked as Artifact should not be present inside tagged content",
         "errorMessage": null,
         "locationContext": "root/document[0]/pages[0](11 0 obj PDPage)/contentStream[0](21 0 obj PDSemanticContentStream)/content[10]{mcid:22}/contentItem[0]{mcid:22}",
+        "location": "Document → Page 1 → text span (Span) \"Artifacts may also be used to describe a…\"",
         "region": { "pageNumber": 1, "left": 70.96, "bottom": 73.47, "right": 540.56, "top": 104.85 },
         "isFixable": false,
         "fixes": [],
@@ -698,7 +701,10 @@ If a file can't be validated at all (missing, corrupt, encrypted), its entry has
 `"error": "<message>"` and the other fields are `null` — check `error` first
 before reading `isCompliant`.
 
-Each failure's `fixes` names the repairs that fix it, as `--fixes` takes them
+Each failure's `location` says where it is readably, ending with what's there: the
+element that owns the content, by its tag and first words, or "content not in the
+tags" and what's drawn there (`locationContext` is veraPDF's own path). Its `fixes`
+names the repairs that fix it, as `--fixes` takes them
 (`tag-from-layout` is what `layout apply` does), and `meaning` says what it
 means for a reader in plain language, for the common PDF/UA-1 failures (`null`
 for others); the text format prints it as `means:`.
