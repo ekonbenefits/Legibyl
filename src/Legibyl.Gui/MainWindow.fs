@@ -121,10 +121,105 @@ type RuleGroup =
     /// Whether its findings start shown: a rule found more than three times starts collapsed.
     member group.ExpandedAtFirst = group.Findings.Length <= 3
 
-/// An item of the results list: a rule (and whether its findings are shown), or a finding.
+/// An item of the results list: a rule (and whether its findings are shown), or a finding; or,
+/// for a PDF that passes, the pass, first (and how far a person has checked it).
 type ResultItem =
     | RuleItem of RuleGroup * expanded: bool
     | FindingItem of RuleViolationRow
+    | PassItem of progress: string
+
+/// A step of the checklist a person works through for a PDF that passes (see the Pass row).
+type ChecklistStep =
+    { /// Its name, as the review keeps it ticked: "title", "alt-text"…
+      Id: string
+      Title: string
+      /// What the file has, where it shows ("Title: Annual Report").
+      Shown: string option
+      /// What to check, and where to do it.
+      What: string
+      /// Whether it's done in Structure… (the step has a button to open it).
+      InStructure: bool }
+
+module Checklist =
+    /// The steps for a passing PDF, those that don't apply (no figures, tables or links) left out.
+    let steps (facts: DocumentFacts.Facts) : ChecklistStep list =
+        let plural (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
+        [ { Id = "title"
+            Title = "Title"
+            Shown = Some(match facts.Title with Some title -> $"Title: {title}" | None -> "No title of its own")
+            What = "Is it the document's real title (not \"Untitled\", or a file name)? If not, give it one in Structure…'s Document title, or where the PDF was made."
+            InStructure = true }
+          { Id = "language"
+            Title = "Language"
+            Shown =
+              Some(
+                  match facts.Language with
+                  | Some(tag, Some name) -> $"Language: {tag} ({name})"
+                  | Some(tag, None) -> $"Language: {tag}"
+                  | None -> "No language declared"
+              )
+            What = "Is it the language the text is in? If not, set it where the PDF was made (Auto Fixes… › Declare the language only adds one where there's none)."
+            InStructure = false }
+          if facts.Figures > 0 then
+              { Id = "alt-text"
+                Title = "Alt text"
+                Shown = Some(plural facts.Figures "figure" + $", {facts.FiguresWithAlt} with alt text")
+                What =
+                  "In Structure…, right-click a figure › Edit Alt Text…: say what it's for here, in a sentence. A figure that's only decoration: select it › Not Read (Artifact)."
+                InStructure = true }
+          { Id = "headings"
+            Title = "Headings"
+            Shown =
+              Some(
+                  match facts.Headings with
+                  | [] -> "No headings"
+                  | levels ->
+                      let counts = levels |> List.map (fun (level, n) -> $"{level} ×{n}") |> String.concat ", "
+                      "Headings: " + counts
+              )
+            What = "In Structure…, check each is a heading at the right level and every section has one; the Tag picker changes a level."
+            InStructure = true }
+          { Id = "reading-order"
+            Title = "Reading order"
+            Shown = None
+            What = "Structure… numbers each page's elements in the order they're read. Legibyl can't reorder them: fix the order where the PDF was made."
+            InStructure = true }
+          if facts.Tables > 0 then
+              { Id = "tables"
+                Title = "Tables"
+                Shown = Some(plural facts.Tables "table")
+                What = "Header cells should be marked as headers (TH): in the tool that made the PDF, or a PDF editor's table tools."
+                InStructure = false }
+          if facts.Links > 0 then
+              { Id = "links"
+                Title = "Links"
+                Shown = Some(plural facts.Links "link")
+                What = "Each link's text or description should say where it goes: Structure…, right-click a link › Edit Link Description…."
+                InStructure = true }
+          { Id = "colour"
+            Title = "Colour"
+            Shown = None
+            What = "Nothing should be conveyed by colour, contrast or position alone: look at the page."
+            InStructure = false } ]
+
+    /// How far a person has checked it, as the Pass row says: "3 of 7 checked", "Checked by a
+    /// person"; before any, that it passes.
+    let progress (profile: string) (steps: ChecklistStep list) (ticked: Set<string>) =
+        let done' = steps |> List.filter (fun s -> ticked.Contains s.Id) |> List.length
+        if steps.IsEmpty || done' = 0 then $"Passes {profile}'s automated checks"
+        elif done' = steps.Length then "Checked by a person"
+        else $"{done'} of {steps.Length} checked"
+
+    /// The checklist as a report has it: what a person verified, not only what a program did.
+    let text (profile: string) (steps: ChecklistStep list) (ticked: Set<string>) =
+        let lines =
+            [ $"PASS — compliant with {profile}. {progress profile steps ticked}."
+              "PDF/UA also needs a person to check:"
+              for i, step in List.indexed steps do
+                  let mark = if ticked.Contains step.Id then "[x]" else "[ ]"
+                  let shown = match step.Shown with Some shown -> $" ({shown})" | None -> ""
+                  $"{mark} {i + 1}. {step.Title}{shown}: {step.What}" ]
+        String.concat Environment.NewLine lines + Environment.NewLine + Environment.NewLine
 
 module private MainView =
     let pdfFileType =
@@ -195,7 +290,7 @@ module private MainView =
         ]
 
     /// A small results-grid icon, with name as its tooltip and screen-reader text.
-    let private gridIcon (icon: Geometry) (color: string) (name: string) =
+    let gridIcon (icon: Geometry) (color: string) (name: string) =
         iconPath icon color 14.0 [
             Control.horizontalAlignment HorizontalAlignment.Center
             ToolTip.tip name
@@ -395,6 +490,11 @@ module private MainView =
             // When the results shown were checked, if they're the review's saved ones (see
             // SavedResults); None for a validation just run.
             let checkedAt = ctx.useState (None: DateTime option)
+            // For a PDF that passes: whether its Pass row is what's selected, what its checklist
+            // shows of it (read once it passes), and a tick's change, to show it.
+            let passSelected = ctx.useState false
+            let passFacts = ctx.useState (None: DocumentFacts.Facts option)
+            let checklistTicks = ctx.useState 0
             let preview = ctx.useState noPreview
             // Bumped on every selection change so a slow page render for an earlier
             // selection can't overwrite the preview for the current one.
@@ -421,6 +521,35 @@ module private MainView =
             /// Whether the PDF has no structure tree: it's tagged from a suggested structure.
             let untagged () = report |> Option.exists (fun r -> r.FixableCount PdfFixOptions.TagFromLayout > 0)
 
+            // For a PDF that passes: its checklist (once what it shows is read), and the steps ticked
+            // for this very file (see DocumentReview.CheckedFor).
+            let checklist () : (ChecklistStep list * Set<string>) option =
+                match report, passFacts.Current, selectedFile.Current with
+                | Some report, Some facts, Some path when report.IsCompliant ->
+                    let review = layoutReviews.For path
+                    let ticked = review.Validation |> Option.map (fun v -> review.CheckedFor v.Hash) |> Option.defaultValue Set.empty
+                    Some(Checklist.steps facts, ticked)
+                | _ -> None
+            let profileName = report |> Option.map (fun r -> PdfUaTarget.displayName r.Profile) |> Option.defaultValue "PDF/UA"
+            let passProgress =
+                match report, checklist () with
+                | Some report, _ when not report.IsCompliant -> None
+                | Some _, Some(steps, ticked) -> Some(Checklist.progress profileName steps ticked)
+                | Some _, None -> Some $"Passes {profileName}'s automated checks"
+                | None, _ -> None
+            // Ticks one of the checklist's steps, or unticks it: a change to the review Save keeps.
+            let toggleStep (id: string) =
+                match selectedFile.Current with
+                | Some path ->
+                    let review = layoutReviews.For path
+                    match review.Validation with
+                    | Some validation ->
+                        let ticked = review.CheckedFor validation.Hash
+                        review.Checklist <- Some(validation.Hash, (if ticked.Contains id then ticked.Remove id else ticked.Add id))
+                        edited.Set review.IsEdited
+                        checklistTicks.Set(checklistTicks.Current + 1)
+                    | None -> ()
+                | None -> ()
             /// Whether it's worth offering fixes right now. The current fixers target known
             /// validation failures, so hide them once the file is already compliant.
             let canAttemptFix = report |> Option.exists (fun r -> not r.IsCompliant || r.WarningCount > 0)
@@ -431,6 +560,8 @@ module private MainView =
                 selectedRule.Set None
                 ruleExpanded.Set Map.empty
                 checkedAt.Set None
+                passSelected.Set false
+                passFacts.Set None
                 preview.Set noPreview
                 previewVersion.Set(previewVersion.Current + 1)
 
@@ -441,6 +572,7 @@ module private MainView =
                     previewVersion.Set(previewVersion.Current + 1)
                     let version = previewVersion.Current
                     selectedRule.Set asRule
+                    passSelected.Set false
                     match row, asRule with
                     | Some row, None -> ruleExpanded.Set(Map.add $"{row.Violation.RuleId}: {row.Message}" true ruleExpanded.Current)
                     | _ -> ()
@@ -478,13 +610,23 @@ module private MainView =
 
             let selectRow (row: RuleViolationRow option) = selectFinding row None
 
-            /// Selects what the list starts with: the first rule's first finding, or the rule's row
-            /// if it starts collapsed.
+            /// Selects the Pass row, whose details are the checklist.
+            let selectPass () =
+                let selecting = selectFinding None None
+                passSelected.Set true
+                selecting
+
+            /// Selects what the list starts with: for a PDF that passes, the Pass row; else the first
+            /// rule's first finding, or the rule's row if it starts collapsed.
             let selectFirst (rows: RuleViolationRow list) =
-                match RuleGroup.OfRows(rows |> List.filter (fun row -> showDismissed.Current || not row.Dismissed)) with
-                | group :: _ when not group.ExpandedAtFirst -> selectFinding (Some group.First) (Some group)
-                | group :: _ -> selectRow (Some group.First)
-                | [] -> selectRow None
+                let passes = match outcome.Current with Validated(report, _) -> report.IsCompliant | _ -> false
+                if passes then
+                    selectPass ()
+                else
+                    match RuleGroup.OfRows(rows |> List.filter (fun row -> showDismissed.Current || not row.Dismissed)) with
+                    | group :: _ when not group.ExpandedAtFirst -> selectFinding (Some group.First) (Some group)
+                    | group :: _ -> selectRow (Some group.First)
+                    | [] -> selectRow None
 
             /// Counts the user's changes Save would write for the selected file: for an untagged PDF,
             /// its edits on the suggested structure (regions merged into their neighbours, other edits, a title); otherwise its
@@ -575,6 +717,13 @@ module private MainView =
                                 outcome.Set(Validated(report, rows))
                                 refreshPending ()
                                 selectFirst rows
+                                // What a person checks for a PDF that passes: read in the background.
+                                if report.IsCompliant then
+                                    Task.Run(fun () -> try Some(DocumentFacts.read filePath) with _ -> None)
+                                        .ContinueWith((fun (t: Task<DocumentFacts.Facts option>) ->
+                                            if selectedFile.Current = Some filePath then passFacts.Set t.Result),
+                                            TaskScheduler.FromCurrentSynchronizationContext())
+                                    |> ignore
                                 return Some report
                             with :? VeraPdfValidationException as ex ->
                                 outcome.Set(ValidationFailed ex.Message)
@@ -989,6 +1138,15 @@ module private MainView =
             let withoutDismissed (report: ValidationReport) =
                 { report with Assertions = report.Assertions |> Seq.filter (not << Dismissals.isDismissed dismissed.Current) |> Array.ofSeq }
 
+            /// The report as Copy Summary and Save Report give it: for a PDF that passes, led by its
+            /// checklist and what a person has checked of it.
+            let reportText (report: ValidationReport) =
+                let checks =
+                    match checklist () with
+                    | Some(steps, ticked) when report.IsCompliant -> Checklist.text profileName steps ticked
+                    | _ -> ""
+                checks + ValidationReportTextFormatter.BuildReport(withoutDismissed report)
+
             let saveReport _ =
                 task {
                     match report with
@@ -1005,7 +1163,7 @@ module private MainView =
                                           FilePickerFileTypes.All ]
                                 ))
                                 report.FilePath
-                        path |> Option.iter (fun path -> File.WriteAllText(path, ValidationReportTextFormatter.BuildReport(withoutDismissed report)))
+                        path |> Option.iter (fun path -> File.WriteAllText(path, reportText report))
                     | None -> ()
                 }
                 |> ignore
@@ -1085,6 +1243,8 @@ module private MainView =
                         match checkedAt.Current with
                         | Some date -> ", as checked " + date.ToString("d MMM yyyy", Globalization.CultureInfo.InvariantCulture)
                         | None -> ""
+                    // And for a PDF that passes, once a person has worked through its checklist.
+                    let asChecked = if passProgress = Some "Checked by a person" then asChecked + ", checked by a person" else asChecked
                     Some(
                         if report.IsCompliant then
                             banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({why}{report.TotalAssertions} checks, {warnings}){asChecked}"
@@ -1111,6 +1271,9 @@ module private MainView =
                 ContextMenu.create [
                     ContextMenu.viewItems [
                         match selectedRule.Current, selected with
+                        // The pass: nothing to dismiss.
+                        | _ when passSelected.Current ->
+                            MenuItem.create [ MenuItem.header "Nothing to dismiss: the PDF passes"; MenuItem.isEnabled false ]
                         // A rule's row: what applies to all of it.
                         | Some group, _ ->
                             let canIgnore = Dismissals.canDismiss group.First.Violation
@@ -1162,19 +1325,22 @@ module private MainView =
                     let groups = RuleGroup.OfRows rows
                     groupsCache.Set(Some(rows, groups))
                     groups
-            let itemsCache = ctx.useState ((None: (RuleGroup list * Set<string> * ResultItem list) option), false)
+            let itemsCache = ctx.useState ((None: (RuleGroup list * Set<string> * string option * ResultItem list) option), false)
             let items =
                 let opened = groups |> List.filter isExpanded |> List.map _.Key |> Set.ofList
                 match itemsCache.Current with
-                | Some(cached, cachedOpened, items) when obj.ReferenceEquals(cached, groups) && cachedOpened = opened -> items
+                | Some(cached, cachedOpened, cachedPass, items) when obj.ReferenceEquals(cached, groups) && cachedOpened = opened && cachedPass = passProgress -> items
                 | _ ->
                     let items =
-                        [ for group in groups do
+                        [ match passProgress with
+                          | Some progress -> yield PassItem progress
+                          | None -> ()
+                          for group in groups do
                               let expanded = opened.Contains group.Key
                               yield RuleItem(group, expanded)
                               if expanded then
                                   yield! [ for row in group.Findings -> FindingItem row ] ]
-                    itemsCache.Set(Some(groups, opened, items))
+                    itemsCache.Set(Some(groups, opened, passProgress, items))
                     items
             let toggle (group: RuleGroup) = ruleExpanded.Set(Map.add group.Key (not (isExpanded group)) ruleExpanded.Current)
 
@@ -1311,7 +1477,39 @@ module private MainView =
                     )
                 ]
 
+            /// The Pass row, first for a PDF that passes: green, a tick, and how far it's checked.
+            let passRow (progress: string) : IView =
+                Border.create [
+                    Border.borderThickness (4.0, 0.0, 0.0, 0.0)
+                    Border.padding (26.0, 4.0, 6.0, 4.0)
+                    Border.tag "pass-row"
+                    Theme.resources [ Border.BorderBrushProperty, Theme.Tokens.Success ]
+                    Border.child (
+                        StackPanel.create [
+                            StackPanel.orientation Orientation.Horizontal
+                            StackPanel.spacing 6.0
+                            StackPanel.children [
+                                gridIcon Icons.pass Theme.Tokens.Success "Pass"
+                                TextBlock.create [
+                                    TextBlock.text "PASS"
+                                    TextBlock.fontSize gridFontSize
+                                    TextBlock.fontWeight FontWeight.SemiBold
+                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                ]
+                                TextBlock.create [
+                                    TextBlock.text progress
+                                    TextBlock.fontSize gridFontSize
+                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                ]
+                            ]
+                        ]
+                    )
+                ]
+
             let selectedItem =
+                match passProgress with
+                | Some progress when passSelected.Current -> Some(PassItem progress)
+                | _ ->
                 match selectedRule.Current, selectedRow.Current with
                 | Some group, _ ->
                     let shown = groups |> List.tryFind ((=) group) |> Option.defaultValue group
@@ -1330,13 +1528,15 @@ module private MainView =
                         DataTemplateView<ResultItem>.create (fun item ->
                             match item with
                             | RuleItem(group, expanded) -> ruleRow group expanded
-                            | FindingItem row -> findingRow row)
+                            | FindingItem row -> findingRow row
+                            | PassItem progress -> passRow progress)
                     )
                     ListBox.onSelectedItemChanged (
                         (fun item ->
                             match item with
                             | :? ResultItem as RuleItem(group, _) when selectedRule.Current <> Some group ->
                                 selectFinding (Some group.First) (Some group) |> ignore
+                            | :? ResultItem as PassItem _ when not passSelected.Current -> selectPass () |> ignore
                             | :? ResultItem as FindingItem row when
                                 selectedRule.Current.IsSome || not (selectedRow.Current |> Option.exists (fun current -> obj.ReferenceEquals(current, row)))
                                 ->
@@ -1380,8 +1580,8 @@ module private MainView =
                     WrapPanel.isVisible (not allRows.IsEmpty)
                     WrapPanel.children [
                         for view in
-                            [ pill Theme.Tokens.Danger (plural failures "failure") :> IView
-                              pill Theme.Tokens.Warning (plural warnings "warning")
+                            [ if failures > 0 then pill Theme.Tokens.Danger (plural failures "failure") :> IView
+                              if warnings > 0 then pill Theme.Tokens.Warning (plural warnings "warning")
                               if fixable > 0 then badged autoFixesIcon $"{fixable} fixable" 0
                               if byTagging > 0 then badged (Some(wandIcon, Theme.Tokens.Primary)) $"{byTagging} by tagging" 0 ] ->
                             Border.create [ Border.margin (0.0, 0.0, 10.0, 0.0); Border.child view ] ]
@@ -1439,20 +1639,6 @@ module private MainView =
                             line "4." "Auto Fixes… chooses repairs, like the document's language and title."
                             line "5." "Export… writes a fixed copy and opens it, to check again. The PDF you opened isn't changed. File › Save keeps your review (edits, dismissed warnings, chosen fixes) to pick up later."
                             note "PDF/UA is the standard for PDFs that screen readers and other assistive technology can use."
-                        ]
-                    )
-                | Some _, Validated(report, _) when report.IsCompliant ->
-                    let profile = PdfUaTarget.displayName report.Profile
-                    Some(
-                        panel [
-                            heading $"Passes {profile}'s automated checks"
-                            note "Automated checks can't judge everything a person needs. Worth checking yourself:"
-                            line "•" "Alt text: does each figure's say what it's for here, not only what it shows? Decorative images shouldn't be read at all."
-                            line "•" "Headings: is each one a heading, at the right level, and does every section have one?"
-                            line "•" "Reading order: does the content read in a sensible order?"
-                            line "•" "Tables: are their header cells marked as headers?"
-                            line "•" "Links: does each one's text or description say where it goes?"
-                            note "Structure… shows the tags and their alt text, and numbers each page's elements in reading order."
                         ]
                     )
                 | _ -> None
@@ -1562,6 +1748,96 @@ module private MainView =
                         ]
                     ]
                 )
+
+            /// The Pass row's details: the automated checks passed, and the steps a person checks,
+            /// each ticked off as it's done (kept with the review, for this very file).
+            let passDetails () : IView =
+                let shownWarnings = rows |> List.filter (fun r -> not r.Dismissed && r.Violation.Severity = FindingSeverity.Warning) |> List.length
+                let secondary (text: string) =
+                    TextBlock.create [
+                        TextBlock.text text
+                        TextBlock.textWrapping TextWrapping.Wrap
+                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                    ]
+                    :> IView
+                ScrollViewer.create [
+                    Grid.column 2
+                    ScrollViewer.margin (12.0, 0.0, 0.0, 0.0)
+                    ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                    ScrollViewer.content (
+                        StackPanel.create [
+                            StackPanel.maxWidth 560.0
+                            StackPanel.horizontalAlignment HorizontalAlignment.Left
+                            StackPanel.spacing 8.0
+                            StackPanel.children [
+                                withIcon
+                                    (decorativeIcon Icons.pass Theme.Tokens.Success 18.0)
+                                    (TextBlock.create [
+                                        TextBlock.text $"Passes {profileName}'s automated checks. PDF/UA also needs a person to check:"
+                                        TextBlock.fontSize 16.0
+                                        TextBlock.fontWeight FontWeight.SemiBold
+                                        TextBlock.textWrapping TextWrapping.Wrap
+                                    ])
+                                if shownWarnings > 0 then
+                                    let what = if shownWarnings = 1 then "1 warning below is" else $"{shownWarnings} warnings below are"
+                                    secondary $"{what} worth a look: what Legibyl noticed that PDF/UA doesn't require."
+                                match checklist () with
+                                | None -> secondary "Reading the document for its checklist…"
+                                | Some(steps, ticked) ->
+                                    for i, step in List.indexed steps do
+                                        Border.create [
+                                            Border.padding (10.0, 8.0)
+                                            Border.cornerRadius 4.0
+                                            Border.borderThickness 1.0
+                                            Border.tag $"step-{step.Id}"
+                                            Theme.resources [ Border.BorderBrushProperty, Theme.Tokens.Border ]
+                                            Border.child (
+                                                StackPanel.create [
+                                                    StackPanel.spacing 4.0
+                                                    StackPanel.children [
+                                                        DockPanel.create [
+                                                            DockPanel.children [
+                                                                CheckBox.create [
+                                                                    DockPanel.dock Dock.Right
+                                                                    CheckBox.content "Checked"
+                                                                    CheckBox.isChecked (ticked.Contains step.Id)
+                                                                    AttrBuilder<CheckBox>.CreateProperty<string | null>(
+                                                                        Automation.AutomationProperties.NameProperty, $"{step.Title}: checked", ValueNone)
+                                                                    CheckBox.onIsCheckedChanged (
+                                                                        (fun e ->
+                                                                            match e.Source with
+                                                                            | :? CheckBox as box when box.IsChecked.GetValueOrDefault() <> ticked.Contains step.Id ->
+                                                                                toggleStep step.Id
+                                                                            | _ -> ()),
+                                                                        SubPatchOptions.Always
+                                                                    )
+                                                                ]
+                                                                TextBlock.create [
+                                                                    TextBlock.text $"{i + 1}. {step.Title}"
+                                                                    TextBlock.fontWeight FontWeight.SemiBold
+                                                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                                                ]
+                                                            ]
+                                                        ]
+                                                        match step.Shown with
+                                                        | Some shown -> secondary shown
+                                                        | None -> ()
+                                                        TextBlock.create [ TextBlock.text step.What; TextBlock.textWrapping TextWrapping.Wrap ]
+                                                        if step.InStructure then
+                                                            Button.create [
+                                                                Button.content "Structure…"
+                                                                Button.padding (10.0, 2.0)
+                                                                Button.horizontalAlignment HorizontalAlignment.Left
+                                                                Button.onClick ((fun _ -> viewStructure () |> ignore), SubPatchOptions.Always)
+                                                            ]
+                                                    ]
+                                                ]
+                                            )
+                                        ]
+                            ]
+                        ]
+                    )
+                ]
 
             let findingDetails (row: RuleViolationRow) =
                 withPreview (
@@ -1727,8 +2003,7 @@ module private MainView =
                                                     Button.padding (12.0, 4.0)
                                                     Button.margin (0.0, 0.0, 8.0, 0.0)
                                                     Button.isEnabled report.IsSome
-                                                    Button.onClick (fun _ ->
-                                                        report |> Option.iter (withoutDismissed >> ValidationReportTextFormatter.BuildReport >> copyText))
+                                                    Button.onClick (fun _ -> report |> Option.iter (reportText >> copyText))
                                                 ]
                                                 Button.create [
                                                     Button.content "Save Report…"
@@ -1750,6 +2025,7 @@ module private MainView =
                                     GridSplitter.resizeDirection GridResizeDirection.Columns
                                 ]
                                 match selectedRule.Current, selectedRow.Current, guidance () with
+                                | _ when passSelected.Current && passProgress.IsSome -> passDetails ()
                                 | Some group, _, _ -> ruleDetails (groups |> List.tryFind ((=) group) |> Option.defaultValue group)
                                 | None, Some row, _ -> findingDetails row
                                 | None, None, Some panel -> panel

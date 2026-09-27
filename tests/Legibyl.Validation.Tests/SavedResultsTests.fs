@@ -23,7 +23,8 @@ let ``a saved result reads back as the validation gave it, messages and all`` (n
     let hash = SavedResults.hashOf pdf
     let file: ReviewFile.SavedFile =
         { Version = 1; DismissedWarnings = null; Edits = null; Title = null; Layout = null; Fixes = null
-          Validation = SavedResults.ofReport report hash (DateTime(2026, 9, 27, 10, 0, 0)) }
+          Validation = SavedResults.ofReport report hash (DateTime(2026, 9, 27, 10, 0, 0))
+          Checklist = null }
 
     // Through the review file's JSON, as Save writes it and opening reads it.
     let saved = (ReviewFile.parse (ReviewFile.toJson file)).Value.Validation |> nonNull
@@ -51,14 +52,16 @@ let ``a saved result is stale for other bytes, another veraPDF or Legibyl, or an
     saved.VeraPdfVersion |> should equal "1.28.1"
 
 [<Fact>]
-let ``a copy's review doesn't carry the saved result`` () =
+let ``a copy's review doesn't carry the saved result, or the checklist`` () =
     let pdf = corpusFile "pdfua1-pass.pdf"
     let report = VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1)
     let file: ReviewFile.SavedFile =
         { Version = 1; DismissedWarnings = [||]; Edits = null; Title = "A title"; Layout = null; Fixes = null
-          Validation = SavedResults.ofReport report (SavedResults.hashOf pdf) DateTime.Now }
+          Validation = SavedResults.ofReport report (SavedResults.hashOf pdf) DateTime.Now
+          Checklist = { Hash = "abc"; Checked = [| "title" |] } }
 
     let json = (ReviewFile.forCopy (Some file)).Invoke([]) |> nonNull
 
     (ReviewFile.parse json).Value.Validation |> should be Null
+    (ReviewFile.parse json).Value.Checklist |> should be Null
     (ReviewFile.parse json).Value.Title |> should equal "A title"

@@ -22,6 +22,7 @@
     <Compile Include="BlocksPreviewTests.fs" />
     <Compile Include="FindingMarkersTests.fs" />
     <Compile Include="SavedValidationTests.fs" />
+    <Compile Include="PassChecklistTests.fs" />
     <Compile Include="StructureCacheTests.fs" />
     <Compile Include="DismissalsTests.fs" />
     <Compile Include="RegionEditsTests.fs" />
@@ -51,6 +52,7 @@
 
   <ItemGroup>
     <None Include="..\Legibyl.Validation.Tests\SampleCorpus\*.pdf" Link="SampleCorpus\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Legibyl.Validation.Tests\SampleCorpus\fonts\*.ttf" Link="SampleCorpus\fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

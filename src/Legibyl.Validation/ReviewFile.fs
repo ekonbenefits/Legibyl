@@ -96,6 +96,16 @@ type SavedValidation =
       [<JsonPropertyName "totalAssertions">] TotalAssertions: int
       [<JsonPropertyName "findings">] Findings: SavedFinding array }
 
+/// The steps of a passing PDF's checklist a person has ticked (see the GUI's Pass finding), for
+/// the exact file checked: its hash, as its validation has it. Ticks don't carry to another
+/// version of the file.
+[<CLIMutable>]
+type SavedChecklist =
+    { [<JsonPropertyName "hash">] Hash: string
+      /// The steps ticked, by name: "title", "language", "alt-text", "headings",
+      /// "reading-order", "tables", "links", "colour".
+      [<JsonPropertyName "checked">] Checked: string array | null }
+
 /// The review: remembered dismissals and edits, either of which may be missing (null).
 [<CLIMutable>]
 type SavedFile =
@@ -123,7 +133,11 @@ type SavedFile =
       /// The last validation's result, as saved (see SavedValidation); never in a copy's review.
       [<JsonPropertyName "validation">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Validation: SavedValidation | null }
+      Validation: SavedValidation | null
+      /// The passing PDF's checklist, as ticked (see SavedChecklist); never in a copy's review.
+      [<JsonPropertyName "checklist">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Checklist: SavedChecklist | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf's") in a
 // file they may open by hand.
@@ -203,7 +217,7 @@ let isEmpty (file: SavedFile) =
         | Null -> true
     // Fixes chosen as none is still a choice, as is none dismissed (over a review carried inside
     // the PDF that has some).
-    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes && isNull file.Validation
+    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes && isNull file.Validation && isNull file.Checklist
 
 /// Writes file next to pdfPath, or deletes it when there's nothing in it. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
@@ -292,7 +306,7 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
 let forCopy (saved: SavedFile option) =
     Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null>(fun tagged ->
         // A copy is validated afresh: a result inside it would be a stale claim about itself.
-        match saved |> Option.map (fun saved -> { saved with Validation = null }) with
+        match saved |> Option.map (fun saved -> { saved with Validation = null; Checklist = null }) with
         | Some saved when tagged.Count = 0 -> toJson saved
         | Some saved ->
             let moved = rekey (edits saved) tagged

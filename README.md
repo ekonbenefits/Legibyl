@@ -259,12 +259,23 @@ validator's private `objectsContext` field; if a future veraPDF renames it,
 the bar just stays indeterminate (and a test fails). Very large documents can
 take minutes.
 
-With no finding selected, the details pane helps instead: an empty window lists
-the steps (open a PDF, read what's found, check and edit the structure, choose
-auto fixes, export a copy), and a PDF that passes says what automated checks
-can't judge (whether alt text says what a figure is for, heading levels,
-reading order, table headers, where links go) and points to Structure… to
-check them.
+An empty window's details pane lists the steps (open a PDF, read what's found,
+check and edit the structure, choose auto fixes, export a copy).
+
+A PDF that passes opens on a **PASS** row at the top of the list (green, above
+any warnings), since PDF/UA compliance is a person's verdict and the automated
+checks only clear the way. Its details are the steps a person checks, each with
+what the file has (its title and language as written, its figures and how many
+have alt text, its headings by level, its tables and links), what to check,
+where in Legibyl to do it (a **Structure…** button where that's there) or that
+it's done where the PDF was made, and a **Checked** box: title, language, alt
+text, headings, reading order, tables, links and colour, leaving out those that
+don't apply (no figures, tables or links). Ticks are part of the review
+(`checklist`, keyed by the file's hash, so they don't carry to another version
+of it): the PASS row says how many are checked ("3 of 7 checked"), and, all
+ticked, "Checked by a person", as the banner does too. Copy Summary and Save
+Report lead with the checklist and its state. The PASS row can't be dismissed,
+and isn't counted with the failures and warnings.
 
 The results list is a row per rule, in the order each is first found by page
 (unlocated failures — those with no `pages[N]` in their context, such as

@@ -65,7 +65,8 @@ let findings (window: Window) : RuleViolationRow list =
     [ for item in resultItems window do
           match item with
           | RuleItem(group, _) -> yield! group.Findings
-          | FindingItem _ -> () ]
+          | FindingItem _
+          | PassItem _ -> () ]
 
 /// Shows a new MainWindow at the given size.
 let show (width: float) (height: float) =
