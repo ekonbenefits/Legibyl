@@ -174,3 +174,41 @@ let ``a block selected on the preview inside collapsed blocks is opened and scro
             // In view.
             top |> should be (greaterThanOrEqualTo 0.0)
             top |> should be (lessThan scroller.Viewport.Height)))
+
+let private selectionOnlyBox (window: Window) =
+    descendants<CheckBox> window |> List.find (fun c -> string c.Content = "Selection only")
+
+/// What the preview's note says, once it's rendered.
+let private note (window: Window) =
+    HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () ->
+        descendants<TextBlock> window |> List.exists (fun t -> (string t.Text).StartsWith "Page 1:"))
+    |> ignore
+    descendants<TextBlock> window |> List.map (fun t -> string t.Text) |> List.find (fun t -> t.StartsWith "Page 1:")
+
+[<Fact>]
+let ``with Selection only, the preview draws just the selection, and the page can still be clicked`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window, image = show page pdf
+            let all = note window
+            (selectionOnlyBox window).IsChecked <- true
+            pump ()
+            let nothingSelected = note window
+            clickAt image 100.0 700.0 false
+            let heading = note window
+            // An element not drawn is still there to click.
+            clickAt image 100.0 510.0 false
+            let chosen = selected window |> List.map (fun n -> n.Tag, n.Geometry)
+            window.Close()
+            // The next window this session starts the same way.
+            let next, _ = show page pdf
+            let stillOn = (selectionOnlyBox next).IsChecked.GetValueOrDefault()
+            (selectionOnlyBox next).IsChecked <- false
+            pump ()
+            next.Close()
+
+            all |> should equal "Page 1: its 3 elements, outlined and numbered in reading order."
+            nothingSelected |> should equal "Page 1: select an element (here, or in the list) to show it; 3 elements hidden."
+            heading |> should equal "Page 1: the selection only; 2 elements hidden."
+            chosen |> should equal [ "P", rect 72.0 500.0 540.0 560.0 ]
+            stillOn |> should be True))
