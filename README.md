@@ -178,6 +178,11 @@ The **File** menu (the menu bar on macOS, the top of the window elsewhere) has
 the app's local data folder), **Close Window**, **Save** and **Export…**, with
 ⌘/Ctrl+O, W, S and E.
 
+veraPDF's one-time setup (a second or two, as IKVM compiles its Java code) starts
+in the background as soon as the app opens, with a validation of a tiny tagged
+PDF so the code a real validation runs is compiled too
+(`VeraPdfValidator.Warm`); by the time a PDF is picked, it's usually done.
+
 While a file validates, the progress bar fills page by page ("Page 57 of
 675"): veraPDF checks the pages in order, and that's nearly all of its time.
 Beside it are the checks run so far, how many rules have failed, and the time
