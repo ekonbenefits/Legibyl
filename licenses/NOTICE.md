@@ -128,6 +128,12 @@ The **Declare the document's language** fix detects a document's language with
 Wikipedia abstracts), licensed under the Apache License, Version 2.0, used
 unmodified via a NuGet package reference.
 
+## YamlDotNet
+
+The plain-language explanations of PDF/UA failures (`RuleGuide.yaml`) are read
+with [YamlDotNet](https://github.com/aaubry/YamlDotNet), licensed under the MIT
+License, used unmodified via a NuGet package reference.
+
 ## ZXing.Net and qr-link-pdf
 
 QR codes are read with [ZXing.Net](https://github.com/micjahn/ZXing.Net),
