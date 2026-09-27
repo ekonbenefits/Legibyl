@@ -572,6 +572,10 @@ module private StructureView =
     /// Pixels per point the page preview is rendered at.
     let previewScale = 2.0f
 
+    /// Whether the page preview draws only the selection, for this session: a busy page's
+    /// outlines can hide it.
+    let mutable private selectionOnlyThisSession = false
+
     /// Over an element on the page preview, to say it can be clicked.
     let private handCursor = lazy (new Cursor(StandardCursorType.Hand))
 
@@ -676,6 +680,8 @@ module private StructureView =
                 ctx.useState "Select an element to highlight where it is on its page, when that's known."
             // Bumped on every selection so a slower preview for an earlier one can't overwrite it.
             let previewVersion = ctx.useState (0, false)
+            // Draw only the selection on the preview, not every element on its page.
+            let selectionOnly = ctx.useState selectionOnlyThisSession
 
             /// Shows the page the selection is on, every element on it outlined and numbered in
             /// reading order, the selected ones (or those inside a selected container) filled; and
@@ -743,12 +749,21 @@ module private StructureView =
                                                   | NonNull geometry when geometry.PageNumber = page && not (elements |> List.exists (fun e -> obj.ReferenceEquals(e, node))) ->
                                                       { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true }
                                                   | _ -> () ]
+                                        // Only the selection, when asked: the rest are still there to click.
+                                        let drawn =
+                                            if selectionOnly.Current then (outlined |> List.filter _.Emphasised) @ extra
+                                            else outlined @ extra
                                         let note =
                                             let count = elements.Length
                                             let what = if count = 1 then "its element" else $"its {count} elements"
-                                            if nodes.IsEmpty then $"Page {page}: {what}, outlined and numbered in reading order."
+                                            let hidden = count - (outlined |> List.filter _.Emphasised).Length
+                                            let hiddenNote = if hidden = 1 then "1 element hidden" else $"{hidden} elements hidden"
+                                            if selectionOnly.Current && nodes.IsEmpty then
+                                                $"Page {page}: select an element (here, or in the list) to show it; {hiddenNote}."
+                                            elif selectionOnly.Current then $"Page {page}: the selection only; {hiddenNote}."
+                                            elif nodes.IsEmpty then $"Page {page}: {what}, outlined and numbered in reading order."
                                             else $"Page {page}: {what}, outlined and numbered in reading order; the selection filled."
-                                        page, decode (renderer.RenderPageWithRegions(sourceFilePath, page, outlined @ extra, previewScale)), note),
+                                        page, decode (renderer.RenderPageWithRegions(sourceFilePath, page, drawn, previewScale)), note),
                                     destination |> Option.map (fun d -> let result = renderer.RenderPageWithTarget(sourceFilePath, d) in result, decode result.PngBytes))
                             if version = previewVersion.Current then
                                 match source with
@@ -1068,10 +1083,33 @@ module private StructureView =
                             Grid.margin (10.0, 0.0, 0.0, 0.0)
                             Grid.rowDefinitions "Auto,Auto,Auto,*"
                             Grid.children [
-                                TextBlock.create [
-                                    TextBlock.text "Selected element"
-                                    TextBlock.fontWeight FontWeight.SemiBold
-                                    TextBlock.margin (0.0, 0.0, 0.0, 6.0)
+                                DockPanel.create [
+                                    DockPanel.margin (0.0, 0.0, 0.0, 6.0)
+                                    DockPanel.children [
+                                        CheckBox.create [
+                                            DockPanel.dock Dock.Right
+                                            CheckBox.content "Selection only"
+                                            CheckBox.isChecked selectionOnly.Current
+                                            ToolTip.tip "Draw only the selected element on the page, not every element's outline: for a busy page. Clicking the page still selects what's there."
+                                            CheckBox.onIsCheckedChanged (
+                                                (fun e ->
+                                                    match e.Source with
+                                                    | :? CheckBox as checkBox ->
+                                                        let only = checkBox.IsChecked.GetValueOrDefault()
+                                                        if only <> selectionOnly.Current then
+                                                            selectionOnly.Set only
+                                                            selectionOnlyThisSession <- only
+                                                            showPage selected.Current
+                                                    | _ -> ()),
+                                                SubPatchOptions.Always
+                                            )
+                                        ]
+                                        TextBlock.create [
+                                            TextBlock.text "Selected element"
+                                            TextBlock.fontWeight FontWeight.SemiBold
+                                            TextBlock.verticalAlignment VerticalAlignment.Center
+                                        ]
+                                    ]
                                 ]
                                 TextBlock.create [
                                     Grid.row 1
