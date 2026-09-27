@@ -51,14 +51,24 @@ type RuleViolation =
       /// The page region to highlight for this finding, if known. veraPDF findings leave
       /// this null (annotation regions come from Location instead); Legibyl's structure
       /// warnings set it from the offending element's content.
-      Geometry: StructureGeometry | null }
+      Geometry: StructureGeometry | null
+      /// What its location holds, named, where that's found: the element that owns the content
+      /// (e.g. paragraph (P) "The garden in spring…"), or "content not in the tags". Null when it
+      /// isn't known.
+      Element: string | null }
 
     /// A short "clause.testNumber" identifier, e.g. "7.1-2".
     member this.RuleId = $"{this.Clause}-{this.TestNumber}"
 
     /// Best-effort, human-readable interpretation of LocationContext (page number +
-    /// plain-English breadcrumb). Null if there's no location context to parse.
-    member this.Location = PdfLocationParser.Parse this.LocationContext
+    /// plain-English breadcrumb), ending with what's there when that's known (Element), in place
+    /// of veraPDF's content streams and items. Null if there's no location context to parse.
+    member this.Location: PdfLocation | null =
+        match PdfLocationParser.Parse this.LocationContext, this.Element with
+        | NonNull location, NonNull element ->
+            let within = if location.PageNumber.HasValue then $"Document → Page {location.PageNumber.Value}" else "Structure tree"
+            { location with Breadcrumb = $"{within} → {element}" }
+        | location, _ -> location
 
     member this.IsFinding = not this.Passed || this.Severity = FindingSeverity.Warning
 

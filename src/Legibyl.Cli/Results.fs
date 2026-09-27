@@ -11,6 +11,9 @@ type FailureDetail =
       Message: string
       ErrorMessage: string | null
       LocationContext: string | null
+      /// Where it is, readably: "Document → Page 1 → paragraph (P) \"The garden in spring…\"" (see
+      /// RuleViolation.Location); null when there's no location.
+      Location: string | null
       /// Page region the finding refers to, in PDF points (origin bottom-left), if known.
       Region: StructureGeometry | null
       IsFixable: bool
@@ -28,6 +31,7 @@ type FailureDetail =
           Message = violation.Message
           ErrorMessage = violation.ErrorMessage
           LocationContext = violation.LocationContext
+          Location = violation.Location |> Option.ofObj |> Option.map _.Breadcrumb |> Option.toObj
           Region = violation.Geometry
           IsFixable = violation.IsFixable
           Fixes = RepairNames.ofOptions violation.FixOptions |> Array.ofList

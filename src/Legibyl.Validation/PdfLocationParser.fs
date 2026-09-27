@@ -8,10 +8,10 @@ open System
 open System.Collections.Generic
 open System.Text.RegularExpressions
 
-// Each path segment looks like: name[index](objNum genNum obj Type...)
-// The parenthesised part and/or the [index] are optional.
+// Each path segment looks like: name[index](objNum genNum obj Type...), or for marked content,
+// name[index]{mcid:N}. The parenthesised part, the [index] and the {mcid:N} are optional.
 let private segmentPattern =
-    Regex(@"^(?<name>[A-Za-z]+)(\[(?<idx>\d+)\])?(\((?<num>\d+)\s+\d+\s+obj\s+(?<type>.+)\))?$", RegexOptions.Compiled)
+    Regex(@"^(?<name>[A-Za-z]+)(\[(?<idx>\d+)\])?(\{mcid:\d+\})?(\((?<num>\d+)\s+\d+\s+obj\s+(?<type>.+)\))?$", RegexOptions.Compiled)
 
 let private camelCasePattern = Regex("(?<=[a-z0-9])(?=[A-Z])", RegexOptions.Compiled)
 
@@ -21,7 +21,7 @@ let private ignoreCaseMap (pairs: (string * string) list) =
         map[key] <- value
     map
 
-let private tagFriendlyNames =
+let private friendlyNames =
     ignoreCaseMap
         [ "Document", "document root"
           "Table", "table"
@@ -69,6 +69,12 @@ let private nameOverrides =
           "structtreeroot", "structure tree"
           "k", "child element" ]
 
+/// A structure tag's name as the breadcrumb says it, e.g. "paragraph" for P, "heading (H2)".
+let friendlyTag (tag: string) =
+    match friendlyNames.TryGetValue tag with
+    | true, friendly -> friendly
+    | _ -> $"{tag} element"
+
 let private isName expected (name: string) =
     String.Equals(name, expected, StringComparison.OrdinalIgnoreCase)
 
@@ -84,7 +90,7 @@ let private humanizeType (typeName: string) =
         // than the internal "SE..." class name.
         match typeName.Split(' ', 2) with
         | [| prefix; tag |] when prefix.StartsWith("SE", StringComparison.Ordinal) ->
-            match tagFriendlyNames.TryGetValue tag with
+            match friendlyNames.TryGetValue tag with
             | true, friendly -> friendly
             | _ -> $"{tag} element"
         | _ ->
@@ -141,7 +147,8 @@ let Parse (locationContext: string | null) : PdfLocation | null =
                     breadcrumb.Add(describeSegment name index typeName)
 
         if breadcrumb.Count = 0 then
-            breadcrumb.Add context
+            // "root" alone is the document itself.
+            breadcrumb.Add(if isName "root" context then "Document" else context)
 
         { PageNumber = Option.toNullable pageNumber
           ObjectType = Option.toObj objectType

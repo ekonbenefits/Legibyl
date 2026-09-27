@@ -21,7 +21,8 @@ let private finding (fixOptions: PdfFixOptions) =
       LocationContext = null
       Severity = FindingSeverity.Failure
       FixOptions = fixOptions
-      Geometry = null }
+      Geometry = null
+      Element = null }
 
 let private report (findings: RuleViolation list) =
     { FilePath = "sample.pdf"

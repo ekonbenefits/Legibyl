@@ -17,7 +17,8 @@ let private finding severity clause testNumber location =
       LocationContext = location
       Severity = severity
       FixOptions = PdfFixOptions.None
-      Geometry = null }
+      Geometry = null
+      Element = null }
 
 let private splitParagraph = finding FindingSeverity.Warning "Structure" 2 "StructTreeRoot/K[0]/K[3] + StructTreeRoot/K[0]/K[4]"
 let private emptyParagraph = finding FindingSeverity.Warning "Structure" 1 "StructTreeRoot/K[0]/K[7]"

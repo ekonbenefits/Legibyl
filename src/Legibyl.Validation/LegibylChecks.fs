@@ -105,7 +105,8 @@ let private warning message (errorMessage: string | null) location testNumber fi
       LocationContext = location
       Severity = FindingSeverity.Warning
       FixOptions = fixOptions
-      Geometry = geometry }
+      Geometry = geometry
+      Element = null }
 
 // ---- Structure-3 to 5: headings from the table of contents (see TocHeadings) ----
 
