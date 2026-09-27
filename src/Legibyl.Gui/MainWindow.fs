@@ -316,8 +316,8 @@ module private MainView =
             let dismissed = ctx.useState (Map.empty: Dismissals.Dismissed)
             let showDismissed = ctx.useState false
             let edited = ctx.useState false
-            // The repairs chosen in Auto Fixes for the selected file (None until they're chosen),
-            // and the user's changes Export writes too.
+            // The repairs chosen in Auto Fixes for the selected file, as its review has them (None
+            // until they're chosen), and the user's changes Export writes too.
             let autoFixes = ctx.useState (None: PdfFixOptions option)
             let pending = ctx.useState noChanges
             // The last count of edits not in a tagged PDF: (path, its last write, edits, count).
@@ -451,9 +451,9 @@ module private MainView =
             let openFileAs (activity: string) (path: string) =
                 selectedFile.Set(Some path)
                 clearResults ()
-                autoFixes.Set None
                 pending.Set noChanges
                 let review = layoutReviews.For path
+                autoFixes.Set review.AutoFixes
                 dismissed.Set review.AllDismissed
                 edited.Set review.IsEdited
                 showDismissed.Set false
@@ -631,7 +631,11 @@ module private MainView =
                             | _, 1 -> Some("Uses your edits on the suggested structure: 1 region left out." + alt)
                             | _, discarded -> Some($"Uses your edits on the suggested structure: {discarded} regions left out." + alt)
                         match! Dialogs.chooseFixOptions window report reviewNote autoFixes.Current with
-                        | Some options -> autoFixes.Set(Some options)
+                        | Some options ->
+                            // Part of the review: Save keeps them.
+                            review.AutoFixes <- Some options
+                            autoFixes.Set review.AutoFixes
+                            edited.Set review.IsEdited
                         | None -> ()
                     | _ -> ()
                 }
@@ -1248,7 +1252,7 @@ module private MainView =
                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                 Button.isEnabled (not busy && edited.Current)
                                 ToolTip.tip
-                                    "Keeps your review (edits, dismissed warnings, the title) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed."
+                                    "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed."
                                 Button.onClick (fun _ -> saveReview () |> ignore)
                             ]
                             Button.create [

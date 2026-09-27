@@ -29,8 +29,12 @@ type DocumentReview(modified: DateTime) =
     member val Dismissed: Dismissals.Dismissed = Map.empty with get, set
     /// The review saved inside the PDF, if it's a copy Legibyl saved: read-only.
     member val Carried: ReviewFile.SavedFile option = None with get, set
-    /// What was last saved (or read): the dismissals, edits and title.
-    member val private Saved: Dismissals.Dismissed * RegionEdits.Edit list * string option = (Map.empty, [], None) with get, set
+    /// The auto fixes chosen for Export; None before any are (the dialog then starts with the
+    /// safe ones the PDF needs).
+    member val AutoFixes: PdfFixOptions option = None with get, set
+    /// What was last saved (or read): the dismissals, edits, title and auto fixes.
+    member val private Saved: Dismissals.Dismissed * RegionEdits.Edit list * string option * PdfFixOptions option =
+        (Map.empty, [], None, None) with get, set
 
     /// The warnings dismissed in the review carried inside the PDF.
     member this.CarriedDismissed = this.Carried |> Option.map Dismissals.ofSaved |> Option.defaultValue Map.empty
@@ -80,7 +84,8 @@ type DocumentReview(modified: DateTime) =
           DismissedWarnings = Dismissals.toSaved this.Dismissed
           Edits = (if edits.Length = 0 then null else edits)
           Title = Option.toObj this.Title
-          Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null) }
+          Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null)
+          Fixes = (this.AutoFixes |> Option.map (RepairNames.ofOptions >> Array.ofList) |> Option.toObj) }
 
     /// Keeps the review in the file next to pdfPath (deleting it if there's nothing to keep).
     /// Throws IOException/UnauthorizedAccessException if it can't be written.
@@ -92,6 +97,7 @@ type DocumentReview(modified: DateTime) =
 
     /// The review a copy of pdfPath carries (see VeraPdfValidator.Review): this one, saved or not,
     /// with the one carried inside pdfPath under it; its edits moved to the elements tagging made.
+    /// Its auto fixes are those the copy was made with.
     member this.ForCopy(pdfPath: string) =
         let own = this.ToFile pdfPath
         let file =
@@ -101,16 +107,17 @@ type DocumentReview(modified: DateTime) =
                 { own with
                     DismissedWarnings = Dismissals.toSaved this.AllDismissed
                     Edits = (if edits.Length = 0 then null else edits)
-                    Title = (if isNull own.Title then carried.Title else own.Title) }
+                    Title = (if isNull own.Title then carried.Title else own.Title)
+                    Fixes = own.Fixes }
             | None -> own
         ReviewFile.forCopy (if ReviewFile.isEmpty file then None else Some file)
 
     /// Whether there are changes Save hasn't kept: the dismissals, edits or title differ from
     /// what was last saved (changing one back isn't a change).
-    member this.IsEdited = (this.Dismissed, this.Edits, this.Title) <> this.Saved
+    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.AutoFixes) <> this.Saved
 
     /// Takes what it has now as what's saved.
-    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title)
+    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.AutoFixes)
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
@@ -153,6 +160,7 @@ type DocumentReviews() =
                 review.Dismissed <- Dismissals.ofSaved saved
                 review.Edits <- RegionEdits.editsIn saved
                 review.Title <- Option.ofObj saved.Title
+                review.AutoFixes <- Option.ofObj saved.Fixes |> Option.map RepairNames.toOptions
                 match Option.ofObj saved.Layout |> Option.map (LayoutFile.current fullPath) with
                 | Some layout ->
                     review.LayoutKept <- true

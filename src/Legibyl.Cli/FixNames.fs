@@ -5,23 +5,7 @@ open System
 open Legibyl.Validation
 
 /// Each repair's name on the command line, in the order they run.
-let names =
-    [ "tag-from-layout", PdfFixOptions.TagFromLayout
-      "qr-links", PdfFixOptions.QrCodeLinks
-      "language", PdfFixOptions.LanguageFromText
-      "headings-from-toc", PdfFixOptions.HeadingsFromToc
-      "empty-paragraphs", PdfFixOptions.RemoveEmptyParagraphs
-      "empty-toc-entries", PdfFixOptions.RemoveEmptyTocEntries
-      "join-split-paragraphs", PdfFixOptions.JoinSplitParagraphs
-      "lists", PdfFixOptions.ListsFromParagraphs
-      "bookmarks", PdfFixOptions.BookmarksFromHeadings
-      "tabs", PdfFixOptions.AnnotationTabs
-      "font-glyphs", PdfFixOptions.FontCidToGidMap
-      "link-contents", PdfFixOptions.LinkContents
-      "link-titles-from-web", PdfFixOptions.LinkTitlesFromWeb
-      "title", PdfFixOptions.DocumentTitle
-      "title-from-first-page", PdfFixOptions.TitleFromFirstPage
-      "metadata", PdfFixOptions.Metadata ]
+let names = RepairNames.names
 
 /// The repairs that need no guesswork about the document's meaning: what `fix` applies by default. The
 /// title only moves across a title the author did write, in Info or in XMP; a title is never

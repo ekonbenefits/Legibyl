@@ -428,7 +428,8 @@ let ``tagging from regions with a review writes its alt text and title`` () =
           DismissedWarnings = null
           Edits = [| { Page = 1; Tag = "Figure"; Box = [| 70.0; 448.0; 175.0; 552.0 |]; Alt = "Red, green and blue squares"; Text = null; MergeWith = null; Retag = null; Exclude = false } |]
           Title = "Squares"
-          Layout = null }
+          Layout = null
+          Fixes = null }
 
     VeraPdfValidator(LayoutSource = ReviewFile.ReviewedRegions(FixedLayout regions, review))
         .Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout)

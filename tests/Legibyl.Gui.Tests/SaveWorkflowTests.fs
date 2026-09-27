@@ -119,6 +119,31 @@ let ``choosing auto fixes counts them, starting from the safe ones, and makes Ex
             canExport |> should be True))
 
 [<Fact>]
+let ``the auto fixes chosen are part of the review: Save keeps them for next time`` () =
+    onUiThread (fun () ->
+        withPdf true (fun pdf ->
+            let window = openPdf pdf
+            (button window "Auto Fixes…").RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            waitFor (fun () -> window.OwnedWindows.Count = 1)
+            let dialog = window.OwnedWindows |> Seq.exactlyOne
+            (descendants<Button> dialog |> List.find (fun b -> string b.Content = "Done")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            waitFor (fun () -> window.OwnedWindows.Count = 0)
+            let chosen = name (button window "Auto Fixes…")
+            let canSave = (button window "Save").IsEnabled
+            (button window "Save").RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            waitFor (fun () -> not (button window "Save").IsEnabled)
+            window.Close()
+
+            let reopened = openPdf pdf
+            let again = name (button reopened "Auto Fixes…")
+            reopened.Close()
+
+            chosen |> should not' (equal "Auto Fixes…")
+            canSave |> should be True
+            File.ReadAllText(pdf + ".legibyl.json") |> should haveSubstring "\"fixes\""
+            again |> should equal chosen))
+
+[<Fact>]
 let ``an untagged PDF's edits on its suggested structure count on Structure, and Export tags from them`` () =
     onUiThread (fun () ->
         withPdf false (fun pdf ->

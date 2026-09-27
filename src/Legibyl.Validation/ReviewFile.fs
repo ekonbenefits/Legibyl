@@ -69,7 +69,11 @@ type SavedFile =
       /// tagging takes it, and the layout model for the others.
       [<JsonPropertyName "layout">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Layout: LayoutFile.SavedLayout | null }
+      Layout: LayoutFile.SavedLayout | null
+      /// The auto fixes chosen, by name (see RepairNames); null if none have been.
+      [<JsonPropertyName "fixes">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Fixes: string array | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf's") in a
 // file they may open by hand.
@@ -114,7 +118,8 @@ let isEmpty (file: SavedFile) =
         match items with
         | NonNull items -> items.Length = 0
         | Null -> true
-    none file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout
+    // Fixes chosen as none is still a choice.
+    none file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes
 
 /// Writes file next to pdfPath, or deletes it when there's nothing in it. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.
