@@ -12,6 +12,7 @@ let names =
       "join-split-paragraphs", PdfFixOptions.JoinSplitParagraphs
       "lists", PdfFixOptions.ListsFromParagraphs
       "bookmarks", PdfFixOptions.BookmarksFromHeadings
+      "link-targets", PdfFixOptions.LinkTargets
       "tabs", PdfFixOptions.AnnotationTabs
       "font-glyphs", PdfFixOptions.FontCidToGidMap
       "link-contents", PdfFixOptions.LinkContents

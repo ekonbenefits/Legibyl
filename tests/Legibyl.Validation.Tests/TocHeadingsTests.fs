@@ -326,3 +326,23 @@ let ``in a PDF 2.0 file the link also names the heading element`` () =
     let structureDestination = (action |> notNull).GetAsArray(PdfName "SD") |> notNull
     let heading = structureDestination.GetAsDictionary 0 |> notNull
     heading.GetAsName(PdfName.S) |> should equal (PdfName "H1")
+
+[<Fact>]
+let ``in a PDF 2.0 file, contents links that don't point to structure can be fixed by recovering their headings`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithTocVersion PdfVersion.PDF_2_0 input.Path false threeLevels threeLevelsBody
+    let structureDestinationFailures path =
+        VeraPdfValidator().Validate(path, PdfProfile.PdfUa2).FailedAssertions |> Seq.filter (fun f -> f.Clause = "8.8") |> List.ofSeq
+
+    let before = structureDestinationFailures input.Path
+    before |> should not' (be Empty)
+    // PDF/UA-2 wants links within the document to point to structure (8.8): recovering the
+    // headings points the contents links at them, as does pointing links at their targets.
+    for finding in before do
+        finding.FixOptions.HasFlag PdfFixOptions.HeadingsFromToc |> should be True
+        finding.FixOptions.HasFlag PdfFixOptions.LinkTargets |> should be True
+
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa2, output.Path, PdfFixOptions.HeadingsFromToc) |> ignore
+
+    structureDestinationFailures output.Path |> should be Empty

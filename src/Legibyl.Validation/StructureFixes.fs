@@ -463,7 +463,8 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///      the item before lists are found (a line starting with a marker is never joined on).
 ///   4. Lists.
 ///   5. Bookmarks, after headings are recovered, so those get bookmarks too. Then your edits,
-///      once nothing else will move the elements they're for.
+///      once nothing else will move the elements they're for. Then links' and bookmarks'
+///      targets (PDF 2.0 only), once the elements they land on won't move or merge.
 ///   6. The rest touch pages, annotations, fonts and the Info dictionary rather than
 ///      paragraphs, so their order among themselves doesn't matter (except that a contents
 ///      link is described from its own text before any is from a web page's title)...
@@ -488,6 +489,7 @@ let orderedFixes
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
       PdfFixOptions.BookmarksFromHeadings, addBookmarks
       PdfFixOptions.ApplyEdits, (fun document context -> ElementEdits.apply document context edits)
+      PdfFixOptions.LinkTargets, (fun document context -> LinkTargets.apply document (LinkTargets.find document context))
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
       PdfFixOptions.LinkTitlesFromWeb, describeWebLinks titles
