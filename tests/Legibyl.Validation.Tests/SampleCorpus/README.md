@@ -38,6 +38,15 @@ embedded TrueType font whose glyph box is empty. `PdfFixerTests` uses it to
 check that empty-paragraph detection follows the RoleMap and that the
 warning gets a one-character region.
 
+## Fonts
+
+`fonts/Lato-Regular.ttf` is Lato, by Łukasz Dziedzic, from Google Fonts
+(https://github.com/google/fonts, `ofl/lato/`, commit
+`f3b885d5590e307e02542f1a724cec55d567fdaa`), under the SIL Open Font License
+1.1 (`fonts/OFL.txt`). Tests that make PDF/UA-2 files embed it: PDF/UA-2
+requires every font embedded, and the standard 14 fonts iText uses by default
+aren't.
+
 ## Techniques for Accessible PDF
 
 `techniques-for-accessible-pdf/` holds the sample PDFs from the PDF

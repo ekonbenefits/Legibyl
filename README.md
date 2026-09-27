@@ -206,6 +206,17 @@ checking should catch. The CLI's `--ua 1|2` checks against either regardless,
 e.g. to see how far a PDF 1.7 file is from PDF/UA-2 (it fails on its version
 alone, since PDF/UA-2 requires PDF 2.0).
 
+The fixes keep a file's PDF version, and on a PDF 2.0 file they do what
+PDF/UA-2 asks where it differs: tagging from the layout puts the Document tag
+in PDF 2.0's namespace (the tags under it stay in PDF 1.7's, which PDF/UA-2
+allows), bookmarks point to their headings' tags (a structure destination) as
+well as their pages, and the metadata repair claims `pdfuaid:part` 2 with
+`pdfuaid:rev` 2024 (veraPDF writes no year). Failures map to the fixes that
+repair them, and to their plain-language guide (`RuleGuide.yaml`), by rule,
+for both standards. PDF/UA-2's checks include ISO 32005's rules on which tags
+may contain which. Whether to upgrade a PDF 1.7 file to 2.0 is left to the
+tool that made it.
+
 ## GUI results view
 
 Each PDF opens in a window of its own, with its review. Opening a PDF

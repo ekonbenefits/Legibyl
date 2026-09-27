@@ -17,7 +17,9 @@ type Heading =
     { Level: int
       Title: string
       Page: int
-      Geometry: StructureGeometry option }
+      Geometry: StructureGeometry option
+      /// Its structure element, which a PDF 2.0 bookmark points to as well as its page.
+      Element: PdfDictionary }
 
 /// A document with headings and no outline.
 type Missing =
@@ -73,7 +75,8 @@ let find (document: PdfDocument) context : Missing option =
                                       { Level = level
                                         Title = title
                                         Page = page
-                                        Geometry = geometry }
+                                        Geometry = geometry
+                                        Element = visit.Element }
                               | _ -> () ]
                   LanguageDeclared =
                     match document.GetCatalog().GetPdfObject().GetAsString(PdfName.Lang) with
@@ -96,7 +99,19 @@ let add (document: PdfDocument) (headings: Heading list) =
             // A little above the heading, so it isn't cut off at the top of the window.
             | Some geometry -> PdfExplicitDestination.CreateXYZ(page, float32 geometry.Left, float32 geometry.Top + 12f, 0f)
             | None -> PdfExplicitDestination.CreateFit page
-        bookmark.AddDestination destination
+        if document.GetPdfVersion().CompareTo PdfVersion.PDF_2_0 >= 0 then
+            // PDF/UA-2 wants links within the document to point to structure (a go-to action's
+            // SD, PDF 2.0's structure destination); D, the page, is for readers without it.
+            let heading' = iText.Kernel.Pdf.Tagging.PdfStructElem heading.Element
+            let structure =
+                match heading.Geometry with
+                | Some geometry -> PdfStructureDestination.CreateXYZ(heading', float32 geometry.Left, float32 geometry.Top + 12f, 0f)
+                | None -> PdfStructureDestination.CreateFit heading'
+            let action = iText.Kernel.Pdf.Action.PdfAction.CreateGoTo destination
+            action.Put(PdfName.SD, structure.GetPdfObject()) |> ignore
+            bookmark.AddAction action
+        else
+            bookmark.AddDestination destination
         if heading.Level = 1 then
             currentH1 <- Some bookmark
     headings.Length

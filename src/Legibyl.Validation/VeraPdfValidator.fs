@@ -387,9 +387,18 @@ module internal VeraPdf =
                 (status = RepairStatus.Success || status = RepairStatus.IdRemoved)
                 && File.Exists repairedPath
                 && FileInfo(repairedPath).Length > 0L
-            if changed then
-                wrapErrors $"veraPDF failed to read its repaired copy of '{pdfPath}'" (fun () ->
+            let revised =
+                changed
+                && wrapErrors $"veraPDF failed to read its repaired copy of '{pdfPath}'" (fun () ->
                     MetadataTransfer.apply pdfPath repairedPath outputPath)
+            // Say the revision it has, not the one veraPDF wrote.
+            let revision = $"'rev' with value '{MetadataTransfer.PdfUa2Revision}'"
+            let appliedFixes =
+                if not revised then appliedFixes
+                elif appliedFixes |> List.exists (fun fix -> fix.Contains "'rev' with value") then
+                    appliedFixes |> List.map (fun fix -> Regex.Replace(fix, @"'rev' with value '[^']*'", revision))
+                else
+                    appliedFixes @ [ $"Set property {revision} in Identification schema" ]
 
             { Changed = changed
               Status = status

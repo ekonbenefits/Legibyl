@@ -53,7 +53,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="SampleCorpus\**\*.pdf;SampleCorpus\**\*.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="SampleCorpus\**\*.pdf;SampleCorpus\**\*.yaml;SampleCorpus\**\*.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -68,13 +68,43 @@ let private textString (value: string) =
     if value |> Seq.forall (fun c -> c < '\u0080') then PdfString value
     else PdfString(value, PdfEncodings.UNICODE_BIG)
 
+/// The PDF/UA-2 identifier's revision: the year of ISO 14289-2's edition.
+[<Literal>]
+let PdfUa2Revision = "2024"
+
+/// veraPDF writes a PDF/UA-2 identifier with a pdfuaid:rev that isn't the edition's year
+/// ("0000", or 2020, PDF 2.0's). This puts in the year of the edition it's checked against,
+/// unless it names that or a later one; returns whether it did.
+let private revisePdfUa2 (xmp: XMPMeta) =
+    let ns = XMPConst.NS_PDFUA_ID
+    let names (edition: string | null) =
+        match edition with
+        | NonNull edition when edition.Length = 4 ->
+            match Int32.TryParse edition with
+            | true, year -> year >= int PdfUa2Revision
+            | _ -> false
+        | _ -> false
+    if xmp.DoesPropertyExist(ns, "part") && xmp.GetPropertyString(ns, "part") = "2" && not (names (xmp.GetPropertyString(ns, "rev"))) then
+        xmp.SetProperty(ns, "rev", PdfUa2Revision)
+        true
+    else
+        false
+
 /// Writes inputPath to outputPath with its XMP metadata and Info dictionary replaced by
-/// those in repairedPath (veraPDF's metadata-fixer output for the same input).
+/// those in repairedPath (veraPDF's metadata-fixer output for the same input); returns whether
+/// it also corrected the PDF/UA-2 identifier's revision.
 let apply (inputPath: string) (repairedPath: string) (outputPath: string) =
     let xmp, info = readRepaired repairedPath
     use document = new PdfDocument(new PdfReader(inputPath), new PdfWriter(outputPath))
 
-    xmp |> Option.iter (fun bytes -> document.SetXmpMetadata(XMPMetaFactory.ParseFromBuffer bytes))
+    let revised =
+        match xmp with
+        | Some bytes ->
+            let metadata = XMPMetaFactory.ParseFromBuffer bytes
+            let revised = revisePdfUa2 metadata
+            document.SetXmpMetadata metadata
+            revised
+        | None -> false
 
     info
     |> Option.iter (fun entries ->
@@ -93,3 +123,5 @@ let apply (inputPath: string) (repairedPath: string) (outputPath: string) =
                 match value with
                 | Text text -> infoDictionary.Put(PdfName key, textString text) |> ignore
                 | Other -> ())
+
+    revised
