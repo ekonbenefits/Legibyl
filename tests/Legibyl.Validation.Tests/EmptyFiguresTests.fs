@@ -63,11 +63,11 @@ let private createPdf (path: string) =
     root.Put(PdfName.K, tagged) |> ignore
     document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, root) |> ignore
 
-/// The figures' alt text failures, and whether each can be fixed by removing the figure.
+/// The figures' alt text failures, and whether each is offered an auto fix.
 let private noAltFailures (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions
     |> Seq.filter (fun a -> a.RuleId = "7.3-1")
-    |> Seq.map (fun a -> a.FixOptions.HasFlag PdfFixOptions.RemoveEmptyFigures)
+    |> Seq.map (fun a -> a.IsFixable)
     |> List.ofSeq
 
 /// Legibyl's warnings about figures that draw nothing: whether each can be fixed.
@@ -82,14 +82,14 @@ let private tags (path: string) =
     (Seq.exactlyOne root.Children).Children |> Seq.map _.Tag |> List.ofSeq
 
 [<Fact>]
-let ``a figure that draws nothing has its alt text failure fixed by removing it`` () =
+let ``a figure that draws nothing gets a warning of its own, which removing it fixes`` () =
     use input = new TempPdf()
     createPdf input.Path
 
-    // The two that draw nothing can be removed; the image, form and shape need alt text.
-    noAltFailures input.Path |> List.sort |> should equal [ false; false; false; true; true ]
-    // And they're told apart from those by a warning of their own.
+    // The two that draw nothing, told apart from the image, form and shape, which need alt text.
     emptyFigureWarnings input.Path |> should equal [ true; true ]
+    // veraPDF's failure is the same for all five, and no auto fix gives alt text.
+    noAltFailures input.Path |> should equal [ false; false; false; false; false ]
 
 [<Fact>]
 let ``the fix removes the figures that draw nothing, and the page looks the same`` () =
