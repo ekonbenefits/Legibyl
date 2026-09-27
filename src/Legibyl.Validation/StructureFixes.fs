@@ -452,7 +452,8 @@ let private setLanguageFromText (document: PdfDocument) context =
 /// Legibyl's own repairs, in the order they run. Each takes the open document and returns a
 /// line per change it made. The order matters where one repair changes what another sees:
 ///
-///   0. The document's language first: it only sets /Lang, and bookmarks need it.
+///   0. The parent tree first, where it's missing: until it's rebuilt, every tag reads as
+///      untagged. Then the document's language: it only sets /Lang, and bookmarks need it.
 ///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list repair could take it for a list item.
@@ -481,7 +482,8 @@ let orderedFixes
     (layout: PageLayout option)
     (edits: ElementEdit list)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
-    [ PdfFixOptions.LanguageFromText, setLanguageFromText
+    [ PdfFixOptions.ParentTree, ParentTree.rebuild
+      PdfFixOptions.LanguageFromText, setLanguageFromText
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.RemoveEmptyTocEntries, removeEmptyTocEntries

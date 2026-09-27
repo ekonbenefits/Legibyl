@@ -86,8 +86,10 @@ let ``a finding's location names what's there: the element, or content no elemen
     // Marked content an element has: that element, by tag and text.
     breadcrumbs "pdfua1-fail.pdf"
     |> should contain "Document → Page 1 → text span (Span) \"Artifacts may also be used to describe a…\""
-    // Marked content no element has: what's drawn there.
-    breadcrumbs "pages-clipped-paragraphs.pdf"
-    |> should contain "Document → Page 1 → content not in the tags \"First paragraph of the document.\""
+    // Marked content an element has, found through the structure tree where the parent tree is
+    // missing (as in this Pages export); and drawing no element has.
+    let pages = breadcrumbs "pages-clipped-paragraphs.pdf"
+    pages |> should contain "Document → Page 1 → paragraph (P) \"First paragraph of the document.\""
+    pages |> should contain "Document → Page 1 → content not in the tags"
     // Legibyl's own warnings: the element they're about.
     breadcrumbs "libreoffice-empty-paragraph.pdf" |> should contain "Structure tree → paragraph (P)"

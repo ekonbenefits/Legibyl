@@ -327,6 +327,17 @@ document looks exactly the same; the marker stays part of each item's text
 rather than being split into an `Lbl`, since that would mean editing the page's
 content.
 
+A tagged document whose parent tree is missing or incomplete gets a warning
+(`ParentTree.fs`, Structure-9). The parent tree says which element each piece of
+page content (and each tagged annotation) belongs to, and readers and veraPDF go
+from content to its tag through it, so without one every tag reads as untagged:
+Pages, for one, writes it `null`, and each piece of content then fails 7.1-3 as
+untagged although it's in a tag. Those failures name the element the structure
+tree gives the content, and are fixable by the matching **Rebuild the parent
+tree** fix (`parent-tree`, one of the safe ones, run first): it rebuilds the tree
+from the tags, giving each page `/StructParents` and each tagged annotation a
+`/StructParent`. Nothing on the page changes.
+
 A document that tags headings but has no bookmarks (document outline) gets a
 warning (`Bookmarks.fs`, Structure-7): readers can't jump between its sections
 from the navigation pane. The matching fix adds a bookmark for each H1 and H2,

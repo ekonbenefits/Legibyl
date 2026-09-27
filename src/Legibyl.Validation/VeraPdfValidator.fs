@@ -155,6 +155,21 @@ module internal VeraPdf =
 
     let private linkAnnotationPattern = Regex(@"\((\d+) \d+ obj PDLinkAnnot\)", RegexOptions.Compiled)
 
+    let private annotationPattern = Regex(@"\((\d+) \d+ obj PD\w*Annot\)", RegexOptions.Compiled)
+
+    let private mcidPattern = Regex(@"\{mcid:(\d+)\}", RegexOptions.Compiled)
+
+    /// PDF/UA's rules for content, and annotations, the tags don't hold: which a missing parent
+    /// tree makes fail even where the tags do hold them.
+    let private untaggedContentRules = set [ PdfProfile.PdfUa1, "7.1-3"; PdfProfile.PdfUa2, "8.2.2-1" ]
+
+    let private untaggedAnnotationRules =
+        set
+            [ PdfProfile.PdfUa1, "7.18.1-2"
+              PdfProfile.PdfUa1, "7.18.5-1"
+              PdfProfile.PdfUa2, "8.2.5.20-1"
+              PdfProfile.PdfUa2, "8.9.2.3-1" ]
+
     /// The link annotations a finding's location names, by object number.
     let private linkAnnotationNumbers (locationContext: string | null) =
         match locationContext with
@@ -178,6 +193,8 @@ module internal VeraPdf =
                 // LinkTargets can place, and table-of-contents links whose headings the
                 // HeadingsFromToc fix tags (it points them at the headings).
                 let linkTargets = lazy (LinkTargets.find document context)
+                // What the tags hold, where the parent tree doesn't say so: rebuilding it fixes those.
+                let unresolvedTags = lazy (ParentTree.find document context |> Option.map (fun _ -> ParentTree.tagged document context))
                 let tocHeadingLinks =
                     lazy
                         (match TocHeadings.analyse document context with
@@ -227,6 +244,25 @@ module internal VeraPdf =
                                 else not (Set.intersect links (LinkTargets.linkNumbers linkTargets.Value)).IsEmpty
                             let options = if placed then options ||| PdfFixOptions.LinkTargets else options
                             if not (Set.intersect links tocHeadingLinks.Value).IsEmpty then options ||| PdfFixOptions.HeadingsFromToc else options
+                        | _ -> options
+                    let options =
+                        match PdfUaTarget.ofSpecification assertion.Specification with
+                        | Some standard when untaggedContentRules.Contains((standard, assertion.RuleId)) ->
+                            match unresolvedTags.Value, assertion.Location, assertion.LocationContext with
+                            | Some tags, NonNull location, NonNull locationContext when location.PageNumber.HasValue ->
+                                let mcids = mcidPattern.Matches locationContext
+                                if mcids.Count > 0 && tags.MarkedContent.ContainsKey((location.PageNumber.Value, int mcids[mcids.Count - 1].Groups[1].Value)) then
+                                    options ||| PdfFixOptions.ParentTree
+                                else
+                                    options
+                            | _ -> options
+                        | Some standard when untaggedAnnotationRules.Contains((standard, assertion.RuleId)) ->
+                            match unresolvedTags.Value, assertion.LocationContext with
+                            | Some tags, NonNull locationContext when
+                                annotationPattern.Matches locationContext |> Seq.exists (fun m -> tags.Objects.ContainsKey(int m.Groups[1].Value))
+                                ->
+                                options ||| PdfFixOptions.ParentTree
+                            | _ -> options
                         | _ -> options
                     // Every "natural language ... shall be determined" rule falls back on /Lang.
                     if languageUndeclared && assertion.Message.Contains("Natural language", StringComparison.OrdinalIgnoreCase) then
