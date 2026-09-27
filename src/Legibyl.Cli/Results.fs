@@ -72,7 +72,10 @@ type ValidationResult =
       /// With --structure: the tagged structure tree; null if the file has none (untagged).
       Structure: StructureNode | null
       /// With --structure: why reading the tree failed, if it did.
-      StructureError: string | null }
+      StructureError: string | null
+      /// What veraPDF logged while it read the file (a font it couldn't read, nested marked
+      /// content), counted; not findings. Empty when none, null when errored.
+      ValidatorNotes: IReadOnlyList<ValidatorNote> | null }
 
     /// A result with only the file and what it's checked against filled in.
     static member Empty(file, target: Target) =
@@ -88,7 +91,8 @@ type ValidationResult =
           Warnings = null
           Error = null
           Structure = null
-          StructureError = null }
+          StructureError = null
+          ValidatorNotes = null }
 
 /// A document's standing against its profile: whether it complies, and how many checks failed.
 type Compliance = { IsCompliant: bool; FailedCount: int }
@@ -129,7 +133,9 @@ type RepairResult =
       Error: string | null
       /// The file as it was, and the repaired copy (validated again), when there's one.
       Before: Compliance option
-      After: Compliance option }
+      After: Compliance option
+      /// What veraPDF logged while it read the file as it was (see ValidationResult); empty for none.
+      ValidatorNotes: IReadOnlyList<ValidatorNote> }
 
 /// `structure`'s result for one file: its tagged structure tree; null (and no error) if it has
 /// none, i.e. it's untagged.

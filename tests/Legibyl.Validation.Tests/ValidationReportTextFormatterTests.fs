@@ -61,7 +61,8 @@ let ``BuildReport includes locations for each failed finding`` () =
                    Clause = "7.2"
                    TestNumber = 3
                    ErrorMessage = null
-                   LocationContext = null } |] }
+                   LocationContext = null } |]
+          Notes = [||] }
 
     let text = ValidationReportTextFormatter.BuildReport report
 

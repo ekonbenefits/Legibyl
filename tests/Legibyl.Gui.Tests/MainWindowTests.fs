@@ -275,3 +275,32 @@ let ``Check Again checks the open PDF again, and needs one open`` () =
         enabledOpen |> should be True
         tip |> should equal "Check this PDF again, after it's changed on disk."
         checkedAgain |> should be True)
+
+[<Fact>]
+let ``what veraPDF noted reading the file is under the banner, not among the findings`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "list.pdf")
+    do
+        // Marked content inside marked content, which veraPDF logs as it reads the page.
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf))
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(document.AddNewPage())
+        for tag, mcid in [ "P", 0; "Span", 1 ] do
+            let properties = iText.Kernel.Pdf.PdfDictionary()
+            properties.Put(iText.Kernel.Pdf.PdfName.MCID, iText.Kernel.Pdf.PdfNumber mcid) |> ignore
+            canvas.BeginMarkedContent(iText.Kernel.Pdf.PdfName tag, properties) |> ignore
+        canvas.BeginText().SetFontAndSize(iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA, 12f)
+            .MoveText(72.0, 700.0).ShowText("Item 1").EndText().EndMarkedContent().EndMarkedContent()
+        |> ignore
+    try
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let headers = descendants<Expander> window |> List.map (fun e -> string e.Header)
+            let findings = HeadlessWindow.findings window |> List.map _.Violation.Message
+            window.Close()
+
+            headers |> should equal [ "veraPDF noted 1 thing while reading the file" ]
+            findings |> List.exists (fun m -> m.Contains "Nested MCID") |> should be False)
+    finally
+        Directory.Delete(folder, true)

@@ -70,6 +70,15 @@ location pins down something drawn on the page — marked content (`{mcid:N}`),
 a structure element, or an annotation — Legibyl also works out its bounding
 box (`RuleViolation.Geometry`, in `FindingGeometry.fs`).
 
+veraPDF logs through `java.util.logging`, which IKVM would print to the console.
+Legibyl replaces the root logger's console handler with its own
+(`ValidatorLog.fs`), so nothing veraPDF logs reaches the console. What it logs at
+WARNING and above while validating a file (a font it couldn't read, marked content
+nested in marked content) is kept for that validation instead, counted by message,
+as `ValidationReport.Notes`: the GUI lists them under the banner ("veraPDF noted 1
+thing while reading the file"), the CLI as `validatorNotes`. They're not findings:
+no rule, not counted, nothing to dismiss.
+
 ## Solution layout
 
 ```
@@ -806,7 +815,12 @@ every file against `--ua 1` or `--ua 2`. `--format json|text`, and `--output
 against (`standard`, `flavourId`), the file's `pdfVersion`, and why
 (`standardFrom`: `file`, or `--ua`); `fix` and `layout apply` choose the same way,
 and say the same. `--structure` also includes each file's structure tree, as
-`structure` gives it. Example JSON output (one non-compliant file):
+`structure` gives it. `validatorNotes` lists what veraPDF logged while it read the
+file, counted (e.g. `{ "level": "WARNING", "logger": "OperatorParser", "message":
+"Content stream (object 16 0 obj): Nested MCID", "count": 13 }`); the text format
+lists them after the findings, and `--verbose` (on `validate` and `fix`) prints
+each as it comes on stderr, which otherwise stays quiet. Example JSON output (one
+non-compliant file):
 
 ```json
 [
@@ -837,7 +851,8 @@ and say the same. `--structure` also includes each file's structure tree, as
     "warnings": [],
     "error": null,
     "structure": null,
-    "structureError": null
+    "structureError": null,
+    "validatorNotes": []
   }
 ]
 ```

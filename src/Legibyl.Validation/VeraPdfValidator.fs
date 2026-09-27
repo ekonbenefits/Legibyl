@@ -26,6 +26,8 @@ module internal VeraPdf =
         if not initialised then
             lock initLock (fun () ->
                 if not initialised then
+                    // Before veraPDF logs anything: what it logs is kept, not printed.
+                    ValidatorLog.install ()
                     VeraGreenfieldFoundryProvider.initialise ()
                     // Each validation profile is shared process-wide and builds its rule lookup
                     // tables on first use, without locking: a rebuild clears the table while
@@ -396,7 +398,8 @@ module internal VeraPdf =
           // The caller chose it; one that detected it (PdfUaTarget.detect) says so.
           ProfileDetected = false
           TotalAssertions = result.getTotalAssertions ()
-          Assertions = List.toArray (withLegibylAnalysis analysis assertions) }
+          Assertions = List.toArray (withLegibylAnalysis analysis assertions)
+          Notes = [||] }
 
     let createTemporaryPdfPath (outputPath: string) =
         let prefix =
@@ -552,7 +555,10 @@ type VeraPdfValidator() =
         let foundry = Foundries.defaultInstance ()
         let analysis = startLegibylAnalysis pdfPath
         try
-            wrapErrors $"veraPDF failed to validate '{pdfPath}'" (fun () ->
+            // What veraPDF logs while it reads the file goes on the report, not the console.
+            let report, notes =
+              ValidatorLog.collecting (fun () ->
+                wrapErrors $"veraPDF failed to validate '{pdfPath}'" (fun () ->
                 use parser = foundry.createParser (java.io.File pdfPath, flavour)
                 // Report every failure (-1: no per-rule limit) and don't log passed checks.
                 // Once veraPDF has recorded 10,000 results it keeps only the first failure of
@@ -568,7 +574,8 @@ type VeraPdfValidator() =
                             | :? GFModelParser as parser -> try parser.getPDDocument().getNumberOfPages () with _ -> 0
                             | _ -> 0
                         withProgress validator pageCount progress (fun () -> validator.validate parser)
-                toReport pdfPath profile result (analysis.GetAwaiter().GetResult()))
+                toReport pdfPath profile result (analysis.GetAwaiter().GetResult())))
+            { report with Notes = Array.ofList notes }
         finally
             closeLegibylAnalysis analysis
 
@@ -754,6 +761,12 @@ type VeraPdfValidator() =
         ensureExists pdfPath
         ensureInitialised ()
         wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath progress)
+
+    /// Whether to print what veraPDF logs to stderr as it comes, as well as keeping it on the
+    /// report's Notes (the CLI's --verbose). Off: nothing veraPDF logs reaches the console.
+    static member EchoLog
+        with get () = ValidatorLog.echo
+        and set (value: bool) = ValidatorLog.echo <- value
 
     /// The veraPDF version its results come from (stamped from VeraPdfVersion in
     /// Directory.Build.props).

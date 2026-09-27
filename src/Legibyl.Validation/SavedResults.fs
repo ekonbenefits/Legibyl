@@ -45,7 +45,10 @@ let ofReport (report: ValidationReport) (hash: string) (checkedAt: DateTime) : R
                    | Null -> null
                  Element = finding.Element
                  FixOptions = int finding.FixOptions
-                 ErrorMessage = finding.ErrorMessage } |] }
+                 ErrorMessage = finding.ErrorMessage } |]
+      Notes =
+        if report.Notes.Count = 0 then null
+        else [| for note in report.Notes -> { Level = note.Level; Logger = note.Logger; Message = note.Message; Count = note.Count } |] }
 
 /// Whether saved is the result for the file with hash, as this build would give it against profile.
 let isCurrent (saved: ReviewFile.SavedValidation) (hash: string) (profile: PdfProfile) =
@@ -87,4 +90,8 @@ let toReport (saved: ReviewFile.SavedValidation) (pdfPath: string) : ValidationR
                    | NonNull [| page; left; bottom; right; top |] ->
                        { PageNumber = int page; Left = left; Bottom = bottom; Right = right; Top = top }
                    | _ -> null
-                 Element = finding.Element } |] }
+                 Element = finding.Element } |]
+      Notes =
+        match saved.Notes with
+        | NonNull notes -> [| for note in notes -> { Level = note.Level; Logger = note.Logger; Message = note.Message; Count = note.Count } |]
+        | Null -> [||] }

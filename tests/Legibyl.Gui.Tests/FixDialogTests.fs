@@ -32,7 +32,8 @@ let private report (findings: RuleViolation list) =
       ProfileDetected = true
       IsCompliant = false
       TotalAssertions = 100
-      Assertions = List.toArray findings }
+      Assertions = List.toArray findings
+      Notes = [||] }
 
 let private lines (checkBox: CheckBox) =
     checkBox.GetVisualDescendants()

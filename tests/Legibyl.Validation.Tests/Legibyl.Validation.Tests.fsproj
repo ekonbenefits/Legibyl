@@ -30,6 +30,7 @@
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
     <Compile Include="EmptyFiguresTests.fs" />
+    <Compile Include="ValidatorNotesTests.fs" />
     <Compile Include="LayoutSuggestionsTests.fs" />
     <Compile Include="LayoutTaggingTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />
