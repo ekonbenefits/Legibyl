@@ -26,6 +26,35 @@
         <RemoveFolder Id="CleanUpShortCut" Directory="InstallProgramMenuFolder" On="uninstall" />
       </Component>
 
+      <!--
+        Offers Legibyl for PDFs under right-click › Open with, without becoming their default app:
+        a file type of its own (Legibyl.pdf) that opens a PDF with the path as its argument, listed
+        among .pdf's OpenWithProgids, and the app's own entry saying it takes .pdf. Removed on
+        uninstall with the rest.
+      -->
+      <Component Id="PdfOpenWithComponent" Guid="*">
+        <RegistryKey Root="HKLM" Key="Software\Classes\Legibyl.pdf">
+          <RegistryValue Type="string" Value="PDF document" KeyPath="yes" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="&quot;[#MainExe]&quot;,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[#MainExe]&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- The values' data isn't read: only their names are. -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pdf\OpenWithProgids" Name="Legibyl.pdf" Type="string" Value="Legibyl" />
+        <RegistryKey Root="HKLM" Key="Software\Classes\Applications\Legibyl.Gui.exe">
+          <RegistryValue Name="FriendlyAppName" Type="string" Value="Legibyl" />
+          <RegistryKey Key="SupportedTypes">
+            <RegistryValue Name=".pdf" Type="string" Value="Legibyl" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[#MainExe]&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+      </Component>
+
       <!-- Everything else from the self-contained publish output (IKVM.Java.dll, translated jar, .NET runtime files, etc.) -->
       <Files Include="$(var.GuiPublishDir)\**\*">
         <Exclude Files="$(var.GuiPublishDir)\Legibyl.Gui.exe" />

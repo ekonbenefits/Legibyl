@@ -30,6 +30,7 @@
     <Compile Include="BusyStatusTests.fs" />
     <Compile Include="SuggestedStructureTests.fs" />
     <Compile Include="DocumentWindowsTests.fs" />
+    <Compile Include="RecentFilesTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -25,6 +25,7 @@
     <Compile Include="DocumentReview.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="LinkTitleOffer.fs" />
+    <Compile Include="RecentFiles.fs" />
     <Compile Include="MainWindow.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
@@ -56,6 +57,20 @@
     <CFBundleIconFile>Legibyl.icns</CFBundleIconFile>
     <NSHighResolutionCapable>true</NSHighResolutionCapable>
   </PropertyGroup>
+
+  <!--
+    Declares that Legibyl opens PDFs, so Finder offers it under Open With, as an alternative
+    (LSHandlerRank Alternate: it never becomes their default app). Dotnet.Bundle has no setting
+    for document types, so they're added to the Info.plist it writes.
+  -->
+  <Target Name="AddPdfDocumentType" AfterTargets="BundleApp">
+    <PropertyGroup>
+      <InfoPlist>$(PublishDir)$(CFBundleName).app/Contents/Info.plist</InfoPlist>
+      <PlistBuddy>/usr/libexec/PlistBuddy</PlistBuddy>
+    </PropertyGroup>
+    <Exec Command="$(PlistBuddy) -c &quot;Delete :CFBundleDocumentTypes&quot; &quot;$(InfoPlist)&quot;" IgnoreExitCode="true" StandardErrorImportance="low" StandardOutputImportance="low" />
+    <Exec Command="$(PlistBuddy) -c &quot;Add :CFBundleDocumentTypes array&quot; -c &quot;Add :CFBundleDocumentTypes:0 dict&quot; -c &quot;Add :CFBundleDocumentTypes:0:CFBundleTypeName string PDF document&quot; -c &quot;Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer&quot; -c &quot;Add :CFBundleDocumentTypes:0:LSHandlerRank string Alternate&quot; -c &quot;Add :CFBundleDocumentTypes:0:LSItemContentTypes array&quot; -c &quot;Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string com.adobe.pdf&quot; &quot;$(InfoPlist)&quot;" />
+  </Target>
 
   <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
     <None Include="..\..\assets\Legibyl.icns" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

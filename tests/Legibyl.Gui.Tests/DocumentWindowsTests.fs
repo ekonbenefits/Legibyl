@@ -67,7 +67,51 @@ let ``the File menu opens, closes, saves and exports, in step with the buttons``
             let saveAtFirst, exportAtFirst = enabled "Save", enabled "Export…"
             window.Close()
 
-            items |> List.map fst |> should equal [ "Open…"; "Close Window"; "Save"; "Export…" ]
+            items |> List.map fst |> should equal [ "Open…"; "Open Recent"; "Close Window"; "Save"; "Export…" ]
             // Nothing to save or export until there's a change or a fix chosen.
             saveAtFirst |> should be False
             exportAtFirst |> should be False))
+
+[<Fact>]
+let ``a PDF asked for before the window is shown opens once it is, in an empty window first`` () =
+    withTwoPdfs (fun first second ->
+        onUiThread (fun () ->
+            // As Finder can ask, launching the app: before its window is up.
+            let window = MainWindow(Width = 1200.0, Height = 720.0)
+            let opening = window.OpenFileAsync first
+            window.Show()
+            let report = wait opening
+            // An empty window is used before a new one is made.
+            let empty = HeadlessWindow.show 1200.0 720.0
+            let shownIn, _ = wait (MainWindow.Open(DocumentShell.Shared, second, window))
+            let reused = obj.ReferenceEquals(shownIn, empty)
+            window.Close()
+            empty.Close()
+
+            report.IsSome |> should be True
+            window.FilePath |> should equal (Some first)
+            reused |> should be True))
+
+[<Fact>]
+let ``opened PDFs are listed under Open Recent, newest first`` () =
+    withTwoPdfs (fun first second ->
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window first
+            let other, _ = wait (MainWindow.Open(DocumentShell.Shared, second, window))
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            let recent = (fileMenu window |> List.find (fst >> (=) "Open Recent") |> snd).Menu |> nonNull
+            let entries =
+                [ for item in recent.Items do
+                      match item with
+                      | :? NativeMenuItemSeparator -> ()
+                      | :? NativeMenuItem as item -> string item.Header, string item.ToolTip
+                      | _ -> () ]
+            other.Close()
+            window.Close()
+
+            // Each entry's full path is its tooltip. Other tests (sharing the UI thread) open
+            // PDFs too, so only the order of these two is certain.
+            let at (pdf: string) = entries |> List.findIndex (fun (_, path) -> path = Path.GetFullPath pdf)
+            at second |> should be (lessThan (at first))
+            entries |> List.last |> fst |> should equal "Clear Menu"))

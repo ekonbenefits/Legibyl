@@ -118,7 +118,9 @@ the app runs standalone with no external Java installation.
 
 `installer/Legibyl.Gui.Installer` builds a WiX v6 MSI (`LegibylSetup.msi`)
 that installs the self-contained GUI to `Program Files\Ekon Benefits\Legibyl`,
-with Start Menu and Desktop shortcuts. It publishes the GUI itself as part of
+with Start Menu and Desktop shortcuts, and offers it for PDFs under
+right-click › **Open with** (a `Legibyl.pdf` file type listed in `.pdf`'s
+`OpenWithProgids`; it never becomes their default app). It publishes the GUI itself as part of
 the build (no separate publish step needed):
 
 ```powershell
@@ -135,7 +137,11 @@ installed machine, not just in this source repository.
 
 The GUI project builds a self-contained `Legibyl.app` with
 [Dotnet.Bundle](https://github.com/egramtel/dotnet-bundle) (Info.plist values
-are in `Legibyl.Gui.fsproj`, icon in `assets/Legibyl.icns`). Run it on a Mac:
+are in `Legibyl.Gui.fsproj`, icon in `assets/Legibyl.icns`). Its Info.plist
+declares PDFs as documents it can view, ranked as an alternative, so Finder
+offers it under **Open With** without making it their default app; Dotnet.Bundle
+has no setting for that, so the `AddPdfDocumentType` target adds it after the
+bundle is built. Run it on a Mac:
 
 ```sh
 dotnet msbuild src/Legibyl.Gui/Legibyl.Gui.fsproj -t:BundleApp -restore -p:Configuration=Release -p:RuntimeIdentifier=osx-arm64 -p:SelfContained=true -p:PublishDir=../../artifacts/macos/osx-arm64/
@@ -158,13 +164,17 @@ PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
 ## GUI results view
 
 Each PDF opens in a window of its own, with its review. Opening a PDF
-(**Browse…**, dropping one on the window, **File › Open…**, or naming PDFs on
-the command line) uses the window it's dropped on if that has none yet, brings
-forward the window already showing it, or else opens a new window. An exported
+(**Browse…**, dropping one on the window, **File › Open…** or **Open Recent**,
+naming PDFs on the command line, or **Open With › Legibyl** in Finder or
+Explorer) uses the window it's dropped on if that has none yet, brings forward
+the window already showing it, uses a window showing no PDF yet, or else opens
+a new window. An exported
 copy opens in its own window too, so the original stays open beside it. Each
 window closes on its own, asking about its review's changes not saved first.
 The **File** menu (the menu bar on macOS, the top of the window elsewhere) has
-**Open…**, **Close Window**, **Save** and **Export…**, with ⌘/Ctrl+O, W, S and E.
+**Open…**, **Open Recent** (the last ten PDFs opened, kept in `recent.json` in
+the app's local data folder), **Close Window**, **Save** and **Export…**, with
+⌘/Ctrl+O, W, S and E.
 
 While a file validates, the progress bar fills page by page ("Page 57 of
 675"): veraPDF checks the pages in order, and that's nearly all of its time.

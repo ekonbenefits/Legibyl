@@ -775,8 +775,25 @@ module private MainView =
                         item
                     let save = item "Save" Key.S (fun () -> if not isBusy.Current && edited.Current then saveReview () |> ignore)
                     let exportItem = item "Export…" Key.E (fun () -> if not isBusy.Current then export ())
+                    // The PDFs opened lately, each opened as File › Open… would.
+                    let recent = NativeMenu()
+                    let fillRecent () =
+                        recent.Items.Clear()
+                        let paths = RecentFiles.read ()
+                        for path, label in List.zip paths (RecentFiles.labels paths) do
+                            let entry = NativeMenuItem(label, ToolTip = path)
+                            entry.Click.Add(fun _ -> setSelectedFile path)
+                            recent.Items.Add entry
+                        if not paths.IsEmpty then recent.Items.Add(NativeMenuItemSeparator())
+                        let clear = NativeMenuItem("Clear Menu", IsEnabled = not paths.IsEmpty)
+                        clear.Click.Add(fun _ -> RecentFiles.clear ())
+                        recent.Items.Add clear
+                    fillRecent ()
+                    let refill = RecentFiles.Changed.Subscribe(fun () -> Avalonia.Threading.Dispatcher.UIThread.Post fillRecent)
+                    window.Closed.Add(fun _ -> refill.Dispose())
                     let file = NativeMenu()
                     file.Items.Add(item "Open…" Key.O (fun () -> browse ()))
+                    file.Items.Add(NativeMenuItem("Open Recent", Menu = recent))
                     file.Items.Add(NativeMenuItemSeparator())
                     file.Items.Add(item "Close Window" Key.W (fun () -> window.Close()))
                     file.Items.Add(save)
@@ -1337,10 +1354,17 @@ type MainWindow(shell: DocumentShell) as this =
 
     let openRequests: IWritable<OpenRequest option> = new State<_>(None)
     let mutable filePath: string option = None
+    // A PDF asked for before the window was shown (as Finder can, launching the app), opened once it is.
+    let mutable shown = false
+    let mutable waiting: OpenRequest option = None
 
     do
         windows.Add this
         this.Closed.Add(fun _ -> windows.Remove this |> ignore)
+        this.Opened.Add(fun _ ->
+            shown <- true
+            waiting |> Option.iter (fun request -> openRequests.Set(Some request))
+            waiting <- None)
         // Semi's column headers are larger than the 12pt cells; match them so short
         // headers aren't clipped in the narrow results pane.
         let headerStyle = Style(fun selector -> selector.OfType<DataGridColumnHeader>())
@@ -1351,7 +1375,10 @@ type MainWindow(shell: DocumentShell) as this =
                 let! window, report = MainWindow.Open(shell, path, this)
                 return (window :> Window), report
             }
-        this.Content <- view this shell openRequests (fun path -> filePath <- Some path) openElsewhere
+        let opened path =
+            filePath <- Some path
+            RecentFiles.add path
+        this.Content <- view this shell openRequests opened openElsewhere
 
     /// A window of the app's, not showing a PDF yet.
     new() = new MainWindow(DocumentShell.Shared)
@@ -1365,24 +1392,30 @@ type MainWindow(shell: DocumentShell) as this =
     /// Opens and validates a PDF in this window; its report once validated (None if it couldn't be).
     member _.OpenFileAsync(path: string) : Task<ValidationReport option> =
         let request = { Path = path; Opened = TaskCompletionSource<ValidationReport option>() }
-        openRequests.Set(Some request)
+        if shown then openRequests.Set(Some request) else waiting <- Some request
         request.Opened.Task
 
     /// The document windows open.
     static member Windows = List.ofSeq windows
 
-    /// Opens path: brings forward the window showing it, or opens it in a new window (a little
-    /// below and right of from, if given). That window, and its report once validated (None if it
-    /// was open already).
+    /// Opens path: brings forward the window showing it, else opens it in a window showing no PDF
+    /// yet, else in a new window (a little below and right of from, if given). That window, and
+    /// its report once validated (None if it was open already).
     static member Open(shell: DocumentShell, path: string, ?from: Window) : Task<MainWindow * ValidationReport option> =
         let comparison = if OperatingSystem.IsLinux() then StringComparison.Ordinal else StringComparison.OrdinalIgnoreCase
         let showing (window: MainWindow) =
             window.FilePath |> Option.exists (fun shown -> String.Equals(Path.GetFullPath shown, Path.GetFullPath path, comparison))
-        match windows |> Seq.tryFind showing with
-        | Some window ->
+        match windows |> Seq.tryFind showing, windows |> Seq.tryFind (fun window -> window.FilePath.IsNone) with
+        | Some window, _ ->
             window.Activate()
             Task.FromResult((window, None))
-        | None ->
+        | None, Some empty ->
+            empty.Activate()
+            task {
+                let! report = empty.OpenFileAsync path
+                return empty, report
+            }
+        | None, None ->
             let window = new MainWindow(shell)
             match from with
             | Some from ->
