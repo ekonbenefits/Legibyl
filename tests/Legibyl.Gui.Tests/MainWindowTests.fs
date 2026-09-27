@@ -83,10 +83,10 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
 [<Fact>]
 let ``findings that can't be fixed show no fix icon or details`` () =
     onUiThread (fun () ->
-        let window = openSample "pages-clipped-paragraphs.pdf"
+        let window = openSample "pdfua1-fail.pdf"
         HeadlessWindow.expandGroups window
         let rows = descendants<DataGridRow> (HeadlessWindow.resultsGrid window)
-        // The first row is untagged content, which no fix addresses.
+        // The first row is content marked both as an artifact and tagged, which no fix addresses.
         let firstRow = rows |> List.find (fun row -> row.GetIndex() = 0)
         let icons = descendants<Path> firstRow |> List.map AutomationProperties.GetName
         let detailHeadings = descendants<TextBlock> window |> List.map _.Text
