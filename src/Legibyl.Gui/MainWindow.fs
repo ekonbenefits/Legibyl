@@ -334,16 +334,23 @@ module private MainView =
     let private fixIconFor (violation: RuleViolation) =
         if violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then wandIcon else fixIcon
 
-    /// The details pane's "Fixable" heading, anchored by how it's fixed.
-    let fixableHeading (violation: RuleViolation) (heading: IView) =
-        withIcon (decorativeIcon (fixIconFor violation) Theme.Tokens.Primary 14.0) heading
+    /// How a finding is fixed, named after the button that does it: "Auto fix", or, for tagging
+    /// from the suggested structure, "Suggest Structure" (the heading adds "fixes it").
+    let fixedBy (violation: RuleViolation) =
+        if violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then "Suggest Structure" else "Auto fix"
+
+    /// The details pane's heading for how a finding is fixed, anchored by its icon.
+    let fixableHeading (violation: RuleViolation) =
+        let text = if violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then "Suggest Structure fixes it" else "Auto fix"
+        withIcon
+            (decorativeIcon (fixIconFor violation) Theme.Tokens.Primary 14.0)
+            (TextBlock.create [ TextBlock.text text; TextBlock.fontWeight FontWeight.SemiBold ])
 
     /// A wand for findings suggesting the structure fixes, a wrench for those an auto fix
     /// repairs; nothing otherwise.
     let fixableIcon (row: RuleViolationRow) : IView =
         if row.Violation.IsFixable then
-            let how = if row.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then "Fixed by Suggest Structure…" else "Fixable"
-            gridIcon (fixIconFor row.Violation) Theme.Tokens.Primary $"{how}: {row.Fixable}"
+            gridIcon (fixIconFor row.Violation) Theme.Tokens.Primary $"{fixedBy row.Violation}: {row.Fixable}"
         else
             TextBlock.create []
 
@@ -1400,7 +1407,7 @@ module private MainView =
                                     Border.verticalAlignment VerticalAlignment.Top
                                     match fixable with
                                     | first :: _ when fixable.Length < group.Findings.Length ->
-                                        ToolTip.tip $"{fixable.Length} of {group.Findings.Length} fixable: {first.Fixable}"
+                                        ToolTip.tip $"{fixedBy first.Violation}, {fixable.Length} of {group.Findings.Length} places: {first.Fixable}"
                                     | _ -> ()
                                     Border.child (
                                         match fixable with
@@ -1582,8 +1589,8 @@ module private MainView =
                         for view in
                             [ if failures > 0 then pill Theme.Tokens.Danger (plural failures "failure") :> IView
                               if warnings > 0 then pill Theme.Tokens.Warning (plural warnings "warning")
-                              if fixable > 0 then badged autoFixesIcon $"{fixable} fixable" 0
-                              if byTagging > 0 then badged (Some(wandIcon, Theme.Tokens.Primary)) $"{byTagging} by tagging" 0 ] ->
+                              if fixable > 0 then badged autoFixesIcon $"{fixable} by auto fix" 0
+                              if byTagging > 0 then badged (Some(wandIcon, Theme.Tokens.Primary)) $"{byTagging} by Suggest Structure" 0 ] ->
                             Border.create [ Border.margin (0.0, 0.0, 10.0, 0.0); Border.child view ] ]
                 ]
 
@@ -1733,7 +1740,7 @@ module private MainView =
                             match group.Fixable with
                             | [] -> ()
                             | fixable ->
-                                fixableHeading fixable.Head.Violation (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
+                                fixableHeading fixable.Head.Violation
                                 |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
                                 let how = if fixable.Length = group.Findings.Length then "" else $"{fixable.Length} of {group.Findings.Length} places: "
                                 // Each way its findings are fixed, as some rules' are more than one.
@@ -1883,7 +1890,7 @@ module private MainView =
                                                 detailText guide.WhatToDo false []
                                         | None -> ()
                                         if row.Violation.IsFixable then
-                                            fixableHeading row.Violation (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
+                                            fixableHeading row.Violation
                                             |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
                                             // Tagging from the layout takes a detector's guesses: they're
                                             // worth checking first.

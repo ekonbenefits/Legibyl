@@ -282,16 +282,17 @@ The results list is a row per rule, in the order each is first found by page
 document-level metadata checks — come last), with its findings under it. A rule's
 row keeps what it is in view even when it's collapsed (as one found more than
 three times starts): a strip of its colour down its edge (red for failures,
-orange for warnings), its type's icon, how it's fixed (a wrench, or a wand for
-tagging from the suggested structure; "4 of 6 fixable" in its tooltip when only
-some are), how many as a badge, and the rule (clause-test and message, cut to two
+orange for warnings), its type's icon, how it's fixed (a wrench, **Auto fix**,
+or a wand, **Suggest Structure**, as the buttons are named; "Auto fix, 4 of 6
+places" in its tooltip when only some are), how many as a badge, and the rule (clause-test and message, cut to two
 lines). Its arrow, or Right and Left, opens and closes it. Selecting it shows the
-rule: its message, **What it means**, how it's fixed or **What to do**, how many
+rule: its message, **What it means**, how it's fixed (headed **Auto fix** or
+**Suggest Structure fixes it**) or **What to do**, how many
 places and on which pages, and its first finding's page. A finding's row says only
 its page and where it is (dimmed, "(dismissed)", when it's a dismissed warning
 shown), with a fix icon only where its rule's findings differ in that. Above the
-list, pills count the failures and warnings, and how many are fixable, and by
-tagging. Selecting a finding shows its full, wrapped
+list, pills count the failures and warnings, and how many are fixed by auto fix,
+and by Suggest Structure. Selecting a finding shows its full, wrapped
 message, friendly location (ending with what's there: the element that owns the
 content, like paragraph (P) "The garden in spring…", or content not in the tags and
 what's drawn there), raw veraPDF location context, and page preview

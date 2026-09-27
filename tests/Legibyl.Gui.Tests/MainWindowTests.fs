@@ -58,13 +58,13 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
         // The rule's row says what it is and how it's fixed; the finding under it, its page.
         let ruleRow = firstRuleContainer window
         let icons = descendants<Path> ruleRow
-        let expected = [ "Warning"; "Fixable: Remove empty paragraph tags" ]
+        let expected = [ "Warning"; "Auto fix: Remove empty paragraph tags" ]
         icons |> List.map AutomationProperties.GetName |> should equal expected
         icons |> List.map (fun icon -> string (ToolTip.GetTip icon)) |> should equal expected
         let findingRow = containerFor window (function FindingItem row -> obj.ReferenceEquals(row, (HeadlessWindow.findings window).Head) | _ -> false)
         descendants<TextBlock> findingRow |> List.map _.Text |> should contain "Page 1"
 
-        // Warning icon by the title and a wrench by "Fixable"; the text says the same,
+        // Warning icon by the title and a wrench by "Auto fix"; the text says the same,
         // so screen readers skip them.
         let anchors = detailIcons window
         anchors |> should haveLength 2
@@ -72,6 +72,9 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
 
         let details = descendants<TextBox> window |> List.map _.Text
         details |> should contain "Remove empty paragraph tags. Choose it in Auto Fixes…, then Export… a copy of this PDF."
+        let headings = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
+        headings |> should contain "Auto fix"
+        headings |> should not' (contain "Fixable")
 
         let preview = descendants<Image> window |> List.tryFind (fun image -> not (isNull image.Source))
         // The selected warning's page preview is shown.
@@ -89,7 +92,8 @@ let ``findings that can't be fixed show no fix icon or details`` () =
         window.Close()
         anchors |> should haveLength 1
         icons |> should equal [ "Failure" ]
-        detailHeadings |> should not' (contain "Fixable"))
+        detailHeadings |> should not' (contain "Auto fix")
+        detailHeadings |> should not' (contain "Suggest Structure fixes it"))
 
 let private texts (window: Window) = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
 
@@ -177,14 +181,14 @@ let ``each rule's row shows its type, how it's fixed and how many, even collapse
         many.Findings.Length |> should be (greaterThan 3)
         expanded |> should be False
         icons.Head |> should equal "Failure"
-        icons |> List.exists (fun name -> name.StartsWith "Fixable") |> should be True
+        icons |> List.exists (fun name -> name.StartsWith "Auto fix") |> should be True
         texts |> should contain (string many.Findings.Length)
         // The warning's row, as a warning.
         let _, _, warningIcons, _ = rows |> List.find (fun (g, _, _, _) -> g.Severity = FindingSeverity.Warning)
         warningIcons.Head |> should equal "Warning"
         // No fix icon where nothing fixes it.
         for group, _, icons, _ in rows do
-            (icons |> List.exists (fun name -> name.StartsWith "Fixable" || name.StartsWith "Fixed by")) |> should equal (not group.Fixable.IsEmpty)
+            (icons |> List.exists (fun name -> name.StartsWith "Auto fix" || name.StartsWith "Suggest Structure")) |> should equal (not group.Fixable.IsEmpty)
         // Collapsed rules' findings aren't listed.
         findingRows |> should be (lessThan (groups |> List.sumBy (fun (g, _) -> g.Findings.Length))))
 
@@ -204,6 +208,8 @@ let ``a rule's row shows the rule, how many places and where; a finding's, its p
 
         ruleTexts |> List.exists (fun t -> t.Contains $"— {count} places, on page 1") |> should be True
         ruleTexts |> should contain "What it means"
+        // Fixed by an auto fix: said by the button's name, as a finding's is.
+        ruleTexts |> should contain "Auto fix"
         findingTexts |> should contain "Location")
 
 [<Fact>]

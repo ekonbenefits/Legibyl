@@ -191,8 +191,11 @@ let ``an untagged PDF's findings point to Suggest Structure…`` () =
             let rows = HeadlessWindow.findings window
             HeadlessWindow.selectRow window (rows |> List.findIndex (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout))
             let texts = descendants<TextBox> window |> List.map (fun t -> string t.Text)
+            let headings = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
             window.Close()
 
+            headings |> should contain "Suggest Structure fixes it"
+            headings |> should not' (contain "Auto fix")
             texts
             |> List.exists (fun t -> t.EndsWith "Open Suggest Structure… to see the headings, figures and reading order suggested for each page; Export… then tags a copy from it.")
             |> should be True))
@@ -210,7 +213,7 @@ let ``there's no Save button; Auto Fixes has the wrench its fixes have, and Sugg
             let fixedBy =
                 descendants<Shapes.Path> (HeadlessWindow.resultsList window)
                 |> List.map (fun p -> string (AutomationProperties.GetName p))
-                |> List.filter (fun n -> n.StartsWith "Fixed by Suggest Structure…")
+                |> List.filter (fun n -> n.StartsWith "Suggest Structure: ")
             window.Close()
 
             fixedBy |> should not' (be Empty)
