@@ -27,6 +27,7 @@
     <Compile Include="Bookmarks.fs" />
     <Compile Include="LinkTargets.fs" />
     <Compile Include="LinkTitles.fs" />
+    <Compile Include="ContentOperations.fs" />
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="ElementEdits.fs" />
