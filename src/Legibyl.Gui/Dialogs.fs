@@ -296,6 +296,21 @@ let chooseFixOptions
         match owner.Screens.ScreenFromWindow owner with
         | NonNull screen -> float screen.WorkingArea.Height / screen.Scaling * 0.9
         | Null -> 700.0
+    // Its size is set once it opens, room enough for most of the repairs: showing all of them
+    // then scrolls the list rather than resizing the window, which grew down from where it
+    // opened, past the bottom of the screen.
+    window.Opened.Add(fun _ ->
+        // Once it's laid out at the height its content wants.
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            (fun () ->
+                let height = min window.MaxHeight (max window.Bounds.Height 620.0)
+                window.SizeToContent <- SizeToContent.Manual
+                window.Height <- height
+                // Centred on the window it's for again, at its new height.
+                let top = owner.Position.Y + int ((owner.Bounds.Height - height) * owner.RenderScaling / 2.0)
+                window.Position <- PixelPoint(window.Position.X, max owner.Position.Y top)),
+            Avalonia.Threading.DispatcherPriority.Background
+        ))
     let found (option: PdfFixOptions) = report.FixableCount option
     /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
     /// and so can describing them from the pages they go to.

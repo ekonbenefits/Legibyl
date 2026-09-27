@@ -238,3 +238,22 @@ let ``done with nothing ticked chooses nothing, and cancelling keeps what was ch
 
         withDialog findings untickAllAndFinish |> should equal (Some PdfFixOptions.None)
         withDialogChosen (Some PdfFixOptions.AnnotationTabs) None findings ignore |> should equal None)
+
+[<Fact>]
+let ``showing all repairs keeps the dialog's size: the list scrolls instead`` () =
+    onUiThread (fun () ->
+        let mutable before = 0.0
+        let mutable after = 0.0
+        let mutable scrolls = false
+        withDialog findings (fun dialog ->
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 1.0) (fun () -> false) |> ignore
+            before <- dialog.Bounds.Height
+            (descendants<ToggleSwitch> dialog |> List.exactlyOne).IsChecked <- true
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 1.0) (fun () -> false) |> ignore
+            after <- dialog.Bounds.Height
+            let list = descendants<ScrollViewer> dialog |> List.head
+            scrolls <- list.Extent.Height > list.Viewport.Height)
+        |> ignore
+
+        after |> should equal before
+        scrolls |> should be True)
