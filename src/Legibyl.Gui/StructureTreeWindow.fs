@@ -144,7 +144,10 @@ module private StructureView =
           Edits: IReadable<RegionEdits.Edit list>
           Edit: StructureNode -> EditKind -> unit
           /// Whether it's a suggested layout, which nothing is in yet (not a tagged PDF).
-          Suggested: bool }
+          Suggested: bool
+          /// Nodes whose collapsed children are shown anyway: those above a block selected on the
+          /// page preview, to bring it into view.
+          Expanded: IReadable<StructureNode list> }
 
     /// The edits an element can take. Alt text: figures and formulas, and anything that already
     /// has alt text. Replacement text: only what already has it (like OCR'd text), since writing
@@ -441,7 +444,8 @@ module private StructureView =
     and collapsedChildren (selection: Selection) (node: StructureNode) : IView =
         Component.create("collapsed-children", fun ctx ->
             let expanded = ctx.useState false
-            if expanded.Current then
+            let opened = ctx.usePassedRead selection.Expanded
+            if expanded.Current || opened.Current |> List.exists (fun n -> obj.ReferenceEquals(n, node)) then
                 let levels = levelsWithinBudget node.Children
                 StackPanel.create [
                     StackPanel.children [
@@ -565,6 +569,50 @@ module private StructureView =
     /// A suggested region merged into its neighbour is outlined grey.
     let leftOutColor = 0x9E9E9Eu
 
+    /// Pixels per point the page preview is rendered at.
+    let previewScale = 2.0f
+
+    /// Over an element on the page preview, to say it can be clicked.
+    let private handCursor = lazy (new Cursor(StandardCursorType.Hand))
+
+    /// The smallest element on page whose region holds (x, y), in PDF points: the innermost of
+    /// nested ones (a link in its paragraph, an item in its list).
+    let nodeAt (root: StructureNode) (page: int) (x: float) (y: float) =
+        let rec all (node: StructureNode) : StructureNode seq =
+            seq {
+                yield node
+                for child in node.Children do
+                    yield! all child
+            }
+        all root
+        |> Seq.choose (fun node ->
+            match node.Geometry with
+            | NonNull g when g.PageNumber = page && x >= g.Left && x <= g.Right && y >= g.Bottom && y <= g.Top ->
+                Some(node, (g.Right - g.Left) * (g.Top - g.Bottom))
+            | _ -> None)
+        |> Seq.sortBy snd
+        |> Seq.tryHead
+        |> Option.map fst
+
+    /// Where on its page, in PDF points, a pointer is over a page preview rendered at
+    /// previewScale; None off the page (the image is scaled to fit, centred).
+    let pointOnPage (image: Image) (bitmap: Bitmap) (position: Point) =
+        let size = bitmap.Size
+        let bounds = image.Bounds.Size
+        if size.Width <= 0.0 || size.Height <= 0.0 || bounds.Width <= 0.0 || bounds.Height <= 0.0 then
+            None
+        else
+            let fit = min (bounds.Width / size.Width) (bounds.Height / size.Height)
+            let x = (position.X - (bounds.Width - size.Width * fit) / 2.0) / fit
+            let y = (position.Y - (bounds.Height - size.Height * fit) / 2.0) / fit
+            if x < 0.0 || y < 0.0 || x > size.Width || y > size.Height then
+                None
+            else
+                // The bitmap's pixels to points; PDF's y runs up from the bottom.
+                let pixels = float bitmap.PixelSize.Width / size.Width
+                let scale = float previewScale
+                Some(x * pixels / scale, (size.Height - y) * pixels / scale)
+
     /// Edits change review (Save in the main window keeps it); onEditsChanged is called after each
     /// (so the main window can count them). For a suggested layout, prefetcher finds its pages and
     /// tagged is unused.
@@ -597,6 +645,8 @@ module private StructureView =
             // The selected blocks' nodes, in document order, and the one a shift-click extends from.
             let selected = ctx.useState ([]: StructureNode list)
             let anchor = ctx.useState ((None: StructureNode option), false)
+            // Collapsed blocks opened to bring one selected on the preview into view.
+            let expanded = ctx.useState ([]: StructureNode list)
             // Each node's parent, to extend a selection over its siblings (worked out again when a
             // suggested layout's root changes).
             let parentsCache =
@@ -698,7 +748,7 @@ module private StructureView =
                                             let what = if count = 1 then "its element" else $"its {count} elements"
                                             if nodes.IsEmpty then $"Page {page}: {what}, outlined and numbered in reading order."
                                             else $"Page {page}: {what}, outlined and numbered in reading order; the selection filled."
-                                        page, decode (renderer.RenderPageWithRegions(sourceFilePath, page, outlined @ extra)), note),
+                                        page, decode (renderer.RenderPageWithRegions(sourceFilePath, page, outlined @ extra, previewScale)), note),
                                     destination |> Option.map (fun d -> let result = renderer.RenderPageWithTarget(sourceFilePath, d) in result, decode result.PngBytes))
                             if version = previewVersion.Current then
                                 match source with
@@ -819,7 +869,45 @@ module private StructureView =
                     }
                     |> ignore
 
-            let selection = { Select = select; Edits = edits; Edit = editNode; Suggested = isSuggested }
+            /// Selects the block for node, as clicking it does, opening collapsed blocks above it if
+            /// it's in one, and scrolls it into view. A node without a block of its own (a table's
+            /// row, say) selects the nearest one above it that has.
+            let selectNode (node: StructureNode) (extend: bool) =
+                let borderFor (node: StructureNode) =
+                    window.GetVisualDescendants()
+                    |> Seq.tryPick (fun v ->
+                        match v with
+                        | :? Border as border when obj.ReferenceEquals(border.Tag, node) -> Some border
+                        | _ -> None)
+                let rec ancestors (node: StructureNode) acc =
+                    match (parents ()).TryGetValue node with
+                    | true, parent -> ancestors parent (parent :: acc)
+                    | _ -> acc
+                let finish () =
+                    match node :: List.rev (ancestors node []) |> List.tryPick (fun n -> borderFor n |> Option.map (fun b -> n, b)) with
+                    | Some(shown, border) ->
+                        select shown border extend
+                        border.BringIntoView() |> ignore
+                    | None -> ()
+                match borderFor node with
+                | Some _ -> finish ()
+                | None ->
+                    expanded.Set(ancestors node [] @ expanded.Current)
+                    // Once the opened blocks are laid out.
+                    Avalonia.Threading.Dispatcher.UIThread.Post(finish, Avalonia.Threading.DispatcherPriority.Background)
+
+            /// The page preview's element under the pointer, if any.
+            let previewNodeAt (e: PointerEventArgs) =
+                match e.Source, shownPage.Current, previewImage.Current with
+                | (:? Visual as source), Some page, Some bitmap ->
+                    source.GetSelfAndVisualAncestors()
+                    |> Seq.tryPick (fun v -> match v with :? Image as image -> Some image | _ -> None)
+                    |> Option.bind (fun image ->
+                        pointOnPage image bitmap (e.GetPosition image) |> Option.map (fun point -> image, page, point))
+                    |> Option.bind (fun (image, page, (x, y)) -> nodeAt root.Current page x y |> Option.map (fun node -> image, node))
+                | _ -> None
+
+            let selection = { Select = select; Edits = edits; Edit = editNode; Suggested = isSuggested; Expanded = expanded }
 
             // For a suggested layout: how many pages are found, and the titles of the pages its QR
             // codes link to, read as they're found (if the offer before the window allowed it).
@@ -1136,7 +1224,8 @@ module private StructureView =
                                   ]
                                 ]
                                 // The selected block's page, and for a link, the page it goes to below it.
-                                let imageBox (row: int) (image: Bitmap option) =
+                                // Clicking an element on the page selects it (shift-click extends).
+                                let imageBox (row: int) (image: Bitmap option) (clickable: bool) =
                                     Border.create [
                                         Grid.row row
                                         Theme.resources
@@ -1150,6 +1239,26 @@ module private StructureView =
                                                 | Some image -> Image.source image
                                                 | None -> ()
                                                 Image.stretch Stretch.Uniform
+                                                if clickable then
+                                                    Image.onPointerPressed (
+                                                        (fun e ->
+                                                            match previewNodeAt e with
+                                                            | Some(image, node) when e.GetCurrentPoint(image).Properties.IsLeftButtonPressed ->
+                                                                e.Handled <- true
+                                                                selectNode node (e.KeyModifiers.HasFlag KeyModifiers.Shift)
+                                                            | _ -> ()),
+                                                        SubPatchOptions.Always
+                                                    )
+                                                    // A hand over an element, to say it can be clicked.
+                                                    Image.onPointerMoved (
+                                                        (fun e ->
+                                                            match e.Source with
+                                                            | :? Image as image ->
+                                                                let cursor = if (previewNodeAt e).IsSome then handCursor.Value else Cursor.Default
+                                                                if not (obj.ReferenceEquals(image.Cursor, cursor)) then image.Cursor <- cursor
+                                                            | _ -> ()),
+                                                        SubPatchOptions.Always
+                                                    )
                                             ]
                                         )
                                     ]
@@ -1157,7 +1266,7 @@ module private StructureView =
                                     Grid.row 3
                                     Grid.rowDefinitions (if targetImage.Current.IsSome then "*,Auto,*" else "*")
                                     Grid.children [
-                                        imageBox 0 previewImage.Current
+                                        imageBox 0 previewImage.Current true
                                         if targetImage.Current.IsSome then
                                             TextBlock.create [
                                                 Grid.row 1
@@ -1166,7 +1275,7 @@ module private StructureView =
                                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                                 TextBlock.margin (0.0, 8.0, 0.0, 8.0)
                                             ]
-                                            imageBox 2 targetImage.Current
+                                            imageBox 2 targetImage.Current false
                                     ]
                                 ]
                             ]
