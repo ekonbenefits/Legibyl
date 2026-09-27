@@ -32,16 +32,15 @@ let private coverage (box: StructureGeometry) (region: StructureGeometry) =
         let height = min box.Top region.Top - max box.Bottom region.Bottom
         max 0.0 width * max 0.0 height / area region
 
-/// Whether a finding can be about a block: it has a place on a page, and isn't about content
-/// that's in no element.
-let private aboutAnElement (finding: RuleViolation) =
-    not (isNull finding.Geometry)
-    && not (finding.Element |> Option.ofObj |> Option.exists (fun e -> e.StartsWith("content not in the tags", System.StringComparison.Ordinal)))
+/// Whether a finding is about content that's in no element: it goes on the piece drawn outside
+/// the tags there (an "Untagged" node; see UntaggedContent), not on an element.
+let private aboutUntagged (finding: RuleViolation) =
+    finding.Element |> Option.ofObj |> Option.exists (fun e -> e.StartsWith("content not in the tags", System.StringComparison.Ordinal))
 
 /// The findings on each block, failures first: each on the smallest element whose region holds
-/// most of the finding's (a figure's own, rather than the section it's in). Those on no block
-/// (document-wide, like the metadata, or on content not in the tags) are left out: the main
-/// window's results list them.
+/// most of the finding's (a figure's own, rather than the section it's in); one about content
+/// not in the tags, on the piece drawn outside them there. Those on no block (document-wide,
+/// like the metadata) are left out: the main window's results list them.
 let place (root: StructureNode) (findings: RuleViolation list) : IReadOnlyDictionary<StructureNode, RuleViolation list> =
     let rec all (node: StructureNode) : StructureNode seq =
         seq {
@@ -53,14 +52,14 @@ let place (root: StructureNode) (findings: RuleViolation list) : IReadOnlyDictio
     let onNodes = Dictionary<StructureNode, RuleViolation list>(HashIdentity.Reference)
     for finding in findings do
         let target =
-            if aboutAnElement finding then
-                let region = nonNull finding.Geometry
+            match finding.Geometry with
+            | NonNull region ->
+                let untagged = aboutUntagged finding
                 nodes
-                |> List.filter (fun n -> coverage (nonNull n.Geometry) region >= 0.5)
+                |> List.filter (fun n -> (n.Tag = "Untagged") = untagged && coverage (nonNull n.Geometry) region >= 0.5)
                 |> List.sortBy (fun n -> area (nonNull n.Geometry))
                 |> List.tryHead
-            else
-                None
+            | Null -> None
         match target with
         | Some node ->
             let existing = match onNodes.TryGetValue node with | true, list -> list | _ -> []

@@ -128,7 +128,8 @@ let ``RenderPageWithRegions outlines each region in its color, filling the empha
           Label = "1 P"
           Color = color
           Emphasised = emphasised
-          Marker = None }
+          Marker = None
+          Dashed = false }
 
     let png =
         renderer.RenderPageWithRegions(
@@ -151,7 +152,8 @@ let ``RenderPageWithRegions draws a region's marker at its top-right corner`` ()
           Label = "1 Figure"
           Color = 0x00C000u
           Emphasised = false
-          Marker = Some(0xE53935u, "2") }
+          Marker = Some(0xE53935u, "2")
+          Dashed = true }
 
     let png = renderer.RenderPageWithRegions(corpusFile "pdfua1-fail.pdf", 1, [ region ])
 

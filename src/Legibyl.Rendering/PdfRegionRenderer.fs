@@ -34,7 +34,9 @@ type PageRegion =
       /// Drawn filled and thicker, e.g. the selected one.
       Emphasised: bool
       /// A marker at its top-right corner, e.g. for its failures: (0xRRGGBB, its text).
-      Marker: (uint32 * string) option }
+      Marker: (uint32 * string) option
+      /// Outlined dashed, e.g. content outside every tag.
+      Dashed: bool }
 
 type IPdfRegionRenderer =
     /// Renders the page containing location as a PNG, highlighting the failing object's
@@ -120,6 +122,8 @@ module private Rendering =
         use fill = new SKPaint(Color = color.WithAlpha(if region.Emphasised then 70uy else 18uy), Style = SKPaintStyle.Fill)
         use stroke =
             new SKPaint(Color = color, Style = SKPaintStyle.Stroke, StrokeWidth = (if region.Emphasised then 4f else 2f), IsAntialias = true)
+        if region.Dashed then
+            stroke.PathEffect <- SKPathEffect.CreateDash([| 6f * scale; 4f * scale |], 0f)
         canvas.DrawRect(box, fill)
         canvas.DrawRect(box, stroke)
         use font = new SKFont(SKTypeface.Default, 11f * scale)
