@@ -129,9 +129,9 @@ let ``the auto fixes chosen are part of the review: Save keeps them for next tim
             (descendants<Button> dialog |> List.find (fun b -> string b.Content = "Done")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
             waitFor (fun () -> window.OwnedWindows.Count = 0)
             let chosen = name (button window "Auto Fixes…")
-            let canSave = (button window "Save").IsEnabled
-            (button window "Save").RaiseEvent(RoutedEventArgs Button.ClickEvent)
-            waitFor (fun () -> not (button window "Save").IsEnabled)
+            // File › Save (or ⌘S): there's no Save button.
+            let canSave = Reviews.chooseFromFileMenu window "Save"
+            waitFor (fun () -> not (window.Title.Contains "Edited"))
             window.Close()
 
             let reopened = openPdf pdf
@@ -196,3 +196,25 @@ let ``an untagged PDF's findings point to Suggest Structure…`` () =
             texts
             |> List.exists (fun t -> t.EndsWith "Open Suggest Structure… to see the headings, figures and reading order suggested for each page; Export… then tags a copy from it.")
             |> should be True))
+
+[<Fact>]
+let ``there's no Save button; Auto Fixes has the wrench its fixes have, and Suggest Structure the wand`` () =
+    onUiThread (fun () ->
+        withPdf false (fun pdf ->
+            let window = openPdf pdf
+            let labels = descendants<Button> window |> List.map (fun b -> name b)
+            let icons (label: string) =
+                descendants<Shapes.Path> (button window label) |> List.length
+            let autoFixes, suggest = icons "Auto Fixes…", icons "Suggest Structure…"
+            // Findings fixed by suggesting the structure are marked with the wand too.
+            let fixedBy =
+                descendants<Shapes.Path> (HeadlessWindow.resultsGrid window)
+                |> List.map (fun p -> string (AutomationProperties.GetName p))
+                |> List.filter (fun n -> n.StartsWith "Fixed by Suggest Structure…")
+            window.Close()
+
+            fixedBy |> should not' (be Empty)
+
+            labels |> should not' (contain "Save")
+            autoFixes |> should equal 1
+            suggest |> should equal 1))
