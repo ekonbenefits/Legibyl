@@ -309,13 +309,8 @@ let find (document: PdfDocument) (page: int) (box: StructureGeometry) (sameOverl
     if page < 1 || page > document.GetNumberOfPages() then
         None
     else
-        let overlap (a: StructureGeometry) (b: StructureGeometry) =
-            let area (g: StructureGeometry) = max 0.0 (g.Right - g.Left) * max 0.0 (g.Top - g.Bottom)
-            let i = max 0.0 (min a.Right b.Right - max a.Left b.Left) * max 0.0 (min a.Top b.Top - max a.Bottom b.Bottom)
-            let u = area a + area b - i
-            if u <= 0.0 then 0.0 else i / u
         piecesOn (document.GetPage page) page
-        |> List.map (fun piece -> piece, overlap piece.Box box)
+        |> List.map (fun piece -> piece, Boxes.overlap piece.Box box)
         |> List.filter (fun (_, o) -> o >= sameOverlap)
         |> List.sortByDescending snd
         |> List.tryHead

@@ -34,13 +34,8 @@ let SameRegionOverlap = 0.6
 
 let private area (box: StructureGeometry) = max 0.0 (box.Right - box.Left) * max 0.0 (box.Top - box.Bottom)
 
-/// The intersection over union of two boxes.
-let overlap (a: StructureGeometry) (b: StructureGeometry) =
-    let width = min a.Right b.Right - max a.Left b.Left
-    let height = min a.Top b.Top - max a.Bottom b.Bottom
-    let intersection = max 0.0 width * max 0.0 height
-    let union = area a + area b - intersection
-    if union <= 0.0 then 0.0 else intersection / union
+/// The intersection over union of two boxes (a hairline's taken as 2 pt wide; see Boxes).
+let overlap (a: StructureGeometry) (b: StructureGeometry) = Boxes.overlap a b
 
 /// The edit for this region or element (not a merge): same page and tag (the one it was found
 /// with, or, once retagged, the one it was given), overlapping most.

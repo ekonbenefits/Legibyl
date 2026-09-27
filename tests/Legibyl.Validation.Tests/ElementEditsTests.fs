@@ -342,3 +342,35 @@ let ``a title given for a tagged PDF 2.0 file passes PDF/UA-2's title rules`` ()
     |> ignore
 
     titleRules output.Path PdfProfile.PdfUa2 |> should be Empty
+
+[<Fact>]
+let ``a hairline's box (no width) is found again: it overlaps itself, and not its neighbours`` () =
+    let rule = box (47.0, 70.0, 47.0, 754.0)
+    Boxes.overlap rule rule |> should equal 1.0
+    Boxes.overlap rule (box (47.2, 70.0, 47.2, 754.0)) |> should be (greaterThan ElementEdits.SameElementOverlap)
+    Boxes.overlap rule (box (565.0, 70.0, 565.0, 754.0)) |> should equal 0.0
+
+[<Fact>]
+let ``a rule tagged as a figure (a hairline) can be made not read`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.SetTagged() |> ignore
+        let page = document.AddNewPage PageSize.LETTER
+        let documentElement = document.GetStructTreeRoot().AddKid(iText.Kernel.Pdf.Tagging.PdfStructElem(document, PdfName.Document))
+        let figure = documentElement.AddKid(iText.Kernel.Pdf.Tagging.PdfStructElem(document, PdfName.Figure, page))
+        let reference = iText.Kernel.Pdf.Tagging.PdfMcrNumber(page, figure)
+        figure.AddKid reference |> ignore
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber(reference.GetMcid())) |> ignore
+        // A vertical rule down the page, tagged as a figure.
+        PdfCanvas(page).BeginMarkedContent(PdfName.Figure, properties).MoveTo(47.0, 70.0).LineTo(47.0, 754.0).Stroke().EndMarkedContent() |> ignore
+    let ruleBox =
+        VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Figure") |> _.Geometry |> nonNull
+    (ruleBox.Right - ruleBox.Left) |> should be (lessThan 1.0)
+
+    let result = applyEdits input.Path output.Path [ { altEdit with Box = ruleBox; Alt = null; Retag = "Artifact" } ]
+
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.exists (fun n -> n.Tag = "Figure") |> should be False
