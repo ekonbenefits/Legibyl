@@ -118,30 +118,15 @@ module private MainView =
 
     let noChanges = { Changes = 0; TagsFromReview = false }
 
-    /// A button's label with a count beside it (none when it's 0).
-    let badged (label: string) (count: int) : IView =
-        StackPanel.create [
-            StackPanel.orientation Orientation.Horizontal
-            StackPanel.children [
-                TextBlock.create [ TextBlock.text label; TextBlock.verticalAlignment VerticalAlignment.Center ]
-                if count > 0 then
-                    Border.create [
-                        Border.margin (6.0, 0.0, 0.0, 0.0)
-                        Border.padding (6.0, 0.0)
-                        Border.cornerRadius 8.0
-                        Border.verticalAlignment VerticalAlignment.Center
-                        Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Primary ]
-                        Border.child (
-                            TextBlock.create [
-                                TextBlock.text (string count)
-                                TextBlock.fontSize 11.0
-                                TextBlock.fontWeight FontWeight.SemiBold
-                                TextBlock.foreground Brushes.White
-                            ]
-                        )
-                    ]
-            ]
-        ]
+    /// A menu item's command: runs action when the item's chosen (from the menu bar, the in-window
+    /// menu, or a test).
+    let command (action: unit -> unit) =
+        let changed = Event<EventHandler, EventArgs>()
+        { new System.Windows.Input.ICommand with
+            member _.CanExecute _ = true
+            member _.Execute _ = action ()
+            [<CLIEvent>]
+            member _.CanExecuteChanged = changed.Publish }
 
     let createBitmap (pngBytes: byte array) =
         use stream = new MemoryStream(pngBytes)
@@ -159,6 +144,11 @@ module private MainView =
     let private fixIcon =
         Geometry.Parse
             "F1 M10.68,8.56 L17.25,15.13 A1.5,1.5 0 0 1 15.13,17.25 L8.56,10.68 A4,4 0 0 1 3.45,5.15 L5.44,7.14 L7.14,5.44 L5.15,3.45 A4,4 0 0 1 10.68,8.56 Z"
+
+    /// A magic wand (a stick, and two sparkles): for what suggesting the structure fixes.
+    let private wandIcon =
+        Geometry.Parse
+            "F1 M1.5,13.4 L9.9,5 L11,6.1 L2.6,14.5 Z M12.5,0.5 L13.3,2.7 L15.5,3.5 L13.3,4.3 L12.5,6.5 L11.7,4.3 L9.5,3.5 L11.7,2.7 Z M5,1.5 L5.5,2.5 L6.5,3 L5.5,3.5 L5,4.5 L4.5,3.5 L3.5,3 L4.5,2.5 Z"
 
     let private iconPath (icon: Geometry) (color: string) (size: float) (attrs: IAttr<Shapes.Path> list) =
         // Qualified: System.IO also defines Path.
@@ -212,16 +202,58 @@ module private MainView =
         let icon, color = severityIconAndColor violation
         withIcon (decorativeIcon icon color 18.0) title
 
-    /// The details pane's "Fixable" heading, anchored by the wrench.
-    let fixableHeading (heading: IView) =
-        withIcon (decorativeIcon fixIcon Theme.Tokens.Primary 14.0) heading
+    /// The icon for how a finding is fixed: a wand for tagging from the suggested structure, a
+    /// wrench for an auto fix.
+    let private fixIconFor (violation: RuleViolation) =
+        if violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then wandIcon else fixIcon
 
-    /// A wrench for findings an auto fix can repair; nothing otherwise.
+    /// The details pane's "Fixable" heading, anchored by how it's fixed.
+    let fixableHeading (violation: RuleViolation) (heading: IView) =
+        withIcon (decorativeIcon (fixIconFor violation) Theme.Tokens.Primary 14.0) heading
+
+    /// A wand for findings suggesting the structure fixes, a wrench for those an auto fix
+    /// repairs; nothing otherwise.
     let fixableIcon (row: RuleViolationRow) : IView =
         if row.Violation.IsFixable then
-            gridIcon fixIcon Theme.Tokens.Primary $"Fixable: {row.Fixable}"
+            let how = if row.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then "Fixed by Suggest Structure…" else "Fixable"
+            gridIcon (fixIconFor row.Violation) Theme.Tokens.Primary $"{how}: {row.Fixable}"
         else
             TextBlock.create []
+
+    /// The Auto Fixes button's icon: the wrench its fixes have in the results.
+    let autoFixesIcon = Some(fixIcon, Theme.Tokens.Primary)
+
+    /// The Suggest Structure button's icon: the wand its fixes have, white on its filled colour.
+    let suggestIcon = Some(wandIcon, "SemiColorWhite")
+
+    /// A button's label, after an icon (its geometry and colour token) if given, with a count
+    /// beside it (none when it's 0).
+    let badged (icon: (Geometry * string) option) (label: string) (count: int) : IView =
+        StackPanel.create [
+            StackPanel.orientation Orientation.Horizontal
+            StackPanel.children [
+                match icon with
+                | Some(geometry, color) -> decorativeIcon geometry color 14.0
+                | None -> ()
+                TextBlock.create [ TextBlock.text label; TextBlock.verticalAlignment VerticalAlignment.Center ]
+                if count > 0 then
+                    Border.create [
+                        Border.margin (6.0, 0.0, 0.0, 0.0)
+                        Border.padding (6.0, 0.0)
+                        Border.cornerRadius 8.0
+                        Border.verticalAlignment VerticalAlignment.Center
+                        Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Primary ]
+                        Border.child (
+                            TextBlock.create [
+                                TextBlock.text (string count)
+                                TextBlock.fontSize 11.0
+                                TextBlock.fontWeight FontWeight.SemiBold
+                                TextBlock.foreground Brushes.White
+                            ]
+                        )
+                    ]
+            ]
+        ]
 
     let gridLinesVisibility (value: DataGridGridLinesVisibility) : IAttr<DataGrid> =
         AttrBuilder<DataGrid>.CreateProperty<DataGridGridLinesVisibility>(DataGrid.GridLinesVisibilityProperty, value, ValueNone)
@@ -755,11 +787,12 @@ module private MainView =
                 (fun () ->
                     let mac = OperatingSystem.IsMacOS()
                     let item (header: string) (key: Key) (action: unit -> unit) =
-                        let item = NativeMenuItem(header)
+                        let item = NativeMenuItem(header, Command = command action)
                         if mac then item.Gesture <- KeyGesture(key, KeyModifiers.Meta)
-                        item.Click.Add(fun _ -> action ())
                         item
                     let save = item "Save" Key.S (fun () -> if not isBusy.Current && edited.Current then saveReview () |> ignore)
+                    save.ToolTip <-
+                        "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed. Closing the window asks about changes not saved."
                     let exportItem = item "Export…" Key.E (fun () -> if not isBusy.Current then export ())
                     // The PDFs opened lately, each opened as File › Open… would.
                     let recent = NativeMenu()
@@ -768,11 +801,11 @@ module private MainView =
                         let paths = RecentFiles.read ()
                         for path, label in List.zip paths (RecentFiles.labels paths) do
                             let entry = NativeMenuItem(label, ToolTip = path)
-                            entry.Click.Add(fun _ -> setSelectedFile path)
+                            entry.Command <- command (fun () -> setSelectedFile path)
                             recent.Items.Add entry
                         if not paths.IsEmpty then recent.Items.Add(NativeMenuItemSeparator())
                         let clear = NativeMenuItem("Clear Menu", IsEnabled = not paths.IsEmpty)
-                        clear.Click.Add(fun _ -> RecentFiles.clear ())
+                        clear.Command <- command RecentFiles.clear
                         recent.Items.Add clear
                     fillRecent ()
                     let refill = RecentFiles.Changed.Subscribe(fun () -> Avalonia.Threading.Dispatcher.UIThread.Post fillRecent)
@@ -1095,7 +1128,7 @@ module private MainView =
                                         TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
                                         detailText row.Message false [ TextBox.maxHeight 130.0 ]
                                         if row.Violation.IsFixable then
-                                            fixableHeading (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
+                                            fixableHeading row.Violation (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
                                             |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
                                             // Tagging from the layout takes a detector's guesses: they're
                                             // worth checking first.
@@ -1296,7 +1329,7 @@ module private MainView =
                                     | n -> $"{structureLabel}, {n} edits not in the PDF yet"
                                 let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
                                 Button.create [
-                                    Button.content (badged structureLabel changes)
+                                    Button.content (badged (if suggest then suggestIcon else None) structureLabel changes)
                                     AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, structureName, ValueNone)
                                     Button.padding (12.0, 4.0)
                                     Button.margin (0.0, 0.0, 8.0, 0.0)
@@ -1314,7 +1347,7 @@ module private MainView =
                                     Button.onClick viewStructure
                                 ]
                                 Button.create [
-                                    Button.content (badged "Auto Fixes…" chosen)
+                                    Button.content (badged autoFixesIcon "Auto Fixes…" chosen)
                                     AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, autoFixesName, ValueNone)
                                     Button.padding (12.0, 4.0)
                                     Button.margin (0.0, 0.0, 8.0, 0.0)
@@ -1322,15 +1355,6 @@ module private MainView =
                                     ToolTip.tip
                                         "Choose best-effort repairs for Export to apply, like XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
                                     Button.onClick chooseAutoFixes
-                                ]
-                                Button.create [
-                                    Button.content "Save"
-                                    Button.padding (12.0, 4.0)
-                                    Button.margin (0.0, 0.0, 8.0, 0.0)
-                                    Button.isEnabled (not busy && edited.Current)
-                                    ToolTip.tip
-                                        "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed."
-                                    Button.onClick (fun _ -> saveReview () |> ignore)
                                 ]
                                 Button.create [
                                     Button.content "Export…"

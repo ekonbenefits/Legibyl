@@ -211,7 +211,9 @@ Legibyl also adds warning rows for fixable cleanup issues that veraPDF does
 not report directly, such as empty semantic `/P` structure elements and empty
 table-of-contents entries (`TOCI`, Structure-8; an entry that still owns a link
 annotation isn't empty), and
-marks known repairable rows in the **Fixable** column. It also warns about
+marks known repairable rows in the **Fix** column: a wrench for what an auto fix
+repairs (as on the **Auto Fixes…** button), and a wand for what tagging from the
+suggested structure fixes (as on **Suggest Structure…**). It also warns about
 adjacent sibling `/P` tags that look like visual line fragments from the same
 sentence; those are intentionally warning-only because the safest repair is
 usually in the source document (for example, the original Word file) rather
@@ -288,7 +290,8 @@ when the PDF is opened again (see Saving below). Failures can't be dismissed. Th
 ### Saving: Structure, Auto Fixes, Save and Export
 
 The PDF you open is never changed. Your review of it is saved next to it, and
-the changes are written to a new copy. Four buttons under the details:
+the changes are written to a new copy. Three buttons under the details, and
+**File › Save**:
 
 - **Structure…** opens View Structure, where you make edits. For an untagged PDF
   it's **Suggest Structure…**, in the warning colour: the next step, which opens
@@ -305,7 +308,7 @@ the changes are written to a new copy. Four buttons under the details:
   first time the dialog opens the safe repairs the PDF needs start ticked (the
   same ones as the CLI's `safe`); after
   that it shows what was chosen. Its badge counts the chosen ones.
-- **Save** (⌘S / Ctrl+S) keeps your review (dismissed warnings, edits, the
+- **File › Save** (⌘S / Ctrl+S; there's no button, since closing asks) keeps your review (dismissed warnings, edits, the
   title, the auto fixes chosen) in `<name>.pdf.legibyl.json` next to the PDF, to pick up where you left
   off. Until then your changes are only in the app: the window's title says
   **Edited**, and closing it, or opening another PDF, asks whether to save them.

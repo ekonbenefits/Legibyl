@@ -113,9 +113,9 @@ let ``dismissals are kept next to the PDF once saved, and reloaded`` () =
             let before = rows window
             dismissFirstWarning window
             let editedTitle = window.Title
-            let canSave = (descendants<Button> window |> List.find (fun b -> string b.Content = "Save")).IsEnabled
             let unsaved = File.Exists(Dismissals.filePath pdf)
-            clickButton window "Save"
+            let canSave = Reviews.chooseFromFileMenu window "Save"
+            pump ()
             let savedTitle = window.Title
             close window
 
@@ -159,7 +159,8 @@ let ``a warning dismissed in the review inside a saved copy stays dismissed, unt
         onUiThread (fun () ->
             let window = openPdf pdf
             dismissFirstWarning window
-            clickButton window "Save"
+            Reviews.chooseFromFileMenu window "Save" |> ignore
+            pump ()
             close window
             // A copy carrying that review, as Export writes one.
             let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
@@ -172,7 +173,8 @@ let ``a warning dismissed in the review inside a saved copy stays dismissed, unt
             clickButton opened "Show 1 dismissed"
             rightClickRow opened (rows opened |> List.findIndex _.Dismissed)
             click (menuItem opened "Restore warning")
-            clickButton opened "Save"
+            Reviews.chooseFromFileMenu opened "Save" |> ignore
+            pump ()
             close opened
 
             let reopened = openPdf copy
