@@ -193,3 +193,13 @@ let ``the lists come as JSON too`` () =
     [ for fix in fixes.EnumerateArray() -> fix.GetProperty("name").GetString() ] |> should contain "lists"
     (fixes.EnumerateArray() |> Seq.find (fun f -> f.GetProperty("name").GetString() = "metadata")).GetProperty("safe").GetBoolean()
     |> should be True
+
+[<Fact>]
+let ``validate explains common failures, and names their fixes as --fixes does`` () =
+    withTaggedPdf (fun pdf ->
+        let _, result = run [ "validate"; pdf ]
+
+        let failures = [ for f in result.Value.GetProperty("failures").EnumerateArray() -> f ]
+        let language = failures |> List.find (fun f -> f.GetProperty("clause").GetString() = "7.2" && f.GetProperty("testNumber").GetInt32() = 34)
+        language.GetProperty("meaning").GetString() |> should haveSubstring "language of some text isn't declared"
+        [ for name in language.GetProperty("fixes").EnumerateArray() -> string (name.GetString()) ] |> should equal [ "language" ])

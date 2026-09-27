@@ -195,7 +195,7 @@ let private validationText (results: ValidationResult list) =
     let sb = StringBuilder()
     let line (text: string) = sb.AppendLine text |> ignore
     let fixableSuffix (detail: FailureDetail) =
-        if detail.IsFixable then $" (fixable: {detail.FixOptions})" else ""
+        if detail.IsFixable then $" (fixable: {String.Join(',', detail.Fixes)})" else ""
     let details (items: FailureDetail seq | null) = match items with NonNull items -> items | Null -> Seq.empty
 
     for r in results do
@@ -209,6 +209,9 @@ let private validationText (results: ValidationResult list) =
             for prefix, items in [ "", r.Failures; "WARNING ", r.Warnings ] do
                 for f in details items do
                     line $"  {prefix}[{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}{fixableSuffix f}"
+                    match f.Meaning with
+                    | NonNull meaning -> line $"    means: {meaning}"
+                    | Null -> ()
                     if not (String.IsNullOrEmpty f.LocationContext) then
                         line $"    at: {f.LocationContext}"
                     match f.Region with

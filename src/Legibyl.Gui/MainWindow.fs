@@ -1197,6 +1197,23 @@ module private MainView =
                                         |> View.withAttrs [ Control.margin (0.0, 0.0, 0.0, 8.0) ]
                                         TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
                                         detailText row.Message false [ TextBox.maxHeight 130.0 ]
+                                        // In plain language, and what to do when no auto fix repairs it.
+                                        match RuleGuide.forFinding row.Violation with
+                                        | Some guide ->
+                                            TextBlock.create [
+                                                TextBlock.text "What it means"
+                                                TextBlock.fontWeight FontWeight.SemiBold
+                                                TextBlock.margin (0.0, 8.0, 0.0, 0.0)
+                                            ]
+                                            detailText guide.Meaning false []
+                                            if not row.Violation.IsFixable then
+                                                TextBlock.create [
+                                                    TextBlock.text "What to do"
+                                                    TextBlock.fontWeight FontWeight.SemiBold
+                                                    TextBlock.margin (0.0, 8.0, 0.0, 0.0)
+                                                ]
+                                                detailText guide.WhatToDo false []
+                                        | None -> ()
                                         if row.Violation.IsFixable then
                                             fixableHeading row.Violation (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
                                             |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]

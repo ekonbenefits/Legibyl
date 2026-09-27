@@ -118,3 +118,17 @@ let ``a PDF that passes says what automated checks can't judge`` () =
         shown |> List.exists (fun t -> t.StartsWith "Alt text: does each figure's say what it's for here") |> should be True
         // Not the steps for an empty window.
         shown |> should not' (contain "Making a PDF accessible"))
+
+[<Fact>]
+let ``a failure no auto fix repairs says what it means, and what to do`` () =
+    onUiThread (fun () ->
+        let window = openSample "pdfua1-fail.pdf"
+        let rows = (HeadlessWindow.resultsGrid window).ItemsSource |> Seq.cast<Legibyl.Gui.RuleViolationRow> |> List.ofSeq
+        HeadlessWindow.selectRow window (rows |> List.findIndex (fun r -> r.Violation.Clause = "7.1" && r.Violation.TestNumber = 1))
+        let shown = texts window
+        let details = descendants<TextBox> window |> List.map (fun t -> string t.Text)
+        window.Close()
+
+        shown |> should contain "What it means"
+        shown |> should contain "What to do"
+        details |> List.exists (fun t -> t.StartsWith "Something marked as decoration") |> should be True)
