@@ -144,16 +144,22 @@ let ``warming up gets veraPDF ready, and leaves nothing behind`` () =
 
 [<Fact>]
 let ``common PDF/UA failures are explained in plain language, with what to do`` () =
-    let untagged = RuleGuide.forRule "7.1" 3 |> Option.get
+    let untagged = RuleGuide.forRule "ISO 14289-1:2014" "7.1" 3 |> Option.get
     untagged.Meaning |> should haveSubstring "neither tagged nor marked as decoration"
     // Shown only where no auto fix applies: a tagged PDF (an untagged one gets Suggest Structure…).
     untagged.WhatToDo |> should haveSubstring "The tool that made the PDF left this out of its tags: fix it where the PDF was made"
-    (RuleGuide.forRule "7.3" 1).Value.WhatToDo |> should haveSubstring "Edit Alt Text…"
+    (RuleGuide.forRule "ISO 14289-1:2014" "7.3" 1).Value.WhatToDo |> should haveSubstring "Edit Alt Text…"
     // Every test of a clause the guide covers as a whole.
-    RuleGuide.forRule "7.21.6" 4 |> Option.isSome |> should be True
+    RuleGuide.forRule "ISO 14289-1:2014" "7.21.6" 4 |> Option.isSome |> should be True
     // Rules it doesn't cover have only veraPDF's own text.
-    RuleGuide.forRule "7.15" 1 |> should equal None
-    // Only PDF/UA-1's rules: a PDF/A rule with the same numbers isn't one of them.
+    RuleGuide.forRule "ISO 14289-1:2014" "7.15" 1 |> should equal None
+    // PDF/UA-2's rules have their own entries, by its own clauses.
+    (RuleGuide.forRule "ISO 14289-2:2024" "8.2.5.28.2" 1).Value.WhatToDo |> should haveSubstring "Edit Alt Text…"
+    (RuleGuide.forRule "ISO 14289-2:2024" "8.2.1" 1).Value.WhatToDo |> should haveSubstring "Suggest Structure…"
+    RuleGuide.forRule "ISO 14289-2:2024" "7.3" 1 |> should equal None
+    // ISO 32005's tag nesting has one entry for all its rules.
+    RuleGuide.forRule "ISO 32005:2023" "Table 5. StructTreeRoot-P" 1 |> Option.isSome |> should be True
+    // Only PDF/UA's rules: a PDF/A rule with the same numbers isn't one of them.
     let finding (specification: string) : RuleViolation =
         { Specification = specification; Clause = "7.1"; TestNumber = 3; Passed = false; Message = ""; ErrorMessage = null
           LocationContext = null; Severity = FindingSeverity.Failure; FixOptions = PdfFixOptions.None; Geometry = null; Element = null }
@@ -162,12 +168,15 @@ let ``common PDF/UA failures are explained in plain language, with what to do`` 
 
 [<Fact>]
 let ``every entry in RuleGuide.yaml names its clauses and has both texts`` () =
-    let entries = RuleGuide.entries.Value
-    entries |> should not' (be Empty)
-    for entry in entries do
-        (not (isNull entry.Clause) || not (isNull entry.Clauses)) |> should be True
-        String.IsNullOrWhiteSpace entry.Meaning |> should be False
-        String.IsNullOrWhiteSpace entry.WhatToDo |> should be False
+    let entries = RuleGuide.entries.Value |> Map.ofList
+    for standard in [ "ISO 14289-1"; "ISO 14289-2"; "ISO 32005" ] do
+        entries[standard] |> should not' (be Empty)
+    // Only ISO 32005's entry is for all its rules.
+    for standard, rules in Map.toList entries do
+        for entry in rules do
+            (standard = "ISO 32005" || not (isNull entry.Clause) || not (isNull entry.Clauses)) |> should be True
+            String.IsNullOrWhiteSpace entry.Meaning |> should be False
+            String.IsNullOrWhiteSpace entry.WhatToDo |> should be False
 
 /// A PDF 2.0 file with a line of text.
 let private createPdf20 (path: string) =
@@ -231,3 +240,33 @@ let ``a PDF/UA-2 file checked as PDF/UA-1 fails: its identifier claims the other
 
     report.FlavourId |> should equal "ua1"
     report.IsCompliant |> should be False
+
+[<Fact>]
+let ``PDF/UA-2 failures map to the repairs that fix them, by rule`` () =
+    use pdf20 = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(pdf20.Path, WriterProperties().SetPdfVersion(PdfVersion.PDF_2_0)))
+        let page = document.AddNewPage()
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas(page)
+        canvas.BeginText().SetFontAndSize(iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA, 12f)
+            .MoveText(72.0, 720.0).ShowText("A PDF 2.0 page with a link.").EndText()
+        |> ignore
+        let link = iText.Kernel.Pdf.Annot.PdfLinkAnnotation(iText.Kernel.Geom.Rectangle(72f, 700f, 100f, 14f))
+        page.AddAnnotation(link.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI "https://example.com")) |> ignore
+
+    let report = VeraPdfValidator().Validate(pdf20.Path, PdfProfile.PdfUa2)
+    let fixesFor rule =
+        report.FailedAssertions |> Seq.filter (fun f -> f.Specification.StartsWith "ISO 14289-2" && f.RuleId = rule) |> Seq.map _.FixOptions |> Seq.head
+
+    fixesFor "5-1" |> should equal PdfFixOptions.Metadata
+    fixesFor "8.11.1-1" |> should equal (PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle)
+    fixesFor "8.11.2-1" |> should equal PdfFixOptions.DocumentTitle
+    fixesFor "8.9.3.3-1" |> should equal (PdfFixOptions.AnnotationTabs ||| PdfFixOptions.TagFromLayout)
+    // Untagged: tagging it from its layout (Suggest Structure…) fixes these.
+    fixesFor "6.2-1" |> should equal PdfFixOptions.TagFromLayout
+    fixesFor "8.2.1-1" |> should equal PdfFixOptions.TagFromLayout
+    // Every "natural language" rule falls back on the document's /Lang.
+    (fixesFor "8.4.4-1").HasFlag PdfFixOptions.LanguageFromText |> should be True
+    // And each has its guide.
+    for finding in report.FailedAssertions do
+        RuleGuide.forFinding finding |> Option.isSome |> should be True

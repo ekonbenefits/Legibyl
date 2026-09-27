@@ -20,7 +20,7 @@ type FailureDetail =
       /// The repairs that fix it, by the names --fixes takes ("tag-from-layout" for tagging an
       /// untagged PDF, which `layout apply` does too); empty when none do.
       Fixes: string array
-      /// What it means for a reader, in plain language, for the common PDF/UA-1 failures (see
+      /// What it means for a reader, in plain language, for the common PDF/UA failures (see
       /// RuleGuide); null for others.
       Meaning: string | null }
 

@@ -52,3 +52,10 @@ let describe (profile: PdfProfile) (version: string | null) (detected: bool) =
     | Some version, true -> $"{name} (worked out from the file: PDF {version})"
     | Some version, false -> $"{name} (asked for; the file is PDF {version})"
     | None, _ -> name
+
+/// The standard a finding's rule belongs to, by its specification ("ISO 14289-2:2024" is
+/// PDF/UA-2's); None for others (ISO 32005's tag nesting, which PDF/UA-2 includes, and Legibyl's).
+let ofSpecification (specification: string) : PdfProfile option =
+    if specification.StartsWith("ISO 14289-1", StringComparison.Ordinal) then Some PdfProfile.PdfUa1
+    elif specification.StartsWith("ISO 14289-2", StringComparison.Ordinal) then Some PdfProfile.PdfUa2
+    else None
