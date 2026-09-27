@@ -128,3 +128,16 @@ let ``ReadStructureTree reports its stages in order, page by page`` () =
     let textReports = reports |> Seq.filter (fun r -> r.Stage = StructureReadStage.ReadingText) |> List.ofSeq
     textReports.Head.Page |> should equal 1
     textReports |> List.forall (fun r -> r.PageCount >= 3 && r.Page <= r.PageCount) |> should be True
+
+[<Fact>]
+let ``warming up gets veraPDF ready, and leaves nothing behind`` () =
+    let warmFiles () = IO.Directory.GetFiles(IO.Path.GetTempPath(), "legibyl-warm-*.pdf") |> Set.ofArray
+    let before = warmFiles ()
+
+    VeraPdfValidator.Warm()
+
+    // Whatever other warm-ups (tests run in parallel) leave in flight isn't this one's.
+    Set.difference (warmFiles ()) before |> should be Empty
+    // And validations still work, alongside it or after.
+    let report = VeraPdfValidator().Validate(IO.Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "pdfua1-pass.pdf"), PdfProfile.PdfUa1)
+    report.IsCompliant |> should be True

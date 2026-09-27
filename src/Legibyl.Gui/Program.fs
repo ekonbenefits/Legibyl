@@ -21,6 +21,15 @@ type App() =
         this.Styles.Add(DataGridSemiTheme())
 
     override this.OnFrameworkInitializationCompleted() =
+        // veraPDF's one-time setup takes a couple of seconds: done in the background now, while a
+        // PDF is being picked, rather than when the first one is validated.
+        Threading.Tasks.Task.Run(fun () ->
+            try
+                Legibyl.Validation.VeraPdfValidator.Warm()
+            with _ ->
+                // A real validation reports what's wrong; this was only a head start.
+                ())
+        |> ignore
         match this.ApplicationLifetime with
         | :? IClassicDesktopStyleApplicationLifetime as desktop ->
             desktop.MainWindow <- MainWindow()

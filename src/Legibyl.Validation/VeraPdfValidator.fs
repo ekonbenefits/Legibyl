@@ -398,7 +398,8 @@ type VeraPdfValidator() =
     // A plain field: an auto-property (member val) of a nullable type reaches other assemblies
     // as non-nullable.
     let mutable review: Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null> | null = null
-    do ensureInitialised ()
+    // veraPDF's one-time setup (a second or two) happens on first use, not here, so a validator
+    // can be made on a UI thread; Warm does it ahead of time.
 
     /// Where the TagFromLayout and JoinSplitParagraphs fixes get each page's regions (see
     /// Legibyl.Layout). Without one, those fixes do nothing.
@@ -425,6 +426,7 @@ type VeraPdfValidator() =
             [<Optional; DefaultParameterValue(null: IProgress<ValidationProgress> | null)>] progress: IProgress<ValidationProgress> | null
         ) : ValidationReport =
         ensureExists pdfPath
+        ensureInitialised ()
         let flavour = toJavaFlavour profile
         let foundry = Foundries.defaultInstance ()
         let analysis = startLegibylAnalysis pdfPath
@@ -458,6 +460,7 @@ type VeraPdfValidator() =
             [<Optional; DefaultParameterValue(null: IProgress<FixProgress> | null)>] progress: IProgress<FixProgress> | null
         ) : FixResult =
         ensureExists pdfPath
+        ensureInitialised ()
         if options = PdfFixOptions.None then
             raise (VeraPdfValidationException "At least one fix option must be selected.")
 
@@ -625,7 +628,26 @@ type VeraPdfValidator() =
             [<Optional; DefaultParameterValue(null: IProgress<StructureReadProgress> | null)>] progress: IProgress<StructureReadProgress> | null
         ) : StructureNode | null =
         ensureExists pdfPath
+        ensureInitialised ()
         wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath progress)
+
+    /// Gets veraPDF ready ahead of time, e.g. on a background thread as an app starts: its
+    /// one-time setup (a second or two), and a validation of a tiny PDF, so the code the first
+    /// real validation runs is compiled already (most of a second more). Safe to run alongside
+    /// validations; they wait for the setup if it's still under way.
+    static member Warm() =
+        ensureInitialised ()
+        let pdf = Path.Combine(Path.GetTempPath(), $"legibyl-warm-{Guid.NewGuid():N}.pdf")
+        try
+            // Tagged, as most PDFs worth checking are, so tagged content's checks are compiled too.
+            do
+                use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf))
+                document.SetTagged() |> ignore
+                use layout = new iText.Layout.Document(document)
+                layout.Add(iText.Layout.Element.Paragraph "Legibyl") |> ignore
+            VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1) |> ignore
+        finally
+            try File.Delete pdf with _ -> ()
 
     interface IPdfValidator with
         member this.Validate(pdfPath, profile, progress) = this.Validate(pdfPath, profile, progress)
