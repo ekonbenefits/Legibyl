@@ -150,6 +150,87 @@ let private changes (edit: ElementEdit, element: PdfDictionary) =
       | NonNull text when textOf element PdfName.ActualText <> Some text -> yield element, PdfName.ActualText, text
       | _ -> () ]
 
+// ---- Not read: an element made an artifact ----
+
+/// Whether an edit makes its element an artifact: decoration, not read (Not Read in Structure…).
+let private isArtifact (edit: ElementEdit) = edit.Retag = "Artifact"
+
+/// An element's marked content, by page: its MCIDs and those of what's inside it (content in a
+/// form XObject, by a marked-content reference with /Stm, is left).
+let private markedContentOf (element: PdfDictionary) context =
+    let found = Collections.Generic.Dictionary<int, Collections.Generic.HashSet<int>>()
+    let add page mcid =
+        match found.TryGetValue page with
+        | true, mcids -> mcids.Add mcid |> ignore
+        | _ -> found[page] <- Collections.Generic.HashSet [ mcid ]
+    let rec visit (element: PdfDictionary) (page: int option) depth =
+        let page = structElemPage element context page
+        let kid (kid: PdfObject | null) =
+            match resolve kid with
+            | :? PdfNumber as mcid -> page |> Option.iter (fun page -> add page (mcid.IntValue()))
+            | :? PdfDictionary as child when not (isNull (child.GetAsName PdfName.S)) && depth < 100 -> visit child page (depth + 1)
+            | :? PdfDictionary as reference when not (isNull (reference.GetAsNumber PdfName.MCID)) && isNull (reference.Get PdfName.Stm) ->
+                structElemPage reference context page |> Option.iter (fun page -> add page (reference.GetAsNumber(PdfName.MCID).IntValue()))
+            | _ -> ()
+        match resolve (element.Get PdfName.K) with
+        | :? PdfArray as kids ->
+            for i in 0 .. kids.Size() - 1 do
+                kid (kids.Get i)
+        | only -> kid only
+    visit element (ancestorPage element context) 0
+    found
+
+/// Makes elements artifacts: their marked content (/Tag <</MCID n>> BDC) becomes /Artifact BMC,
+/// so it's still drawn but not read, and they leave the structure tree. Through iText, which
+/// then leaves their content out of the parent tree.
+let private makeArtifacts (document: PdfDocument) context (elements: PdfDictionary list) =
+    let byPage = Collections.Generic.Dictionary<int, Collections.Generic.HashSet<int>>()
+    for element in elements do
+        for KeyValue(page, mcids) in markedContentOf element context do
+            match byPage.TryGetValue page with
+            | true, all -> all.UnionWith mcids
+            | _ -> byPage[page] <- Collections.Generic.HashSet mcids
+    for KeyValue(pageNumber, mcids) in byPage do
+        let page = document.GetPage pageNumber
+        let bytes = page.GetContentBytes()
+        let resources = page.GetResources()
+        let operations, length = ContentOperations.operationsOf bytes resources
+        use output = new IO.MemoryStream()
+        let mutable from = 0L
+        for operation in operations do
+            match ContentOperations.mcidOf resources operation with
+            | Some mcid when mcids.Contains mcid ->
+                output.Write(bytes, int from, int (operation.Start - from))
+                let artifact = Text.Encoding.ASCII.GetBytes "\n/Artifact BMC\n"
+                output.Write(artifact, 0, artifact.Length)
+                from <- operation.End
+            | _ -> ()
+        output.Write(bytes, int from, int (length - from))
+        page.GetPdfObject().Put(PdfName.Contents, PdfStream(output.ToArray()).MakeIndirect document) |> ignore
+    let root = document.GetStructTreeRoot()
+    for element in elements do
+        let structElem = iText.Kernel.Pdf.Tagging.PdfStructElem element
+        // Its content first, so iText forgets it; then the element itself.
+        for i in (structElem.GetKids() |> Seq.length) - 1 .. -1 .. 0 do
+            structElem.RemoveKid i |> ignore
+        match resolve (element.Get PdfName.P) with
+        | :? PdfDictionary as parent when obj.ReferenceEquals(parent, root.GetPdfObject()) ->
+            match resolve (parent.Get PdfName.K) with
+            | :? PdfArray as kids ->
+                for i in kids.Size() - 1 .. -1 .. 0 do
+                    if obj.ReferenceEquals(resolve (kids.Get i), element) then kids.Remove i
+            | _ -> parent.Remove PdfName.K |> ignore
+        | :? PdfDictionary as parent ->
+            let parentElem = iText.Kernel.Pdf.Tagging.PdfStructElem parent
+            let index =
+                parentElem.GetKids()
+                |> Seq.tryFindIndex (fun kid ->
+                    match kid with
+                    | :? iText.Kernel.Pdf.Tagging.PdfStructElem as kid -> obj.ReferenceEquals(kid.GetPdfObject(), element)
+                    | _ -> false)
+            index |> Option.iter (fun index -> parentElem.RemoveKid index |> ignore)
+        | _ -> ()
+
 /// A PdfString that survives non-ASCII text.
 let private textString (value: string) =
     if value |> Seq.forall (fun c -> c < '\u0080') then PdfString value
@@ -162,6 +243,10 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     let runs = merges |> List.choose (mergeRun document context)
     ParagraphJoins.join runs |> ignore
     let found = find document context edits
+    // Those made artifacts leave the tags; the rest are changed where they are.
+    let artifacts, found = found |> List.partition (fst >> isArtifact)
+    let seen = Collections.Generic.HashSet<obj>(Collections.Generic.ReferenceEqualityComparer.Instance)
+    makeArtifacts document context [ for _, element in artifacts do if seen.Add element then element ]
     let applied =
         [ for pair in found do
               let changes = changes pair
@@ -169,9 +254,9 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
                   // A tag is a name; the rest are text.
                   dictionary.Put(key, (if key.Equals PdfName.S then PdfName value :> PdfObject else textString value)) |> ignore
               if not changes.IsEmpty then yield () ]
-    let count = applied.Length + runs.Length
+    let count = applied.Length + runs.Length + artifacts.Length
     // Those that don't apply are said by unapplied, one by one.
-    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags and merged paragraphs)." ]
+    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merged paragraphs and decoration not read)." ]
 
 /// An edit, as a report names it: its tag, page and box.
 let describe (edit: ElementEdit) =
@@ -191,6 +276,8 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
         let found = find document context edits
         [ for edit in edits do
               match found |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
+              | None when isArtifact edit ->
+                  $"Your edit making the {describe edit} decoration wasn't applied: no <{edit.Tag}> is in about that place (it may be decoration already)."
               | None ->
                   $"Your edit for the {describe edit} wasn't applied: no <{edit.Tag}> is in about that place (its box overlapping at least 60%%). Check its page, tag and box against legibyl structure."
               | Some pair when (changes pair).IsEmpty ->

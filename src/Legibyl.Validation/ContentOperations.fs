@@ -11,6 +11,8 @@ open iText.Kernel.Pdf.Canvas.Parser.Util
 
 type Operation =
     { Name: string
+      /// Its operands, in order (the operator itself left out).
+      Operands: PdfObject array
       /// The operator's bytes in the original stream, operands included.
       Start: int64
       End: int64 }
@@ -29,7 +31,11 @@ let operationsOf (bytes: byte array) (resources: PdfResources) =
         if name = "BI" then
             // The inline image's dictionary and data, through EI.
             InlineImageParsingUtils.Parse(parser, resources.GetResource PdfName.ColorSpace) |> ignore
-        operations.Add { Name = name; Start = start; End = tokenizer.GetPosition() }
+        operations.Add
+            { Name = name
+              Operands = [| for i in 0 .. operands.Count - 2 -> operands[i] |]
+              Start = start
+              End = tokenizer.GetPosition() }
         start <- tokenizer.GetPosition()
         parser.Parse operands |> ignore
     operations, bytes.LongLength
@@ -42,6 +48,21 @@ let pathPainting = set [ "S"; "s"; "f"; "F"; "f*"; "B"; "B*"; "b"; "b*"; "n" ]
 
 /// Operators that show text.
 let textShowing = set [ "Tj"; "TJ"; "'"; "\"" ]
+
+/// A marked-content operator's MCID (BDC's properties, inline or in the resources' /Properties).
+let mcidOf (resources: PdfResources) (operation: Operation) : int option =
+    if operation.Name <> "BDC" || operation.Operands.Length < 2 then
+        None
+    else
+        let properties: PdfDictionary option =
+            match operation.Operands[1] with
+            | :? PdfDictionary as properties -> Some properties
+            | :? PdfName as name ->
+                match resources.GetResource PdfName.Properties with
+                | null -> None
+                | all -> Option.ofObj (all.GetAsDictionary name)
+            | _ -> None
+        properties |> Option.bind (fun properties -> properties.GetAsNumber PdfName.MCID |> Option.ofObj |> Option.map _.IntValue())
 
 /// Operators a marked-content sequence mustn't straddle.
 let boundaries = set [ "BT"; "ET"; "q"; "Q"; "BMC"; "BDC"; "EMC"; "BX"; "EX" ]

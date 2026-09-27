@@ -471,7 +471,13 @@ a heading tagged as a paragraph, say — as a `retag` edit; and when two or more
 neighbouring paragraphs on one page are selected (none with alt
 text or replacement text), **Merge N Paragraphs** records the merge as an edit,
 keyed by each paragraph's box; **Don't Merge These** drops it again. Export joins
-them into the first, as **Join split paragraphs** does. The **Edits** tab lists every edit and whether it's in the PDF
+them into the first, as **Join split paragraphs** does. A figure that's only
+decoration (a rule, a background, a border, which some tools tag as figures) can
+be made **Not Read (Artifact)** (shift-click for several; **Read It** undoes it),
+as a `retag` edit to `Artifact`, as on a suggested structure: export marks its
+content as an artifact (its `/Tag <</MCID n>> BDC` becomes `/Artifact BMC`), so
+it's still drawn but not read, and takes it out of the tags; the preview draws
+it grey until then. The **Edits** tab lists every edit and whether it's in the PDF
 yet, and removes ones you no longer want. **Export…** writes the ones not in it
 yet to a copy (`ElementEdits.fs`), each to the element with its tag in about the
 same place, so they still apply after other repairs have rearranged the tree.

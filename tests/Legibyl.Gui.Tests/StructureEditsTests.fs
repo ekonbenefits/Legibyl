@@ -362,3 +362,44 @@ let ``a link's description can be edited, starting from the one it has`` () =
             layout |> should contain "description: \"click here\""
             layout |> should contain "✎ your description, not in the PDF yet: \"Example (example.com)\""
             window.Review.Edits |> List.map (fun e -> e.Tag, e.Alt) |> should equal [ "Link", Some "Example (example.com)" ]))
+
+[<Fact>]
+let ``a tagged PDF's figure can be made not read, and read again`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show (structure null) pdf
+            click (blockFor window "Figure") false
+            let button (label: string) = descendants<Button> window |> List.tryFind (fun b -> string b.Content = label)
+            (button "Not Read (Artifact)").Value.RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let recorded = window.Review.Edits |> List.map (fun e -> e.Tag, e.Retag)
+            let header = descendants<TabItem> window |> List.map (fun t -> string t.Header)
+            let pendingLine = texts window |> List.exists (fun t -> t = "✎ not read (decoration), not in the PDF yet")
+            let readIt = button "Read It"
+            readIt.Value.RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let after = window.Review.Edits
+            // A paragraph isn't offered it.
+            click (blockFor window "P") false
+            let forParagraph = button "Not Read (Artifact)"
+            window.Close()
+
+            recorded |> should equal [ "Figure", Some "Artifact" ]
+            header |> should contain "Edits (1)"
+            pendingLine |> should be True
+            after |> should be Empty
+            forParagraph |> should equal None))
+
+[<Fact>]
+let ``a tagged PDF's figure's alt text prompt suggests Not Read for decoration`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show (structure null) pdf
+            (menuItems (blockFor window "Figure") |> List.find (fst >> (=) "Edit Alt Text…") |> snd).RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
+            pump ()
+            let prompt = window.OwnedWindows |> Seq.exactlyOne
+            let said = texts prompt
+            prompt.Close()
+            window.Close()
+
+            said |> List.exists (fun t -> t.Contains "use Not Read (Artifact) instead") |> should be True))

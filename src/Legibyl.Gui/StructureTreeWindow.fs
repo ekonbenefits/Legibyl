@@ -474,8 +474,10 @@ module private StructureView =
                             StackPanel.create [
                                 StackPanel.children [
                                     for label, text in lines do
-                                        if selection.Suggested then detailLine $"✎ your {label}: \"{text}\"" true
-                                        else detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
+                                        match label, text with
+                                        | "tag", "Artifact" when not selection.Suggested -> detailLine "✎ not read (decoration), not in the PDF yet" true
+                                        | _ when selection.Suggested -> detailLine $"✎ your {label}: \"{text}\"" true
+                                        | _ -> detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
                                     if editFor edits.Current node |> Option.exists _.Exclude then
                                         detailLine "✎ merged into its neighbour: its text joins the nearest region kept" true
                                     match mergeLine edits.Current node with
@@ -831,7 +833,8 @@ module private StructureView =
                                                   let leftOut = edit |> Option.exists _.Exclude
                                                   { Geometry = nonNull element.Geometry
                                                     Label = if leftOut then $"× {i + 1} {tag}" else $"{i + 1} {tag}"
-                                                    Color = if leftOut then leftOutColor else outlineColor tag
+                                                    // Not a region of its own, or not read: grey.
+                                                    Color = if leftOut || tag = "Artifact" then leftOutColor else outlineColor tag
                                                     Emphasised = within element
                                                     Marker = markerFor element } ]
                                         // A selection that isn't one of them (a span in a paragraph, say) is filled too.
@@ -939,10 +942,10 @@ module private StructureView =
                         let title, prompt, current, placeholder =
                             match kind with
                             | AltText ->
-                                // Decoration isn't described but not read, which only a suggested region
-                                // can be here (Not Read).
+                                // Decoration isn't described but not read (Not Read): a suggested region, or
+                                // a tagged PDF's figure.
                                 let decoration =
-                                    if isSuggested then " If it's only decoration, close this and use Not Read (Artifact) instead."
+                                    if isSuggested || node.Tag = "Figure" then " If it's only decoration, close this and use Not Read (Artifact) instead."
                                     else ""
                                 "Alt Text",
                                 $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. "
@@ -1314,6 +1317,33 @@ module private StructureView =
                                                 )
                                             ]
                                         ]
+                                    ]
+                                // A tagged PDF's figures can be kept from being read (decoration: an artifact),
+                                // and back again; several at once.
+                                match (if isSuggested then [] else selected.Current |> List.filter (fun n -> n.Tag = "Figure" && not (isNull n.Geometry))) with
+                                | [] -> ()
+                                | figures ->
+                                    let what = if figures.Length = 1 then "" else $" {figures.Length} Figures"
+                                    let notRead = figures |> List.forall (fun f -> editFor edits.Current f |> Option.bind _.Retag = Some "Artifact")
+                                    Button.create [
+                                        Button.content (if notRead then $"Read It{what}" else $"Not Read (Artifact){what}")
+                                        Button.margin (0.0, 0.0, 0.0, 8.0)
+                                        ToolTip.tip (
+                                            if notRead then "Read it after all: keep it as a figure (it needs alt text)."
+                                            else "Decoration a screen reader should skip, like a rule, a background or a border: on export, it's still drawn but marked as an artifact, and leaves the tags."
+                                        )
+                                        Button.onClick (
+                                            (fun _ ->
+                                                figures
+                                                |> List.fold
+                                                    (fun all f ->
+                                                        let box = nonNull f.Geometry
+                                                        RegionEdits.setRetag all box.PageNumber f.Tag box (if notRead then f.Tag else "Artifact"))
+                                                    edits.Current
+                                                |> saveEdits
+                                                |> ignore),
+                                            SubPatchOptions.Always
+                                        )
                                     ]
                                 // Merging is for a tagged PDF's paragraphs.
                                 let mergeable nodes = if isSuggested then None else mergeable nodes
