@@ -214,7 +214,7 @@ in a resizable details panel beside the list. For the PDF/UA-1 failures a
 document commonly has, it also says **What it means** in plain language (what
 it does to someone using a screen reader), and, where no auto fix repairs it,
 **What to do**: where in Legibyl to fix it (Structure…, Suggest Structure…), or
-that it's fixed where the PDF was made or in a PDF editor (`RuleGuide.fs`). All detail text is selectable,
+that it's fixed where the PDF was made or in a PDF editor (`RuleGuide.yaml`, which `RuleGuide.fs` reads). All detail text is selectable,
 and **Copy Finding** copies the selected rule, message, error detail, and
 both location forms. **Copy Summary** and **Save Report** sit below the
 results list and include the same location information for every finding.

@@ -1,0 +1,189 @@
+# What PDF/UA-1's failures mean in plain language, and what to do about those no auto fix
+# repairs (see RuleGuide.fs, which reads this). veraPDF says what the standard requires ("Content
+# shall be marked as Artifact or tagged as real content"), which says little to someone who
+# doesn't know PDF's insides.
+#
+# Each entry is for a clause of ISO 14289-1 (or several clauses), and the tests of it listed, or
+# every test of it when none are. The first entry that matches a failure is its guide; a rule no
+# entry matches has only veraPDF's own text. Check a rule's clause, test and description with
+# veraPDF's PDF/UA-1 profile.
+#
+# meaning: what the failure means for someone using a screen reader or other assistive
+#   technology, in plain language.
+# whatToDo: shown only when no auto fix repairs it (the Fixable section says what to do then):
+#   where in Legibyl to fix it (Structure…, Suggest Structure…), or where else.
+
+rules:
+
+  - clause: "5"
+    meaning: "The PDF doesn't say in its metadata that it follows PDF/UA, so tools that look for accessible PDFs won't treat it as one."
+    whatToDo: "Choose Repair XMP metadata in Auto Fixes… (veraPDF only adds it once every other failure is fixed)."
+
+  - clause: "6.2"
+    tests: [1]
+    meaning: "The PDF isn't marked as tagged, so assistive technology may ignore its tags."
+    whatToDo: "Tagging it sets this. For a PDF with tags already, export it again from the tool that made it with tags turned on."
+
+  - clause: "7.1"
+    tests: [1]
+    meaning: "Something marked as decoration (an artifact, which isn't read) is inside tagged content, so it's both skipped and part of the text."
+    whatToDo: &inTheSource "Fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\"), or in a PDF editor's tags panel."
+
+  - clause: "7.1"
+    tests: [2]
+    meaning: "Tagged content is inside something marked as decoration (an artifact), so a screen reader may skip content that should be read."
+    whatToDo: *inTheSource
+
+  - clause: "7.1"
+    tests: [3]
+    meaning: "Some of the page (text, images or lines) is neither tagged nor marked as decoration, so a screen reader can't tell whether to read it."
+    whatToDo: "The tool that made the PDF left this out of its tags: fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\"), or in a PDF editor's tags panel."
+
+  - clause: "7.1"
+    tests: [4]
+    meaning: "The PDF says its tags may be unreliable (Suspects), so assistive technology may not trust them."
+    whatToDo: "Export it again from the tool that made it, with tags turned on."
+
+  - clause: "7.1"
+    tests: [5]
+    meaning: "The PDF uses tag names of its own without saying which standard tag each means, so a screen reader can't tell what they are (a heading, a list, a paragraph)."
+    whatToDo: "Add each name to the role map in a PDF editor, or fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\"), or in a PDF editor's tags panel."
+
+  - clause: "7.1"
+    tests: [6, 7]
+    meaning: "The PDF's role map, which says what its own tag names mean, is broken: it goes round in a circle, or redefines a standard tag."
+    whatToDo: "Correct the role map in a PDF editor, or fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\"), or in a PDF editor's tags panel."
+
+  - clause: "7.1"
+    tests: [8]
+    meaning: "The PDF has no metadata (XMP) for its title, language and PDF/UA claim to go in."
+    whatToDo: "Choose Repair XMP metadata in Auto Fixes…."
+
+  - clause: "7.1"
+    tests: [9]
+    meaning: "The PDF has no title in its metadata, so a screen reader and the reader's title bar name it by its file name."
+    whatToDo: "Choose Document title in Auto Fixes… if it has a title elsewhere, or Title from the first page; or set the title in the tool that made it."
+
+  - clause: "7.1"
+    tests: [10]
+    meaning: "The reader shows the file name in its title bar instead of the document's title."
+    whatToDo: "Choose Document title in Auto Fixes…."
+
+  - clause: "7.1"
+    tests: [11]
+    meaning: "The PDF has no tags at all, so a screen reader has nothing to go on but the raw text, in whatever order it's drawn."
+    whatToDo: "Suggest Structure… tags it from its pages' layout."
+
+  - clause: "7.1"
+    tests: [12]
+    meaning: "A tag in the PDF's structure doesn't say what it belongs to, so the structure is broken there."
+    whatToDo: *inTheSource
+
+  - clause: "7.2"
+    tests: [2, 21, 22, 23, 24, 25, 30, 31, 32, 33, 34]
+    meaning: "The language of some text isn't declared (the page's text, or alt text, a bookmark, a link's description, the metadata), so a screen reader may read it with the wrong voice and pronunciation."
+    whatToDo: "Choose Declare the language in Auto Fixes… (it needs enough text to tell the language), or set the document's language in the tool that made it."
+
+  - clause: "7.2"
+    tests: [29]
+    meaning: "A language is declared, but not as a language code a screen reader understands (like en-US)."
+    whatToDo: *inTheSource
+
+  - clause: "7.2"
+    tests: [17, 18, 19, 20, 40]
+    meaning: "A list's tags are nested wrongly (an item outside a list, say), so a screen reader can't announce it as a list with its number of items."
+    whatToDo: *inTheSource
+
+  - clause: "7.2"
+    tests: [26, 27, 28]
+    meaning: "A table of contents' tags are nested wrongly, so a screen reader can't announce it as one."
+    whatToDo: *inTheSource
+
+  - clause: "7.2"
+    tests: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 36, 37, 38, 39, 41, 42, 43]
+    meaning: "A table's tags are nested or shaped wrongly (a cell outside a row, rows of different lengths), so a screen reader can't move through it or say which header goes with a cell."
+    whatToDo: "Fix the table in the tool that made the PDF (mark its header row, avoid merged cells where you can) and export it again, or in a PDF editor's table tools."
+
+  - clause: "7.3"
+    tests: [1]
+    meaning: "A figure has no alt text, so a screen reader can only say it's an image."
+    whatToDo: "In Structure…, right-click the figure and choose Edit Alt Text…: say what it's for here, in a sentence. If it's only decoration, it should be marked as an artifact instead, in a PDF editor or where the PDF was made."
+
+  - clause: "7.4.2"
+    tests: [1]
+    meaning: "The headings don't start with H1, or skip levels (an H3 straight after an H1), so the outline a screen reader navigates by has gaps."
+    whatToDo: "In Structure…, select a heading and give it the right level with the Tag picker."
+
+  - clause: "7.4.4"
+    meaning: "The headings mix numbered levels (H1 to H6) with plain H, or a section has more than one plain H, so a screen reader can't work out the outline."
+    whatToDo: "In Structure…, give the headings numbered levels with the Tag picker."
+
+  - clause: "7.5"
+    meaning: "A table's header cells don't say whether they head a row or a column, so a screen reader can't announce the right header with each cell."
+    whatToDo: "Mark the header row or column in the tool that made the PDF and export it again, or set each header cell's scope in a PDF editor's table tools."
+
+  - clause: "7.7"
+    tests: [1]
+    meaning: "A formula has no alt text, so a screen reader can't read it."
+    whatToDo: "In Structure…, right-click the formula and choose Edit Alt Text…, and write it out as it would be read aloud."
+
+  - clause: "7.9"
+    meaning: "A note (a footnote, say) has no ID, or shares one, so its reference can't point to it."
+    whatToDo: *inTheSource
+
+  - clause: "7.18.1"
+    tests: [1]
+    meaning: "An annotation (a comment or stamp, say) isn't in the tags, so a screen reader won't find it in reading order."
+    whatToDo: *inTheSource
+
+  - clause: "7.18.1"
+    tests: [2]
+    meaning: "An annotation has no description, so a screen reader can't say what it is."
+    whatToDo: "Give it a description (its Contents) in a PDF editor, or remove it if it isn't needed."
+
+  - clause: "7.18.1"
+    tests: [3]
+    meaning: "A form field has no tooltip, which is what a screen reader says when it's reached."
+    whatToDo: "Give the field a tooltip in a PDF editor's form tools, or in the tool that made the form."
+
+  - clause: "7.18.3"
+    tests: [1]
+    meaning: "A page with links or other annotations doesn't set the keyboard's tab order to follow the structure."
+    whatToDo: "Choose Tab order for annotations in Auto Fixes…."
+
+  - clause: "7.18.4"
+    meaning: "A form field isn't tagged as a form field, so a screen reader doesn't announce it as one."
+    whatToDo: *inTheSource
+
+  - clause: "7.18.5"
+    tests: [1]
+    meaning: "A link isn't tagged as a link, so a screen reader doesn't announce it as one."
+    whatToDo: *inTheSource
+
+  - clause: "7.18.5"
+    tests: [2]
+    meaning: "A link has no description, so a screen reader can only read out its address, or nothing."
+    whatToDo: "In Structure…, right-click the link and choose Edit Link Description…. Auto Fixes… can describe table-of-contents links, and web links from their pages' titles."
+
+  - clause: "7.20"
+    tests: [2]
+    meaning: "Content drawn from a shared graphic (a form XObject) isn't in the tags."
+    whatToDo: *inTheSource
+
+  - clause: "7.21.3.2"
+    tests: [1]
+    meaning: "A font leaves out how its character codes map to its glyphs; readers assume the usual mapping, but the standard wants it said."
+    whatToDo: "Choose Font glyph mapping in Auto Fixes…."
+
+  - clause: "7.21.4.1"
+    tests: [1]
+    meaning: "A font isn't embedded, so the text may look different, or not read the same, on another computer."
+    whatToDo: &fonts "Export it again with fonts embedded (most tools have an option for it), or fix the fonts with a PDF editor's preflight tools."
+
+  - clauses: ["7.21.3.1", "7.21.3.3", "7.21.4.1", "7.21.4.2", "7.21.5", "7.21.6", "7.21.8"]
+    meaning: "A font in the PDF is incomplete or inconsistent, which can make its text display or read wrongly."
+    whatToDo: *fonts
+
+  - clause: "7.21.7"
+    meaning: "Some text uses a font that doesn't say which characters it draws, so a screen reader (or copying the text) gets nothing, or the wrong letters."
+    whatToDo: *fonts

@@ -37,6 +37,8 @@
     <Compile Include="CopyNames.fs" />
     <Compile Include="EmbeddedReview.fs" />
     <Compile Include="LayoutFile.fs" />
+    <!-- The text RuleGuide.fs reads, embedded so the CLI and the app need no file beside them. -->
+    <EmbeddedResource Include="RuleGuide.yaml" LogicalName="Legibyl.Validation.RuleGuide.yaml" />
     <Compile Include="RuleGuide.fs" />
     <Compile Include="RepairNames.fs" />
     <Compile Include="ReviewFile.fs" />
@@ -51,6 +53,8 @@
     <!-- Used only to read marked-content text runs (by page + MCID) for structure-tree
          content extraction; pure managed, Apache 2.0, no native/PDFium dependency. -->
     <PackageReference Include="PdfPig" />
+    <!-- Reads RuleGuide.yaml (MIT). -->
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <!-- veraPDF fat jar: fetched from Maven Central on first build, pinned by

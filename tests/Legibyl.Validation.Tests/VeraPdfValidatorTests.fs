@@ -159,3 +159,12 @@ let ``common PDF/UA failures are explained in plain language, with what to do`` 
           LocationContext = null; Severity = FindingSeverity.Failure; FixOptions = PdfFixOptions.None; Geometry = null }
     RuleGuide.forFinding (finding "ISO 14289-1:2014") |> Option.isSome |> should be True
     RuleGuide.forFinding (finding "ISO 19005-2:2011") |> should equal None
+
+[<Fact>]
+let ``every entry in RuleGuide.yaml names its clauses and has both texts`` () =
+    let entries = RuleGuide.entries.Value
+    entries |> should not' (be Empty)
+    for entry in entries do
+        (not (isNull entry.Clause) || not (isNull entry.Clauses)) |> should be True
+        String.IsNullOrWhiteSpace entry.Meaning |> should be False
+        String.IsNullOrWhiteSpace entry.WhatToDo |> should be False
