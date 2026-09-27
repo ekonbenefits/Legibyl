@@ -115,3 +115,29 @@ let ``opened PDFs are listed under Open Recent, newest first`` () =
             let at (pdf: string) = entries |> List.findIndex (fun (_, path) -> path = Path.GetFullPath pdf)
             at second |> should be (lessThan (at first))
             entries |> List.last |> fst |> should equal "Clear Menu"))
+
+[<Fact>]
+let ``a PDF written again while it's open, as an export can, is validated again there`` () =
+    withTwoPdfs (fun first second ->
+        onUiThread (fun () ->
+            let rows (window: MainWindow) = (HeadlessWindow.resultsGrid window).ItemsSource |> Seq.cast<obj> |> Seq.length
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window first
+            let other, _ = wait (MainWindow.Open(DocumentShell.Shared, second, window))
+            let before = rows other
+            // The copy exported again: here, another PDF written over it.
+            File.Copy(first, second, true)
+
+            let brought, notValidated = wait (MainWindow.Open(DocumentShell.Shared, second, window))
+            let again, report = wait (MainWindow.Open(DocumentShell.Shared, second, window, true))
+            let after = rows other
+            other.Close()
+            window.Close()
+
+            // Only brought forward, unless it's changed.
+            obj.ReferenceEquals(brought, other) |> should be True
+            notValidated |> should equal None
+            obj.ReferenceEquals(again, other) |> should be True
+            report.IsSome |> should be True
+            after |> should not' (equal before)
+            after |> should equal (rows window)))
