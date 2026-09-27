@@ -5,6 +5,7 @@ module Legibyl.Validation.RepairNames
 let names =
     [ "tag-from-layout", PdfFixOptions.TagFromLayout
       "qr-links", PdfFixOptions.QrCodeLinks
+      "parent-tree", PdfFixOptions.ParentTree
       "language", PdfFixOptions.LanguageFromText
       "headings-from-toc", PdfFixOptions.HeadingsFromToc
       "empty-paragraphs", PdfFixOptions.RemoveEmptyParagraphs
@@ -25,7 +26,8 @@ let names =
 /// by default, and what the GUI's Auto Fixes start with ticked. The title only moves across a
 /// title the author did write, in Info or in XMP; a title is never invented from the file name.
 let safe =
-    PdfFixOptions.Metadata
+    PdfFixOptions.ParentTree
+    ||| PdfFixOptions.Metadata
     ||| PdfFixOptions.AnnotationTabs
     ||| PdfFixOptions.LinkContents
     ||| PdfFixOptions.DocumentTitle

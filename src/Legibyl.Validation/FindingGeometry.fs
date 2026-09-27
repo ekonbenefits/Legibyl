@@ -80,13 +80,22 @@ let private elementAtPath (document: PdfDocument) (path: string) : PdfDictionary
         |> Option.filter (fun element -> not (obj.ReferenceEquals(element, root)))
     | _ -> None
 
+/// What each document's tags hold, read from the structure tree: for a parent tree that's
+/// missing or incomplete, where iText can't find a piece of content's element.
+let private taggedByDocument = System.Runtime.CompilerServices.ConditionalWeakTable<PdfDocument, ParentTree.Tagged>()
+
 /// The element that owns a page's marked content, by its MCID.
-let private ownerOf (document: PdfDocument) (page: int) (mcid: int) : PdfDictionary option =
+let private ownerOf (document: PdfDocument) context (page: int) (mcid: int) : PdfDictionary option =
+    let fromStructureTree () =
+        let tagged = taggedByDocument.GetValue(document, fun document -> ParentTree.tagged document context)
+        match tagged.MarkedContent.TryGetValue((page, mcid)) with
+        | true, element -> Some element
+        | _ -> None
     match document.GetStructTreeRoot() with
     | null -> None
     | root when page >= 1 && page <= document.GetNumberOfPages() ->
         match root.GetPageMarkedContentReferences(document.GetPage page) with
-        | null -> None
+        | null -> fromStructureTree ()
         | references ->
             references
             |> Seq.tryFind (fun reference -> reference.GetMcid() = mcid)
@@ -94,6 +103,7 @@ let private ownerOf (document: PdfDocument) (page: int) (mcid: int) : PdfDiction
                 match reference.GetParent() with
                 | :? iText.Kernel.Pdf.Tagging.PdfStructElem as element -> Some(element.GetPdfObject())
                 | _ -> None)
+            |> Option.orElseWith fromStructureTree
     | _ -> None
 
 /// What a finding's location holds, named (see RuleViolation.Element): the element that owns its
@@ -108,7 +118,7 @@ let describe context (document: PdfDocument) (violation: RuleViolation) : string
             elementAtPath document locationContext |> Option.map (fun element -> describeElement element context (ancestorPage element context))
         elif matches.Count > 0 && page.IsSome && not (isInsideXObject locationContext) then
             let mcid = int matches[matches.Count - 1].Groups[1].Value
-            match ownerOf document page.Value mcid with
+            match ownerOf document context page.Value mcid with
             | Some element -> Some(describeElement element context page)
             | None ->
                 // Marked, but no element has it: what's drawn there.

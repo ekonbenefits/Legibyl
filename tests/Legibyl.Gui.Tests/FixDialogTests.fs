@@ -123,6 +123,7 @@ let ``showing all repairs lists the ones this PDF doesn't need too, still in ord
         |> should
             equal
             [ "Link QR codes"
+              "Rebuild the parent tree"
               "Declare the language"
               "Headings from the table of contents"
               "Remove empty paragraphs"

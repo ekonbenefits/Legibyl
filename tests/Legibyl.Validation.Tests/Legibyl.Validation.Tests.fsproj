@@ -35,6 +35,7 @@
     <Compile Include="MetadataAndFontFixTests.fs" />
     <Compile Include="LinkTitlesTests.fs" />
     <Compile Include="LinkTargetsTests.fs" />
+    <Compile Include="ParentTreeTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

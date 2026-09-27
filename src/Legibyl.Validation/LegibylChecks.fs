@@ -187,6 +187,25 @@ let private missingBookmarkFindings (document: PdfDocument) context =
               (if fixable then PdfFixOptions.BookmarksFromHeadings else PdfFixOptions.None)
               null ]
 
+// ---- Structure-9: the parent tree is missing or incomplete (see ParentTree) ----
+
+[<Literal>]
+let private ParentTreeMessage =
+    "The tags exist but the PDF doesn't say which page content each covers (its parent tree is missing or incomplete), so the tags read as untagged. An auto fix can rebuild it from the tags."
+
+let private parentTreeFindings (document: PdfDocument) context =
+    match ParentTree.find document context with
+    | None -> []
+    | Some missing ->
+        let pages = if missing.Pages = 1 then "1 page with tagged content has" else $"{missing.Pages} pages with tagged content have"
+        let objects = if missing.Objects = 1 then "1 tagged annotation has" else $"{missing.Objects} tagged annotations have"
+        let detail =
+            [ if missing.TreeMissing then "The parent tree is missing."
+              if missing.Pages > 0 then $"{pages} no entry in it."
+              if missing.Objects > 0 then $"{objects} no entry in it." ]
+            |> String.concat " "
+        [ warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null ]
+
 /// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
@@ -199,6 +218,7 @@ let run (document: PdfDocument) context : RuleViolation list =
                   | Some finding ->
                       warning check.Message null finding.Location check.TestNumber check.FixOptions (Option.toObj finding.Geometry)
                   | None -> ()
+          yield! parentTreeFindings document context
           yield! tocHeadingFindings document context
           yield! paragraphListFindings document context
           yield! missingBookmarkFindings document context ]

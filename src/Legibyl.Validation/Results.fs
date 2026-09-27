@@ -10,6 +10,7 @@ module PdfFixDescriptions =
     let Describe (options: PdfFixOptions) : string list =
         [ PdfFixOptions.TagFromLayout, "Tag an untagged document from each page's layout"
           PdfFixOptions.QrCodeLinks, "Link QR codes to the web addresses they encode"
+          PdfFixOptions.ParentTree, "Rebuild the parent tree, so the tags are found for the content they hold"
           PdfFixOptions.LanguageFromText, "Declare the document's language, detected from its text"
           PdfFixOptions.Metadata, "Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP)"
           PdfFixOptions.FontCidToGidMap, "Write down how embedded fonts map their character codes to glyphs (/CIDToGIDMap)"

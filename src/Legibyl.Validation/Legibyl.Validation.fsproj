@@ -20,6 +20,7 @@
     <Compile Include="Interop.fs" />
     <Compile Include="MarkedContentTextIndex.fs" />
     <Compile Include="StructureTreeObjects.fs" />
+    <Compile Include="ParentTree.fs" />
     <Compile Include="TocHeadings.fs" />
     <Compile Include="ParagraphLists.fs" />
     <Compile Include="ParagraphJoins.fs" />
