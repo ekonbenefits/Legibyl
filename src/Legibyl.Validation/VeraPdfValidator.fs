@@ -509,6 +509,7 @@ type VeraPdfValidator() =
     // A plain field: an auto-property (member val) of a nullable type reaches other assemblies
     // as non-nullable.
     let mutable review: Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null> | null = null
+    let mutable title: string | null = null
     // veraPDF's one-time setup (a second or two) happens on first use, not here, so a validator
     // can be made on a UI thread; Warm does it ahead of time.
 
@@ -525,6 +526,12 @@ type VeraPdfValidator() =
 
     /// The edits the ApplyEdits fix writes (see ElementEdits).
     member val Edits: Collections.Generic.IReadOnlyList<ElementEdit> = [] with get, set
+
+    /// The title a person gave the document, which the ApplyEdits fix writes (see
+    /// ElementEdits.applyTitle); null for none.
+    member _.Title
+        with get (): string | null = title
+        and set (value: string | null) = title <- value
 
     /// Where the LinkTitlesFromWeb fix reads the titles of the web pages links go to: the web
     /// itself, safely (see LinkTitles), unless replaced.
@@ -576,7 +583,7 @@ type VeraPdfValidator() =
             raise (VeraPdfValidationException "At least one fix option must be selected.")
 
         let structuralOptions =
-            StructureFixes.orderedFixes this.PageTitleSource None [] |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
+            StructureFixes.orderedFixes this.PageTitleSource None [] None |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
         let steps =
@@ -657,7 +664,7 @@ type VeraPdfValidator() =
                     // Edits of elements (not regions, which tagging takes) that won't change anything, and why.
                     if options.HasFlag PdfFixOptions.ApplyEdits && not (options.HasFlag PdfFixOptions.TagFromLayout) then
                         notApplied.AddRange(ElementEdits.unapplied currentInput (List.ofSeq this.Edits))
-                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) with
+                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) (Option.ofObj this.Title) with
                     | [] ->
                         tryDeleteTemporary tempOutput
                         tempStructuralOutput <- null

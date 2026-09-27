@@ -164,9 +164,15 @@ module private StructureView =
 
     /// A block's failures (or, with none, warnings) as a marker: its icon, and how many if more
     /// than one; its tooltip lists them. Clicking it shows the first in the main window's results.
-    let findingMarker (selection: Selection) (node: StructureNode) : IView option =
+    let rec findingMarker (selection: Selection) (node: StructureNode) : IView option =
         match selection.Findings.TryGetValue node with
-        | true, findings when not findings.IsEmpty ->
+        | true, findings -> findingsMarker findings selection.ShowFinding
+        | _ -> None
+
+    /// Findings as a marker (see findingMarker): on a block, or the document title's row.
+    and findingsMarker (findings: RuleViolation list) (showFinding: RuleViolation -> unit) : IView option =
+        match findings with
+        | _ when not findings.IsEmpty ->
             let failures = findings |> List.filter (fun f -> f.Severity = FindingSeverity.Failure) |> List.length
             let warnings = findings.Length - failures
             let icon, color = if failures > 0 then Icons.failure, Theme.Tokens.Danger else Icons.warning, Theme.Tokens.Warning
@@ -212,7 +218,7 @@ module private StructureView =
                             ]
                         ]
                     )
-                    Button.onClick ((fun e -> e.Handled <- true; selection.ShowFinding findings.Head), SubPatchOptions.Always)
+                    Button.onClick ((fun e -> e.Handled <- true; showFinding findings.Head), SubPatchOptions.Always)
                 ]
                 :> IView
             )
@@ -1630,29 +1636,54 @@ module private StructureView =
                     )
                 ]
 
-            // For a suggested layout, the document's title: prefilled as the title fixes would find
-            // it (the document's own, else a short first page), else the first H1 found. Only a
-            // change from what's prefilled is saved.
-            let titleEdit = ctx.useState (suggested |> Option.bind (fun (review, _) -> review.Title))
-            let documentCandidates =
-                ctx.useStateLazy(fun () -> if isSuggested then (try DocumentTitles.candidates sourceFilePath with _ -> []) else []).Current
+            // The document's title. For a suggested layout, prefilled as the title fixes would find
+            // it (the document's own, else a short first page), else the first H1 found; for a
+            // tagged PDF, its own title (empty if it has none), the others offered. Only a change
+            // from what's prefilled is saved, and Export writes it.
+            let titleEdit = ctx.useState review.Title
+            let documentCandidates = ctx.useStateLazy(fun () -> try DocumentTitles.candidates sourceFilePath with _ -> []).Current
+            // PDF/UA's title failures (no title in the metadata; the file name shown in its place),
+            // marked on the title's row.
+            let titleFindings =
+                let titleRules = set [ PdfProfile.PdfUa1, "7.1-9"; PdfProfile.PdfUa1, "7.1-10"; PdfProfile.PdfUa2, "8.11.1-1"; PdfProfile.PdfUa2, "8.11.2-1" ]
+                if isSuggested then []
+                else
+                    findings.Items
+                    |> List.filter (fun f ->
+                        match PdfUaTarget.ofSpecification f.Specification with
+                        | Some standard -> titleRules.Contains((standard, f.RuleId))
+                        | None -> false)
 
             let titleRow (review: DocumentReview) =
+                let tidy (text: string) = Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim()
                 let headingCandidate =
-                    match review.Pages.TryGetValue 1 with
-                    | true, first ->
-                        first.Blocks
-                        |> List.tryFind (fun block -> RegionEdits.tagOf edits.Current 1 block = "H1")
-                        |> Option.bind (fun block ->
-                            RegionEdits.textFor edits.Current 1 block
-                            |> Option.orElse (Some block.Text)
-                            |> Option.map (fun text -> Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim())
-                            |> Option.filter (String.IsNullOrWhiteSpace >> not))
-                        |> Option.map (fun title -> { DocumentTitles.Title = title; DocumentTitles.Source = "first heading" })
-                    | _ -> None
+                    if isSuggested then
+                        match review.Pages.TryGetValue 1 with
+                        | true, first ->
+                            first.Blocks
+                            |> List.tryFind (fun block -> RegionEdits.tagOf edits.Current 1 block = "H1")
+                            |> Option.bind (fun block ->
+                                RegionEdits.textFor edits.Current 1 block
+                                |> Option.orElse (Some block.Text)
+                                |> Option.map tidy
+                                |> Option.filter (String.IsNullOrWhiteSpace >> not))
+                        | _ -> None
+                    else
+                        let rec firstHeading (node: StructureNode) : string option =
+                            if node.Tag = "H1" then Option.ofObj node.Content |> Option.map tidy |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                            else node.Children |> Seq.tryPick firstHeading
+                        firstHeading root.Current
+                    |> Option.map (fun title -> { DocumentTitles.Title = title; DocumentTitles.Source = "first heading" })
                 let candidates = documentCandidates @ Option.toList headingCandidate |> List.distinctBy _.Title
-                let prefilled = candidates |> List.tryHead |> Option.map _.Title |> Option.defaultValue ""
-                review.ShownTitle <- (if prefilled = "" then None else Some prefilled)
+                let prefilled =
+                    if isSuggested then candidates |> List.tryHead |> Option.map _.Title |> Option.defaultValue ""
+                    else
+                        // Its own title, only: one taken from its first page or heading is offered.
+                        candidates
+                        |> List.tryFind (fun c -> c.Source <> "first page" && c.Source <> "first heading")
+                        |> Option.map _.Title
+                        |> Option.defaultValue ""
+                if isSuggested then review.ShownTitle <- (if prefilled = "" then None else Some prefilled)
                 let shownTitle = titleEdit.Current |> Option.defaultValue prefilled
                 let setTitle (text: string) =
                     let next = if text = prefilled then None else Some text
@@ -1664,17 +1695,30 @@ module private StructureView =
                     Grid.columnDefinitions "Auto,*"
                     Grid.rowDefinitions "Auto,Auto"
                     Grid.children [
-                        TextBlock.create [
-                            TextBlock.text "Document title"
-                            TextBlock.fontWeight FontWeight.SemiBold
-                            TextBlock.verticalAlignment VerticalAlignment.Center
-                            TextBlock.margin (0.0, 0.0, 10.0, 0.0)
+                        StackPanel.create [
+                            StackPanel.orientation Orientation.Horizontal
+                            StackPanel.verticalAlignment VerticalAlignment.Center
+                            StackPanel.margin (0.0, 0.0, 10.0, 0.0)
+                            StackPanel.children [
+                                TextBlock.create [
+                                    TextBlock.text "Document title"
+                                    TextBlock.fontWeight FontWeight.SemiBold
+                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                    TextBlock.margin (0.0, 0.0, 6.0, 0.0)
+                                ]
+                                match findingsMarker titleFindings findings.Show with
+                                | Some marker -> marker
+                                | None -> ()
+                            ]
                         ]
                         TextBox.create [
                             Grid.column 1
                             TextBox.text shownTitle
                             TextBox.placeHolderText "What a screen reader and the title bar call this document"
-                            ToolTip.tip "Given to the tagged copy as its title, shown in place of the file name. Save keeps a change next to the PDF."
+                            ToolTip.tip (
+                                if isSuggested then "Given to the tagged copy as its title, shown in place of the file name. Save keeps a change next to the PDF."
+                                else "Export… gives the copy this title, shown in place of the file name. Save keeps a change next to the PDF."
+                            )
                             // What's prefilled can change as the first page is found.
                             TextBox.onTextChanged (setTitle, SubPatchOptions.Always)
                         ]
@@ -1795,6 +1839,7 @@ module private StructureView =
                                     TextBlock.text
                                         "This is the tagged logical structure tree — the semantic heading/paragraph/list/table/link hierarchy that determines what content and reading order a screen reader presents to a user. Only elements that directly own page content show a page number."
                                 ]
+                                titleRow review
                         ]
                     ]
                     TabControl.create [

@@ -288,3 +288,57 @@ let ``a figure made not read leaves the tags, and its content is an artifact, st
     // Once written, the edit says it's done.
     ElementEdits.unapplied output.Path [ notReadEdit ] |> List.exactlyOne |> should haveSubstring "it may be decoration already"
     ElementEdits.pending input.Path [ notReadEdit ] |> should equal 1
+
+let private titleRules (path: string) profile =
+    VeraPdfValidator().Validate(path, profile).FailedAssertions
+    |> Seq.map _.RuleId
+    |> Seq.filter (fun r -> List.contains r [ "7.1-9"; "7.1-10"; "8.11.1-1"; "8.11.2-1" ])
+    |> Set.ofSeq
+
+[<Fact>]
+let ``a title given for a tagged PDF is written to it, shown in place of the file name`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path
+    // No metadata at all (7.1-8), so no title in it either; and the file name shown.
+    titleRules input.Path PdfProfile.PdfUa1 |> should equal (set [ "7.1-10" ])
+    ElementEdits.titlePending input.Path "The Garden in Spring" |> should be True
+
+    let result =
+        VeraPdfValidator(Title = "The Garden in Spring").Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits ||| PdfFixOptions.Metadata)
+
+    result.AppliedFixes |> should contain "Titled the document \"The Garden in Spring\", as you gave it, shown in place of the file name."
+    titleRules output.Path PdfProfile.PdfUa1 |> should be Empty
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle() |> should equal "The Garden in Spring"
+    let xmp = iText.Kernel.XMP.XMPMetaFactory.ParseFromBuffer(document.GetXmpMetadataBytes())
+    xmp.GetLocalizedText(iText.Kernel.XMP.XMPConst.NS_DC, "title", "", "x-default").GetValue() |> should equal "The Garden in Spring"
+    ElementEdits.titlePending output.Path "The Garden in Spring" |> should be False
+
+[<Fact>]
+let ``a title given wins over the one the file carries, in its XMP metadata too`` () =
+    use output = new TempPdf()
+    let result =
+        VeraPdfValidator(Title = "A better title").Fix(corpusFile "pdfua1-pass.pdf", PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits ||| PdfFixOptions.DocumentTitle)
+
+    result.AppliedFixes |> Seq.exists (fun f -> f.StartsWith "Titled the document \"A better title\"") |> should be True
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetDocumentInfo().GetTitle() |> should equal "A better title"
+    let xmp = iText.Kernel.XMP.XMPMetaFactory.ParseFromBuffer(document.GetXmpMetadataBytes())
+    xmp.GetLocalizedText(iText.Kernel.XMP.XMPConst.NS_DC, "title", "", "x-default").GetValue() |> should equal "A better title"
+
+[<Fact>]
+let ``a title given for a tagged PDF 2.0 file passes PDF/UA-2's title rules`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path, WriterProperties().SetPdfVersion(PdfVersion.PDF_2_0)))
+        document.SetTagged() |> ignore
+        use layout = new iText.Layout.Document(document)
+        layout.Add(iText.Layout.Element.Paragraph "The garden in spring.") |> ignore
+    titleRules input.Path PdfProfile.PdfUa2 |> should equal (set [ "8.11.1-1"; "8.11.2-1" ])
+
+    VeraPdfValidator(Title = "The Garden in Spring").Fix(input.Path, PdfProfile.PdfUa2, output.Path, PdfFixOptions.ApplyEdits ||| PdfFixOptions.Metadata)
+    |> ignore
+
+    titleRules output.Path PdfProfile.PdfUa2 |> should be Empty

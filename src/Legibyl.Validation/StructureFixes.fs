@@ -475,12 +475,13 @@ let private setLanguageFromText (document: PdfDocument) context =
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
 /// result, and syncs XMP with the Info dictionary the title repair may have just set.
 /// titles is where LinkTitlesFromWeb reads the titles of the pages links go to, layout where
-/// JoinSplitParagraphs finds the pages' regions (without one, it does nothing), and edits what
-/// ApplyEdits writes.
+/// JoinSplitParagraphs finds the pages' regions (without one, it does nothing), and edits and title
+/// what ApplyEdits writes (the title before the title repairs, which then leave it).
 let orderedFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
     (edits: ElementEdit list)
+    (title: string option)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.ParentTree, ParentTree.rebuild
       PdfFixOptions.LanguageFromText, setLanguageFromText
@@ -490,7 +491,10 @@ let orderedFixes
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
       PdfFixOptions.ListsFromParagraphs, tagParagraphLists
       PdfFixOptions.BookmarksFromHeadings, addBookmarks
-      PdfFixOptions.ApplyEdits, (fun document context -> ElementEdits.apply document context edits)
+      PdfFixOptions.ApplyEdits,
+      (fun document context ->
+          ElementEdits.apply document context edits
+          @ (title |> Option.map (ElementEdits.applyTitle document) |> Option.defaultValue []))
       PdfFixOptions.LinkTargets, (fun document context -> LinkTargets.apply document (LinkTargets.find document context))
       PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
@@ -510,11 +514,12 @@ let applyFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
     (edits: ElementEdit list)
+    (title: string option)
     : string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
-    [ for option, apply in orderedFixes titles layout edits do
+    [ for option, apply in orderedFixes titles layout edits title do
           if options.HasFlag option then
               yield! apply document context ]

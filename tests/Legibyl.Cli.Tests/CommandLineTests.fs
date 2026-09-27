@@ -120,6 +120,26 @@ let ``--edits with a figure retagged Artifact makes it decoration`` () =
         VeraPdfValidator().ReadStructureTree copy |> nonNull |> tags |> should not' (contain "Figure"))
 
 [<Fact>]
+let ``--edits gives a tagged PDF the review's title`` () =
+    withTaggedPdf (fun pdf ->
+        let review: ReviewFile.SavedFile =
+            { Version = 1
+              DismissedWarnings = null
+              Edits = null
+              Title = "The Community Garden"
+              Layout = null
+              Fixes = null }
+        File.WriteAllText(ReviewFile.filePath pdf, ReviewFile.toJson review)
+        let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
+
+        let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
+
+        strings result.Value "applied"
+        |> should contain "Titled the document \"The Community Garden\", as you gave it, shown in place of the file name."
+        use document = new PdfDocument(new PdfReader(copy))
+        document.GetDocumentInfo().GetTitle() |> should equal "The Community Garden")
+
+[<Fact>]
 let ``--edits-from reads another review, such as an earlier version's`` () =
     withTaggedPdf (fun pdf ->
         let other = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "earlier.legibyl.json")

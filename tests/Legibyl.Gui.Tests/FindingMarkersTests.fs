@@ -126,16 +126,21 @@ let private withTaggedPdf (test: string -> unit) =
 let private markers (window: Window) =
     descendants<Button> window |> List.filter (fun b -> (b.Tag :? string) && string b.Tag = "finding-marker")
 
-/// The block a marker is on.
-let private blockOf (marker: Button) =
+/// The block a marker is on, if it's on one (the title's isn't).
+let private tryBlockOf (marker: Button) =
     marker.GetVisualAncestors()
-    |> Seq.pick (fun v ->
+    |> Seq.tryPick (fun v ->
         match v with
         | :? Border as b ->
             match b.Tag with
             | :? StructureNode as n -> Some n
             | _ -> None
         | _ -> None)
+
+let private blockOf (marker: Button) = tryBlockOf marker |> Option.get
+
+/// The markers on blocks.
+let private blockMarkers (window: Window) = markers window |> List.filter (tryBlockOf >> Option.isSome)
 
 [<Fact>]
 let ``a tagged PDF's Structure window marks the blocks with failures, and a marker shows its finding in the results`` () =
@@ -148,7 +153,7 @@ let ``a tagged PDF's Structure window marks the blocks with failures, and a mark
             waitFor (fun () -> (structure ()).IsSome)
             let structureWindow = structure () |> Option.get
             pump ()
-            let marked = markers structureWindow
+            let marked = blockMarkers structureWindow
             let markedTags = marked |> List.map (fun m -> (blockOf m).Tag)
             let figureMarker = marked |> List.find (fun m -> (blockOf m).Tag = "Figure")
             let tip = string (ToolTip.GetTip figureMarker)
@@ -187,7 +192,7 @@ let ``markers stay until the file is validated again: an edit doesn't clear them
             (descendants<TextBox> prompt |> List.exactlyOne).Text <- "Four coloured squares"
             pump ()
             click (descendants<Button> prompt |> List.find (fun b -> string b.Content = "OK"))
-            let after = markers structureWindow |> List.map (fun m -> (blockOf m).Tag)
+            let after = blockMarkers structureWindow |> List.map (fun m -> (blockOf m).Tag)
             structureWindow.Close()
             window.Close()
 
@@ -217,3 +222,56 @@ let ``a suggested structure has no markers: its findings are the untagged file's
         finally
             Directory.Delete(folder, true))
 
+
+/// The Structure window a tagged PDF's Structure… button opens, from the main window.
+let private openStructure (window: MainWindow) =
+    click (descendants<Button> window |> List.find (fun b -> (string (AutomationProperties.GetName b)).StartsWith "Structure…"))
+    let structure () = window.OwnedWindows |> Seq.tryPick (fun w -> match w with :? StructureTreeWindow as s -> Some s | _ -> None)
+    waitFor (fun () -> (structure ()).IsSome)
+    let structureWindow = structure () |> Option.get
+    pump ()
+    structureWindow
+
+/// The title row's text box, and the marker beside its label, if any.
+let private titleRow (window: Window) =
+    let box = descendants<TextBox> window |> List.find (fun t -> string t.PlaceholderText = "What a screen reader and the title bar call this document")
+    let marker =
+        markers window |> List.tryFind (tryBlockOf >> Option.isNone)
+    box, marker
+
+[<Fact>]
+let ``a tagged PDF's Structure window has its title, empty when it has none, marked with the title failures`` () =
+    withTaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let structureWindow = openStructure window
+            let box, marker = titleRow structureWindow
+            let text = box.Text
+            let tip = marker |> Option.map (fun m -> string (ToolTip.GetTip m)) |> Option.defaultValue ""
+            box.Text <- "The Garden in Spring"
+            pump ()
+            let given = structureWindow.Review.Title
+            structureWindow.Close()
+            window.Close()
+
+            text |> should equal ""
+            tip |> should haveSubstring "7.1, test 10"
+            given |> should equal (Some "The Garden in Spring")))
+
+[<Fact>]
+let ``a tagged PDF with a title of its own shows it`` () =
+    withTaggedPdf (fun pdf ->
+        let titled = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "titled.pdf")
+        do
+            use document = new PdfDocument(new PdfReader(pdf), new PdfWriter(titled))
+            document.GetDocumentInfo().SetTitle "The Community Garden" |> ignore
+        onUiThread (fun () ->
+            let window = StructureTreeWindow(StructureSource.Tagged(VeraPdfValidator().ReadStructureTree titled |> nonNull), titled, DocumentReviews().For titled, ignore)
+            window.Show()
+            pump ()
+            let box, _ = titleRow window
+            let text = box.Text
+            window.Close()
+
+            text |> should equal "The Community Garden"))

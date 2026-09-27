@@ -164,8 +164,9 @@ let ``a block selected on the preview inside collapsed blocks is opened and scro
             clickAt image (20.0 + 50.0 * 5.5 + 2.5) (40.0 + 20.0 * 30.0 + 10.0) false
             HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> not (selected window).IsEmpty) |> ignore
             let chosen = selected window
-            let scroller = descendants<ScrollViewer> window |> List.head
             let border = descendants<Border> window |> List.find (fun b -> match chosen with [ n ] -> obj.ReferenceEquals(b.Tag, n) | _ -> false)
+            // The list's, which holds the block.
+            let scroller = border.GetVisualAncestors() |> Seq.pick (fun v -> match v with :? ScrollViewer as s -> Some s | _ -> None)
             let top = (border.TranslatePoint(Point(0.0, 0.0), scroller)).Value.Y
             window.Close()
 
