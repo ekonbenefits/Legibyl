@@ -169,7 +169,9 @@ naming PDFs on the command line, or **Open With › Legibyl** in Finder or
 Explorer) uses the window it's dropped on if that has none yet, brings forward
 the window already showing it, uses a window showing no PDF yet, or else opens
 a new window. An exported
-copy opens in its own window too, so the original stays open beside it. Each
+copy opens in its own window too, so the original stays open beside it; if
+it's already open (exported to the same file before), that window validates it
+again. Each
 window closes on its own, asking about its review's changes not saved first.
 The **File** menu (the menu bar on macOS, the top of the window elsewhere) has
 **Open…**, **Open Recent** (the last ten PDFs opened, kept in `recent.json` in

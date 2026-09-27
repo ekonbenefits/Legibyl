@@ -308,13 +308,14 @@ module private MainView =
         | _ -> [ ProgressBar.isIndeterminate true ]
 
     /// A document window's view: one PDF. opened is told the PDF it opens; openElsewhere opens
-    /// another PDF (in the window showing it, or a new one), with that window and its report.
+    /// another PDF (in the window showing it, or a new one), with that window and its report;
+    /// told the PDF has changed, a window showing it validates it again.
     let view
         (window: Window)
         (shell: DocumentShell)
         (openRequests: IReadable<OpenRequest option>)
         (opened: string -> unit)
-        (openElsewhere: string -> Task<Window * ValidationReport option>)
+        (openElsewhere: string -> bool -> Task<Window * ValidationReport option>)
         =
         Component(fun ctx ->
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
@@ -524,7 +525,7 @@ module private MainView =
             /// its own window.
             let setSelectedFile (path: string) =
                 match selectedFile.Current with
-                | Some current when Path.GetFullPath current <> Path.GetFullPath path -> openElsewhere path |> ignore
+                | Some current when Path.GetFullPath current <> Path.GetFullPath path -> openElsewhere path false |> ignore
                 | _ -> openFileAs "Validating" path |> ignore
 
             // Closing with changes not saved asks about them first.
@@ -753,7 +754,8 @@ module private MainView =
                                 match fixOutcome with
                                 | Ok fix when fix.WasFixed ->
                                     match fix.OutputPath with
-                                    | NonNull path -> openElsewhere path
+                                    // It may be open already, from an earlier export to the same file.
+                                    | NonNull path -> openElsewhere path true
                                     | Null -> Task.FromResult(window, None)
                                 | _ -> Task.FromResult(window, None)
 
@@ -1370,9 +1372,9 @@ type MainWindow(shell: DocumentShell) as this =
         let headerStyle = Style(fun selector -> selector.OfType<DataGridColumnHeader>())
         headerStyle.Setters.Add(Setter(DataGridColumnHeader.FontSizeProperty, 12.0))
         this.Styles.Add headerStyle
-        let openElsewhere path =
+        let openElsewhere path changed =
             task {
-                let! window, report = MainWindow.Open(shell, path, this)
+                let! window, report = MainWindow.Open(shell, path, this, changed)
                 return (window :> Window), report
             }
         let opened path =
@@ -1398,14 +1400,21 @@ type MainWindow(shell: DocumentShell) as this =
     /// The document windows open.
     static member Windows = List.ofSeq windows
 
-    /// Opens path: brings forward the window showing it, else opens it in a window showing no PDF
-    /// yet, else in a new window (a little below and right of from, if given). That window, and
-    /// its report once validated (None if it was open already).
-    static member Open(shell: DocumentShell, path: string, ?from: Window) : Task<MainWindow * ValidationReport option> =
+    /// Opens path: brings forward the window showing it (validating it again if changed, as when
+    /// it's been written again since), else opens it in a window showing no PDF yet, else in a new
+    /// window (a little below and right of from, if given). That window, and its report once
+    /// validated (None if it was open already and not changed).
+    static member Open(shell: DocumentShell, path: string, ?from: Window, ?changed: bool) : Task<MainWindow * ValidationReport option> =
         let comparison = if OperatingSystem.IsLinux() then StringComparison.Ordinal else StringComparison.OrdinalIgnoreCase
         let showing (window: MainWindow) =
             window.FilePath |> Option.exists (fun shown -> String.Equals(Path.GetFullPath shown, Path.GetFullPath path, comparison))
         match windows |> Seq.tryFind showing, windows |> Seq.tryFind (fun window -> window.FilePath.IsNone) with
+        | Some window, _ when defaultArg changed false ->
+            window.Activate()
+            task {
+                let! report = window.OpenFileAsync path
+                return window, report
+            }
         | Some window, _ ->
             window.Activate()
             Task.FromResult((window, None))
