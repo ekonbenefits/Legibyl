@@ -462,3 +462,71 @@ let ``several figures are tagged Artifact at once`` () =
 
             named |> should equal "Tag for these 2 elements"
             recorded |> should equal [ "Figure", Some "Artifact"; "Figure", Some "Artifact" ]))
+/// A page's masthead, left column and right column, tagged in that order, and a paragraph on page 2.
+let private columns =
+    let paragraph text geometry = { node "P" geometry [] with Content = text }
+    node "StructTreeRoot" null [
+        node "Document" null [
+            paragraph "Masthead" (rect 72.0 700.0 540.0 740.0)
+            paragraph "Left column" (rect 72.0 400.0 290.0 680.0)
+            paragraph "Right column" (rect 310.0 400.0 540.0 680.0)
+            paragraph "Page two" { rect 72.0 600.0 540.0 700.0 with PageNumber = 2 }
+        ]
+    ]
+
+/// The paragraphs' text, in the order the layout shows them.
+let private shownOrder (window: Window) =
+    paragraphs window |> List.map (fun b -> (b.Tag :?> StructureNode).Content |> string)
+
+let private moveButton (window: Window) (label: string) =
+    descendants<Button> window |> List.find (fun b -> string b.Content = label)
+
+[<Fact>]
+let ``Move Up reads an element one place earlier, as an edit; the Edits tab says so, and Remove puts it back`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show columns pdf
+            let right = (paragraphs window)[2]
+            click right false
+            (moveButton window "Move Up").RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let moved = shownOrder window
+            let edits = window.Review.Edits |> List.map (fun e -> string e.Tag, e.Move.IsSome)
+            let marked = texts window |> List.filter ((=) "✎ moved in the reading order, not in the PDF yet") |> List.length
+            selectTab window "Edits"
+            let editsTab = texts window
+            for remove in descendants<Button> window |> List.filter (fun b -> string b.Content = "Remove") do
+                remove.RaiseEvent(RoutedEventArgs Button.ClickEvent)
+                pump ()
+            selectTab window "Blocks"
+            let restored = shownOrder window
+            window.Close()
+
+            moved |> should equal [ "Masthead"; "Right column"; "Left column"; "Page two" ]
+            // The fewest moves that give it: the right column after the masthead.
+            edits |> should equal [ "P", true ]
+            marked |> should equal 1
+            editsTab |> should contain "moved: after \"Masthead\""
+            editsTab |> should contain "Not in this PDF yet: Export… writes it to a copy."
+            restored |> should equal [ "Masthead"; "Left column"; "Right column"; "Page two" ]))
+
+[<Fact>]
+let ``an element moves only among its siblings on its page`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show columns pdf
+            let masthead = (paragraphs window)[0]
+            click masthead false
+            let first = (moveButton window "Move Up").IsEnabled, (moveButton window "Move Down").IsEnabled
+            let right = (paragraphs window)[2]
+            click right false
+            let last = (moveButton window "Move Up").IsEnabled, (moveButton window "Move Down").IsEnabled
+            (moveButton window "Move Down").RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let order = shownOrder window
+            window.Close()
+
+            first |> should equal (false, true)
+            // The next is on page 2.
+            last |> should equal (true, false)
+            order |> should equal [ "Masthead"; "Left column"; "Right column"; "Page two" ]))

@@ -80,7 +80,7 @@ let private writeReview (path: string) (alt: string) =
     let review: ReviewFile.SavedFile =
         { Version = 1
           DismissedWarnings = null
-          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null; Retag = null; Exclude = false } |]
+          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false } |]
           Title = null
           Layout = null
           Fixes = null
@@ -108,7 +108,7 @@ let ``--edits with a figure retagged Artifact makes it decoration`` () =
         let review: ReviewFile.SavedFile =
             { Version = 1
               DismissedWarnings = null
-              Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = null; Text = null; MergeWith = null; Retag = "Artifact"; Exclude = false } |]
+              Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = null; Text = null; MergeWith = null; Retag = "Artifact"; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false } |]
               Title = null
               Layout = null
               Fixes = null

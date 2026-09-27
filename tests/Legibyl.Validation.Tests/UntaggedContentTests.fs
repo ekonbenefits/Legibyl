@@ -54,7 +54,7 @@ let private render (path: string) =
     page.Pixels |> Array.map (fun c -> c.Red, c.Green, c.Blue, c.Alpha)
 
 let private edit (piece: StructureNode) (retag: string) (alt: string | null) =
-    { Page = 1; Tag = ElementEdits.UntaggedTag; Box = nonNull piece.Geometry; Alt = alt; Text = null; MergeWith = []; Retag = retag; Exclude = false }
+    { Page = 1; Tag = ElementEdits.UntaggedTag; Box = nonNull piece.Geometry; Alt = alt; Text = null; MergeWith = []; Retag = retag; Exclude = false; Move = None }
 
 let private applyEdits (input: string) (output: string) (edits: ElementEdit list) =
     VeraPdfValidator(Edits = edits).Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.ApplyEdits)

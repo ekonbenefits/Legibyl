@@ -111,16 +111,17 @@ module private StructureView =
         | "Artifact" -> 0x757575u
         | _ -> 0x6A1B9Au
 
-    /// The elements a page's overview outlines, in reading order: those that own content on it,
-    /// outermost first (one inside another that does is within that one's outline).
-    let pageElements (root: StructureNode) (page: int) : StructureNode list =
+    /// The elements a page's overview outlines, in reading order (each node's children in the
+    /// order children gives): those that own content on it, outermost first (one inside another
+    /// that does is within that one's outline).
+    let pageElements (children: StructureNode -> StructureNode list) (root: StructureNode) (page: int) : StructureNode list =
         let owns (node: StructureNode) =
             node.ContentLeafCount > 0
             && (match node.Geometry with
                 | NonNull geometry -> geometry.PageNumber = page
                 | Null -> false)
         let rec collect (node: StructureNode) : StructureNode list =
-            if owns node then [ node ] else [ for child in node.Children do yield! collect child ]
+            if owns node then [ node ] else [ for child in children node do yield! collect child ]
         [ for child in root.Children do yield! collect child ]
 
     /// The first page node's content is on: its own, else its first descendant's.
@@ -151,7 +152,12 @@ module private StructureView =
           /// The failures and warnings on each block (see FindingMarkers), and how to show one in
           /// the main window's results.
           Findings: Collections.Generic.IReadOnlyDictionary<StructureNode, RuleViolation list>
-          ShowFinding: RuleViolation -> unit }
+          ShowFinding: RuleViolation -> unit
+          /// The edits as they were when an element was last moved (see movesIn): a block's
+          /// children follow it, so other edits don't re-render them.
+          Moves: IReadable<RegionEdits.Edit list>
+          /// Whether a moved element isn't in that place in the PDF yet.
+          MovePending: StructureNode -> bool }
 
     /// A finding as a marker's tooltip lists it: "Failure: ISO 14289-1 7.3, test 1: Figure …",
     /// and what it means, where that's known.
@@ -259,6 +265,44 @@ module private StructureView =
         match node.Geometry with
         | null -> None
         | geometry -> RegionEdits.find edits geometry.PageNumber node.Tag geometry
+
+    /// node's children in the order the moves in edits give them (see SiblingOrder), as read when
+    /// none are moved.
+    let orderedChildren (edits: RegionEdits.Edit list) (node: StructureNode) : StructureNode list =
+        let children = List.ofSeq node.Children
+        if edits |> List.forall _.Move.IsNone then children
+        else SiblingOrder.reorder [ for child in children -> child, Option.ofObj child.Geometry, editFor edits child |> Option.bind _.Move ]
+
+    /// The moves in edits, to tell whether the order has changed: an edit of alt text doesn't.
+    let movesIn (edits: RegionEdits.Edit list) =
+        edits |> List.choose (fun e -> e.Move |> Option.map (fun move -> e.Page, e.Tag, e.Box, move))
+
+    /// The tags whose children keep their order: a table's cells and rows, a table of contents'
+    /// entries, which Move Up and Move Down don't change.
+    let fixedOrder = set [ "Table"; "THead"; "TBody"; "TFoot"; "TR"; "TOC"; "StructTreeRoot"; "NotInTags" ]
+
+    /// edits with parent's children in order: the fewest moves that give it (see SiblingOrder),
+    /// replacing those it had. Starting from none, each place where the order still differs gets a
+    /// move of the element that belongs there, after the one before it (or first).
+    let recordOrder (edits: RegionEdits.Edit list) (parent: StructureNode) (order: StructureNode list) =
+        let setMove edits (node: StructureNode) move =
+            match node.Geometry with
+            | NonNull box -> RegionEdits.setMove edits box.PageNumber node.Tag box move
+            | Null -> edits
+        let cleared =
+            parent.Children
+            |> Seq.fold (fun edits node -> if (editFor edits node |> Option.bind _.Move).IsSome then setMove edits node None else edits) edits
+        let rec place edits tries =
+            let now = orderedChildren edits parent
+            match List.zip now order |> List.tryFindIndex (fun (a, b) -> not (obj.ReferenceEquals(a, b))) with
+            | Some i when tries > 0 ->
+                let move = if i = 0 then Some First else order[i - 1].Geometry |> Option.ofObj |> Option.map After
+                match move, order[i].Geometry with
+                | Some _, NonNull _ -> place (setMove edits order[i] move) (tries - 1)
+                // One with no place on a page can't be named by a move.
+                | _ -> edits
+            | _ -> edits
+        place cleared (order.Length + 1)
 
     /// For a paragraph or figure: how it's in a merge the user chose, if it is (merges are only
     /// ever not in the PDF yet where they're still apart, as they are wherever a block shows them).
@@ -508,7 +552,20 @@ module private StructureView =
                 match node.Tag with
                 | "TOC" -> [ tocGrid selection node ]
                 | "Table" -> [ tableGrid selection node ]
-                | _ -> [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child ]
+                | tag when fixedOrder.Contains tag ->
+                    [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child ]
+                | _ ->
+                    // In the order the moves give them; its own component, so a move re-renders just these.
+                    // Keyed by the node: a component keeps the node it was made for (a suggested
+                    // structure's is made again as pages are found).
+                    [ Component.create($"ordered-children-{Runtime.CompilerServices.RuntimeHelpers.GetHashCode node}", fun ctx ->
+                          let moves = ctx.usePassedRead selection.Moves
+                          StackPanel.create [
+                              StackPanel.children [
+                                  for child in orderedChildren moves.Current node ->
+                                      element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child
+                              ]
+                          ]) ]
 
         let inner =
             StackPanel.create [
@@ -520,7 +577,7 @@ module private StructureView =
                         match decorationHint node with
                         | Some hint -> detailLine hint true
                         | None -> ()
-                    if not (editKinds node).IsEmpty || canRetag selection.Suggested node || isUntagged node then
+                    if not (editKinds node).IsEmpty || canRetag selection.Suggested node || isUntagged node || not (isNull node.Geometry) then
                         // Its own component, so an edit re-renders just this line.
                         Component.create("pending-edit", fun ctx ->
                             let edits = ctx.usePassedRead selection.Edits
@@ -537,6 +594,8 @@ module private StructureView =
                                         | _ -> detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
                                     if editFor edits.Current node |> Option.exists _.Exclude then
                                         detailLine "✎ merged into its neighbour: its text joins the nearest region kept" true
+                                    if selection.MovePending node then
+                                        detailLine "✎ moved in the reading order, not in the PDF yet" true
                                     match mergeLine edits.Current node with
                                     | Some line -> detailLine line true
                                     | None -> ()
@@ -576,11 +635,13 @@ module private StructureView =
         Component.create("collapsed-children", fun ctx ->
             let expanded = ctx.useState false
             let opened = ctx.usePassedRead selection.Expanded
+            let moves = ctx.usePassedRead selection.Moves
             if expanded.Current || opened.Current |> List.exists (fun n -> obj.ReferenceEquals(n, node)) then
                 let levels = levelsWithinBudget node.Children
+                let children = if fixedOrder.Contains node.Tag then List.ofSeq node.Children else orderedChildren moves.Current node
                 StackPanel.create [
                     StackPanel.children [
-                        for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
+                        for child in children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
                     ]
                 ]
             else
@@ -808,6 +869,26 @@ module private StructureView =
                     parents
             // The user's edits for this PDF: its review's.
             let edits = ctx.useState review.Edits
+            // The edits as of the last move, which the blocks' order follows.
+            let moves = ctx.useState review.Edits
+            /// Whether node is moved and isn't in that place in the PDF yet: its predecessor as read
+            /// isn't the one its move names.
+            let movePending (node: StructureNode) =
+                match editFor edits.Current node |> Option.bind _.Move, (parents ()).TryGetValue node with
+                | Some move, (true, parent) ->
+                    let asRead = List.ofSeq parent.Children
+                    let before =
+                        match asRead |> List.tryFindIndex (fun n -> obj.ReferenceEquals(n, node)) with
+                        | Some i when i > 0 -> Some asRead[i - 1]
+                        | _ -> None
+                    match move, before with
+                    | First, None -> false
+                    | After box, Some previous ->
+                        match previous.Geometry with
+                        | NonNull own -> own.PageNumber <> box.PageNumber || RegionEdits.overlap own box < RegionEdits.SameRegionOverlap
+                        | Null -> true
+                    | _ -> true
+                | _ -> false
             let modelReady = ctx.useState (not isSuggested || LayoutModel.isDownloaded ())
             // The page the preview shows, if any.
             let shownPage = ctx.useState ((None: int option), false)
@@ -883,7 +964,7 @@ module private StructureView =
                                         new Bitmap(stream)
                                     page
                                     |> Option.map (fun page ->
-                                        let elements = pageElements tree page
+                                        let elements = pageElements (orderedChildren currentEdits) tree page
                                         // As edited: given another tag, or merged into its neighbour.
                                         let outlined =
                                             [ for i, element in List.indexed elements ->
@@ -988,6 +1069,7 @@ module private StructureView =
                 task {
                     review.Edits <- next
                     edits.Set next
+                    if movesIn next <> movesIn moves.Current then moves.Set next
                     onEditsChanged ()
                     // The overview labels elements as edited.
                     showPage selected.Current
@@ -1125,7 +1207,9 @@ module private StructureView =
                   Suggested = isSuggested
                   Expanded = expanded
                   Findings = placed
-                  ShowFinding = findings.Show }
+                  ShowFinding = findings.Show
+                  Moves = moves
+                  MovePending = movePending }
 
             // For a suggested layout: how many pages are found, and the titles of the pages its QR
             // codes link to, read as they're found (if the offer before the window allowed it).
@@ -1404,6 +1488,43 @@ module private StructureView =
                                         ]
                                     ]
                                 | _ -> ()
+                                // A tagged PDF's element can move among its siblings in the reading order (on
+                                // its page: not past one on another page, nor out of its parent).
+                                match (if isSuggested then [] else selected.Current) with
+                                | [ single ] when not (isNull single.Geometry) && not (isUntagged single) ->
+                                    match (parents ()).TryGetValue single with
+                                    | true, parent when not (fixedOrder.Contains parent.Tag) ->
+                                        let order = orderedChildren edits.Current parent
+                                        let index = order |> List.findIndex (fun n -> obj.ReferenceEquals(n, single))
+                                        let page = (nonNull single.Geometry).PageNumber
+                                        let onPage (other: StructureNode) =
+                                            match other.Geometry with
+                                            | NonNull g -> g.PageNumber = page
+                                            | Null -> false
+                                        let canUp = index > 0 && onPage order[index - 1]
+                                        let canDown = index < order.Length - 1 && onPage order[index + 1]
+                                        let swapped i j = order |> List.mapi (fun k n -> if k = i then order[j] elif k = j then order[i] else n)
+                                        let moveTo (next: StructureNode list) = recordOrder edits.Current parent next |> saveEdits |> ignore
+                                        WrapPanel.create [
+                                            WrapPanel.margin (0.0, 0.0, 0.0, 8.0)
+                                            WrapPanel.children [
+                                                Button.create [
+                                                    Button.content "Move Up"
+                                                    Button.margin (0.0, 0.0, 8.0, 0.0)
+                                                    Button.isEnabled canUp
+                                                    ToolTip.tip "Read it before the element above it: one place earlier in the reading order, among the elements in the same one, on this page."
+                                                    Button.onClick ((fun _ -> if canUp then moveTo (swapped (index - 1) index)), SubPatchOptions.Always)
+                                                ]
+                                                Button.create [
+                                                    Button.content "Move Down"
+                                                    Button.isEnabled canDown
+                                                    ToolTip.tip "Read it after the element below it: one place later in the reading order, among the elements in the same one, on this page."
+                                                    Button.onClick ((fun _ -> if canDown then moveTo (swapped index (index + 1))), SubPatchOptions.Always)
+                                                ]
+                                            ]
+                                        ]
+                                    | _ -> ()
+                                | _ -> ()
                                 // A suggested region can be merged into its neighbour (its text still read), and
                                 // kept again; several at once. (Not read is the Tag picker's Artifact.)
                                 match (if isSuggested then regionsIn selected.Current else []) with
@@ -1644,7 +1765,7 @@ module private StructureView =
                             else
                                 match elementFor edit with
                                 | None -> $"No <{edit.Tag}> in about this place in this PDF, so Save can't apply it."
-                                | Some node when (pendingLines edit node).IsEmpty -> "In this PDF."
+                                | Some node when (pendingLines edit node).IsEmpty && not (edit.Move.IsSome && movePending node) -> "In this PDF."
                                 | Some _ -> "Not in this PDF yet: Export… writes it to a copy."
                         Border.create [
                             Border.borderThickness (0.0, 0.0, 0.0, 1.0)
@@ -1665,6 +1786,30 @@ module private StructureView =
                                                 | Some tag -> detailLine $"tag: {tag}" false
                                                 | None -> ()
                                                 if edit.Exclude then detailLine "merged into its neighbour" false
+                                                match edit.Move with
+                                                | Some First -> detailLine "moved: first in the reading order among its siblings" false
+                                                | Some(After box) ->
+                                                    // What it now follows, by its text (or its tag).
+                                                    let previous =
+                                                        allNodes
+                                                        |> List.choose (fun node ->
+                                                            match node.Geometry with
+                                                            | NonNull own when own.PageNumber = box.PageNumber -> Some(node, RegionEdits.overlap own box)
+                                                            | _ -> None)
+                                                        |> List.filter (fun (_, o) -> o >= RegionEdits.SameRegionOverlap)
+                                                        |> List.sortByDescending snd
+                                                        |> List.tryHead
+                                                        |> Option.map fst
+                                                    let name =
+                                                        match previous with
+                                                        | Some node ->
+                                                            match node.Content |> Option.ofObj |> Option.map _.Trim() with
+                                                            | Some text when text.Length > 40 -> $"\"{text[..39]}…\""
+                                                            | Some text when text <> "" -> $"\"{text}\""
+                                                            | _ -> $"the <{node.Tag}>"
+                                                        | None -> $"the element on page {box.PageNumber}"
+                                                    detailLine $"moved: after {name}" false
+                                                | None -> ()
                                                 match edit.Alt with
                                                 | Some alt when edit.Tag = "Link" -> detailLine $"description: \"{alt}\"" false
                                                 | Some alt -> detailLine $"alt: \"{alt}\"" false
