@@ -198,6 +198,13 @@ validator's private `objectsContext` field; if a future veraPDF renames it,
 the bar just stays indeterminate (and a test fails). Very large documents can
 take minutes.
 
+With no finding selected, the details pane helps instead: an empty window lists
+the steps (open a PDF, read what's found, check and edit the structure, choose
+auto fixes, export a copy), and a PDF that passes says what automated checks
+can't judge (whether alt text says what a figure is for, heading levels,
+reading order, table headers, where links go) and points to Structure… to
+check them.
+
 The results list is sorted by page number by default (unlocated failures —
 those with no `pages[N]` in their context, such as document-level metadata
 checks — sort to the end). It keeps only the short clause, test, page, and

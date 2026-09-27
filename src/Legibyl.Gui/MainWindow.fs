@@ -1104,6 +1104,76 @@ module private MainView =
                     )
                 ]
 
+            /// What the details pane says when no finding is selected: how to start, in an empty window;
+            /// for a PDF that passes, what automated checks can't judge.
+            let guidance () : IView option =
+                let heading (text: string) =
+                    TextBlock.create [
+                        TextBlock.text text
+                        TextBlock.fontSize 16.0
+                        TextBlock.fontWeight FontWeight.SemiBold
+                        TextBlock.margin (0.0, 0.0, 0.0, 10.0)
+                        TextBlock.textWrapping TextWrapping.Wrap
+                    ]
+                    :> IView
+                let line (marker: string) (text: string) =
+                    Grid.create [
+                        Grid.columnDefinitions "Auto,*"
+                        Grid.margin (0.0, 0.0, 0.0, 8.0)
+                        Grid.children [
+                            TextBlock.create [
+                                TextBlock.text marker
+                                TextBlock.width 22.0
+                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                            ]
+                            TextBlock.create [ Grid.column 1; TextBlock.text text; TextBlock.textWrapping TextWrapping.Wrap ]
+                        ]
+                    ]
+                    :> IView
+                let note (text: string) =
+                    TextBlock.create [
+                        TextBlock.text text
+                        TextBlock.textWrapping TextWrapping.Wrap
+                        TextBlock.margin (0.0, 6.0, 0.0, 0.0)
+                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                    ]
+                    :> IView
+                let panel (children: IView list) : IView =
+                    ScrollViewer.create [
+                        Grid.column 2
+                        ScrollViewer.margin (12.0, 0.0, 0.0, 0.0)
+                        ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                        ScrollViewer.content (StackPanel.create [ StackPanel.maxWidth 560.0; StackPanel.horizontalAlignment HorizontalAlignment.Left; StackPanel.children children ])
+                    ]
+                match selectedFile.Current, outcome.Current with
+                | None, _ when not busy ->
+                    Some(
+                        panel [
+                            heading "Making a PDF accessible"
+                            line "1." "Open a PDF: Browse…, drop it on this window, or File › Open…."
+                            line "2." "Read what's found. Failures (red) are what PDF/UA requires; warnings (orange) are worth a look. A wrench marks what an auto fix can repair; a wand, what suggesting the structure fixes."
+                            line "3." "Structure… shows the tags a screen reader uses. Check the headings, the figures' alt text and the reading order, and edit them there. A PDF with no tags gets Suggest Structure… instead."
+                            line "4." "Auto Fixes… chooses repairs, like the document's language and title."
+                            line "5." "Export… writes a fixed copy and opens it, to check again. The PDF you opened isn't changed. File › Save keeps your review (edits, dismissed warnings, chosen fixes) to pick up later."
+                            note "PDF/UA is the standard for PDFs that screen readers and other assistive technology can use."
+                        ]
+                    )
+                | Some _, Validated(report, _) when report.IsCompliant ->
+                    let profile = fst profiles[profileIndex.Current]
+                    Some(
+                        panel [
+                            heading $"Passes {profile}'s automated checks"
+                            note "Automated checks can't judge everything a person needs. Worth checking yourself:"
+                            line "•" "Alt text: does each figure's say what it's for here, not only what it shows? Decorative images shouldn't be read at all."
+                            line "•" "Headings: is each one a heading, at the right level, and does every section have one?"
+                            line "•" "Reading order: does the content read in a sensible order?"
+                            line "•" "Tables: are their header cells marked as headers?"
+                            line "•" "Links: does each one's text or description say where it goes?"
+                            note "Structure… shows the tags and their alt text, and numbers each page's elements in reading order."
+                        ]
+                    )
+                | _ -> None
+
             let findingDetails (row: RuleViolationRow) =
                 Grid.create [
                     Grid.column 2
@@ -1301,9 +1371,10 @@ module private MainView =
                                     Theme.resources [ GridSplitter.BackgroundProperty, Theme.Tokens.Border ]
                                     GridSplitter.resizeDirection GridResizeDirection.Columns
                                 ]
-                                match selectedRow.Current with
-                                | Some row -> findingDetails row
-                                | None -> ()
+                                match selectedRow.Current, guidance () with
+                                | Some row, _ -> findingDetails row
+                                | None, Some panel -> panel
+                                | None, None -> ()
                             ]
                         ]
                         StackPanel.create [

@@ -787,10 +787,17 @@ module private StructureView =
                         let title, prompt, current, placeholder =
                             match kind with
                             | AltText ->
+                                // Decoration isn't described but not read, which only a suggested region
+                                // can be here (Not Read).
+                                let decoration =
+                                    if isSuggested then " If it's only decoration, close this and use Not Read (Artifact) instead."
+                                    else ""
                                 "Alt Text",
-                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. {savedHow}",
+                                $"Alt text for this <{node.Tag}> on page {page}: what a screen reader says for it. "
+                                + "Say what it's for here, not only what it shows: \"Map of the route to the campsite\", not \"map\". "
+                                + $"Keep it to a sentence or so, and leave out \"image of\": the reader says it's an image.{decoration} {savedHow}",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.AlternateDescription),
-                                "Describe what it shows"
+                                "What it's for, in a sentence"
                             | LinkDescription ->
                                 let target = match node.LinkUri with NonNull uri -> $" (it goes to {uri})" | Null -> ""
                                 "Link Description",
