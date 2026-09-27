@@ -536,6 +536,20 @@ and Remove puts one back. Export reorders the parent's `/K` last, once nothing
 else will change what's where; what each element holds doesn't change, so the
 parent tree needs nothing.
 
+**Order by Page Layout**, under the page preview, suggests the page's reading
+order from its layout (the layout detector's regions come in reading order;
+downloaded the first time, as for Suggest Structure): each of the document's
+top-level elements with content on the page takes the place of the first region
+it holds (a list or table moves as one, by its own box), one that holds none
+stays after the element it follows now, and elements on other pages keep their
+places (`LayoutOrder.fs`). The preview shows where each would go, a second
+number on a purple tab. **Use This Order** records the moves that give it, as if
+made by hand (the fewest: what's already in order stays); **Keep Current Order**
+drops it. It's a suggestion to accept page by page, looking at the page: a
+detector errs exactly where order matters (sidebars, captions, a table beside
+text), and a PDF passes PDF/UA whatever its order, so nothing is reordered on its
+own.
+
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
 the tagged blocks, in a **Not in the tags** group per page, a block per piece
