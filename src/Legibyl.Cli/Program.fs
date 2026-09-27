@@ -82,15 +82,28 @@ let private filesArgument () =
 
 let private fileArgument () = argument<string> "file" |> desc "A PDF file."
 
-let private profileOption () =
-    option "--profile"
-    |> desc "Profile to validate against. See 'legibyl list profiles'."
-    |> helpName "name"
-    |> def ProfileNames.DefaultName
-    |> validate (fun name ->
-        match ProfileNames.tryParse name with
-        | Some _ -> Ok()
-        | None -> Error $"Unknown profile '{name}'. Run 'legibyl list profiles' to see valid names.")
+let private uaOption () =
+    optionMaybe<string> "--ua"
+    |> desc
+        "Check every file against PDF/UA-1 or PDF/UA-2. Without it, each file is checked against the one its PDF \
+         version calls for: PDF/UA-2 for PDF 2.0, PDF/UA-1 for earlier versions. PDF/UA-2 requires PDF 2.0, so a \
+         PDF 1.7 file checked with --ua 2 fails on its version alone (a way to see how far it is from PDF/UA-2)."
+    |> helpName "1|2"
+    |> arity Arity.ExactlyOne
+    |> validate (fun ua ->
+        match ua with
+        | None
+        | Some "1"
+        | Some "2" -> Ok()
+        | Some other -> Error $"--ua takes 1 or 2, not '{other}'.")
+
+/// The PDF/UA standard to check file against: --ua's, else the one its PDF version calls for.
+let private targetFor (ua: string option) (file: string) : Target =
+    let _, version = PdfUaTarget.detect file
+    match ua with
+    | Some "2" -> { Profile = PdfProfile.PdfUa2; PdfVersion = Option.toObj version; FromFile = false }
+    | Some _ -> { Profile = PdfProfile.PdfUa1; PdfVersion = Option.toObj version; FromFile = false }
+    | None -> { Profile = PdfUaTarget.forVersion version; PdfVersion = Option.toObj version; FromFile = true }
 
 let private formatOption () =
     option "--format"
@@ -134,15 +147,15 @@ let private reportOption () =
 
 type private ValidateArgs =
     { Files: string array
-      ProfileName: string
+      Ua: string option
       Format: string
       Output: string option
       Structure: bool }
 
 let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (file: string) =
-    let result = ValidationResult.Empty(file, args.ProfileName)
-    let profile = (ProfileNames.tryParse args.ProfileName).Value
-    match (try Ok(validator.Validate(file, profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) with
+    let target = targetFor args.Ua file
+    let result = ValidationResult.Empty(file, target)
+    match (try Ok(validator.Validate(file, target.Profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) with
     | Error message -> { result with Error = message }
     | Ok report ->
         let result =
@@ -203,8 +216,8 @@ let private validationText (results: ValidationResult list) =
         | NonNull error -> line $"{r.File}: ERROR — {error}"
         | Null ->
             line (
-                if r.IsCompliant = Nullable true then $"{r.File}: PASS ({r.Profile}, {r.TotalAssertions} checks)"
-                else $"{r.File}: FAIL ({r.Profile}, {r.FailedCount}/{r.TotalAssertions} checks failed)"
+                if r.IsCompliant = Nullable true then $"{r.File}: PASS ({r.Standard}, {r.TotalAssertions} checks)"
+                else $"{r.File}: FAIL ({r.Standard}, {r.FailedCount}/{r.TotalAssertions} checks failed)"
             )
             for prefix, items in [ "", r.Failures; "WARNING ", r.Warnings ] do
                 for f in details items do
@@ -244,7 +257,8 @@ let private runValidate (args: ValidateArgs) =
 
 /// What to repair a file with.
 type private Repair =
-    { ProfileName: string
+    { /// --ua's standard, if given; else each file's own.
+      Ua: string option
       Fixes: PdfFixOptions
       Review: ReviewFile.SavedFile option
       /// Whether a review was asked for (--edits): one that isn't there is then worth saying so.
@@ -262,10 +276,13 @@ let private nextVersion (file: string) =
     | _ -> name
 
 let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: string) : RepairResult =
-    let profile = (ProfileNames.tryParse repair.ProfileName).Value
+    let target = targetFor repair.Ua file
+    let profile = target.Profile
     let result =
         { File = file
-          Profile = repair.ProfileName
+          Standard = PdfUaTarget.displayName target.Profile
+          PdfVersion = target.PdfVersion
+          StandardFrom = target.From
           Status = FixStatus.Error
           OutputPath = null
           Applied = [||]
@@ -428,7 +445,7 @@ let private runRepair (validator: VeraPdfValidator) (files: string list) (repair
 
 type private FixArgs =
     { Files: string array
-      ProfileName: string
+      Ua: string option
       Format: string
       Report: string option
       Fixes: string option
@@ -451,7 +468,7 @@ let private runFix (args: FixArgs) =
             runRepair
                 (VeraPdfValidator())
                 (List.ofArray args.Files)
-                { ProfileName = args.ProfileName
+                { Ua = args.Ua
                   Fixes = fixes
                   Review = review |> Option.bind Result.toOption
                   ReviewAsked = args.Edits
@@ -542,7 +559,7 @@ let private runSuggest (args: SuggestArgs) =
 type private ApplyArgs =
     { File: string
       Layout: string
-      ProfileName: string
+      Ua: string option
       Format: string
       Report: string option
       Fixes: string option
@@ -564,7 +581,7 @@ let private runApply (args: ApplyArgs) =
             runRepair
                 (VeraPdfValidator())
                 [ args.File ]
-                { ProfileName = args.ProfileName
+                { Ua = args.Ua
                   Fixes = fixes
                   Review = review |> Option.bind Result.toOption
                   ReviewAsked = args.Edits
@@ -590,11 +607,6 @@ let private listFixes (format: string) =
         FixNames.listing () |> List.iter (printfn "%s")
     ExitCodes.Success
 
-let private listProfiles (format: string) =
-    if format = "json" then Console.WriteLine(toJson ProfileNames.CanonicalNames)
-    else ProfileNames.CanonicalNames |> List.iter (printfn "%s")
-    ExitCodes.Success
-
 // ---- The command line ----
 
 /// Runs a function in place of a command's action, e.g. for --version.
@@ -611,7 +623,8 @@ let private helpFooter =
 
 EXAMPLES:
   legibyl validate document.pdf
-  legibyl validate *.pdf --profile pdfa2b --output results.json
+  legibyl validate *.pdf --output results.json
+  legibyl validate report.pdf --ua 2
   legibyl fix document.pdf --fixes safe,lists,headings-from-toc
   legibyl fix flyer.v3.pdf --edits-from flyer.v2.pdf --output flyer.v4.pdf
   legibyl structure document.pdf --output structure.json
@@ -620,8 +633,15 @@ EXAMPLES:
   legibyl list fixes --format json
 """
 
+/// Version of the veraPDF engine, stamped from VeraPdfVersion in Directory.Build.props.
+let private vendoredEngineVersion =
+    Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
+    |> Seq.tryFind (fun a -> a.Key = "VeraPdfVersion")
+    |> Option.bind (fun a -> Option.ofObj a.Value)
+    |> Option.defaultValue "unknown"
+
 let private printVersion _ =
-    printfn $"legibyl {Assembly.GetExecutingAssembly().GetName().Version} (vendored veraPDF engine {ProfileNames.VendoredEngineVersion})"
+    printfn $"legibyl {Assembly.GetExecutingAssembly().GetName().Version} (vendored veraPDF engine {vendoredEngineVersion})"
     ExitCodes.Success
 
 /// Reports a parse error the same way as the CLI's other usage errors.
@@ -633,11 +653,12 @@ let private reportParseError (parseResult: ParseResult) =
 
 let private validateCommand =
     command "validate" {
-        description "Validate PDFs against a profile (PDF/UA-1 by default), reporting each failure and Legibyl's own warnings."
+        description
+            "Validate PDFs against PDF/UA (PDF/UA-2 for a PDF 2.0 file, PDF/UA-1 for earlier ones; see --ua), reporting each failure and Legibyl's own warnings."
         inputs (
             input {
                 let! files = filesArgument ()
-                and! profileName = profileOption ()
+                and! ua = uaOption ()
                 and! format = formatOption ()
                 and! output = optionMaybe "--output" |> desc "Write the report to path instead of stdout." |> helpName "path"
                 and! structure =
@@ -645,7 +666,7 @@ let private validateCommand =
                     |> desc "Also include each file's structure tree (as 'legibyl structure' gives it)."
                 return
                     { Files = files
-                      ProfileName = profileName
+                      Ua = ua
                       Format = format
                       Output = output
                       Structure = structure }
@@ -665,12 +686,12 @@ let private fixCommand =
                 and! edits = editsOption ()
                 and! editsFrom = editsFromOption ()
                 and! output = optionMaybe "--output" |> desc "The repaired copy's path (one file only)." |> helpName "path"
-                and! profileName = profileOption ()
+                and! ua = uaOption ()
                 and! format = formatOption ()
                 and! report = reportOption ()
                 return
                     { Files = files
-                      ProfileName = profileName
+                      Ua = ua
                       Format = format
                       Report = report
                       Fixes = fixes
@@ -736,13 +757,13 @@ let private applyCommand =
                 and! editsFrom = editsFromOption ()
                 and! fixes = fixesOption "none"
                 and! output = optionMaybe "--output" |> desc "The tagged copy's path." |> helpName "path"
-                and! profileName = profileOption ()
+                and! ua = uaOption ()
                 and! format = formatOption ()
                 and! report = reportOption ()
                 return
                     { File = file
                       Layout = layout
-                      ProfileName = profileName
+                      Ua = ua
                       Format = format
                       Report = report
                       Fixes = fixes
@@ -779,13 +800,6 @@ let private listCommand =
                 description "The repairs 'fix --fixes' can name, with what each does."
                 inputs (listFormatOption ())
                 setAction listFixes
-            }
-        )
-        addCommand (
-            command "profiles" {
-                description "The profiles '--profile' accepts."
-                inputs (listFormatOption ())
-                setAction listProfiles
             }
         )
     }

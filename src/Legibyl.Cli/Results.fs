@@ -37,10 +37,26 @@ type FailureDetail =
           Fixes = RepairNames.ofOptions violation.FixOptions |> Array.ofList
           Meaning = RuleGuide.forFinding violation |> Option.map _.Meaning |> Option.toObj }
 
+/// The PDF/UA standard a file is checked against, and why.
+type Target =
+    { Profile: PdfProfile
+      /// The file's PDF version, e.g. "2.0"; null if it couldn't be read.
+      PdfVersion: string | null
+      /// Worked out from the PDF version (true), or asked for with --ua.
+      FromFile: bool }
+
+    /// Why, as the results say it: "file" or "--ua".
+    member target.From = if target.FromFile then "file" else "--ua"
+
 /// `validate`'s result for one file. Field names are camelCased on output.
 type ValidationResult =
     { File: string
-      Profile: string
+      /// The standard checked against: "PDF/UA-1" or "PDF/UA-2".
+      Standard: string
+      /// The file's PDF version, which says which standard applies; null if it couldn't be read.
+      PdfVersion: string | null
+      /// Why that standard: "file" (from its PDF version) or "--ua" (asked for).
+      StandardFrom: string
       /// The flavour id actually validated against (e.g. "ua1"), null if validation errored.
       FlavourId: string | null
       /// True/false if validation completed, null if it errored before a result was produced.
@@ -58,10 +74,12 @@ type ValidationResult =
       /// With --structure: why reading the tree failed, if it did.
       StructureError: string | null }
 
-    /// A result with only the file and profile filled in.
-    static member Empty(file, profile) =
+    /// A result with only the file and what it's checked against filled in.
+    static member Empty(file, target: Target) =
         { File = file
-          Profile = profile
+          Standard = PdfUaTarget.displayName target.Profile
+          PdfVersion = target.PdfVersion
+          StandardFrom = target.From
           FlavourId = null
           IsCompliant = Nullable()
           TotalAssertions = Nullable()
@@ -96,7 +114,10 @@ module FixStatus =
 /// `fix`'s or `layout apply`'s result for one file.
 type RepairResult =
     { File: string
-      Profile: string
+      /// The standard checked against, as for validate (the metadata repair writes its claim).
+      Standard: string
+      PdfVersion: string | null
+      StandardFrom: string
       /// One of FixStatus.
       Status: string
       /// The repaired copy, if one was written.

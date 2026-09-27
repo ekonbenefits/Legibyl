@@ -1,6 +1,6 @@
 # Legibyl
 
-Legibyl checks PDFs for accessibility (PDF/UA, and PDF/A) and helps fix them:
+Legibyl checks PDFs for accessibility (PDF/UA-1 and PDF/UA-2) and helps fix them:
 a desktop app (Avalonia, on Windows, macOS and Linux), and a command-line tool
 for scripts and AI agents. It explains each failure in plain language, repairs
 what it safely can, lets you check and edit the tags a screen reader uses (alt
@@ -195,9 +195,16 @@ Privacy & Security > **Open Anyway**, or run
 hdiutil create -volname Legibyl -srcfolder artifacts/macos/osx-arm64/Legibyl.app -ov -format UDZO artifacts/macos/Legibyl-osx-arm64.dmg
 ```
 
-## Supported profiles
+## Supported standards
 
-PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
+PDF/UA-1 (ISO 14289-1) and PDF/UA-2 (ISO 14289-2), as veraPDF checks them.
+Which applies follows from the PDF version a file declares (its header, or a
+catalog `/Version`): PDF/UA-2 is defined on PDF 2.0, so a PDF 2.0 file is
+checked against PDF/UA-2 and an earlier one against PDF/UA-1 (`PdfUaTarget.fs`).
+The file's own `pdfuaid:part` claim isn't used to decide: a wrong claim is what
+checking should catch. The CLI's `--ua 1|2` checks against either regardless,
+e.g. to see how far a PDF 1.7 file is from PDF/UA-2 (it fails on its version
+alone, since PDF/UA-2 requires PDF 2.0).
 
 ## GUI results view
 
@@ -662,12 +669,12 @@ scripts or by an AI agent iterating on PDF/UA compatibility fixes. It has a
 command for each job:
 
 ```
-legibyl validate <files>… [--profile p] [--format json|text] [--output report] [--structure]
-legibyl fix <files>… [--fixes safe|all|none|names] [--edits | --edits-from review] [--output out.pdf] [--report path]
+legibyl validate <files>… [--ua 1|2] [--format json|text] [--output report] [--structure]
+legibyl fix <files>… [--ua 1|2] [--fixes safe|all|none|names] [--edits | --edits-from review] [--output out.pdf] [--report path]
 legibyl structure <files>… [--format json|text] [--output path]
 legibyl layout suggest <file> [--output layout.json] [--figure-images]
-legibyl layout apply <file> --layout layout.json [--edits | --edits-from review] [--fixes names] [--output out.pdf]
-legibyl list fixes|profiles [--format text|json]
+legibyl layout apply <file> --layout layout.json [--ua 1|2] [--edits | --edits-from review] [--fixes names] [--output out.pdf]
+legibyl list fixes [--format text|json]
 ```
 
 ```powershell
@@ -692,17 +699,22 @@ means the same for every command, about what that command did:
 
 ### validate
 
-Validates PDFs against a profile: `--profile <name>` (default `pdfua1`; `legibyl
-list profiles` gives them all: `pdfua1`, `pdfa1b`, `pdfa2b`, `pdfa2u`,
-`pdfa3b`, `pdfa4`), `--format json|text`, and `--output <path>` to write the
-report to a file. `--structure` also includes each file's structure tree, as
+Validates PDFs against PDF/UA: each file against the standard its PDF version
+calls for (PDF/UA-2 for PDF 2.0, PDF/UA-1 before; see Supported standards), or
+every file against `--ua 1` or `--ua 2`. `--format json|text`, and `--output
+<path>` to write the report to a file. Each result says what it was checked
+against (`standard`, `flavourId`), the file's `pdfVersion`, and why
+(`standardFrom`: `file`, or `--ua`); `fix` and `layout apply` choose the same way,
+and say the same. `--structure` also includes each file's structure tree, as
 `structure` gives it. Example JSON output (one non-compliant file):
 
 ```json
 [
   {
     "file": "document.pdf",
-    "profile": "pdfua1",
+    "standard": "PDF/UA-1",
+    "pdfVersion": "1.7",
+    "standardFrom": "file",
     "flavourId": "ua1",
     "isCompliant": false,
     "totalAssertions": 794,
@@ -762,7 +774,9 @@ after:
 [
   {
     "file": "document.pdf",
-    "profile": "pdfua1",
+    "standard": "PDF/UA-1",
+    "pdfVersion": "1.7",
+    "standardFrom": "file",
     "status": "repaired",
     "outputPath": "document.v2.pdf",
     "applied": [ "Declared the document's language as en (English), detected from its text." ],
@@ -909,8 +923,7 @@ legibyl layout apply scan.pdf --layout scan.layout.json --edits-from scan.edits.
 ### list
 
 `legibyl list fixes` prints the repairs `--fixes` can name, with what each does
-and which are in `safe`; `legibyl list profiles` the profiles `--profile`
-accepts. `--format json` gives them as JSON. `legibyl --version` prints the tool
+and which are in `safe`. `--format json` gives them as JSON. `legibyl --version` prints the tool
 build and the vendored veraPDF engine version.
 
 ## Versioning
