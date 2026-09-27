@@ -1212,7 +1212,6 @@ module private MainView =
             let statusBanner =
                 let banner (backgroundToken: string) (text: string) =
                     Border.create [
-                        Grid.row 2
                         Border.padding (12.0, 8.0)
                         Border.cornerRadius 4.0
                         Border.margin (0.0, 0.0, 0.0, 8.0)
@@ -1252,13 +1251,40 @@ module private MainView =
                         | None -> ""
                     // And for a PDF that passes, once a person has worked through its checklist.
                     let asChecked = if passProgress = Some "Checked by a person" then asChecked + ", checked by a person" else asChecked
-                    Some(
+                    let standing =
                         if report.IsCompliant then
                             banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({why}{report.TotalAssertions} checks, {warnings}){asChecked}"
                         else
                             banner
                                 Theme.Tokens.Danger
                                 $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({why}{warnings}){asChecked}"
+                    Some(
+                        match List.ofSeq report.Notes with
+                        | [] -> standing
+                        | notes ->
+                            // What veraPDF logged while it read the file: not findings, but kept.
+                            let things = if notes.Length = 1 then "1 thing" else $"{notes.Length} things"
+                            StackPanel.create [
+                                StackPanel.children [
+                                    standing
+                                    Expander.create [
+                                        Expander.margin (0.0, 0.0, 0.0, 8.0)
+                                        Expander.horizontalAlignment HorizontalAlignment.Stretch
+                                        Expander.header $"veraPDF noted {things} while reading the file"
+                                        Expander.content (
+                                            SelectableTextBlock.create [
+                                                SelectableTextBlock.textWrapping TextWrapping.Wrap
+                                                SelectableTextBlock.text (
+                                                    [ for note in notes ->
+                                                          let times = if note.Count > 1 then $" (×{note.Count})" else ""
+                                                          $"{note.Message}{times} — {note.Level}, {note.Logger}" ]
+                                                    |> String.concat "\n"
+                                                )
+                                            ]
+                                        )
+                                    ]
+                                ]
+                            ]
                     )
 
             let allRows =
@@ -1970,7 +1996,7 @@ module private MainView =
                             ]
                         ]
                         match statusBanner with
-                        | Some banner -> banner
+                        | Some banner -> Border.create [ Grid.row 2; Border.child banner ]
                         | None -> ()
                         Grid.create [
                             Grid.row 3

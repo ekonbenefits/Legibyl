@@ -82,6 +82,18 @@ type RuleViolation =
 
     override this.ToString() = $"[{this.Specification} {this.RuleId}] {this.Message}"
 
+/// Something veraPDF logged while it read the file (see ValidatorLog): not a finding (no rule, not
+/// counted), but worth keeping, like a font it couldn't read or marked content nested in marked content.
+type ValidatorNote =
+    { /// "WARNING" or "SEVERE".
+      Level: string
+      /// The logger's short name, e.g. "OperatorParser".
+      Logger: string
+      /// What it said, without the number a repeat ends with ("Content stream (object 16 0 obj): Nested MCID").
+      Message: string
+      /// How many times it said it.
+      Count: int }
+
 /// The result of validating a single PDF document against a PdfProfile.
 type ValidationReport =
     { FilePath: string
@@ -100,7 +112,9 @@ type ValidationReport =
       TotalAssertions: int
       /// veraPDF's failed checks, followed by Legibyl's own warnings. Passed veraPDF checks
       /// are only counted (TotalAssertions), not recorded.
-      Assertions: IReadOnlyList<RuleViolation> }
+      Assertions: IReadOnlyList<RuleViolation>
+      /// What veraPDF logged while it read the file, WARNING and above; empty for none.
+      Notes: IReadOnlyList<ValidatorNote> }
 
     /// Convenience accessor for only the failed assertions.
     member this.FailedAssertions: RuleViolation seq = this.Assertions |> Seq.filter (fun a -> not a.Passed)

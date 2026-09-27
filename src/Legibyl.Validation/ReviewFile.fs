@@ -76,6 +76,14 @@ type SavedFinding =
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       ErrorMessage: string | null }
 
+/// Something veraPDF logged while it read the file, as a saved validation keeps it (see ValidatorNote).
+[<CLIMutable>]
+type SavedNote =
+    { [<JsonPropertyName "level">] Level: string
+      [<JsonPropertyName "logger">] Logger: string
+      [<JsonPropertyName "message">] Message: string
+      [<JsonPropertyName "count">] Count: int }
+
 /// A validation's result, kept with the review so reopening the PDF shows it at once. It's the
 /// result for the exact bytes validated (their SHA-256), by these versions of veraPDF and
 /// Legibyl, against this standard; if any of them differs, the PDF is validated again.
@@ -94,7 +102,11 @@ type SavedValidation =
       [<JsonPropertyName "checkedAt">] CheckedAt: DateTime
       [<JsonPropertyName "isCompliant">] IsCompliant: bool
       [<JsonPropertyName "totalAssertions">] TotalAssertions: int
-      [<JsonPropertyName "findings">] Findings: SavedFinding array }
+      [<JsonPropertyName "findings">] Findings: SavedFinding array
+      /// What veraPDF logged while it read the file (see ValidatorNote); none in older reviews.
+      [<JsonPropertyName "notes">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Notes: SavedNote array | null }
 
 /// The steps of a passing PDF's checklist a person has ticked (see the GUI's Pass finding), for
 /// the exact file checked: its hash, as its validation has it. Ticks don't carry to another

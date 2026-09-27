@@ -288,3 +288,61 @@ let ``--profile and list profiles are gone, and --ua takes 1 or 2`` () =
         Legibyl.Cli.Program.main [| "validate"; pdf; "--profile"; "pdfua1" |] |> should equal 64
         Legibyl.Cli.Program.main [| "list"; "profiles" |] |> should equal 64
         Legibyl.Cli.Program.main [| "validate"; pdf; "--ua"; "3" |] |> should equal 64)
+
+/// A page whose paragraphs hold marked content inside marked content, which veraPDF logs as it
+/// reads it, in a fresh folder.
+let private withNestedPdf (test: string -> unit) =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    try
+        let pdf = Path.Combine(folder, "list.pdf")
+        do
+            use document = new PdfDocument(new PdfWriter(pdf))
+            let canvas = PdfCanvas(document.AddNewPage())
+            let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+            for i in 0..1 do
+                for tag, mcid in [ "P", 2 * i; "Span", 2 * i + 1 ] do
+                    let properties = PdfDictionary()
+                    properties.Put(PdfName.MCID, PdfNumber mcid) |> ignore
+                    canvas.BeginMarkedContent(PdfName tag, properties) |> ignore
+                canvas.BeginText().SetFontAndSize(font, 12f).MoveText(72.0, 700.0 - 20.0 * float i).ShowText($"Item {i + 1}").EndText() |> ignore
+                canvas.EndMarkedContent().EndMarkedContent() |> ignore
+        test pdf
+    finally
+        Directory.Delete(folder, true)
+
+/// Runs the CLI as run does, returning what it wrote to stderr too.
+let private runCapturingErrors (args: string list) =
+    let original = Console.Error
+    use writer = new StringWriter()
+    Console.SetError writer
+    try
+        let code, result = run args
+        code, result, writer.ToString()
+    finally
+        Console.SetError original
+        // --verbose lasts for the process: not for the tests after.
+        VeraPdfValidator.EchoLog <- false
+
+[<Fact>]
+let ``validate keeps what veraPDF logs as validatorNotes, off stderr; --verbose prints it too`` () =
+    withNestedPdf (fun pdf ->
+        let _, result, errors = runCapturingErrors [ "validate"; pdf ]
+        let _, _, verboseErrors = runCapturingErrors [ "validate"; pdf; "--verbose" ]
+
+        let notes = [ for note in result.Value.GetProperty("validatorNotes").EnumerateArray() -> note ]
+        let nested = notes |> List.find (fun n -> n.GetProperty("message").GetString().Contains "Nested MCID")
+        nested.GetProperty("count").GetInt32() |> should equal 2
+        nested.GetProperty("logger").GetString() |> should equal "OperatorParser"
+        errors |> should not' (haveSubstring "Nested MCID")
+        verboseErrors |> should haveSubstring "Nested MCID")
+
+[<Fact>]
+let ``fix keeps what veraPDF logged reading the file as it was`` () =
+    withNestedPdf (fun pdf ->
+        let _, result, errors = runCapturingErrors [ "fix"; pdf; "--fixes"; "tabs" ]
+
+        [ for note in result.Value.GetProperty("validatorNotes").EnumerateArray() -> note.GetProperty("message").GetString() ]
+        |> List.exists (fun m -> m.Contains "Nested MCID")
+        |> should be True
+        errors |> should not' (haveSubstring "Nested MCID"))

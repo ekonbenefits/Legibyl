@@ -140,6 +140,10 @@ let private editsFromOption () =
     |> helpName "path"
     |> arity Arity.ExactlyOne
 
+let private verboseOption () =
+    option<bool> "--verbose"
+    |> desc "Print what veraPDF logs while it reads each file on stderr as it comes (it's always in the report's validatorNotes)."
+
 let private reportOption () =
     optionMaybe<string> "--report" |> desc "Write the JSON (or text) report to path instead of stdout." |> helpName "path"
 
@@ -150,7 +154,8 @@ type private ValidateArgs =
       Ua: string option
       Format: string
       Output: string option
-      Structure: bool }
+      Structure: bool
+      Verbose: bool }
 
 let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (file: string) =
     let target = targetFor args.Ua file
@@ -164,6 +169,7 @@ let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (fil
                 IsCompliant = Nullable report.IsCompliant
                 TotalAssertions = Nullable report.TotalAssertions
                 FailedCount = Nullable report.FailedCount
+                ValidatorNotes = report.Notes
                 Failures = report.FailedAssertions |> Seq.map FailureDetail.Of |> Array.ofSeq
                 Warnings =
                     report.Assertions
@@ -204,6 +210,11 @@ let rec private appendStructure (sb: StringBuilder) (node: StructureNode) (inden
     for child in node.Children do
         appendStructure sb child (indent + 2)
 
+/// A note veraPDF logged, as the text reports list it.
+let private noteLine (note: ValidatorNote) =
+    let times = if note.Count > 1 then $" (×{note.Count})" else ""
+    $"  veraPDF noted ({note.Level}, {note.Logger}): {note.Message}{times}"
+
 let private validationText (results: ValidationResult list) =
     let sb = StringBuilder()
     let line (text: string) = sb.AppendLine text |> ignore
@@ -233,6 +244,9 @@ let private validationText (results: ValidationResult list) =
                     match f.Region with
                     | NonNull region -> line $"    region: {ValidationReportTextFormatter.FormatRegion region}"
                     | Null -> ()
+            match r.ValidatorNotes with
+            | NonNull notes -> for note in notes do line (noteLine note)
+            | Null -> ()
             match r.StructureError, r.Structure with
             | NonNull error, _ -> line $"  structure: ERROR — {error}"
             | Null, NonNull structure ->
@@ -243,6 +257,7 @@ let private validationText (results: ValidationResult list) =
     sb.ToString().TrimEnd('\n', '\r')
 
 let private runValidate (args: ValidateArgs) =
+    VeraPdfValidator.EchoLog <- args.Verbose
     let validator = VeraPdfValidator()
     let results = [ for file in args.Files -> validateFile validator args file ]
     write args.Output (if args.Format = "json" then toJson results else validationText results)
@@ -289,7 +304,8 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
           NotApplied = [||]
           Error = null
           Before = None
-          After = None }
+          After = None
+          ValidatorNotes = [||] }
     let targetPath = repair.Output |> Option.defaultWith (fun () -> nextVersion file)
     // The review's edits (--edits: the file's own review), and a layout it recorded for an
     // untagged PDF (only the pages that haven't changed since).
@@ -311,9 +327,14 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
              | Some review when not (ReviewFile.edits review).IsEmpty || not (String.IsNullOrWhiteSpace review.Title) -> PdfFixOptions.ApplyEdits
              | _ -> PdfFixOptions.None)
     if options = PdfFixOptions.None then
-        let before = try Some(compliance (validator.Validate(file, profile))) with :? VeraPdfValidationException -> None
+        let before = try Some(validator.Validate(file, profile)) with :? VeraPdfValidationException -> None
         match before with
-        | Some before -> { result with Status = FixStatus.NothingToDo; NotApplied = Array.ofList noReview; Before = Some before }
+        | Some before ->
+            { result with
+                Status = FixStatus.NothingToDo
+                NotApplied = Array.ofList noReview
+                Before = Some(compliance before)
+                ValidatorNotes = before.Notes }
         | None -> { result with Error = $"'{file}' couldn't be validated." }
     else
         // The layout model, for the repairs that read the page's layout, unless a layout given or
@@ -353,6 +374,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                 | None -> ()
                 let fix = validator.Fix(file, profile, targetPath, options)
                 let before = Some(compliance fix.OriginalReport)
+                let result = { result with ValidatorNotes = fix.OriginalReport.Notes }
                 let applied = Array.ofSeq fix.AppliedFixes
                 let tagged = applied |> Array.exists (fun line -> line.StartsWith "Tagged ")
                 // Edits of the layout tagged from that it couldn't use, and why.
@@ -405,6 +427,8 @@ let private fixText (results: RepairResult list) =
             line $"  - {applied}"
         for skipped in r.NotApplied do
             line $"  ! {skipped}"
+        for note in r.ValidatorNotes do
+            line (noteLine note)
     sb.ToString().TrimEnd('\n', '\r')
 
 /// The exit code for a repair: whether the document it leaves (the copy, else the original)
@@ -454,9 +478,11 @@ type private FixArgs =
       Fixes: string option
       Edits: bool
       EditsFrom: string option
-      Output: string option }
+      Output: string option
+      Verbose: bool }
 
 let private runFix (args: FixArgs) =
+    VeraPdfValidator.EchoLog <- args.Verbose
     if args.Edits && args.EditsFrom.IsSome then
         usageError "Use --edits or --edits-from, not both."
     elif (sidecarProblems args.Edits args.Files).IsSome then
@@ -667,12 +693,14 @@ let private validateCommand =
                 and! structure =
                     option<bool> "--structure"
                     |> desc "Also include each file's structure tree (as 'legibyl structure' gives it)."
+                and! verbose = verboseOption ()
                 return
                     { Files = files
                       Ua = ua
                       Format = format
                       Output = output
-                      Structure = structure }
+                      Structure = structure
+                      Verbose = verbose }
             }
         )
         setAction runValidate
@@ -692,6 +720,7 @@ let private fixCommand =
                 and! ua = uaOption ()
                 and! format = formatOption ()
                 and! report = reportOption ()
+                and! verbose = verboseOption ()
                 return
                     { Files = files
                       Ua = ua
@@ -700,7 +729,8 @@ let private fixCommand =
                       Fixes = fixes
                       Edits = edits
                       EditsFrom = editsFrom
-                      Output = output }
+                      Output = output
+                      Verbose = verbose }
             }
         )
         setAction runFix
