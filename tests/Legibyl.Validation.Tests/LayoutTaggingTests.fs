@@ -546,3 +546,17 @@ let ``on a tagged PDF 2.0 file, lists and bookmarks keep it PDF/UA-2 compliant, 
     action.GetAsName(PdfName.S) |> should equal PdfName.GoTo
     (action.GetAsArray(PdfName.SD).GetAsDictionary 0).GetAsName(PdfName.S) |> should equal PdfName.H1
     action.GetAsArray(PdfName.D) |> should not' (be Null)
+
+[<Fact>]
+let ``QR code links on a PDF 2.0 file are PDF/UA-2 compliant, with alt text a person wrote or not`` () =
+    // PDF/UA-2 (8.9.4.2) wants a link's description and its element's alt text to agree.
+    for alt in [ null; "Scan to apply" ] do
+        use input = new TempPdf()
+        use output = new TempPdf()
+        createUntaggedPdf20 input.Path
+        let qr = reviewedRegions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = alt; QrText = "https://example.com/apply" } else r)
+        let result =
+            VeraPdfValidator(LayoutSource = FixedLayout(qr, "The example site", "The Title"))
+                .Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.LanguageFromText ||| PdfFixOptions.QrCodeLinks)
+        result.AppliedFixes |> should contain "Linked 1 QR code to the web address they encode"
+        failedUa2Rules output.Path |> should be Empty
