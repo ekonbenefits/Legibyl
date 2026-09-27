@@ -157,6 +157,15 @@ PDF/UA-1 (default), PDF/A-1b, PDF/A-2b, PDF/A-2u, PDF/A-3b, PDF/A-4.
 
 ## GUI results view
 
+Each PDF opens in a window of its own, with its review. Opening a PDF
+(**Browse…**, dropping one on the window, **File › Open…**, or naming PDFs on
+the command line) uses the window it's dropped on if that has none yet, brings
+forward the window already showing it, or else opens a new window. An exported
+copy opens in its own window too, so the original stays open beside it. Each
+window closes on its own, asking about its review's changes not saved first.
+The **File** menu (the menu bar on macOS, the top of the window elsewhere) has
+**Open…**, **Close Window**, **Save** and **Export…**, with ⌘/Ctrl+O, W, S and E.
+
 While a file validates, the progress bar fills page by page ("Page 57 of
 675"): veraPDF checks the pages in order, and that's nearly all of its time.
 Beside it are the checks run so far, how many rules have failed, and the time
