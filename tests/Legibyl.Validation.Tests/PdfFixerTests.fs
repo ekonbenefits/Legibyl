@@ -257,7 +257,7 @@ let ``Validate empty paragraph adds fixable warning`` () =
     warning.Passed |> should be True
     warning.FixOptions |> should equal PdfFixOptions.RemoveEmptyParagraphs
     warning.IsFixable |> should be True
-    warning.Message |> should haveSubstring "Empty semantic /P"
+    warning.Message |> should haveSubstring "Empty paragraph tag"
 
 [<Fact>]
 let ``Validate LibreOffice role-mapped whitespace paragraph is empty with one-character geometry`` () =
@@ -265,7 +265,7 @@ let ``Validate LibreOffice role-mapped whitespace paragraph is empty with one-ch
 
     let report = validator.Validate(corpusFile "libreoffice-empty-paragraph.pdf", PdfProfile.PdfUa1)
 
-    let warning = report.Assertions |> single (isWarning "Empty semantic /P")
+    let warning = report.Assertions |> single (isWarning "Empty paragraph tag")
     let geometry = warning.Geometry |> notNull
     geometry.PageNumber |> should equal 1
     geometry.Right - geometry.Left |> should be (inRange 1.0 12.0)

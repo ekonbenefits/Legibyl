@@ -61,7 +61,7 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
         let firstRow = descendants<DataGridRow> grid |> List.find (fun row -> row.GetIndex() = 0)
 
         let icons = descendants<Path> firstRow
-        let expected = [ "Warning"; "Fixable: Remove empty /P structure elements" ]
+        let expected = [ "Warning"; "Fixable: Remove empty paragraph tags" ]
         icons |> List.map AutomationProperties.GetName |> should equal expected
         icons |> List.map (fun icon -> string (ToolTip.GetTip icon)) |> should equal expected
         descendants<TextBlock> firstRow |> List.map _.Text |> should contain "Page 1"
@@ -73,7 +73,7 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
         anchors |> List.filter (not << isHiddenFromScreenReaders) |> should be Empty
 
         let details = descendants<TextBox> window |> List.map _.Text
-        details |> should contain "Remove empty /P structure elements. Choose it in Auto Fixes…, then Export… a copy of this PDF."
+        details |> should contain "Remove empty paragraph tags. Choose it in Auto Fixes…, then Export… a copy of this PDF."
 
         let preview = descendants<Image> window |> List.tryFind (fun image -> not (isNull image.Source))
         // The selected warning's page preview is shown.

@@ -34,7 +34,7 @@ let offer (owner: Window) (pdfPath: string) (review: DocumentReview) (titleSourc
     else
         let window =
             HostWindow(
-                Title = "Read Link Titles?",
+                Title = "Describe Web Links?",
                 Width = 560.0,
                 SizeToContent = SizeToContent.Height,
                 CanResize = false,
