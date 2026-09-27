@@ -26,11 +26,11 @@ type Entry =
 [<CLIMutable>]
 type GuideFile =
     { /// PDF/UA-1's (ISO 14289-1).
-      Rules: Entry array
+      Rules: Entry array | null
       /// PDF/UA-2's (ISO 14289-2).
-      PdfUa2Rules: Entry array
+      PdfUa2Rules: Entry array | null
       /// ISO 32005's, on which tags may contain which, which PDF/UA-2 includes.
-      TagNestingRules: Entry array }
+      TagNestingRules: Entry array | null }
 
 /// Each standard's entries, by the start of its specification ("ISO 14289-1"), in order: the
 /// first that matches a failure is its guide.
