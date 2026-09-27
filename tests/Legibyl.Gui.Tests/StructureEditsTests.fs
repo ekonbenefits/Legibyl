@@ -109,7 +109,7 @@ let ``figures offer alt text, and replacement text only where there is some`` ()
             paragraphs |> should equal [ [ "Edit Replacement Text…" ]; [] ]))
 
 [<Fact>]
-let ``an edit is saved next to the PDF, shown as not in it yet, and listed on the Edits tab`` () =
+let ``an edit is kept in the review, shown as not in the PDF yet, and listed on the Edits tab`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let window = show (structure null) pdf
@@ -121,18 +121,21 @@ let ``an edit is saved next to the PDF, shown as not in it yet, and listed on th
             let header = descendants<TabItem> window |> List.map (fun t -> string t.Header)
             window.Close()
 
-            RegionEdits.load pdf |> List.map (fun e -> e.Tag, e.Alt, e.Text)
+            window.Review.Edits |> List.map (fun e -> e.Tag, e.Alt, e.Text)
             |> should equal [ "Figure", Some "Tomato seedlings in a tray", None; "P", None, Some "Garden opens at 8" ]
+            // Not saved until Save in the main window.
+            window.Review.IsEdited |> should be True
+            File.Exists(pdf + ".legibyl.json") |> should be False
             layout |> should contain "✎ your alt, not in the PDF yet: \"Tomato seedlings in a tray\""
             layout |> should contain "✎ your text, not in the PDF yet: \"Garden opens at 8\""
             header |> should contain "Edits (2)"
-            editsTab |> List.filter ((=) "Not in this PDF yet: Save… writes it to a copy.") |> List.length |> should equal 2))
+            editsTab |> List.filter ((=) "Not in this PDF yet: Export… writes it to a copy.") |> List.length |> should equal 2))
 
 [<Fact>]
 let ``an edit the PDF already has shows as in it, and can be removed`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
-            RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" logo "Tomato seedlings in a tray")
+            Reviews.saveEdits pdf (RegionEdits.setAlt [] 1 "Figure" logo "Tomato seedlings in a tray")
             let window = show (structure "Tomato seedlings in a tray") pdf
             let layout = texts window
             selectTab window "Edits"
@@ -144,15 +147,16 @@ let ``an edit the PDF already has shows as in it, and can be removed`` () =
 
             layout |> List.filter (fun t -> t.StartsWith "✎") |> should be Empty
             status |> should contain "In this PDF."
-            RegionEdits.load pdf |> should be Empty
+            window.Review.Edits |> should be Empty
             header |> should contain "Edits"))
 
 [<Fact>]
-let ``saving an edit tells whoever opened the window, so it can count them`` () =
+let ``an edit tells whoever opened the window, so it can count them`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let mutable told = 0
-            let window = StructureTreeWindow(structure null, pdf, (fun () -> told <- told + 1), Width = 900.0, Height = 700.0)
+            let window =
+                StructureTreeWindow(Tagged(structure null), pdf, Reviews.read pdf, (fun () -> told <- told + 1), Width = 900.0, Height = 700.0)
             window.Show()
             pump ()
             editVia window "Figure" "Edit Alt Text…" "Tomato seedlings in a tray"
@@ -205,11 +209,11 @@ let ``shift-clicking selects the paragraphs between, which can be merged as an e
 
             hint |> should contain "Shift-click the paragraphs after it to merge them into one."
             offer |> should equal (Some "Merge 3 Paragraphs")
-            RegionEdits.load pdf |> List.map (fun e -> e.Tag, e.MergeWith.Length) |> should equal [ "P", 2 ]
+            window.Review.Edits |> List.map (fun e -> e.Tag, e.MergeWith.Length) |> should equal [ "P", 2 ]
             layout |> should contain "✎ merged with the next 2 paragraphs, not in the PDF yet"
             layout |> List.filter ((=) "✎ merged into the paragraph before, not in the PDF yet") |> List.length |> should equal 2
             editsTab |> should contain "merge: 3 paragraphs into one, from \"P text\""
-            editsTab |> should contain "Not in this PDF yet: Save… writes it to a copy."))
+            editsTab |> should contain "Not in this PDF yet: Export… writes it to a copy."))
 
 [<Fact>]
 let ``paragraphs already chosen to merge offer to stay apart instead`` () =
@@ -227,7 +231,7 @@ let ``paragraphs already chosen to merge offer to stay apart instead`` () =
             let offer = mergeButton window |> Option.map (fun b -> string b.Content)
             window.Close()
 
-            RegionEdits.load pdf |> should be Empty
+            window.Review.Edits |> should be Empty
             offer |> should equal (Some "Merge 2 Paragraphs")))
 
 [<Fact>]
@@ -270,10 +274,10 @@ let ``a block of text can be given another tag, which shows as not in the PDF ye
             let editsTab = texts window
             window.Close()
 
-            RegionEdits.load pdf |> List.map (fun e -> e.Tag, e.Retag) |> should equal [ "P", Some "H1" ]
+            window.Review.Edits |> List.map (fun e -> e.Tag, e.Retag) |> should equal [ "P", Some "H1" ]
             layout |> should contain "✎ your tag, not in the PDF yet: \"H1\""
             editsTab |> should contain "tag: H1"
-            editsTab |> should contain "Not in this PDF yet: Save… writes it to a copy."))
+            editsTab |> should contain "Not in this PDF yet: Export… writes it to a copy."))
 
 [<Fact>]
 let ``the tag picker retags the block selected now, not one selected before`` () =
@@ -291,14 +295,14 @@ let ``the tag picker retags the block selected now, not one selected before`` ()
             window.Close()
 
             let second = nonNull (blocks[1].Tag :?> StructureNode).Geometry
-            RegionEdits.load pdf |> List.map (fun e -> e.Box, e.Retag) |> should equal [ second, Some "Caption" ]))
+            window.Review.Edits |> List.map (fun e -> e.Box, e.Retag) |> should equal [ second, Some "Caption" ]))
 
 [<Fact>]
 let ``a retag the PDF already has shows as in it, and figures get no tag picker`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let paragraph = rect 72.0 697.0 238.0 712.0
-            RegionEdits.save pdf (RegionEdits.setRetag [] 1 "P" paragraph "H1")
+            Reviews.saveEdits pdf (RegionEdits.setRetag [] 1 "P" paragraph "H1")
             let retagged = node "StructTreeRoot" null [ node "Document" null [ node "H1" paragraph []; node "Figure" logo [] ] ]
             let window = show retagged pdf
             let heading = descendants<Border> window |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "H1" | _ -> false)
@@ -339,4 +343,4 @@ let ``a link's description can be edited, starting from the one it has`` () =
             prefilled |> should equal "click here"
             layout |> should contain "description: \"click here\""
             layout |> should contain "✎ your description, not in the PDF yet: \"Example (example.com)\""
-            RegionEdits.load pdf |> List.map (fun e -> e.Tag, e.Alt) |> should equal [ "Link", Some "Example (example.com)" ]))
+            window.Review.Edits |> List.map (fun e -> e.Tag, e.Alt) |> should equal [ "Link", Some "Example (example.com)" ]))

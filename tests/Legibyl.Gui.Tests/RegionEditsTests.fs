@@ -102,36 +102,34 @@ let ``importing adds only the regions that have no edits here`` () =
     merged |> List.map _.Alt |> should equal [ Some "Written here"; Some "Page two's" ]
 
 [<Fact>]
-let ``edits and dismissals share the file next to the PDF without losing each other`` () =
+let ``edits and dismissals share the file next to the PDF`` () =
     withPdfPath (fun pdf ->
         let edits = RegionEdits.setAlt [] 1 "Figure" logo "The pack's wolf logo"
-        RegionEdits.save pdf edits
-        // A file with only edits doesn't mean dismissals are remembered...
-        Dismissals.load pdf |> should equal None
-        // ...and an entry has only the fields it changes, in readable text.
+        Reviews.saveEdits pdf edits
+        // An entry has only the fields it changes, in readable text.
         let json = File.ReadAllText(Dismissals.filePath pdf)
         json |> should haveSubstring "\"alt\": \"The pack's wolf logo\""
         json |> should not' (haveSubstring "\"text\"")
 
         let dismissed = Map [ { Dismissals.Rule = "Legibyl Structure-1"; Dismissals.Location = "StructTreeRoot/K[0]" }, "Empty paragraph" ]
-        Dismissals.save pdf dismissed
-        RegionEdits.load pdf |> List.map _.Alt |> should equal [ Some "The pack's wolf logo" ]
+        Reviews.save pdf (fun review -> review.Dismissed <- dismissed)
+        (Reviews.read pdf).Edits |> List.map _.Alt |> should equal [ Some "The pack's wolf logo" ]
 
-        RegionEdits.save pdf (RegionEdits.setText edits 1 "P" blurb "cavlng" "caving")
-        Dismissals.load pdf |> should equal (Some dismissed)
-        RegionEdits.load pdf |> List.map (fun e -> e.Alt, e.Text) |> should equal [ Some "The pack's wolf logo", None; None, Some "caving" ]
+        Reviews.saveEdits pdf (RegionEdits.setText edits 1 "P" blurb "cavlng" "caving")
+        (Reviews.read pdf).Dismissed |> should equal dismissed
+        (Reviews.read pdf).Edits |> List.map (fun e -> e.Alt, e.Text) |> should equal [ Some "The pack's wolf logo", None; None, Some "caving" ]
 
-        // Forgetting dismissals keeps the file for the edits...
-        Dismissals.forget pdf
+        // Without the dismissals the file stays for the edits...
+        Reviews.save pdf (fun review -> review.Dismissed <- Map.empty)
         File.Exists(Dismissals.filePath pdf) |> should be True
-        // ...and removing the edits too leaves nothing to keep.
-        RegionEdits.save pdf []
+        // ...and without the edits too there's nothing to keep.
+        Reviews.saveEdits pdf []
         File.Exists(Dismissals.filePath pdf) |> should be False)
 
 [<Fact>]
 let ``edits can be read from a file saved for another PDF`` () =
     withPdfPath (fun pdf ->
-        RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" logo "The pack's wolf logo")
+        Reviews.saveEdits pdf (RegionEdits.setAlt [] 1 "Figure" logo "The pack's wolf logo")
         let renamed = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "old-name.pdf.legibyl.json")
         File.Move(Dismissals.filePath pdf, renamed)
         RegionEdits.fromFile renamed |> List.map _.Alt |> should equal [ Some "The pack's wolf logo" ])
@@ -139,13 +137,13 @@ let ``edits can be read from a file saved for another PDF`` () =
 [<Fact>]
 let ``the document title is saved with the rest of the file, and removed without losing it`` () =
     withPdfPath (fun pdf ->
-        RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" logo "The pack's wolf logo")
-        RegionEdits.saveTitle pdf (Some "Cub Scout Pack 721")
-        RegionEdits.loadTitle pdf |> should equal (Some "Cub Scout Pack 721")
-        RegionEdits.load pdf |> List.map _.Alt |> should equal [ Some "The pack's wolf logo" ]
-        RegionEdits.saveTitle pdf None
-        RegionEdits.loadTitle pdf |> should equal None
-        RegionEdits.load pdf |> should haveLength 1)
+        Reviews.saveEdits pdf (RegionEdits.setAlt [] 1 "Figure" logo "The pack's wolf logo")
+        Reviews.save pdf (fun review -> review.Title <- Some "Cub Scout Pack 721")
+        (Reviews.read pdf).Title |> should equal (Some "Cub Scout Pack 721")
+        (Reviews.read pdf).Edits |> List.map _.Alt |> should equal [ Some "The pack's wolf logo" ]
+        Reviews.save pdf (fun review -> review.Title <- None)
+        (Reviews.read pdf).Title |> should equal None
+        (Reviews.read pdf).Edits |> should haveLength 1)
 
 /// A one-page PDF with text, in a fresh folder.
 let private withPdf (text: string) (test: string -> unit) =
@@ -169,12 +167,12 @@ let private found: PageSuggestion =
 [<Fact>]
 let ``a review's layout is recorded next to the PDF as found, with the edits on it, and found again when it's reopened`` () =
     withPdf "Caving this spring" (fun pdf ->
-        let review = LayoutReview(File.GetLastWriteTimeUtc pdf)
+        let review = DocumentReview(File.GetLastWriteTimeUtc pdf)
         review.Pages[1] <- found
-        RegionEdits.save pdf (RegionEdits.setExcluded [] 1 "Figure" logo true)
-        RegionEdits.saveLayout pdf (review.ToLayout pdf)
+        review.Edits <- RegionEdits.setExcluded [] 1 "Figure" logo true
+        review.Save pdf
 
-        let reopened = LayoutReviews().For pdf
+        let reopened = DocumentReviews().For pdf
 
         reopened.Pages.Keys |> List.ofSeq |> should equal [ 1 ]
         reopened.Pages[1].Blocks |> List.map (fun b -> b.Order, b.Tag, b.Text) |> should equal [ 1, "P", "Caving this spring"; 2, "Figure", "" ]
@@ -183,9 +181,11 @@ let ``a review's layout is recorded next to the PDF as found, with the edits on 
 [<Fact>]
 let ``a page that has changed since isn't taken from the saved layout`` () =
     withPdf "Caving this spring" (fun pdf ->
-        let review = LayoutReview(File.GetLastWriteTimeUtc pdf)
+        let review = DocumentReview(File.GetLastWriteTimeUtc pdf)
         review.Pages[1] <- found
-        RegionEdits.saveLayout pdf (review.ToLayout pdf)
+        // A layout is recorded once something's decided: here, the title.
+        review.Title <- Some "Caving"
+        review.Save pdf
         let saved = File.ReadAllText(Dismissals.filePath pdf)
         // The PDF regenerated with other text (its review file kept).
         do
@@ -195,4 +195,4 @@ let ``a page that has changed since isn't taken from the saved layout`` () =
             canvas.BeginText().SetFontAndSize(font, 12f).MoveText(100.0, 330.0).ShowText("Hiking this summer").EndText() |> ignore
         File.WriteAllText(Dismissals.filePath pdf, saved)
 
-        (LayoutReviews().For pdf).Pages.IsEmpty |> should be True)
+        (DocumentReviews().For pdf).Pages.IsEmpty |> should be True)

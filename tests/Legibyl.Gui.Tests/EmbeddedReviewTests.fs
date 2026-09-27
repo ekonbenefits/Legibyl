@@ -28,53 +28,70 @@ let private withPdf (test: string -> string -> unit) =
     finally
         Directory.Delete(folder, true)
 
-/// Fixes pdf to output, carrying its review with dismissed in place of its saved dismissals.
+/// Fixes pdf to output, carrying its review (as it's saved) with dismissed as its dismissals.
 let private fixCarrying (pdf: string) (output: string) (dismissed: Dismissals.Dismissed) =
-    VeraPdfValidator(Review = RegionEdits.reviewFor pdf (Some dismissed)).Fix(pdf, PdfProfile.PdfUa1, output, PdfFixOptions.AnnotationTabs)
+    let review = Reviews.read pdf
+    review.Dismissed <- dismissed
+    VeraPdfValidator(Review = review.ForCopy pdf).Fix(pdf, PdfProfile.PdfUa1, output, PdfFixOptions.AnnotationTabs)
     |> ignore
 
 [<Fact>]
-let ``the fixed copy opens with the review it was fixed with, without a file next to it`` () =
+let ``the fixed copy carries the review it was fixed with, read-only`` () =
     withPdf (fun pdf output ->
-        RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" logo "The garden's logo")
-        RegionEdits.saveTitle pdf (Some "Joining the garden")
+        Reviews.save pdf (fun review ->
+            review.Edits <- RegionEdits.setAlt [] 1 "Figure" logo "The garden's logo"
+            review.Title <- Some "Joining the garden")
 
         fixCarrying pdf output (Map [ splitParagraphs, "Likely split paragraph" ])
 
         File.Exists(Dismissals.filePath output) |> should be False
-        Dismissals.load output |> should equal (Some(Map [ splitParagraphs, "Likely split paragraph" ]))
-        RegionEdits.load output |> List.map _.Alt |> should equal [ Some "The garden's logo" ]
-        RegionEdits.loadTitle output |> should equal (Some "Joining the garden"))
+        let copy = Reviews.read output
+        // Carried, not the copy's own review: that starts empty.
+        copy.Edits |> should be Empty
+        copy.Dismissed |> should be Empty
+        copy.CarriedEdits |> List.map _.Alt |> should equal [ Some "The garden's logo" ]
+        copy.Carried |> Option.map _.Title |> should equal (Some "Joining the garden")
+        // Its dismissals still hold.
+        copy.AllDismissed |> should equal (Map [ splitParagraphs, "Likely split paragraph" ]))
 
 [<Fact>]
-let ``a file next to the fixed copy wins over the review in it`` () =
+let ``saving a fixed copy's review keeps the one in it as it was`` () =
     withPdf (fun pdf output ->
         fixCarrying pdf output (Map [ splitParagraphs, "Likely split paragraph" ])
+        let other = { Dismissals.Rule = "Legibyl Structure-1"; Dismissals.Location = "StructTreeRoot/K[0]" }
 
-        Dismissals.save output Map.empty
+        Reviews.save output (fun review -> review.Dismissed <- Map [ other, "Empty paragraph" ])
 
-        Dismissals.load output |> should equal (Some(Map.empty: Dismissals.Dismissed)))
+        let copy = Reviews.read output
+        copy.Dismissed |> should equal (Map [ other, "Empty paragraph" ])
+        copy.CarriedDismissed |> should equal (Map [ splitParagraphs, "Likely split paragraph" ])
+        copy.AllDismissed.Count |> should equal 2)
 
 [<Fact>]
-let ``forgetting the dismissals of a fixed copy keeps them from coming back from the review in it`` () =
+let ``a copy of a copy carries both reviews`` () =
     withPdf (fun pdf output ->
         fixCarrying pdf output (Map [ splitParagraphs, "Likely split paragraph" ])
+        let other = { Dismissals.Rule = "Legibyl Structure-1"; Dismissals.Location = "StructTreeRoot/K[0]" }
+        let review = Reviews.read output
+        review.Dismissed <- Map [ other, "Empty paragraph" ]
+        let third = Path.ChangeExtension(output, ".v3.pdf") |> nonNull
 
-        Dismissals.forget output
+        // Another repair: the copy's tab order is fixed already.
+        VeraPdfValidator(Review = review.ForCopy output).Fix(output, PdfProfile.PdfUa1, third, PdfFixOptions.Metadata) |> ignore
 
-        Dismissals.load output |> should equal None)
+        File.Exists third |> should be True
+        (Reviews.read third).CarriedDismissed.Keys |> Set.ofSeq |> should equal (Set [ splitParagraphs; other ]))
 
 [<Fact>]
 let ``with no review at all, nothing is carried`` () =
     withPdf (fun pdf output ->
-        Dismissals.reviewJson pdf (Some Map.empty) |> should equal (null: string | null)
         fixCarrying pdf output Map.empty
         EmbeddedReview.read output |> should equal None)
 
 [<Fact>]
 let ``edits can be imported from another PDF: from inside a saved copy, or the file next to one`` () =
     withPdf (fun pdf output ->
-        RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" logo "The garden's logo")
+        Reviews.saveEdits pdf (RegionEdits.setAlt [] 1 "Figure" logo "The garden's logo")
         fixCarrying pdf output Map.empty
 
         // The saved copy carries them inside it...
@@ -84,7 +101,7 @@ let ``edits can be imported from another PDF: from inside a saved copy, or the f
         // A .legibyl.json file still imports as before.
         RegionEdits.fromFileOrPdf (Dismissals.filePath pdf) |> List.map _.Alt |> should equal [ Some "The garden's logo" ])
 
-/// Regions as Suggest Structure would give them, with edits made there applied.
+/// Regions as a suggested structure would give them, with edits made there applied.
 type private FixedLayout(regions: LayoutRegion list) =
     interface IPageLayoutSource with
         member _.PageRegions(_, _) = regions
@@ -115,16 +132,16 @@ let ``a copy tagged from the layout carries its edits as edits of the elements t
         let figure = rect (66.0, 444.0, 180.0, 556.0)
         let edits =
             RegionEdits.setAlt (RegionEdits.setText [] 1 "H" heading "Joinng the garden" "Joining the garden") 1 "Figure" figure "Seedlings"
-        RegionEdits.save pdf edits
+        Reviews.saveEdits pdf edits
         let region tag geometry (alt: string | null) (text: string | null) : LayoutRegion =
             { Tag = tag; Geometry = geometry; ListNumbering = null; ActualText = text; QrText = null; Alt = alt }
         let layout =
             FixedLayout [ region "H" heading null "Joining the garden"; region "P" (rect (60.0, 684.0, 300.0, 704.0)) null null; region "Figure" figure "Seedlings" null ]
 
-        VeraPdfValidator(LayoutSource = layout, Review = RegionEdits.reviewFor pdf None).Fix(pdf, PdfProfile.PdfUa1, output, PdfFixOptions.TagFromLayout)
+        VeraPdfValidator(LayoutSource = layout, Review = (Reviews.read pdf).ForCopy pdf).Fix(pdf, PdfProfile.PdfUa1, output, PdfFixOptions.TagFromLayout)
         |> ignore
 
-        let carried = RegionEdits.load output
+        let carried = (Reviews.read output).CarriedEdits
         carried |> List.map (fun e -> e.Tag, e.Alt, e.Text) |> should equal [ "H1", None, Some "Joining the garden"; "Figure", Some "Seedlings", None ]
         // Each is an edit of an element in the copy, and already in it.
         let root = VeraPdfValidator().ReadStructureTree output |> nonNull
@@ -137,7 +154,7 @@ let ``a copy tagged from the layout carries its edits as edits of the elements t
                 && RegionEdits.overlap (nonNull node.Geometry) edit.Box >= RegionEdits.SameRegionOverlap)
             |> should be True
         ElementEdits.pending output (RegionEdits.toElementEdits carried) |> should equal 0
-        // The original's file keeps them as Suggest Structure made them.
-        RegionEdits.load pdf |> List.map _.Tag |> should equal [ "H"; "Figure" ]
+        // The original's file keeps them as they were made on its suggested structure.
+        (Reviews.read pdf).Edits |> List.map _.Tag |> should equal [ "H"; "Figure" ]
     finally
         Directory.Delete(folder, true)

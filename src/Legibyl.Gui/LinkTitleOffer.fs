@@ -28,7 +28,7 @@ let private add (found: Found list) (address: string) (where: string) =
 /// page), each of which can be unticked, with Read titles and Skip. Remembers the answer in
 /// review, and doesn't ask again once it's answered. If nothing links to the web, closes by
 /// itself. Returns once it's closed.
-let offer (owner: Window) (pdfPath: string) (review: LayoutReview) (titleSource: IPageTitleSource) : Task =
+let offer (owner: Window) (pdfPath: string) (review: DocumentReview) (titleSource: IPageTitleSource) : Task =
     if review.LinkTitles <> NotAsked then
         Task.CompletedTask
     else

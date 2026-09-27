@@ -1,7 +1,7 @@
 /// Changes made to suggested regions (an untagged PDF's structure in View Structure): a figure's alt text, and corrected
-/// OCR text; and the same, plus paragraphs merged, to elements in View Structure. Kept in the
-/// "edits" section of the "<name>.pdf.legibyl.json" file next to the PDF
-/// (with any remembered dismissals). A region is found again by its page, its suggested tag and
+/// OCR text; and the same, plus paragraphs merged, to elements in View Structure. Part of the
+/// PDF's review (see DocumentReview), which Save keeps in the "edits" section of the
+/// "<name>.pdf.legibyl.json" file next to the PDF. A region is found again by its page, its suggested tag and
 /// its box, so an edit still applies when the layout is suggested again, even for a regenerated
 /// PDF, as long as the region is in about the same place.
 module Legibyl.Gui.RegionEdits
@@ -11,7 +11,6 @@ open System.IO
 open Legibyl.Layout
 open Legibyl.Validation
 open Legibyl.Validation.ReviewFile
-open Legibyl.Gui.Dismissals
 
 type Edit =
     { Page: int
@@ -157,16 +156,16 @@ let ofElementEdit (e: ElementEdit) : Edit =
       Retag = Option.ofObj e.Retag
       Exclude = e.Exclude }
 
-let private editsOf (saved: SavedFile option) : Edit list =
-    match saved with
-    | Some saved -> ReviewFile.edits saved |> List.map ofElementEdit
-    | None -> []
+/// The edits in a review.
+let editsIn (saved: SavedFile) : Edit list = ReviewFile.edits saved |> List.map ofElementEdit
+
+let private editsOf (saved: SavedFile option) : Edit list = saved |> Option.map editsIn |> Option.defaultValue []
 
 /// The edits in a .legibyl.json file, e.g. one saved next to an earlier version of the PDF.
 let fromFile (jsonPath: string) : Edit list = editsOf (readFile jsonPath)
 
-/// The edits saved for pdfPath (see Dismissals.readFor).
-let load (pdfPath: string) = editsOf (readFor pdfPath)
+/// The edits saved for pdfPath: in the file next to it, or else inside it (a copy Legibyl saved).
+let load (pdfPath: string) = editsOf (ReviewFile.readFor pdfPath)
 
 /// The edits to import from path: a .legibyl.json file, or a PDF, whose own edits are those
 /// saved for it (in the file next to it, or inside it; see load).
@@ -174,32 +173,3 @@ let fromFileOrPdf (path: string) : Edit list =
     if String.Equals(Path.GetExtension path, ".pdf", StringComparison.OrdinalIgnoreCase) then load path
     else fromFile path
 
-/// The edits, document title and reviewed layout saved for pdfPath, read once (reading a review
-/// embedded in the PDF opens it). The layout has only the pages that haven't changed since.
-let loadReview (pdfPath: string) : Edit list * string option * LayoutFile.SavedLayout option =
-    let saved = readFor pdfPath
-    editsOf saved,
-    saved |> Option.bind (fun saved -> Option.ofObj saved.Title),
-    saved |> Option.bind (fun saved -> Option.ofObj saved.Layout) |> Option.map (LayoutFile.current pdfPath)
-
-/// Saves (or, with None, removes) the reviewed layout next to pdfPath, keeping the rest of the file.
-let saveLayout (pdfPath: string) (layout: LayoutFile.SavedLayout option) =
-    writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Layout = Option.toObj layout }
-
-/// Saves edits next to pdfPath, keeping any dismissals in the file. Throws
-/// IOException/UnauthorizedAccessException if it can't be written.
-let save (pdfPath: string) (edits: Edit list) =
-    let saved = toElementEdits edits |> List.map ReviewFile.ofElementEdit |> Array.ofList
-    writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Edits = (if saved.Length = 0 then null else saved) }
-
-/// Builds the review a copy of pdfPath carries (see VeraPdfValidator.Review), with dismissed in
-/// place of its saved dismissals if given, and its edits moved to the elements tagging made.
-let reviewFor (pdfPath: string) (dismissed: Dismissed option) = ReviewFile.forCopy (reviewFile pdfPath dismissed)
-
-/// The document title set for an untagged PDF in View Structure and saved for pdfPath, if any.
-let loadTitle (pdfPath: string) : string option =
-    readFor pdfPath |> Option.bind (fun saved -> Option.ofObj saved.Title)
-
-/// Saves (or, with None, removes) the document title next to pdfPath, keeping the rest of the file.
-let saveTitle (pdfPath: string) (title: string option) =
-    writeFile pdfPath { readOrEmpty pdfPath with Version = 1; Title = Option.toObj title }

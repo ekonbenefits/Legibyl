@@ -72,35 +72,35 @@ let private waitFor (condition: unit -> bool) =
     HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) condition |> ignore
 
 [<Fact>]
-let ``nothing to save until there's an edit or a chosen fix`` () =
+let ``nothing to export until there's an edit or a chosen fix`` () =
     onUiThread (fun () ->
         withPdf true (fun pdf ->
             let window = openPdf pdf
             let structure = name (button window "Structure…")
             let autoFixes = name (button window "Auto Fixes…")
-            let canSave = (button window "Save…").IsEnabled
+            let canExport = (button window "Export…").IsEnabled
             window.Close()
 
             structure |> should equal "Structure…"
             autoFixes |> should equal "Auto Fixes…"
-            canSave |> should be False))
+            canExport |> should be False))
 
 [<Fact>]
-let ``an edit not in the PDF yet counts on Structure, and can be saved`` () =
+let ``an edit not in the PDF yet counts on Structure, and can be exported`` () =
     onUiThread (fun () ->
         withPdf true (fun pdf ->
-            RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" (rect (73.0, 551.0, 171.0, 649.0)) "Tomato seedlings")
+            Reviews.saveEdits pdf (RegionEdits.setAlt [] 1 "Figure" (rect (73.0, 551.0, 171.0, 649.0)) "Tomato seedlings")
             let window = openPdf pdf
             waitFor (fun () -> name (button window "Structure…") <> "Structure…")
             let structure = name (button window "Structure…")
-            let canSave = (button window "Save…").IsEnabled
+            let canExport = (button window "Export…").IsEnabled
             window.Close()
 
-            structure |> should equal "Structure…, 1 edit to save"
-            canSave |> should be True))
+            structure |> should equal "Structure…, 1 edit not in the PDF yet"
+            canExport |> should be True))
 
 [<Fact>]
-let ``choosing auto fixes counts them, starting from the safe ones, and makes Save possible`` () =
+let ``choosing auto fixes counts them, starting from the safe ones, and makes Export possible`` () =
     onUiThread (fun () ->
         withPdf true (fun pdf ->
             let window = openPdf pdf
@@ -111,23 +111,23 @@ let ``choosing auto fixes counts them, starting from the safe ones, and makes Sa
             (descendants<Button> dialog |> List.find (fun b -> string b.Content = "Done")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
             waitFor (fun () -> window.OwnedWindows.Count = 0)
             let autoFixes = name (button window "Auto Fixes…")
-            let canSave = (button window "Save…").IsEnabled
+            let canExport = (button window "Export…").IsEnabled
             window.Close()
 
             ticked |> should be (greaterThan 0)
             autoFixes |> should equal $"Auto Fixes…, {ticked} chosen"
-            canSave |> should be True))
+            canExport |> should be True))
 
 [<Fact>]
-let ``an untagged PDF's review in Suggest Structure counts on Structure, and Save tags from it`` () =
+let ``an untagged PDF's edits on its suggested structure count on Structure, and Export tags from them`` () =
     onUiThread (fun () ->
         withPdf false (fun pdf ->
-            RegionEdits.save pdf (RegionEdits.setAlt [] 1 "Figure" (rect (70.0, 548.0, 175.0, 652.0)) "Tomato seedlings")
+            Reviews.saveEdits pdf (RegionEdits.setAlt [] 1 "Figure" (rect (70.0, 548.0, 175.0, 652.0)) "Tomato seedlings")
             let window = openPdf pdf
             waitFor (fun () -> name (button window "Structure…") <> "Structure…")
             let structure = name (button window "Structure…")
-            let canSave = (button window "Save…").IsEnabled
+            let canExport = (button window "Export…").IsEnabled
             window.Close()
 
-            structure |> should equal "Structure…, 1 edit to save"
-            canSave |> should be True))
+            structure |> should equal "Structure…, 1 edit not in the PDF yet"
+            canExport |> should be True))

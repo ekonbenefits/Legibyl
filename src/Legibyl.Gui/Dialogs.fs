@@ -106,6 +106,54 @@ let showMessageWithAction (owner: Window) (message: string) (title: string) (act
         return chosen
     }
 
+/// Asks whether to keep a review's changes before they'd be lost (closing, or opening another
+/// PDF): Some true to save them, Some false not to, None to cancel.
+let askToSave (owner: Window) (fileName: string) : Task<bool option> =
+    let window = dialogWindow "Save Your Review?" 460.0
+    let mutable chosen = None
+    let choice (label: string) (result: bool option) (attrs: IAttr<Button> list) =
+        Button.create [
+            Button.content label
+            Button.minWidth 82.0
+            Button.horizontalContentAlignment HorizontalAlignment.Center
+            Button.onClick (fun _ ->
+                chosen <- result
+                window.Close())
+            yield! attrs
+        ]
+    window.Content <-
+        Component(fun _ ->
+            StackPanel.create [
+                StackPanel.margin 16.0
+                StackPanel.spacing 16.0
+                StackPanel.children [
+                    TextBlock.create [
+                        TextBlock.text $"Save your review of {fileName}? Your edits and dismissed warnings are lost if you don't. The PDF isn't changed either way."
+                        TextBlock.textWrapping TextWrapping.Wrap
+                    ]
+                    DockPanel.create [
+                        DockPanel.children [
+                            StackPanel.create [
+                                DockPanel.dock Dock.Right
+                                StackPanel.orientation Orientation.Horizontal
+                                StackPanel.spacing 8.0
+                                StackPanel.children [
+                                    choice "Cancel" None [ Button.isCancel true ]
+                                    choice "Save" (Some true) [ Button.isDefault true ]
+                                ]
+                            ]
+                            StackPanel.create [
+                                StackPanel.children [ choice "Don't Save" (Some false) [] ]
+                            ]
+                        ]
+                    ]
+                ]
+            ])
+    task {
+        do! window.ShowDialog owner
+        return chosen
+    }
+
 /// Asks for a piece of text (alt text, say): prompt above a box starting with initial. Some text
 /// on OK, None on Cancel.
 let promptText (owner: Window) (title: string) (prompt: string) (initial: string) (placeholder: string) : Task<string option> =
@@ -245,7 +293,7 @@ let private fixChoices =
 /// Returns None if the user cancelled.
 /// tagNote, if any, says what tagging from the layout will use (edits on a suggested structure).
 /// chosen is what was chosen before, if anything; the first time, the safe repairs this PDF
-/// needs start ticked. Save writes the chosen repairs (and the user's edits) to a copy.
+/// needs start ticked. Export writes the chosen repairs (and the user's edits) to a copy.
 let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string option) (chosen: PdfFixOptions option) : Task<PdfFixOptions option> =
     let window = dialogWindow "Auto Fixes" 560.0
     // Never taller than the screen: the list scrolls in whatever room is left. (All the repairs
@@ -360,7 +408,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                 Grid.rowDefinitions "Auto,Auto,*,Auto,Auto"
                 Grid.children [
                     TextBlock.create [
-                        TextBlock.text "Choose the repairs Save applies to a copy of this PDF:"
+                        TextBlock.text "Choose the repairs Export applies to a copy of this PDF:"
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                     ]
@@ -402,7 +450,7 @@ let chooseFixOptions (owner: Window) (report: ValidationReport) (tagNote: string
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 8.0, 0.0, 16.0)
                         TextBlock.text
-                            "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't write alt text themselves (Save writes the alt text you wrote, with your other edits) or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
+                            "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't write alt text themselves (Export writes the alt text you wrote, with your other edits) or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
                     ]
                     StackPanel.create [
                         Grid.row 4

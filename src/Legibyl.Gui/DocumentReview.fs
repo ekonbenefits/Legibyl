@@ -16,13 +16,28 @@ type LinkTitlesChoice =
     /// Read them, except for these addresses.
     | Read of except: Set<string>
 
-/// What's been found and decided about one file's suggested structure: each page's layout
-/// found so far (as found: what a person decides is in Edits, on top), and the page last looked
-/// at. Remembered while the
-/// app is open, so viewing the structure again (or tagging on Save) picks it up.
+/// A PDF's review: what a person has decided about it (warnings dismissed, edits, a title) and,
+/// for an untagged PDF, each page's layout found so far (as found: the edits are on top). Save
+/// keeps it in the "<name>.pdf.legibyl.json" file next to the PDF (see ReviewFile); until then
+/// it's only here, and IsEdited says so. The PDF itself is never changed. A review carried
+/// inside the PDF (a copy Legibyl saved) is read-only: its edits are in the PDF already, and its
+/// dismissals still hold, under any made since.
 [<Sealed>]
-type LayoutReview(modified: DateTime) =
+type DocumentReview(modified: DateTime) =
     member _.Modified = modified
+    /// Warnings dismissed.
+    member val Dismissed: Dismissals.Dismissed = Map.empty with get, set
+    /// The review saved inside the PDF, if it's a copy Legibyl saved: read-only.
+    member val Carried: ReviewFile.SavedFile option = None with get, set
+    /// What was last saved (or read): the dismissals, edits and title.
+    member val private Saved: Dismissals.Dismissed * RegionEdits.Edit list * string option = (Map.empty, [], None) with get, set
+
+    /// The warnings dismissed in the review carried inside the PDF.
+    member this.CarriedDismissed = this.Carried |> Option.map Dismissals.ofSaved |> Option.defaultValue Map.empty
+    /// The edits in the review carried inside the PDF (in it already).
+    member this.CarriedEdits = this.Carried |> Option.map RegionEdits.editsIn |> Option.defaultValue []
+    /// Every warning dismissed: here, and in the review carried inside the PDF.
+    member this.AllDismissed = this.Dismissed |> Map.fold (fun all key message -> Map.add key message all) this.CarriedDismissed
     member val Pages = Collections.Concurrent.ConcurrentDictionary<int, PageSuggestion>()
     member val LastPage = 1 with get, set
     /// What a person decided about the suggestions, as saved next to the PDF (see RegionEdits):
@@ -58,6 +73,45 @@ type LayoutReview(modified: DateTime) =
     /// are on is worth recording next to the PDF.
     member this.HasDecisions = this.LayoutKept || not this.Edits.IsEmpty || this.Title.IsSome
 
+    /// The review as Save keeps it: the layout is recorded only once something's decided.
+    member this.ToFile(pdfPath: string) : ReviewFile.SavedFile =
+        let edits = RegionEdits.toElementEdits this.Edits |> List.map ReviewFile.ofElementEdit |> Array.ofList
+        { Version = 1
+          DismissedWarnings = Dismissals.toSaved this.Dismissed
+          Edits = (if edits.Length = 0 then null else edits)
+          Title = Option.toObj this.Title
+          Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null) }
+
+    /// Keeps the review in the file next to pdfPath (deleting it if there's nothing to keep).
+    /// Throws IOException/UnauthorizedAccessException if it can't be written.
+    member this.Save(pdfPath: string) =
+        let file = this.ToFile pdfPath
+        ReviewFile.writeFile pdfPath file
+        this.LayoutKept <- not (isNull file.Layout)
+        this.MarkSaved()
+
+    /// The review a copy of pdfPath carries (see VeraPdfValidator.Review): this one, saved or not,
+    /// with the one carried inside pdfPath under it; its edits moved to the elements tagging made.
+    member this.ForCopy(pdfPath: string) =
+        let own = this.ToFile pdfPath
+        let file =
+            match this.Carried with
+            | Some carried ->
+                let edits = Array.append (Option.ofObj carried.Edits |> Option.defaultValue [||]) (Option.ofObj own.Edits |> Option.defaultValue [||])
+                { own with
+                    DismissedWarnings = Dismissals.toSaved this.AllDismissed
+                    Edits = (if edits.Length = 0 then null else edits)
+                    Title = (if isNull own.Title then carried.Title else own.Title) }
+            | None -> own
+        ReviewFile.forCopy (if ReviewFile.isEmpty file then None else Some file)
+
+    /// Whether there are changes Save hasn't kept: the dismissals, edits or title differ from
+    /// what was last saved (changing one back isn't a change).
+    member this.IsEdited = (this.Dismissed, this.Edits, this.Title) <> this.Saved
+
+    /// Takes what it has now as what's saved.
+    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title)
+
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
         match this.LinkTitles with
@@ -77,30 +131,43 @@ type LayoutReview(modified: DateTime) =
         | Some edited -> if String.IsNullOrWhiteSpace edited then None else Some edited
         | None -> Some(this.LinkPrefill link.Address) |> Option.filter (String.IsNullOrWhiteSpace >> not)
 
-/// The layout reviews of the files opened this session, each forgotten if its file changes.
+/// The reviews of the files opened this session, each read again if its file changes (unless it
+/// has changes not saved).
 [<Sealed>]
-type LayoutReviews() =
-    let reviews = Collections.Concurrent.ConcurrentDictionary<string, LayoutReview>()
+type DocumentReviews() =
+    let reviews = Collections.Concurrent.ConcurrentDictionary<string, DocumentReview>()
+
+    /// Drops this file's review with any changes not saved: it's read again next time.
+    member _.Forget(pdfPath: string) = reviews.TryRemove(Path.GetFullPath pdfPath) |> ignore
 
     /// This file's review, a new one if there's none or the file has changed since.
     member _.For(pdfPath: string) =
         let fullPath = Path.GetFullPath pdfPath
         let modified = File.GetLastWriteTimeUtc fullPath
         let fresh () =
-            // Any edits saved next to the PDF, made for it or an earlier version of it, and the
-            // layout recorded with them: its pages count as found.
-            let review = LayoutReview modified
-            let edits, title, layout = RegionEdits.loadReview fullPath
-            review.Edits <- edits
-            review.Title <- title
-            match layout with
-            | Some layout ->
-                review.LayoutKept <- true
-                for page in layout.Pages do
-                    review.Pages[page.Page] <- LayoutSuggestions.ofLayoutPage page
+            // The review saved next to the PDF, and the layout recorded with it: its pages that
+            // haven't changed since count as found.
+            let review = DocumentReview modified
+            match ReviewFile.readFile (ReviewFile.filePath fullPath) with
+            | Some saved ->
+                review.Dismissed <- Dismissals.ofSaved saved
+                review.Edits <- RegionEdits.editsIn saved
+                review.Title <- Option.ofObj saved.Title
+                match Option.ofObj saved.Layout |> Option.map (LayoutFile.current fullPath) with
+                | Some layout ->
+                    review.LayoutKept <- true
+                    for page in layout.Pages do
+                        review.Pages[page.Page] <- LayoutSuggestions.ofLayoutPage page
+                | None -> ()
             | None -> ()
+            review.MarkSaved()
+            review.Carried <- if File.Exists fullPath then EmbeddedReview.read fullPath |> Option.bind ReviewFile.parse else None
             review
-        reviews.AddOrUpdate(fullPath, (fun _ -> fresh ()), (fun _ existing -> if existing.Modified = modified then existing else fresh ()))
+        reviews.AddOrUpdate(
+            fullPath,
+            (fun _ -> fresh ()),
+            (fun _ existing -> if existing.Modified = modified || existing.IsEdited then existing else fresh ())
+        )
 
 /// Finds every page's layout in the background, one page at a time (each takes seconds): the
 /// page being viewed first, then the pages after it, then any before. So moving to another page
@@ -174,7 +241,7 @@ type LayoutPrefetcher(suggester: LayoutSuggester, results: Collections.Concurren
 
 /// The regions to tag: each page's suggestions, with the review's edits layered on (left out,
 /// retagged, alt text, corrected text).
-type ReviewedLayout(prefetcher: LayoutPrefetcher, review: LayoutReview) =
+type ReviewedLayout(prefetcher: LayoutPrefetcher, review: DocumentReview) =
     interface IPageLayoutSource with
         member _.PageRegions(_, page) =
             RegionEdits.onRegions review.Edits (prefetcher.Find page).Blocks :> Collections.Generic.IReadOnlyList<_>
@@ -223,7 +290,7 @@ module SuggestedTree =
 
     /// A page's suggestions as elements. A link's description is prefilled from its page's title
     /// if read, a QR code's alt text with where it links; an edit is a change from those.
-    let pageNodes (review: LayoutReview) (page: PageSuggestion) : StructureNode list =
+    let pageNodes (review: DocumentReview) (page: PageSuggestion) : StructureNode list =
         let links = review.WebLinks |> List.filter (fun link -> link.Page = page.PageNumber)
         let linkNode (link: WebLink) =
             let prefill = review.LinkPrefill link.Address

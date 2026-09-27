@@ -99,7 +99,7 @@ module private MainView =
 
     let noPreview = { Image = None; Note = ""; Loading = false }
 
-    /// What Save writes besides the chosen auto fixes: how many of the user's changes aren't in
+    /// What Export writes besides the chosen auto fixes: how many of the user's changes aren't in
     /// the PDF yet (edits of its elements; for an untagged PDF, its edits on the suggested structure),
     /// and whether it tags an untagged PDF from that review.
     type PendingChanges = { Changes: int; TagsFromReview: bool }
@@ -300,7 +300,7 @@ module private MainView =
             let validator = ctx.useStateLazy(fun () -> VeraPdfValidator()).Current
             let renderer = ctx.useStateLazy(fun () -> new PdfRegionRenderer()).Current
             let structureCache = ctx.useStateLazy(fun () -> StructureCache()).Current
-            let layoutReviews = ctx.useStateLazy(fun () -> LayoutReviews()).Current
+            let layoutReviews = ctx.useStateLazy(fun () -> DocumentReviews()).Current
             let selectedFile = ctx.useState (None: string option)
             let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
@@ -311,13 +311,13 @@ module private MainView =
             // Bumped on every selection change so a slow page render for an earlier
             // selection can't overwrite the preview for the current one.
             let previewVersion = ctx.useState (0, false)
-            // Warnings dismissed for the selected file, whether they're saved next to it, and
-            // whether the results list shows them.
+            // Warnings dismissed for the selected file (in its review, and any carried inside it),
+            // whether the results list shows them, and whether its review has changes not saved.
             let dismissed = ctx.useState (Map.empty: Dismissals.Dismissed)
-            let rememberDismissals = ctx.useState false
             let showDismissed = ctx.useState false
+            let edited = ctx.useState false
             // The repairs chosen in Auto Fixes for the selected file (None until they're chosen),
-            // and the user's changes Save writes too.
+            // and the user's changes Export writes too.
             let autoFixes = ctx.useState (None: PdfFixOptions option)
             let pending = ctx.useState noChanges
             // The last count of edits not in a tagged PDF: (path, its last write, edits, count).
@@ -382,6 +382,7 @@ module private MainView =
             /// edits that aren't in it yet, which means reading it, off the UI thread.
             let refreshPending () =
                 task {
+                    selectedFile.Current |> Option.iter (fun path -> edited.Set (layoutReviews.For path).IsEdited)
                     match selectedFile.Current, outcome.Current with
                     | Some path, Validated(report, _) when report.FixableCount PdfFixOptions.TagFromLayout > 0 ->
                         let review = layoutReviews.For path
@@ -391,7 +392,7 @@ module private MainView =
                         let! count =
                             Task.Run(fun () ->
                                 try
-                                    let edits = RegionEdits.toElementEdits (RegionEdits.load path)
+                                    let edits = RegionEdits.toElementEdits (layoutReviews.For path).Edits
                                     let written = File.GetLastWriteTimeUtc path
                                     match pendingCount.Value with
                                     | Some(p, w, e, count) when p = path && w = written && e = edits -> count
@@ -452,21 +453,72 @@ module private MainView =
                 clearResults ()
                 autoFixes.Set None
                 pending.Set noChanges
-                match Dismissals.load path with
-                | Some saved ->
-                    dismissed.Set saved
-                    rememberDismissals.Set true
-                | None ->
-                    dismissed.Set Map.empty
-                    rememberDismissals.Set false
+                let review = layoutReviews.For path
+                dismissed.Set review.AllDismissed
+                edited.Set review.IsEdited
                 showDismissed.Set false
                 runValidation activity
 
-            /// Opens a file and validates it with the current profile.
-            let openFile (path: string) = openFileAs "Validating" path
+            /// Keeps the selected file's review in the file next to it; false if it couldn't be
+            /// written (and says why).
+            let saveReview () =
+                task {
+                    match selectedFile.Current with
+                    | Some path ->
+                        try
+                            (layoutReviews.For path).Save path
+                            edited.Set false
+                            return true
+                        with :? IOException | :? UnauthorizedAccessException as ex ->
+                            do! Dialogs.showMessage window $"Couldn't save the review next to the PDF: {ex.Message}" "Save"
+                            return false
+                    | None -> return true
+                }
+
+            /// Whether the selected file's review may be left: it has no changes not saved, or the
+            /// user saves them, or chooses not to (and they're dropped).
+            let mayLeave () =
+                task {
+                    match selectedFile.Current with
+                    | Some path when (layoutReviews.For path).IsEdited ->
+                        match! Dialogs.askToSave window (Path.GetFileName path) with
+                        | Some true -> return! saveReview ()
+                        | Some false ->
+                            layoutReviews.Forget path
+                            edited.Set false
+                            return true
+                        | None -> return false
+                    | _ -> return true
+                }
+
+            /// Opens another file, after asking about the selected one's changes not saved.
+            let switchTo (activity: string) (path: string) =
+                task {
+                    let same = selectedFile.Current |> Option.exists (fun current -> Path.GetFullPath current = Path.GetFullPath path)
+                    let! leave = if same then Task.FromResult true else mayLeave ()
+                    if leave then return! openFileAs activity path else return None
+                }
 
             // Auto-validate as soon as a file is picked/dropped.
-            let setSelectedFile (path: string) = openFile path |> ignore
+            let setSelectedFile (path: string) = switchTo "Validating" path |> ignore
+
+            // Closing with changes not saved asks about them first.
+            let closing = ctx.useState (false, false)
+            ctx.useEffect (
+                (fun () ->
+                    window.Closing.Add(fun e ->
+                        let edited = selectedFile.Current |> Option.exists (fun path -> (layoutReviews.For path).IsEdited)
+                        if edited && not closing.Current then
+                            e.Cancel <- true
+                            task {
+                                let! leave = mayLeave ()
+                                if leave then
+                                    closing.Set true
+                                    window.Close()
+                            }
+                            |> ignore)),
+                [ EffectTrigger.AfterInit ]
+            )
 
             // Files opened from outside the view (e.g. by the headless screenshot harness).
             ctx.useEffect (
@@ -514,15 +566,15 @@ module private MainView =
                                         ("This PDF has no structure tree at all — it is completely untagged, so there is no "
                                          + "semantic hierarchy for a screen reader to use.\n\n"
                                          + "Suggest Structure shows the structure a layout detector finds on each page: headings, "
-                                         + "paragraphs, figures, tables and their reading order. You can edit it; the PDF isn't changed until you Save a copy.")
+                                         + "paragraphs, figures, tables and their reading order. You can edit it; the PDF isn't changed (Export writes a copy).")
                                         "Document Structure"
                                         "Suggest Structure…"
                                 if suggest then
                                     let review = layoutReviews.For filePath
                                     // Offer to read the titles of pages links go to, before the window opens.
                                     do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
-                                    StructureTreeWindow(Suggested review, filePath, refreshPending).Show window
-                            | structure -> StructureTreeWindow(structure, filePath, refreshPending).Show window
+                                    StructureTreeWindow(Suggested, filePath, review, refreshPending).Show window
+                            | structure -> StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending).Show window
                         }
 
                     match selectedFile.Current with
@@ -549,7 +601,7 @@ module private MainView =
                 }
                 |> ignore
 
-            /// Chooses the repairs Save applies (it doesn't save).
+            /// Chooses the repairs Export applies (it doesn't export).
             let chooseAutoFixes _ =
                 task {
                     match selectedFile.Current, report with
@@ -572,7 +624,7 @@ module private MainView =
                                 figures + texts
                             match review.Pages.Count, review.Edits |> List.filter _.Exclude |> List.length with
                             | _ when pending.Current.TagsFromReview ->
-                                Some("Save tags from your review on the suggested structure, ticked or not." + alt)
+                                Some("Export tags from your review on the suggested structure, ticked or not." + alt)
                             | 0, 0 when alt = "" -> None
                             | 0, 0 -> Some(alt.Trim())
                             | _, 0 -> Some("Uses the layout suggested in View Structure." + alt)
@@ -585,7 +637,7 @@ module private MainView =
                 }
                 |> ignore
 
-            /// What Save writes: the chosen auto fixes, the user's edits not in the PDF yet, and for
+            /// What Export writes: the chosen auto fixes, the user's edits not in the PDF yet, and for
             /// an untagged PDF with edits on its suggested structure, tags from them.
             let saveOptions () =
                 let chosen = autoFixes.Current |> Option.defaultValue PdfFixOptions.None
@@ -593,8 +645,9 @@ module private MainView =
                 ||| (if pending.Current.TagsFromReview then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
                 ||| (if pending.Current.Changes > 0 && not pending.Current.TagsFromReview then PdfFixOptions.ApplyEdits else PdfFixOptions.None)
 
-            /// Writes the next version of the PDF with saveOptions, then opens it.
-            let save _ =
+            /// Writes the next version of the PDF with saveOptions (its review, saved or not, goes in
+            /// it too), then opens it.
+            let export _ =
                 task {
                     match selectedFile.Current with
                     | Some sourcePath when saveOptions () <> PdfFixOptions.None ->
@@ -604,7 +657,7 @@ module private MainView =
                             Dialogs.pickSavePath
                                 window
                                 (FilePickerSaveOptions(
-                                    Title = "Save a copy with your changes",
+                                    Title = "Export a copy with your changes",
                                     SuggestedFileName = CopyNames.nextVersion sourcePath,
                                     DefaultExtension = "pdf",
                                     FileTypeChoices = [ pdfFileType; FilePickerFileTypes.All ]
@@ -640,13 +693,12 @@ module private MainView =
                                                         CancellationToken.None
                                             source |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
                                             let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
-                                            let dismissedNow = dismissed.Current
                                             let! fix =
                                                 Task.Run(fun () ->
-                                                    // The review (as the window has it) goes in the repaired copy.
-                                                    // Reading it can mean opening the PDF, so it's done here too.
-                                                    validator.Review <- RegionEdits.reviewFor sourcePath (Some dismissedNow)
-                                                    validator.Edits <- RegionEdits.toElementEdits (RegionEdits.load sourcePath)
+                                                    // The review, as it is now, goes in the repaired copy. Recording
+                                                    // its layout reads the PDF, so it's done here too.
+                                                    validator.Review <- review.ForCopy sourcePath
+                                                    validator.Edits <- RegionEdits.toElementEdits review.Edits
                                                     validator.Fix(sourcePath, profile, outputPath, options, progress))
                                             return Ok fix
                                         with
@@ -667,7 +719,7 @@ module private MainView =
                                 match fixOutcome with
                                 | Ok fix when fix.WasFixed ->
                                     match fix.OutputPath with
-                                    | NonNull path -> openFileAs "Validating the saved copy" path
+                                    | NonNull path -> switchTo "Validating the exported copy" path
                                     | Null -> Task.FromResult None
                                 | _ -> Task.FromResult None
 
@@ -676,31 +728,47 @@ module private MainView =
                 }
                 |> ignore
 
+            // ⌘S / Ctrl+S saves the review, ⌘E / Ctrl+E exports.
+            ctx.useEffect (
+                (fun () ->
+                    window.KeyDown.Add(fun e ->
+                        if e.KeyModifiers.HasFlag KeyModifiers.Meta || e.KeyModifiers.HasFlag KeyModifiers.Control then
+                            match e.Key with
+                            | Key.S when not isBusy.Current && edited.Current ->
+                                e.Handled <- true
+                                saveReview () |> ignore
+                            | Key.E when not isBusy.Current ->
+                                e.Handled <- true
+                                export ()
+                            | _ -> ())),
+                [ EffectTrigger.AfterInit ]
+            )
+
+            // The window is titled with the PDF, and whether its review has changes not saved.
+            window.Title <-
+                match selectedFile.Current with
+                | Some path when edited.Current -> $"{Path.GetFileName path} — Edited — Legibyl"
+                | Some path -> $"{Path.GetFileName path} — Legibyl"
+                | None -> "Legibyl — PDF/UA Validator"
+
             let copyText (text: string) =
                 match window.Clipboard with
                 | NonNull clipboard -> clipboard.SetTextAsync text |> ignore
                 | Null -> ()
 
-            /// Writes the dismissals next to the PDF when the user has asked to remember them.
-            /// If that fails, stops remembering and says why.
-            let saveDismissals (next: Dismissals.Dismissed) =
-                task {
-                    match selectedFile.Current with
-                    | Some filePath when rememberDismissals.Current ->
-                        try
-                            Dismissals.save filePath next
-                        with :? IOException | :? UnauthorizedAccessException as ex ->
-                            rememberDismissals.Set false
-                            do! Dialogs.showMessage window $"Couldn't save dismissals next to the PDF: {ex.Message}" "Dismissed warnings"
-                    | _ -> ()
-                }
-
             /// Dismisses or restores a warning (key), or every warning of its rule (ruleKey),
             /// keeping the selection on it, or moving it on to the next shown finding if it's now hidden.
             let setDismissed (row: RuleViolationRow) (key: RuleViolation -> Dismissals.Key) (isDismissed: bool) =
-                let next =
-                    if isDismissed then dismissed.Current.Add(key row.Violation, row.Message)
-                    else dismissed.Current.Remove(key row.Violation)
+              match selectedFile.Current with
+              | None -> ()
+              | Some path ->
+                let review = layoutReviews.For path
+                review.Dismissed <-
+                    if isDismissed then review.Dismissed.Add(key row.Violation, row.Message)
+                    else review.Dismissed.Remove(key row.Violation)
+                edited.Set true
+                // With those carried inside the PDF, which stay.
+                let next = review.AllDismissed
                 dismissed.Set next
                 match outcome.Current with
                 | Validated(report, rows) ->
@@ -718,24 +786,6 @@ module private MainView =
                         |> Option.map snd
                         |> selectRow
                 | _ -> ()
-                saveDismissals next |> ignore
-
-            /// Starts or stops keeping this PDF's dismissals in a file next to it.
-            let toggleRememberDismissals () =
-                task {
-                    match selectedFile.Current with
-                    | Some filePath when rememberDismissals.Current ->
-                        try
-                            Dismissals.forget filePath
-                            rememberDismissals.Set false
-                        with :? IOException | :? UnauthorizedAccessException as ex ->
-                            do! Dialogs.showMessage window $"Couldn't delete {Dismissals.filePath filePath}: {ex.Message}" "Dismissed warnings"
-                    | Some _ ->
-                        rememberDismissals.Set true
-                        do! saveDismissals dismissed.Current
-                    | None -> ()
-                }
-                |> ignore
 
             /// The report without the warnings the user dismissed, for the banner and reports.
             let withoutDismissed (report: ValidationReport) =
@@ -862,16 +912,20 @@ module private MainView =
                     ContextMenu.viewItems [
                         match selected with
                         | Some row when row.Dismissed ->
+                            // Those dismissed in the review carried inside the PDF stay: it's read-only.
+                            let own =
+                                selectedFile.Current |> Option.map (fun path -> (layoutReviews.For path).Dismissed) |> Option.defaultValue Map.empty
+                            let restore (header: string) (key: RuleViolation -> Dismissals.Key) =
+                                let carried = not (own.ContainsKey(key row.Violation))
+                                MenuItem.create [
+                                    MenuItem.header (if carried then $"{header} (dismissed in the review saved inside this PDF)" else header)
+                                    MenuItem.isEnabled (not carried)
+                                    MenuItem.onClick (fun _ -> setDismissed row key false)
+                                ]
                             if dismissed.Current.ContainsKey(Dismissals.keyOf row.Violation) then
-                                MenuItem.create [
-                                    MenuItem.header "Restore warning"
-                                    MenuItem.onClick (fun _ -> setDismissed row Dismissals.keyOf false)
-                                ]
+                                restore "Restore warning" Dismissals.keyOf
                             if Dismissals.isRuleIgnored dismissed.Current row.Violation then
-                                MenuItem.create [
-                                    MenuItem.header $"Stop ignoring {row.Violation.RuleId} warnings"
-                                    MenuItem.onClick (fun _ -> setDismissed row Dismissals.ruleKeyOf false)
-                                ]
+                                restore $"Stop ignoring {row.Violation.RuleId} warnings" Dismissals.ruleKeyOf
                         | _ ->
                             MenuItem.create [
                                 MenuItem.header (if canDismiss || selected.IsNone then "Dismiss warning" else "Dismiss warning (only warnings can be dismissed)")
@@ -888,19 +942,6 @@ module private MainView =
                                 ToolTip.tip "Hides every warning of this type in this PDF, wherever it is."
                                 MenuItem.onClick (fun _ -> selected |> Option.iter (fun row -> setDismissed row Dismissals.ruleKeyOf true))
                             ]
-                        Separator.create []
-                        MenuItem.create [
-                            MenuItem.header "Remember dismissals for this PDF"
-                            MenuItem.toggleType MenuItemToggleType.CheckBox
-                            MenuItem.isChecked rememberDismissals.Current
-                            MenuItem.isEnabled selectedFile.Current.IsSome
-                            ToolTip.tip (
-                                match selectedFile.Current with
-                                | Some filePath -> $"Keeps them in {Path.GetFileName(Dismissals.filePath filePath)} next to the PDF."
-                                | None -> "Open a PDF first."
-                            )
-                            MenuItem.onClick (fun _ -> toggleRememberDismissals ())
-                        ]
                     ]
                 ]
 
@@ -1005,7 +1046,7 @@ module private MainView =
                                         if row.Violation.IsFixable then
                                             fixableHeading (TextBlock.create [ TextBlock.text "Fixable"; TextBlock.fontWeight FontWeight.SemiBold ])
                                             |> View.withAttrs [ Control.margin (0.0, 8.0, 0.0, 0.0) ]
-                                            detailText $"{row.Fixable}. Choose it in Auto Fixes…, then Save… a copy of this PDF." false []
+                                            detailText $"{row.Fixable}. Choose it in Auto Fixes…, then Export… a copy of this PDF." false []
                                         TextBlock.create [
                                             TextBlock.text "Location"
                                             TextBlock.fontWeight FontWeight.SemiBold
@@ -1178,8 +1219,8 @@ module private MainView =
                             let structureName =
                                 match changes with
                                 | 0 -> "Structure…"
-                                | 1 -> "Structure…, 1 edit to save"
-                                | n -> $"Structure…, {n} edits to save"
+                                | 1 -> "Structure…, 1 edit not in the PDF yet"
+                                | n -> $"Structure…, {n} edits not in the PDF yet"
                             let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
                             Button.create [
                                 Button.content (badged "Structure…" changes)
@@ -1188,7 +1229,7 @@ module private MainView =
                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                 Button.isEnabled (not busy && selectedFile.Current.IsSome)
                                 ToolTip.tip
-                                    "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements, or for an untagged PDF, suggests a layout to tag it from. The count is your edits Save writes."
+                                    "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements, or for an untagged PDF, suggests a layout to tag it from. The count is your edits not in it yet, which Export writes."
                                 Button.onClick viewStructure
                             ]
                             Button.create [
@@ -1198,17 +1239,26 @@ module private MainView =
                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                 Button.isEnabled (not busy && canAttemptFix)
                                 ToolTip.tip
-                                    "Choose best-effort repairs for Save to apply, like XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
+                                    "Choose best-effort repairs for Export to apply, like XMP metadata, page annotation tab order, and empty paragraph tags. Disabled once the file is already fully compliant, since there'd be nothing left to fix."
                                 Button.onClick chooseAutoFixes
                             ]
                             Button.create [
-                                Button.content "Save…"
+                                Button.content "Save"
+                                Button.padding (12.0, 4.0)
+                                Button.margin (0.0, 0.0, 8.0, 0.0)
+                                Button.isEnabled (not busy && edited.Current)
+                                ToolTip.tip
+                                    "Keeps your review (edits, dismissed warnings, the title) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed."
+                                Button.onClick (fun _ -> saveReview () |> ignore)
+                            ]
+                            Button.create [
+                                Button.content "Export…"
                                 Button.padding (12.0, 4.0)
                                 Button.margin (0.0, 0.0, 8.0, 0.0)
                                 Button.isEnabled (not busy && selectedFile.Current.IsSome && saveOptions () <> PdfFixOptions.None)
                                 ToolTip.tip
-                                    "Saves the next version of the PDF (flyer.v2.pdf) with your changes and the chosen auto fixes, and opens it. The original isn't changed."
-                                Button.onClick save
+                                    "Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and opens it. The original isn't changed."
+                                Button.onClick export
                             ]
                         ]
                     ]
