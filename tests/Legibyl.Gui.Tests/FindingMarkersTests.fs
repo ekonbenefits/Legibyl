@@ -159,8 +159,10 @@ let ``a tagged PDF's Structure window marks the blocks with failures, and a mark
             let tip = string (ToolTip.GetTip figureMarker)
             // Clicking it selects the finding in the main window's results.
             click figureMarker
-            let grid = HeadlessWindow.resultsGrid window
-            let chosen = match grid.SelectedItem with :? RuleViolationRow as row -> Some(row.Clause, row.TestNumber) | _ -> None
+            let chosen =
+                match (HeadlessWindow.resultsList window).SelectedItem with
+                | :? ResultItem as FindingItem row -> Some(row.Clause, row.TestNumber)
+                | _ -> None
             structureWindow.Close()
             window.Close()
 

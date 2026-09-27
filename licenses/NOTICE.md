@@ -164,18 +164,13 @@ unmodified via NuGet package references.
   F# runtime library used by all of Legibyl's projects.
   Copyright (c) Microsoft Corporation.
 - [Avalonia](https://github.com/AvaloniaUI/Avalonia) (`Avalonia`,
-  `Avalonia.Desktop`) and
-  [Avalonia.Controls.DataGrid](https://github.com/AvaloniaUI/Avalonia.Controls.DataGrid)
-  — the cross-platform UI framework for the GUI.
+  `Avalonia.Desktop`) — the cross-platform UI framework for the GUI.
   Copyright (c) AvaloniaUI OÜ.
 - [Avalonia.FuncUI](https://github.com/fsprojects/Avalonia.FuncUI) — the
   F# view and component layer the GUI is written with.
   Copyright (c) 2019 Josua Jäger.
-- [AvaloniaCommunity.FuncUI.Bindings.DataGrid](https://www.nuget.org/packages/AvaloniaCommunity.FuncUI.Bindings.DataGrid)
-  — FuncUI bindings for the DataGrid. Package author: JaggerJo (the
-  package metadata gives no separate copyright line).
 - [Semi.Avalonia](https://github.com/irihitech/Semi.Avalonia)
-  (`Semi.Avalonia`, `Semi.Avalonia.DataGrid`) — the GUI's light/dark theme.
+  (`Semi.Avalonia`) — the GUI's light/dark theme.
   Copyright (c) 2022 IRIHI Technology.
 - [FSharp.SystemCommandLine](https://github.com/JordanMarr/FSharp.SystemCommandLine)
   — the CLI's argument parser.

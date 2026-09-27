@@ -11,6 +11,8 @@ open Avalonia.Controls.Shapes
 open Avalonia.VisualTree
 open Xunit
 open FsUnit.Xunit
+open Legibyl.Gui
+open Legibyl.Validation
 open Legibyl.Screenshots
 open Legibyl.Gui.Tests.HeadlessSession
 
@@ -35,36 +37,32 @@ let private openSample name =
     HeadlessWindow.openPdf window (corpusFile name)
     window
 
-[<Fact>]
-let ``results grid column headers are not clipped`` () =
-    onUiThread (fun () ->
-        let window = openSample "libreoffice-empty-paragraph.pdf"
-        // Skip the grid's empty filler header after the last column.
-        let headers =
-            descendants<DataGridColumnHeader> (HeadlessWindow.resultsGrid window)
-            |> List.filter (fun header -> not (String.IsNullOrEmpty(string header.Content)))
-        headers |> should not' (be Empty)
-        let clipped =
-            [ for header in headers do
-                  let available = header.Bounds.Width
-                  header.Measure(Size(Double.PositiveInfinity, header.Bounds.Height))
-                  if header.DesiredSize.Width > available + 0.5 then
-                      $"'{header.Content}' needs {header.DesiredSize.Width:F1}px but has {available:F1}px" ]
-        window.Close()
-        clipped |> should be Empty)
+/// The list's row for an item, once shown.
+let private containerFor (window: Window) (matches: ResultItem -> bool) =
+    descendants<ListBoxItem> (HeadlessWindow.resultsList window)
+    |> List.find (fun item -> match item.DataContext with :? ResultItem as shown -> matches shown | _ -> false)
+
+let private ruleContainer (window: Window) (ruleId: string) =
+    containerFor window (function RuleItem(group, _) -> group.RuleId = ruleId | _ -> false)
+
+let private firstRuleContainer (window: Window) =
+    containerFor window (function RuleItem(group, _) -> obj.ReferenceEquals(group.First, (HeadlessWindow.findings window).Head) | _ -> false)
+
+/// A row's icons' screen-reader names.
+let private iconNames (row: Visual) = descendants<Path> row |> List.map AutomationProperties.GetName
 
 [<Fact>]
 let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
     onUiThread (fun () ->
         let window = openSample "libreoffice-empty-paragraph.pdf"
-        let grid = HeadlessWindow.resultsGrid window
-        let firstRow = descendants<DataGridRow> grid |> List.find (fun row -> row.GetIndex() = 0)
-
-        let icons = descendants<Path> firstRow
+        // The rule's row says what it is and how it's fixed; the finding under it, its page.
+        let ruleRow = firstRuleContainer window
+        let icons = descendants<Path> ruleRow
         let expected = [ "Warning"; "Fixable: Remove empty paragraph tags" ]
         icons |> List.map AutomationProperties.GetName |> should equal expected
         icons |> List.map (fun icon -> string (ToolTip.GetTip icon)) |> should equal expected
-        descendants<TextBlock> firstRow |> List.map _.Text |> should contain "Page 1"
+        let findingRow = containerFor window (function FindingItem row -> obj.ReferenceEquals(row, (HeadlessWindow.findings window).Head) | _ -> false)
+        descendants<TextBlock> findingRow |> List.map _.Text |> should contain "Page 1"
 
         // Warning icon by the title and a wrench by "Fixable"; the text says the same,
         // so screen readers skip them.
@@ -84,11 +82,8 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
 let ``findings that can't be fixed show no fix icon or details`` () =
     onUiThread (fun () ->
         let window = openSample "pdfua1-fail.pdf"
-        HeadlessWindow.expandGroups window
-        let rows = descendants<DataGridRow> (HeadlessWindow.resultsGrid window)
-        // The first row is content marked both as an artifact and tagged, which no fix addresses.
-        let firstRow = rows |> List.find (fun row -> row.GetIndex() = 0)
-        let icons = descendants<Path> firstRow |> List.map AutomationProperties.GetName
+        // The first rule is content marked both as an artifact and tagged, which no fix addresses.
+        let icons = iconNames (firstRuleContainer window)
         let detailHeadings = descendants<TextBlock> window |> List.map _.Text
         let anchors = detailIcons window
         window.Close()
@@ -124,7 +119,7 @@ let ``a PDF that passes says what automated checks can't judge`` () =
 let ``a failure no auto fix repairs says what it means, and what to do`` () =
     onUiThread (fun () ->
         let window = openSample "pdfua1-fail.pdf"
-        let rows = (HeadlessWindow.resultsGrid window).ItemsSource |> Seq.cast<Legibyl.Gui.RuleViolationRow> |> List.ofSeq
+        let rows = HeadlessWindow.findings window
         HeadlessWindow.selectRow window (rows |> List.findIndex (fun r -> r.Violation.Clause = "7.1" && r.Violation.TestNumber = 1))
         let shown = texts window
         let details = descendants<TextBox> window |> List.map (fun t -> string t.Text)
@@ -135,20 +130,68 @@ let ``a failure no auto fix repairs says what it means, and what to do`` () =
         details |> List.exists (fun t -> t.StartsWith "Something marked as decoration") |> should be True)
 
 [<Fact>]
-let ``findings are grouped by rule, the count first, a rule found many times collapsed`` () =
+let ``each rule's row shows its type, how it's fixed and how many, even collapsed`` () =
     onUiThread (fun () ->
         let window = openSample "pages-clipped-paragraphs.pdf"
-        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 1.0) (fun () -> false) |> ignore
-        let grid = HeadlessWindow.resultsGrid window
-        let keys =
-            descendants<DataGridRowGroupHeader> grid
-            |> List.choose (fun h -> match h.DataContext with :? Avalonia.Collections.DataGridCollectionViewGroup as g -> Some(string g.Key, g.ItemCount) | _ -> None)
-        let findings = grid.ItemsSource |> Seq.cast<obj> |> Seq.length
-        let rowsShown = descendants<DataGridRow> grid |> List.filter _.IsVisible |> List.length
+        let items = HeadlessWindow.resultItems window
+        let groups = items |> List.choose (function RuleItem(group, expanded) -> Some(group, expanded) | _ -> None)
+        let rows =
+            [ for group, expanded in groups do
+                  let row = ruleContainer window group.RuleId
+                  let texts = descendants<TextBlock> row |> List.map (fun t -> string t.Text)
+                  group, expanded, iconNames row, texts ]
+        let findingRows = items |> List.filter (function FindingItem _ -> true | _ -> false) |> List.length
+        // The first rule is found many times, so it's its row that's selected to begin with.
+        let selectedAtFirst = (HeadlessWindow.resultsList window).SelectedIndex
         window.Close()
 
-        keys |> List.exists (fun (key, count) -> count > 3 && key.StartsWith $"{count} × 7.1-3: ") |> should be True
-        rowsShown |> should be (lessThan findings))
+        selectedAtFirst |> should equal 0
+
+        // A rule found many times starts collapsed, its row still saying what it is.
+        let many, expanded, icons, texts = rows |> List.find (fun (g, _, _, _) -> g.RuleId = "7.1-3")
+        many.Findings.Length |> should be (greaterThan 3)
+        expanded |> should be False
+        icons.Head |> should equal "Failure"
+        icons |> List.exists (fun name -> name.StartsWith "Fixable") |> should be True
+        texts |> should contain (string many.Findings.Length)
+        // The warning's row, as a warning.
+        let _, _, warningIcons, _ = rows |> List.find (fun (g, _, _, _) -> g.Severity = FindingSeverity.Warning)
+        warningIcons.Head |> should equal "Warning"
+        // No fix icon where nothing fixes it.
+        for group, _, icons, _ in rows do
+            (icons |> List.exists (fun name -> name.StartsWith "Fixable" || name.StartsWith "Fixed by")) |> should equal (not group.Fixable.IsEmpty)
+        // Collapsed rules' findings aren't listed.
+        findingRows |> should be (lessThan (groups |> List.sumBy (fun (g, _) -> g.Findings.Length))))
+
+[<Fact>]
+let ``a rule's row shows the rule, how many places and where; a finding's, its place`` () =
+    onUiThread (fun () ->
+        let window = openSample "pages-clipped-paragraphs.pdf"
+        let list = HeadlessWindow.resultsList window
+        let rule = HeadlessWindow.resultItems window |> List.find (function RuleItem(g, _) -> g.RuleId = "7.1-3" | _ -> false)
+        list.SelectedItem <- rule
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> false) |> ignore
+        let ruleTexts = texts window
+        let count = match rule with RuleItem(g, _) -> g.Findings.Length | _ -> 0
+        HeadlessWindow.selectRow window 0
+        let findingTexts = texts window
+        window.Close()
+
+        ruleTexts |> List.exists (fun t -> t.Contains $"— {count} places, on page 1") |> should be True
+        ruleTexts |> should contain "What it means"
+        findingTexts |> should contain "Location")
+
+[<Fact>]
+let ``the summary above the list counts what the banner does`` () =
+    onUiThread (fun () ->
+        let window = openSample "pages-clipped-paragraphs.pdf"
+        let shown = texts window
+        let failures = HeadlessWindow.findings window |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Failure) |> List.length
+        window.Close()
+
+        shown |> should contain $"{failures} failures"
+        shown |> should contain "1 warning"
+        shown |> List.exists (fun t -> t.StartsWith $"FAIL — {failures} of " && t.EndsWith "1 warning)") |> should be True)
 
 [<Fact>]
 let ``a PDF 2.0 file is checked against PDF/UA-2 without choosing, and the banner says why`` () =
@@ -187,12 +230,12 @@ let ``Check Again checks the open PDF again, and needs one open`` () =
         let button = checkAgain window
         let enabledOpen = button.IsEnabled
         let tip = string (ToolTip.GetTip button)
-        let before = (HeadlessWindow.resultsGrid window).ItemsSource
+        let before = (HeadlessWindow.resultsList window).ItemsSource
         button.RaiseEvent(Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent))
         // A new report, once it's done.
         let checkedAgain =
             HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 30.0) (fun () ->
-                let now = (HeadlessWindow.resultsGrid window).ItemsSource
+                let now = (HeadlessWindow.resultsList window).ItemsSource
                 not (isNull now) && not (obj.ReferenceEquals(now, before)) && button.IsEnabled)
         window.Close()
 

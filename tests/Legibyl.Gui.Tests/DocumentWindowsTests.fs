@@ -120,7 +120,7 @@ let ``opened PDFs are listed under Open Recent, newest first`` () =
 let ``a PDF written again while it's open, as an export can, is validated again there`` () =
     withTwoPdfs (fun first second ->
         onUiThread (fun () ->
-            let rows (window: MainWindow) = (HeadlessWindow.resultsGrid window).ItemsSource |> Seq.cast<obj> |> Seq.length
+            let rows (window: MainWindow) = HeadlessWindow.findings window |> List.length
             let window = HeadlessWindow.show 1200.0 720.0
             HeadlessWindow.openPdf window first
             let other, _ = wait (MainWindow.Open(DocumentShell.Shared, second, window))
