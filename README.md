@@ -550,6 +550,13 @@ detector errs exactly where order matters (sidebars, captions, a table beside
 text), and a PDF passes PDF/UA whatever its order, so nothing is reordered on its
 own.
 
+Legibyl warns about a big jump only (Structure-12, `LegibylChecks.fs`, no model
+needed): on a page where something spanning columns (across two elements side by
+side, above them, like a masthead) is read after content below it and under it.
+Reading the right column after the left isn't one, and running headers and
+footers (short, in the top or bottom tenth of the page) don't count either way.
+It points to Order by Page Layout and Move Up / Move Down; there's no auto fix.
+
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
 the tagged blocks, in a **Not in the tags** group per page, a block per piece
