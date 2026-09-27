@@ -417,8 +417,8 @@ outlines and numbers them as it does a tagged PDF's elements. The detector has
 no list regions, so runs of paragraphs that start with list markers become list
 items (LI), in a list, by the same rules as the lists-from-paragraphs fix; a web
 link without a description is a `Link` inside the region it's in. Selecting a
-region gives a **Tag** picker for another tag (H1, H, P, LI, Figure, Table,
-Caption, Note, Formula, Lbl, Artifact) — a heading the detector took for a
+region gives a **Tag** picker for another tag (H1, H, H2 to H6, P, LI, Figure,
+Table, Caption, Note, Formula, Lbl, Artifact) — a heading the detector took for a
 paragraph, say — and **Leave Out** (or **Keep**); shift-click selects several,
 and selecting a list or the document leaves out or keeps every region in it.
 The preview draws a region left out in grey, and every region with its tag as
@@ -450,7 +450,11 @@ nothing for a screen reader to read. A text region with no text of its own is
 read with OCR ([Tesseract](https://www.nuget.org/packages/Tesseract.CrossPlatform)
 and its English `tessdata_fast` model, about 4 MB, fetched at build time pinned
 by `TessdataVersion`/`TessdataEngSha256` in `Directory.Build.props` and shipped
-in the app's `tessdata` folder). The preview marks that text **OCR:**. Tesseract
+in the app's `tessdata` folder). So is part of one that has some: a band of a
+text region, full width and a line tall, that none of its words cover (a badge's
+"5th grade" drawn as outlines under its name written as text) is read too, and
+what OCR finds there joins the region's text in order down the page, when it
+reads as words rather than decoration. The preview marks that text **OCR:**. Tesseract
 has native libraries for Windows, Linux and Apple Silicon Macs; elsewhere (Intel
 Macs) OCR is skipped and those regions show no text.
 
@@ -776,8 +780,23 @@ like them); delete the folder with the layout file when done.
 
 Like a structure read from a PDF, the layout is meant to be left as found:
 write changes as edits in a review file, each naming a region by its `page`,
-`tag` and `box` (copied from the layout), with `exclude: true`, `retag` (e.g.
-`"H1"`), `alt`, or `text` (a correction of recognized text):
+`tag` and `box` (copied from the layout; the tag it was suggested with, not one
+an edit gives it), and changing it with any of:
+
+| Field | For | Does |
+|---|---|---|
+| `exclude: true` | a region | Leaves it out: its text joins the nearest region kept, and anything else it holds is decoration. For page furniture that shouldn't be read at all, `retag` it `"Artifact"` instead. |
+| `retag` | a region or element | Gives it another tag: `"H1"` to `"H6"` (`"H"` is the next level under the title), `"P"`, `"LI"`, `"Figure"`, `"Note"`, `"Artifact"`. Tagging from a layout writes any other standard tag (`"Caption"`, `"Table"`...) as a paragraph, and says so; on a tagged PDF (`fix`), any standard tag is written. |
+| `alt` | a figure | Its alt text: what it's for, not only what it shows. |
+| `alt` | a `Link` (tagged PDF) | Its description, what a screen reader announces (the annotation's `/Contents`). |
+| `text` | text read with OCR | The text, corrected (`""` for nothing to read), written as replacement text (`/ActualText`). |
+| `mergeWith` | a paragraph (tagged PDF) | The boxes of the paragraphs after it to merge into it. |
+
+A field an edit doesn't have (`"description"`, say) or a `retag` that isn't a
+standard tag is a usage error (exit `64`) naming it, rather than an edit quietly
+doing nothing. An edit that matches nothing (no region or element with its tag
+in about the same place, its box overlapping at least 60%), or that's in the
+PDF already, is listed in `notApplied` with why. For example:
 
 ```json
 { "version": 1, "title": "Joining the Community Garden",
@@ -790,7 +809,9 @@ write changes as edits in a review file, each naming a region by its `page`,
 then `layout apply <file> --layout <layout.json> --edits-from <review.json>`
 tags the file from the layout with the edits layered on: its regions become the
 structure in their order, less those excluded, retagged, with alt text,
-recognized text (as corrected) as replacement text, and the title. It needs no
+recognized text (as corrected) as replacement text, and the title. A QR code
+linked with `qr-links` is described with the figure's alt text if you wrote it
+(else "QR code link to" its address). It needs no
 layout model. Other repairs can come with it (`--fixes safe,qr-links`); the
 result is the same shape as `fix`'s, with `status` `already-tagged` (exit `1`)
 for a file that already has a structure tree. (A layout file changed by hand

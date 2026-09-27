@@ -169,13 +169,36 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
                   // A tag is a name; the rest are text.
                   dictionary.Put(key, (if key.Equals PdfName.S then PdfName value :> PdfObject else textString value)) |> ignore
               if not changes.IsEmpty then yield () ]
-    let missing = edits.Length - found.Length
     let count = applied.Length + runs.Length
-    [ if count > 0 then
-          if missing = 0 then
-              $"Applied {count} of your edits (alt text, replacement text, tags and merged paragraphs)."
-          else
-              $"Applied {count} of your edits (alt text, replacement text, tags and merged paragraphs); {missing} weren't, as no element with their tag is in about the same place." ]
+    // Those that don't apply are said by unapplied, one by one.
+    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags and merged paragraphs)." ]
+
+/// An edit, as a report names it: its tag, page and box.
+let describe (edit: ElementEdit) =
+    let n (value: float) = value.ToString("0.#", Globalization.CultureInfo.InvariantCulture)
+    let b = edit.Box
+    $"<{edit.Tag}> on page {edit.Page} at [{n b.Left}, {n b.Bottom}, {n b.Right}, {n b.Top}]"
+
+/// Why each of edits that won't change pdfPath won't: its element isn't found, it's in the PDF
+/// already, or the paragraphs to merge aren't next to each other. Empty when they all apply.
+let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
+    if edits.IsEmpty then
+        []
+    else
+        use document = new PdfDocument(new PdfReader(pdfPath))
+        let context = createContext document pdfPath
+        let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
+        let found = find document context edits
+        [ for edit in edits do
+              match found |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
+              | None ->
+                  $"Your edit for the {describe edit} wasn't applied: no <{edit.Tag}> is in about that place (its box overlapping at least 60%%). Check its page, tag and box against legibyl structure."
+              | Some pair when (changes pair).IsEmpty ->
+                  $"Your edit for the {describe edit} changed nothing: the PDF says that already."
+              | Some _ -> ()
+          for merge in merges do
+              if (mergeRun document context merge).IsNone then
+                  $"Your merge of {merge.MergeWith.Length + 1} paragraphs from the {describe merge} wasn't applied: they aren't paragraphs next to each other under one parent here (or they're merged already)." ]
 
 /// How many of edits would change pdfPath: their element is found and doesn't already say it, or
 /// the paragraphs to merge are still apart.

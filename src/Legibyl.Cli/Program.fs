@@ -329,8 +329,13 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                 let fix = validator.Fix(file, profile, targetPath, options)
                 let before = Some(compliance fix.OriginalReport)
                 let applied = Array.ofSeq fix.AppliedFixes
-                let notApplied = Array.ofList (List.ofSeq fix.NotApplied @ noReview)
                 let tagged = applied |> Array.exists (fun line -> line.StartsWith "Tagged ")
+                // Edits of the layout tagged from that it couldn't use, and why.
+                let unmatched =
+                    match repair.Layout |> Option.orElse reviewLayout, review with
+                    | Some layout, Some review when tagged -> LayoutFile.unmatched layout (ReviewFile.edits review)
+                    | _ -> []
+                let notApplied = Array.ofList (List.ofSeq fix.NotApplied @ unmatched @ noReview)
                 match fix.OutputPath with
                 | _ when repair.Layout.IsSome && not tagged ->
                     { result with
@@ -386,13 +391,29 @@ let private fixExit (r: RepairResult) =
     | _, None, Some before -> if before.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
     | _ -> ExitCodes.Success
 
+/// What's wrong with the edits in a review file (see ReviewFile.problems), as one message naming
+/// it; None if nothing is, or it's a PDF (whose review Legibyl wrote).
+let private editProblems (option: string) (path: string) =
+    if String.Equals(Path.GetExtension path, ".pdf", StringComparison.OrdinalIgnoreCase) || not (File.Exists path) then
+        None
+    else
+        match ReviewFile.problems (File.ReadAllText path) with
+        | [] -> None
+        | problems -> Some(String.Join(Environment.NewLine, $"{option}: {path} has edits that can't be applied as written:" :: [ for p in problems -> $"  {p}" ]))
+
 /// The review --edits-from names, or why it can't be used.
 let private reviewFrom (path: string) =
     if not (File.Exists path) then Error $"--edits-from: {path} doesn't exist."
     else
-        match ReviewFile.readFrom path with
-        | Some review -> Ok review
-        | None -> Error $"--edits-from: {path} has no review in it."
+        match editProblems "--edits-from" path, ReviewFile.readFrom path with
+        | Some problems, _ -> Error problems
+        | None, Some review -> Ok review
+        | None, None -> Error $"--edits-from: {path} has no review in it."
+
+/// What's wrong with the reviews next to files that --edits applies, if anything.
+let private sidecarProblems (edits: bool) (files: string seq) =
+    if not edits then None
+    else files |> Seq.tryPick (fun file -> editProblems "--edits" (ReviewFile.filePath file))
 
 let private runRepair (validator: VeraPdfValidator) (files: string list) (repair: Repair) (format: string) (report: string option) =
     let results = [ for file in files -> repairFile validator repair file ]
@@ -412,6 +433,8 @@ type private FixArgs =
 let private runFix (args: FixArgs) =
     if args.Edits && args.EditsFrom.IsSome then
         usageError "Use --edits or --edits-from, not both."
+    elif (sidecarProblems args.Edits args.Files).IsSome then
+        usageError (sidecarProblems args.Edits args.Files).Value
     elif args.Output.IsSome && args.Files.Length > 1 then
         usageError "--output names one repaired copy: use it with a single file (several get their next versions)."
     else
@@ -524,6 +547,8 @@ type private ApplyArgs =
 let private runApply (args: ApplyArgs) =
     if args.Edits && args.EditsFrom.IsSome then
         usageError "Use --edits or --edits-from, not both."
+    elif (sidecarProblems args.Edits [ args.File ]).IsSome then
+        usageError (sidecarProblems args.Edits [ args.File ]).Value
     else
         match LayoutFile.read args.Layout, args.EditsFrom |> Option.map reviewFrom with
         | Error message, _ -> usageError message

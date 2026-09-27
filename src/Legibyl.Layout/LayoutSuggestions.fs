@@ -144,6 +144,39 @@ module LayoutSuggestions =
     /// Whether a suggested tag is for text (so a region with none as text needs OCR).
     let holdsText (tag: string) = tag <> "Figure" && tag <> "Table" && tag <> "Artifact"
 
+    /// The bands of region, full width (bottom, top in points, highest first), that none of its
+    /// words cover and that are tall enough for a line of their size: where a region with some
+    /// text as text may have more drawn as outlines or pixels ("5th grade" under a badge's
+    /// name, say). words are the page's word boxes; those centred in region count.
+    let uncoveredBands (region: StructureGeometry) (words: StructureGeometry list) : (float * float) list =
+        let inside =
+            words
+            |> List.filter (fun w -> contains region ((w.Left + w.Right) / 2.0, (w.Bottom + w.Top) / 2.0))
+        match inside with
+        | [] -> []
+        | _ ->
+            let heights = inside |> List.map (fun w -> w.Top - w.Bottom) |> List.sort
+            let lineHeight = heights[heights.Length / 2]
+            // Down from the region's top: each gap above a word's span, then what's below the last.
+            let spans = inside |> List.map (fun w -> max region.Bottom w.Bottom, min region.Top w.Top) |> List.sortByDescending snd
+            let gaps, lowest =
+                spans
+                |> List.fold
+                    (fun (gaps, above) (bottom, top) -> (if top < above then (top, above) :: gaps else gaps), min above bottom)
+                    ([], region.Top)
+            (region.Bottom, lowest) :: gaps
+            |> List.filter (fun (bottom, top) -> top - bottom >= 0.8 * lineHeight)
+            |> List.sortByDescending snd
+
+    /// Whether text OCR read looks like words rather than decoration read as text ("C—O ———_"):
+    /// mostly letters and digits, with a word of two or more.
+    let looksLikeText (text: string) =
+        let visible = text |> Seq.filter (not << Char.IsWhiteSpace) |> Seq.length
+        let alphanumeric = text |> Seq.filter Char.IsLetterOrDigit |> Seq.length
+        visible > 0
+        && float alphanumeric / float visible >= 0.6
+        && text.Split(' ', StringSplitOptions.RemoveEmptyEntries) |> Array.exists (fun w -> (w |> Seq.filter Char.IsLetterOrDigit |> Seq.length) >= 2)
+
     // Items of one list start within this many points of each other.
     [<Literal>]
     let private SameIndent = 6.0
@@ -491,6 +524,39 @@ type LayoutSuggester(pdfPath: string) =
                         [ for box, region, text in List.zip3 (List.ofSeq boxes) regions texts ->
                               let tag = LayoutSuggestions.tagFor box.Label
                               (if text = "" && LayoutSuggestions.holdsText tag then Some recognize else None), region ]
+            // Regions with some text as text, and bands of them no word covers (e.g. a line drawn as
+            // outlines under one that's text): what OCR reads there that looks like words, with
+            // the text, in order down the page.
+            let completed =
+                match highResolution with
+                | null -> texts |> List.map (fun _ -> None)
+                | bitmap ->
+                    let wordBoxes: StructureGeometry list =
+                        [ for word in page.GetWords() ->
+                              { PageNumber = pageNumber
+                                Left = word.BoundingBox.Left
+                                Bottom = word.BoundingBox.Bottom
+                                Right = word.BoundingBox.Right
+                                Top = word.BoundingBox.Top } ]
+                    [ for box, region, text in List.zip3 (List.ofSeq boxes) regions texts ->
+                          match LayoutSuggestions.uncoveredBands region wordBoxes with
+                          | bands when text <> "" && LayoutSuggestions.holdsText (LayoutSuggestions.tagFor box.Label) && not bands.IsEmpty ->
+                              let read =
+                                  readRegions bitmap ocrScale crop [ for bottom, top in bands -> Some recognize, { region with Bottom = bottom; Top = top } ]
+                              let found =
+                                  List.zip bands read
+                                  |> List.choose (fun ((_, top), read) -> read |> Option.filter LayoutSuggestions.looksLikeText |> Option.map (fun r -> top, r))
+                              if found.IsEmpty then
+                                  None
+                              else
+                                  let wordsTop =
+                                      wordBoxes
+                                      |> List.filter (fun w -> w.Left >= region.Left - 1.0 && w.Right <= region.Right + 1.0 && w.Bottom >= region.Bottom - 1.0 && w.Top <= region.Top + 1.0)
+                                      |> List.map _.Top
+                                      |> List.fold max region.Bottom
+                                  let above, below = found |> List.partition (fun (top, _) -> top > wordsTop)
+                                  Some(String.Join(" ", List.map snd above @ [ text ] @ List.map snd below))
+                          | _ -> None ]
             // QR codes: the detector's figures first (a region holding one decodes most
             // reliably), then the whole page, scanned at several resolutions, for any it didn't
             // take for a figure. In PDF points.
@@ -525,15 +591,18 @@ type LayoutSuggester(pdfPath: string) =
               HasText = not words.IsEmpty
               Rotated = rotated
               Blocks =
-                [ for i, ((box, region, text), recognized) in List.indexed (List.zip (List.zip3 (List.ofSeq boxes) regions texts) recognized) ->
+                [ for i, ((box, region, text), (recognized, completed)) in
+                      List.indexed (List.zip (List.zip3 (List.ofSeq boxes) regions texts) (List.zip recognized completed)) ->
+                      // Text read with OCR, all of it or some, is what a reader hears (ActualText).
+                      let read = recognized |> Option.orElse completed
                       { Order = i + 1
                         Label = box.Label
                         Tag = LayoutSuggestions.tagFor box.Label
                         Score = float box.Score
                         Geometry = region
-                        Text = defaultArg recognized text
+                        Text = defaultArg read text
                         ListNumbering = None
-                        Recognized = recognized.IsSome
+                        Recognized = read.IsSome
                         QrText = None } ]
                 |> LayoutSuggestions.placeQrCodes qrCodes
                 |> LayoutSuggestions.findLists })

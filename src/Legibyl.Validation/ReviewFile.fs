@@ -109,6 +109,39 @@ let readFrom (path: string) : SavedFile option =
     if String.Equals(Path.GetExtension path, ".pdf", StringComparison.OrdinalIgnoreCase) then readFor path
     else readFile path
 
+/// The fields an edit can have.
+let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mergeWith" ]
+
+/// The tags an edit can give (retag): PDF's standard structure types, and Artifact for a
+/// suggested region that's page furniture.
+let retagTags =
+    set [ "Document"; "Part"; "Art"; "Sect"; "Div"; "BlockQuote"; "Caption"; "TOC"; "TOCI"; "Index"; "NonStruct"; "Private"
+          "P"; "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "L"; "LI"; "Lbl"; "LBody"
+          "Table"; "TR"; "TH"; "TD"; "THead"; "TBody"; "TFoot"
+          "Span"; "Quote"; "Note"; "Reference"; "BibEntry"; "Code"; "Link"; "Annot"; "Ruby"; "RB"; "RT"; "RP"; "Warichu"; "WT"; "WP"
+          "Figure"; "Formula"; "Form"; "Artifact" ]
+
+/// What's wrong with a review's edits as written (json), which reading it would otherwise pass
+/// over: fields an edit doesn't have (e.g. "description": a link's description is its "alt"), and
+/// retags to tags that aren't standard. Empty when there's nothing wrong, or it isn't JSON.
+let problems (json: string) : string list =
+    try
+        use document = JsonDocument.Parse json
+        match document.RootElement.TryGetProperty "edits" with
+        | true, edits when edits.ValueKind = JsonValueKind.Array ->
+            [ for index, edit in Seq.indexed (edits.EnumerateArray()) do
+                  if edit.ValueKind = JsonValueKind.Object then
+                      for field in edit.EnumerateObject() do
+                          if not (List.contains field.Name editFields) then
+                              let hint = if field.Name = "description" || field.Name = "contents" then " (a link's description is its \"alt\")" else ""
+                              $"edits[{index}] has \"{field.Name}\", which isn't a field of an edit{hint}. An edit has page, tag and box, and any of alt, text, retag, exclude and mergeWith."
+                      match edit.TryGetProperty "retag" with
+                      | true, retag when retag.ValueKind = JsonValueKind.String && not (retagTags.Contains(retag.GetString() |> string)) ->
+                          $"edits[{index}] retags to \"{retag.GetString()}\", which isn't a standard tag (e.g. H1 to H6, P, LI, Figure, Caption, Note, Artifact)."
+                      | _ -> () ]
+        | _ -> []
+    with :? JsonException -> []
+
 /// file as it's saved.
 let toJson (file: SavedFile) = JsonSerializer.Serialize({ file with Version = 1 }, jsonOptions)
 

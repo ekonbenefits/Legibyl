@@ -269,6 +269,35 @@ let ``with link titles, a QR code's description names the page it goes to`` () =
     |> should be True
 
 [<Fact>]
+let ``a QR code's link is described with the alt text a person wrote for it`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let written = withQrCode regions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = "Scan to apply online" } else r)
+
+    tagWithQrLinks input.Path output.Path (FixedLayout written) |> ignore
+
+    use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(output.Path))
+    [ for a in document.GetPage(1).GetAnnotations() do
+          if not (isNull (a.GetContents())) then a.GetContents().ToUnicodeString() ]
+    |> should contain "Scan to apply online"
+
+[<Fact>]
+let ``a heading given a level keeps it`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let leveled = regions |> List.map (fun r -> if r.Tag = "P" then { r with Tag = "H3" } else r)
+
+    tagFromLayout input.Path output.Path (Some(FixedLayout leveled)) |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    // Each paragraph given H3 is one; none is written as a paragraph.
+    let tags = flatten root |> List.map _.Tag
+    tags |> List.filter (fun t -> t.StartsWith "H") |> List.distinct |> should equal [ "H1"; "H3" ]
+    tags |> should not' (contain "P")
+
+[<Fact>]
 let ``with QR code links, the figure is a link to what it encodes, and the page looks the same`` () =
     use input = new TempPdf()
     use output = new TempPdf()

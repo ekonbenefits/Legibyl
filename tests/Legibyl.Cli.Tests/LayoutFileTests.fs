@@ -136,6 +136,42 @@ let ``layout apply tags the file from the layout as found, with the edits layere
         document.GetDocumentInfo().GetTitle() |> should equal "The garden")
 
 [<Fact>]
+let ``layout apply keeps a heading level an edit gives, and names edits that match no region`` () =
+    withUntaggedPdf (fun pdf ->
+        let path = pdf + ".layout.json"
+        File.WriteAllText(path, LayoutFile.toJson (LayoutSuggestions.toLayoutFile pdf [ suggestion ] None))
+        let review = pdf + ".edits.json"
+        let nowhere = [| 300.0; 100.0; 400.0; 200.0 |]
+        File.WriteAllText(
+            review,
+            ReviewFile.toJson (edits null [ { editOn "H" heading with Retag = "H2" }; { editOn "Figure" nowhere with Alt = "Not here" } ])
+        )
+
+        let _, result = run [ "layout"; "apply"; pdf; "--layout"; path; "--edits-from"; review ]
+
+        let copy = result.Value.GetProperty("outputPath").GetString() |> nonNull
+        VeraPdfValidator().ReadStructureTree copy |> nonNull |> nodes |> List.map _.Tag |> should contain "H2"
+        [ for line in result.Value.GetProperty("notApplied").EnumerateArray() -> string (line.GetString()) ]
+        |> should
+            contain
+            "Your edit for the <Figure> on page 1 at [300, 100, 400, 200] wasn't applied: no region of the layout with that tag is in about that place (its box overlapping at least 60%). An edit names a region by the tag it was suggested with, not one it's given.")
+
+[<Fact>]
+let ``edits with a field an edit doesn't have, or a tag that isn't one, are usage errors`` () =
+    withUntaggedPdf (fun pdf ->
+        let review = pdf + ".edits.json"
+        let check (edit: string) =
+            File.WriteAllText(review, $"""{{ "version": 1, "edits": [ {edit} ] }}""")
+            fst (run [ "fix"; pdf; "--edits-from"; review ])
+        check """{ "page": 1, "tag": "Link", "box": [ 70, 695, 300, 715 ], "description": "Apply" }""" |> should equal 64
+        check """{ "page": 1, "tag": "H", "box": [ 70, 695, 300, 715 ], "retag": "Heading2" }""" |> should equal 64
+        // --edits checks the review next to the PDF the same way.
+        File.WriteAllText(pdf + ".legibyl.json", """{ "version": 1, "edits": [ { "page": 1, "tag": "P", "box": [ 1, 2, 3, 4 ], "contents": "x" } ] }""")
+        fst (run [ "fix"; pdf; "--edits" ]) |> should equal 64
+        ReviewFile.problems (File.ReadAllText(pdf + ".legibyl.json"))
+        |> should equal [ "edits[0] has \"contents\", which isn't a field of an edit (a link's description is its \"alt\"). An edit has page, tag and box, and any of alt, text, retag, exclude and mergeWith." ])
+
+[<Fact>]
 let ``layout apply on a tagged file says it's already tagged`` () =
     withUntaggedPdf (fun pdf ->
         let path = pdf + ".layout.json"
