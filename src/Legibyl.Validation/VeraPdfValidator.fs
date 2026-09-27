@@ -755,10 +755,6 @@ type VeraPdfValidator() =
         ensureInitialised ()
         wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath progress)
 
-    /// Gets veraPDF ready ahead of time, e.g. on a background thread as an app starts: its
-    /// one-time setup (a second or two), and a validation of a tiny PDF, so the code the first
-    /// real validation runs is compiled already (most of a second more). Safe to run alongside
-    /// validations; they wait for the setup if it's still under way.
     /// The veraPDF version its results come from (stamped from VeraPdfVersion in
     /// Directory.Build.props).
     static member EngineVersion =
@@ -785,6 +781,10 @@ type VeraPdfValidator() =
             )
         table |> Map.tryFind (specification, clause, testNumber)
 
+    /// Gets veraPDF ready ahead of time, e.g. on a background thread as an app starts: its
+    /// one-time setup (a second or two), and a validation of a tiny PDF, so the code the first
+    /// real validation runs is compiled already (most of a second more). Safe to run alongside
+    /// validations; they wait for the setup if it's still under way.
     static member Warm() =
         ensureInitialised ()
         let pdf = Path.Combine(Path.GetTempPath(), $"legibyl-warm-{Guid.NewGuid():N}.pdf")

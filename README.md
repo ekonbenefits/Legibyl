@@ -932,8 +932,15 @@ and where it is: `page` and `box` (left, bottom, right, top, in points — the w
 edits name it), with the fuller `geometry`. `/Form` nodes also include widget
 field metadata (`formFieldName`, `formFieldDescription`, `formFieldType`,
 `formFieldValue`) resolved from the referenced annotation's `/T`, `/TU`, `/FT`,
-and `/V`. `--format text` prints an indented outline instead. A file with no
-structure tree (untagged) has `"structure": null` and exits `1`.
+and `/V`. What a page draws outside every tag comes after the tagged elements:
+for each page with any, a `NotInTags` node ("Page 1: not in the tags") holding
+an `Untagged` node per piece (strokes drawn together are one piece: a border in
+sixty strokes is one), with its `page`, `box`, and what it is as `content` ("a
+fill, 612 × 792 pt (the whole page)", "a line, 468 × 2 pt", "an image, 60 × 60
+pt", or its text). Only a person can tell a background from a chart, so these are
+never marked on their own: mark each with an edit (below). `--format text`
+prints an indented outline instead. A file with no structure tree (untagged)
+has `"structure": null` and exits `1`.
 
 ### layout suggest and layout apply
 
@@ -971,6 +978,7 @@ an edit gives it), and changing it with any of:
 | `alt` | a `Link` (tagged PDF) | Its description, what a screen reader announces (the annotation's `/Contents`). |
 | `text` | text read with OCR | The text, corrected (`""` for nothing to read), written as replacement text (`/ActualText`). |
 | `mergeWith` | a paragraph (tagged PDF) | The boxes of the paragraphs after it to merge into it. |
+| `retag` | something outside every tag (`"tag": "Untagged"`, its `box` from `structure`) | `"Artifact"`: decoration, not read (its drawing is wrapped in `/Artifact BMC … EMC`; never text, which stays readable). `"Figure"` (with `alt`) or `"P"`: tagged, in reading order after what's tagged before it on its page. |
 
 A field an edit doesn't have (`"description"`, say) or a `retag` that isn't a
 standard tag is a usage error (exit `64`) naming it, rather than an edit quietly

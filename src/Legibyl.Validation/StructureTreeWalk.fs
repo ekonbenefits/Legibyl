@@ -523,7 +523,10 @@ let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) :
                         elements <- elements + 1
                         reporter.Report(StructureReadStage.BuildingTree, 0, 0, elements) }
 
-            let children = walkChildren structTreeRoot context None 0
+            let tagged = walkChildren structTreeRoot context None 0
+            // And what its pages draw outside every tag, for a person to mark (see UntaggedContent).
+            let outside = try UntaggedContent.nodes pdfPath with _ -> []
+            let children = Array.append tagged (Array.ofList outside)
             { Tag = "StructTreeRoot"
               Role = null
               AlternateDescription = null
