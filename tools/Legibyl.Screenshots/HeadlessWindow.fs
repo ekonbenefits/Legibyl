@@ -67,6 +67,22 @@ let openPdf (window: MainWindow) (pdfPath: string) =
     window.OpenFile pdfPath
     waitForIdle window
 
+/// Expands every group of findings (a rule found many times starts collapsed), as clicking
+/// their headers does.
+let expandGroups (window: Window) =
+    let grid = resultsGrid window
+    match grid.ItemsSource with
+    | :? Avalonia.Collections.DataGridCollectionView as view ->
+        match view.Groups with
+        | NonNull groups ->
+            for group in groups do
+                match group with
+                | :? Avalonia.Collections.DataGridCollectionViewGroup as group -> grid.ExpandRowGroup(group, true)
+                | _ -> ()
+        | Null -> ()
+    | _ -> ()
+    pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+
 /// Selects a results row (0-based) and waits for its preview.
 let selectRow (window: MainWindow) (index: int) =
     let grid = resultsGrid window

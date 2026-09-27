@@ -11,8 +11,10 @@ type Guide = { Meaning: string; WhatToDo: string }
 let private guide meaning whatToDo = Some { Meaning = meaning; WhatToDo = whatToDo }
 
 /// For a failure fixed in the tool that made the PDF, or a PDF editor.
-let private inTheSource =
-    "Fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\"), or in a PDF editor's tags panel."
+let private inTheSourceText =
+    "fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\"), or in a PDF editor's tags panel."
+
+let private inTheSource = "F" + inTheSourceText.Substring 1
 
 let private fonts =
     "Export it again with fonts embedded (most tools have an option for it), or fix the fonts with a PDF editor's preflight tools."
@@ -39,7 +41,8 @@ let forRule (clause: string) (test: int) : Guide option =
     | "7.1", 3 ->
         guide
             "Some of the page (text, images or lines) is neither tagged nor marked as decoration, so a screen reader can't tell whether to read it."
-            ("For a PDF with no tags, Suggest Structure… tags it. Otherwise the tool that made it left this out of its tags: " + inTheSource)
+            // A PDF with no tags has this fixed by Suggest Structure… (so it isn't shown there).
+            ("The tool that made the PDF left this out of its tags: " + inTheSourceText)
     | "7.1", 4 ->
         guide
             "The PDF says its tags may be unreliable (Suspects), so assistive technology may not trust them."
@@ -47,11 +50,11 @@ let forRule (clause: string) (test: int) : Guide option =
     | "7.1", 5 ->
         guide
             "The PDF uses tag names of its own without saying which standard tag each means, so a screen reader can't tell what they are (a heading, a list, a paragraph)."
-            ("Add each name to the role map in a PDF editor, or " + inTheSource)
+            ("Add each name to the role map in a PDF editor, or " + inTheSourceText)
     | "7.1", (6 | 7) ->
         guide
             "The PDF's role map, which says what its own tag names mean, is broken: it goes round in a circle, or redefines a standard tag."
-            ("Correct the role map in a PDF editor, or " + inTheSource)
+            ("Correct the role map in a PDF editor, or " + inTheSourceText)
     | "7.1", 8 ->
         guide "The PDF has no metadata (XMP) for its title, language and PDF/UA claim to go in." "Choose Repair XMP metadata in Auto Fixes…."
     | "7.1", 9 ->
