@@ -76,7 +76,7 @@ src/
   Legibyl.Validation/   F# facade over the veraPDF Java validation core (IKVM)
   Legibyl.Rendering/    Renders page images with PDFium, with highlight boxes around a failure's region (SkiaSharp)
   Legibyl.Layout/       Suggests structure for untagged pages with a layout detector (PaddleOCR, model downloaded on use)
-  Legibyl.Gui/          Avalonia + FuncUI UI (Windows/macOS/Linux): file picker, profile selector, results grid
+  Legibyl.Gui/          Avalonia + FuncUI UI (Windows/macOS/Linux): file picker, results grid (checked against the PDF/UA its PDF version calls for)
   Legibyl.Cli/          Command-line tool (legibyl.exe), JSON-first, agent-friendly
 tests/
   Legibyl.Validation.Tests/   xUnit v3 + FsUnit tests using real PDF/UA-1 corpus samples
@@ -227,6 +227,12 @@ veraPDF's one-time setup (a second or two, as IKVM compiles its Java code) start
 in the background as soon as the app opens, with a validation of a tiny tagged
 PDF so the code a real validation runs is compiled too
 (`VeraPdfValidator.Warm`); by the time a PDF is picked, it's usually done.
+
+Each PDF is checked against the PDF/UA its PDF version calls for (PDF/UA-2 for a
+PDF 2.0 file, PDF/UA-1 for an earlier one; see Supported standards), with no
+choice to make, and the result banner says which and why ("FAIL — 12 of 794
+checks failed against PDF/UA-2 (a PDF 2.0 file; …)"). Export checks the copy
+against the same one, so the metadata repair writes the matching claim.
 
 While a file validates, the progress bar fills page by page ("Page 57 of
 675"): veraPDF checks the pages in order, and that's nearly all of its time.

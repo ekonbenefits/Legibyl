@@ -92,10 +92,6 @@ type RuleViolationRow =
           Occurrences = 1 }
 
 module private MainView =
-    let profiles =
-        [ "PDF/UA-1", PdfProfile.PdfUa1
-          "PDF/UA-2", PdfProfile.PdfUa2 ]
-
     let pdfFileType =
         FilePickerFileType(
             "PDF files",
@@ -360,7 +356,6 @@ module private MainView =
             let structureCache = shell.Structures
             let layoutReviews = shell.Reviews
             let selectedFile = ctx.useState (None: string option)
-            let profileIndex = ctx.useState 0
             let isBusy = ctx.useState false
             let busyProgress = ctx.useState (None: BusyProgress option)
             let outcome = ctx.useState NotValidated
@@ -382,7 +377,6 @@ module private MainView =
             // Counting reads the PDF, so it's only done again when one of those changes.
             let pendingCount = ctx.useStateLazy(fun () -> ref (None: (string * DateTime * ElementEdit list * int) option)).Current
 
-            let currentProfile () = snd profiles[profileIndex.Current]
 
             let report =
                 match outcome.Current with
@@ -482,7 +476,6 @@ module private MainView =
                 task {
                     match selectedFile.Current with
                     | Some filePath when not isBusy.Current ->
-                        let profile = currentProfile ()
                         isBusy.Set true
                         clearResults ()
                         busyProgress.Set None
@@ -490,7 +483,11 @@ module private MainView =
                         let progress = Progress<ValidationProgress>(fun p -> busyProgress.Set(Some(Validating(activity, p))))
                         try
                             try
-                                let! report = Task.Run(fun () -> validator.Validate(filePath, profile, progress))
+                                // Against the PDF/UA its PDF version calls for (see PdfUaTarget).
+                                let! report =
+                                    Task.Run(fun () ->
+                                        let profile, _ = PdfUaTarget.detect filePath
+                                        { validator.Validate(filePath, profile, progress) with ProfileDetected = true })
                                 let rows =
                                     report.Findings
                                     |> Seq.map RuleViolationRow.Of
@@ -726,7 +723,11 @@ module private MainView =
                         match outputPath with
                         | None -> ()
                         | Some outputPath ->
-                            let profile = currentProfile ()
+                            // The standard it was checked against, so the metadata repair writes its claim.
+                            let profile =
+                                match outcome.Current with
+                                | Validated(report, _) -> report.Profile
+                                | _ -> fst (PdfUaTarget.detect sourcePath)
                             isBusy.Set true
                             busyProgress.Set None
                             let! fixOutcome =
@@ -917,7 +918,7 @@ module private MainView =
             let fileRow =
                 Grid.create [
                     Grid.margin (0.0, 0.0, 0.0, 8.0)
-                    Grid.columnDefinitions "*,Auto,Auto,Auto"
+                    Grid.columnDefinitions "*,Auto,Auto"
                     Grid.children [
                         TextBox.create [
                             TextBox.margin (0.0, 0.0, 8.0, 0.0)
@@ -933,21 +934,8 @@ module private MainView =
                             Button.isEnabled (not busy)
                             Button.onClick browse
                         ]
-                        ComboBox.create [
-                            Grid.column 2
-                            ComboBox.width 160.0
-                            ComboBox.margin (0.0, 0.0, 8.0, 0.0)
-                            ComboBox.isEnabled (not busy)
-                            ComboBox.dataItems (List.map fst profiles)
-                            ComboBox.selectedIndex profileIndex.Current
-                            ComboBox.onSelectedIndexChanged (fun index ->
-                                if index >= 0 && index <> profileIndex.Current then
-                                    profileIndex.Set index
-                                    // Re-validate automatically when the profile changes, if a file is selected.
-                                    runValidation "Validating" |> ignore)
-                        ]
                         Button.create [
-                            Grid.column 3
+                            Grid.column 2
                             Button.content "Validate"
                             Button.padding (16.0, 4.0)
                             Button.isEnabled (not busy && selectedFile.Current.IsSome)
@@ -979,10 +967,12 @@ module private MainView =
                 | NotValidated -> None
                 | ValidationFailed message -> Some(banner Theme.Tokens.Warning $"Error: {message}")
                 | Validated(report, _) ->
-                    // As the profile picker names it ("PDF/UA-1"), not its id ("UA1").
-                    let flavour =
-                        profiles |> List.tryFind (fun (_, profile) -> profile = report.Profile) |> Option.map fst
-                        |> Option.defaultValue (report.FlavourId.ToUpperInvariant())
+                    // The standard, and why it's the one: "PDF/UA-2 (a PDF 2.0 file".
+                    let flavour = PdfUaTarget.displayName report.Profile
+                    let why =
+                        match Option.ofObj report.PdfVersion with
+                        | Some version when report.ProfileDetected -> $"a PDF {version} file; "
+                        | _ -> ""
                     let shownWarnings = (withoutDismissed report).WarningCount
                     let warnings =
                         match report.WarningCount - shownWarnings with
@@ -990,11 +980,11 @@ module private MainView =
                         | hidden -> $"{shownWarnings} warnings, {hidden} dismissed"
                     Some(
                         if report.IsCompliant then
-                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({report.TotalAssertions} checks, {warnings})"
+                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({why}{report.TotalAssertions} checks, {warnings})"
                         else
                             banner
                                 Theme.Tokens.Danger
-                                $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({warnings})"
+                                $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({why}{warnings})"
                     )
 
             let allRows =
@@ -1188,7 +1178,7 @@ module private MainView =
                         ]
                     )
                 | Some _, Validated(report, _) when report.IsCompliant ->
-                    let profile = fst profiles[profileIndex.Current]
+                    let profile = PdfUaTarget.displayName report.Profile
                     Some(
                         panel [
                             heading $"Passes {profile}'s automated checks"

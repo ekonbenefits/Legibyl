@@ -149,3 +149,28 @@ let ``findings are grouped by rule, the count first, a rule found many times col
 
         keys |> List.exists (fun (key, count) -> count > 3 && key.StartsWith $"{count} × 7.1-3: ") |> should be True
         rowsShown |> should be (lessThan findings))
+
+[<Fact>]
+let ``a PDF 2.0 file is checked against PDF/UA-2 without choosing, and the banner says why`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "annual-report.pdf")
+    do
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf, iText.Kernel.Pdf.WriterProperties().SetPdfVersion(iText.Kernel.Pdf.PdfVersion.PDF_2_0)))
+        iText.Kernel.Pdf.Canvas.PdfCanvas(document.AddNewPage())
+            .BeginText().SetFontAndSize(iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA, 12f)
+            .MoveText(72.0, 720.0).ShowText("A PDF 2.0 page.").EndText()
+        |> ignore
+    try
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let shown = texts window
+            let pickers = descendants<ComboBox> window
+            window.Close()
+
+            shown |> List.exists (fun t -> t.StartsWith "FAIL" && t.Contains "against PDF/UA-2 (a PDF 2.0 file; ") |> should be True
+            // No profile picker to choose from.
+            pickers |> should be Empty)
+    finally
+        Directory.Delete(folder, true)
