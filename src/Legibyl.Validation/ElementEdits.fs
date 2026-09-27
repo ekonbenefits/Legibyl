@@ -259,9 +259,34 @@ let private textString (value: string) =
     if value |> Seq.forall (fun c -> c < '\u0080') then PdfString value
     else PdfString(value, PdfEncodings.UNICODE_BIG)
 
+// ---- Content outside every tag ----
+
+/// The tag an edit of content outside every tag has (see UntaggedContent): such an edit's
+/// retag is what a person chose, Artifact (not read), Figure or P.
+[<Literal>]
+let UntaggedTag = "Untagged"
+
+let private isUntagged (edit: ElementEdit) = edit.Tag = UntaggedTag
+
+/// Each edit of content outside the tags with its piece, for those whose piece is still there.
+let private untaggedPieces (document: PdfDocument) (edits: ElementEdit list) =
+    [ for edit in edits do
+          match edit.Retag, UntaggedContent.find document edit.Page edit.Box SameElementOverlap with
+          | NonNull _, Some piece -> yield edit, piece
+          | _ -> () ]
+
 /// Writes the edits that change something, merges first (joining paragraphs moves nothing else);
 /// says how many (and how many elements weren't found), or nothing if none changed anything.
 let internal apply (document: PdfDocument) context (edits: ElementEdit list) : string list =
+    // Content outside every tag first: it looks up the elements drawn before it, as they are.
+    let outside, edits = edits |> List.partition isUntagged
+    // (Text asked to be made decoration isn't: unapplied says why.)
+    let outsideWritten, _ =
+        UntaggedContent.apply
+            document
+            context
+            [ for edit, piece in untaggedPieces document outside ->
+                  piece, (if edit.Retag = "Artifact" then UntaggedContent.NotRead else UntaggedContent.TagAs(edit.Retag |> nonNull, edit.Alt)) ]
     let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
     let runs = merges |> List.choose (mergeRun document context)
     ParagraphJoins.join runs |> ignore
@@ -277,7 +302,7 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
                   // A tag is a name; the rest are text.
                   dictionary.Put(key, (if key.Equals PdfName.S then PdfName value :> PdfObject else textString value)) |> ignore
               if not changes.IsEmpty then yield () ]
-    let count = applied.Length + runs.Length + artifacts.Length
+    let count = applied.Length + runs.Length + artifacts.Length + outsideWritten
     // Those that don't apply are said by unapplied, one by one.
     [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)." ]
 
@@ -347,9 +372,19 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
     else
         use document = new PdfDocument(new PdfReader(pdfPath))
         let context = createContext document pdfPath
+        let outside, edits = edits |> List.partition isUntagged
+        let outsideFound = untaggedPieces document outside
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
         let found = findIn document context (boxesOf merges) edits
-        [ for edit in edits do
+        [ for edit in outside do
+              match outsideFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
+              | Some(_, piece) when piece.Kind = UntaggedContent.Text && edit.Retag = "Artifact" ->
+                  $"Your edit making text outside the tags on page {edit.Page} decoration wasn't applied: text isn't hidden. Tag it as a paragraph (P) instead."
+              | Some _ -> ()
+              | None when not (isNull edit.Retag) ->
+                  $"Your edit for content outside the tags on page {edit.Page} wasn't applied: nothing outside the tags is in about that place (it may be tagged, or decoration, already)."
+              | None -> ()
+          for edit in edits do
               match found |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
               | None when isArtifact edit ->
                   $"Your edit making the {describe edit} decoration wasn't applied: no <{edit.Tag}> is in about that place (it may be decoration already)."
@@ -371,6 +406,9 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
     else
         use document = new PdfDocument(new PdfReader(pdfPath))
         let context = createContext document pdfPath
+        let outside, edits = edits |> List.partition isUntagged
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
-        (merges |> List.choose (mergeRun document context) |> List.length)
+        // (Text asked to be made decoration never is.)
+        (untaggedPieces document outside |> List.filter (fun (e, piece) -> not (piece.Kind = UntaggedContent.Text && e.Retag = "Artifact")) |> List.length)
+        + (merges |> List.choose (mergeRun document context) |> List.length)
         + (findIn document context (boxesOf merges) edits |> List.filter (not << List.isEmpty << changes) |> List.length)

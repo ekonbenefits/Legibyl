@@ -44,6 +44,18 @@ let private objectGeometry context (document: PdfDocument) (location: PdfLocatio
             subtreeGeometry dictionary context page
         | _ -> None
 
+/// "…/contentStream[0](…)/content[3]/contentItem[1]": a page's own content outside every tag.
+let private unmarkedItemPattern =
+    Regex(@"/contentStream\[0\][^/]*/content\[(\d+)\]/contentItem\[(\d+)\]$", RegexOptions.Compiled)
+
+/// Where a piece of content outside every tag is drawn (see UntaggedContent.itemGeometry).
+let private unmarkedGeometry (document: PdfDocument) (locationContext: string) (location: PdfLocation) =
+    let item = unmarkedItemPattern.Match locationContext
+    if item.Success && location.PageNumber.HasValue && not (isInsideXObject locationContext) then
+        UntaggedContent.itemGeometry document location.PageNumber.Value (int item.Groups[1].Value) (int item.Groups[2].Value)
+    else
+        None
+
 /// Best-effort page region for a veraPDF finding; None when its location doesn't pin
 /// down anything drawn on a page (document-level checks, whole pages, etc.).
 let locate context (document: PdfDocument) (violation: RuleViolation) : StructureGeometry option =
@@ -51,6 +63,7 @@ let locate context (document: PdfDocument) (violation: RuleViolation) : Structur
     | NonNull locationContext, NonNull location ->
         markedContentGeometry context locationContext location
         |> Option.orElseWith (fun () -> objectGeometry context document location)
+        |> Option.orElseWith (fun () -> unmarkedGeometry document locationContext location)
     | _ -> None
 
 /// The element a structure-tree path names ("StructTreeRoot/K[0]/K[3]", as Legibyl's warnings
