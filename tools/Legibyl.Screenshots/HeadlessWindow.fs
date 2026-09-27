@@ -16,6 +16,8 @@ open Legibyl.Gui
 /// HeadlessUnitTestSession looks for (a static BuildAvaloniaApp).
 type HeadlessApp =
     static member BuildAvaloniaApp() : AppBuilder =
+        // PDFs opened here aren't a person's: they go in a list of their own.
+        RecentFiles.FilePath <- IO.Path.Combine(IO.Path.GetTempPath(), $"legibyl-recent-{Guid.NewGuid():N}.json")
         AppBuilder
             .Configure<App>()
             .UseSkia()

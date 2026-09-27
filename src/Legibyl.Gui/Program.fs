@@ -4,6 +4,7 @@ open System
 open System.IO
 open Avalonia
 open Avalonia.Controls.ApplicationLifetimes
+open Avalonia.Platform.Storage
 open Avalonia.Styling
 open Semi.Avalonia
 open Semi.Avalonia.DataGrid
@@ -22,17 +23,25 @@ type App() =
     override this.OnFrameworkInitializationCompleted() =
         match this.ApplicationLifetime with
         | :? IClassicDesktopStyleApplicationLifetime as desktop ->
-            let first = MainWindow()
-            desktop.MainWindow <- first
-            // PDFs named on the command line: the first in this window, each other in its own.
-            let pdfs = desktop.Args |> Option.ofObj |> Option.defaultValue [||] |> Array.filter File.Exists |> List.ofArray
-            first.Opened.Add(fun _ ->
-                match pdfs with
-                | head :: rest ->
-                    first.OpenFile head
-                    for pdf in rest do
-                        MainWindow.Open(DocumentShell.Shared, pdf, first) |> ignore
-                | [] -> ())
+            desktop.MainWindow <- MainWindow()
+            let openPdf (path: string) =
+                if File.Exists path then MainWindow.Open(DocumentShell.Shared, path) |> ignore
+            // PDFs named on the command line (as Windows' Open With passes them): the first in the
+            // window just made, each other in its own.
+            desktop.Args |> Option.ofObj |> Option.defaultValue [||] |> Array.iter openPdf
+            // PDFs macOS asks the app to open (Finder's Open With, or a PDF dropped on its icon),
+            // whether it's starting or running.
+            match this.TryGetFeature<IActivatableLifetime>() with
+            | NonNull activatable ->
+                activatable.Activated.Add(fun e ->
+                    match e with
+                    | :? FileActivatedEventArgs as files ->
+                        for file in files.Files do
+                            match file.TryGetLocalPath() with
+                            | NonNull path -> openPdf path
+                            | Null -> ()
+                    | _ -> ())
+            | Null -> ()
         | _ -> ()
 
         base.OnFrameworkInitializationCompleted()
