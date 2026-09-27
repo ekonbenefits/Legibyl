@@ -619,6 +619,16 @@ title as edited, or as shown prefilled if the structure was viewed, with
 `/DisplayDocTitle`. (The CLI, tagging a file never reviewed, doesn't take a title
 from a heading.)
 
+A tagged PDF's Structure window has the same **Document title** field, showing
+the document's own title (empty when it has none), with its first page's text and
+first H1 offered beside it, and a marker beside the label for the title failures
+(7.1-9 and 7.1-10; PDF/UA-2's 8.11.1-1 and 8.11.2-1), as on the blocks. A title
+typed there is saved as `title` and counts as a change not in the PDF yet;
+**Export…** writes it (`ElementEdits.applyTitle`) to the Info `/Title`, the XMP
+`dc:title` where there's XMP (the metadata repair writes XMP from Info otherwise),
+and `/DisplayDocTitle`, before the title auto fixes, which then leave it. The
+CLI's `fix --edits` does the same with a review's `title`.
+
 Figures can be given alt text, and OCR'd text corrected, on the suggested
 structure too: right-click a figure for **Edit Alt Text…** (a QR code's starts
 from where it links), and a region read with OCR for **Edit Replacement Text…**.

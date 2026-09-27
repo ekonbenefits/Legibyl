@@ -371,7 +371,7 @@ module private MainView =
             let pending = ctx.useState noChanges
             // The last count of edits not in a tagged PDF: (path, its last write, edits, count).
             // Counting reads the PDF, so it's only done again when one of those changes.
-            let pendingCount = ctx.useStateLazy(fun () -> ref (None: (string * DateTime * ElementEdit list * int) option)).Current
+            let pendingCount = ctx.useStateLazy(fun () -> ref (None: (string * DateTime * ElementEdit list * string option * int) option)).Current
 
 
             let report =
@@ -430,7 +430,7 @@ module private MainView =
 
             /// Counts the user's changes Save would write for the selected file: for an untagged PDF,
             /// its edits on the suggested structure (regions merged into their neighbours, other edits, a title); otherwise its
-            /// edits that aren't in it yet, which means reading it, off the UI thread.
+            /// edits, and the title given in Structure…, that aren't in it yet, which means reading it, off the UI thread.
             let refreshPending () =
                 task {
                     selectedFile.Current |> Option.iter (fun path -> edited.Set (layoutReviews.For path).IsEdited)
@@ -445,13 +445,18 @@ module private MainView =
                         let! count =
                             Task.Run(fun () ->
                                 try
-                                    let edits = RegionEdits.toElementEdits (layoutReviews.For path).Edits
+                                    let review = layoutReviews.For path
+                                    let edits = RegionEdits.toElementEdits review.Edits
+                                    let title = review.Title |> Option.filter (String.IsNullOrWhiteSpace >> not)
                                     let written = File.GetLastWriteTimeUtc path
                                     match pendingCount.Value with
-                                    | Some(p, w, e, count) when p = path && w = written && e = edits -> count
+                                    | Some(p, w, e, t, count) when p = path && w = written && e = edits && t = title -> count
                                     | _ ->
-                                        let count = ElementEdits.pending path edits
-                                        pendingCount.Value <- Some(path, written, edits, count)
+                                        // Its edits, and the title given in Structure…, that aren't in it yet.
+                                        let count =
+                                            ElementEdits.pending path edits
+                                            + (match title with Some title when ElementEdits.titlePending path title -> 1 | _ -> 0)
+                                        pendingCount.Value <- Some(path, written, edits, title, count)
                                         count
                                 with
                                 | :? iText.Commons.Exceptions.ITextException
@@ -796,6 +801,7 @@ module private MainView =
                                                     // its layout reads the PDF, so it's done here too.
                                                     validator.Review <- review.ForCopy sourcePath
                                                     validator.Edits <- RegionEdits.toElementEdits review.Edits
+                                                    validator.Title <- (review.Title |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.toObj)
                                                     validator.Fix(sourcePath, profile, outputPath, options, progress))
                                             return Ok fix
                                         with

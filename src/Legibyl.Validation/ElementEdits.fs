@@ -281,6 +281,58 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     // Those that don't apply are said by unapplied, one by one.
     [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)." ]
 
+// ---- The document's title ----
+
+/// The document's title where readers and PDF/UA look for it: the Info dictionary's /Title and
+/// the XMP metadata's dc:title (when it has XMP; the metadata repair writes XMP from Info
+/// otherwise), shown in place of the file name (/DisplayDocTitle).
+let private titleChanges (document: PdfDocument) (title: string) =
+    let info = document.GetDocumentInfo().GetTitle() |> Option.ofObj
+    let xmp =
+        match document.GetXmpMetadataBytes() with
+        | null -> None
+        | bytes ->
+            try Some(iText.Kernel.XMP.XMPMetaFactory.ParseFromBuffer bytes) with _ -> None
+    let xmpTitle =
+        xmp
+        |> Option.bind (fun meta ->
+            try meta.GetLocalizedText(iText.Kernel.XMP.XMPConst.NS_DC, "title", "", "x-default") |> Option.ofObj |> Option.map _.GetValue()
+            with _ -> None)
+    let preferences = document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.ViewerPreferences
+    let shown = not (isNull preferences) && PdfBoolean.TRUE.Equals(preferences.Get PdfName.DisplayDocTitle)
+    {| Info = info <> Some title
+       Xmp = (match xmp with Some _ -> xmpTitle <> Some title | None -> false)
+       Shown = not shown
+       Meta = xmp |}
+
+/// Whether the title a person gave isn't pdfPath's yet.
+let titlePending (pdfPath: string) (title: string) =
+    use document = new PdfDocument(new PdfReader(pdfPath))
+    let changes = titleChanges document title
+    changes.Info || changes.Xmp || changes.Shown
+
+/// Gives the document the title a person gave (Structure…'s Document title, or a review's
+/// "title"), shown in place of the file name; says so, or nothing if it has it already.
+let internal applyTitle (document: PdfDocument) (title: string) : string list =
+    let changes = titleChanges document title
+    if changes.Info then document.GetDocumentInfo().SetTitle title |> ignore
+    match changes.Meta with
+    | Some meta when changes.Xmp ->
+        meta.SetLocalizedText(iText.Kernel.XMP.XMPConst.NS_DC, "title", "", "x-default", title)
+        document.SetXmpMetadata meta
+    | _ -> ()
+    if changes.Shown then
+        let catalog = document.GetCatalog().GetPdfObject()
+        let preferences =
+            match catalog.GetAsDictionary PdfName.ViewerPreferences with
+            | null ->
+                let preferences = PdfDictionary()
+                catalog.Put(PdfName.ViewerPreferences, preferences) |> ignore
+                preferences
+            | preferences -> preferences
+        preferences.Put(PdfName.DisplayDocTitle, PdfBoolean.TRUE) |> ignore
+    [ if changes.Info || changes.Xmp || changes.Shown then $"Titled the document \"{title}\", as you gave it, shown in place of the file name." ]
+
 /// An edit, as a report names it: its tag, page and box.
 let describe (edit: ElementEdit) =
     let n (value: float) = value.ToString("0.#", Globalization.CultureInfo.InvariantCulture)

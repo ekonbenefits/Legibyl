@@ -308,7 +308,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
         repair.Fixes
         ||| (if repair.Layout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
         ||| (match review with
-             | Some review when not (ReviewFile.edits review).IsEmpty -> PdfFixOptions.ApplyEdits
+             | Some review when not (ReviewFile.edits review).IsEmpty || not (String.IsNullOrWhiteSpace review.Title) -> PdfFixOptions.ApplyEdits
              | _ -> PdfFixOptions.None)
     if options = PdfFixOptions.None then
         let before = try Some(compliance (validator.Validate(file, profile))) with :? VeraPdfValidationException -> None
@@ -347,6 +347,8 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                 match review with
                 | Some review ->
                     validator.Edits <- ReviewFile.edits review
+                    // Its title too, on a tagged PDF (tagging from the layout gives it as well).
+                    validator.Title <- (if String.IsNullOrWhiteSpace review.Title then null else review.Title)
                     validator.Review <- ReviewFile.forCopy (Some review)
                 | None -> ()
                 let fix = validator.Fix(file, profile, targetPath, options)
@@ -383,6 +385,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
         finally
             validator.LayoutSource <- null
             validator.Edits <- []
+            validator.Title <- null
             validator.Review <- null
             model |> Option.iter (fun model -> (model :> IDisposable).Dispose())
 
