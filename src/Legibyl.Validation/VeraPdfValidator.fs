@@ -50,11 +50,7 @@ module internal VeraPdf =
     let toJavaFlavour profile =
         match profile with
         | PdfProfile.PdfUa1 -> PDFAFlavour.PDFUA_1
-        | PdfProfile.PdfA1B -> PDFAFlavour.PDFA_1_B
-        | PdfProfile.PdfA2B -> PDFAFlavour.PDFA_2_B
-        | PdfProfile.PdfA2U -> PDFAFlavour.PDFA_2_U
-        | PdfProfile.PdfA3B -> PDFAFlavour.PDFA_3_B
-        | PdfProfile.PdfA4 -> PDFAFlavour.PDFA_4
+        | PdfProfile.PdfUa2 -> PDFAFlavour.PDFUA_2
         | _ -> raise (ArgumentOutOfRangeException(nameof profile, profile, "Unsupported PDF profile"))
 
     let private repairStatuses =
@@ -294,6 +290,9 @@ module internal VeraPdf =
           Profile = profile
           FlavourId = result.getPDFAFlavour().getId()
           IsCompliant = result.isCompliant ()
+          PdfVersion = PdfUaTarget.pdfVersion pdfPath |> Option.toObj
+          // The caller chose it; one that detected it (PdfUaTarget.detect) says so.
+          ProfileDetected = false
           TotalAssertions = result.getTotalAssertions ()
           Assertions = List.toArray (withLegibylAnalysis analysis assertions) }
 

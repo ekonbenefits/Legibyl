@@ -85,6 +85,12 @@ type ValidationReport =
       Profile: PdfProfile
       /// The flavour id actually reported by veraPDF, e.g. "ua1".
       FlavourId: string
+      /// The PDF version the file declares, e.g. "1.7" or "2.0" (see PdfUaTarget); null if it
+      /// couldn't be read.
+      PdfVersion: string | null
+      /// Whether Profile was worked out from the file's PDF version (see PdfUaTarget.detect), or
+      /// asked for. Validate reports false; a caller that detected it says so.
+      ProfileDetected: bool
       /// True if the document complies with the requested profile.
       IsCompliant: bool
       /// Total number of individual rule checks performed.
