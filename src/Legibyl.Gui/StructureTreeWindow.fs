@@ -281,9 +281,30 @@ module private StructureView =
     /// entries, which Move Up and Move Down don't change.
     let fixedOrder = set [ "Table"; "THead"; "TBody"; "TFoot"; "TR"; "TOC"; "StructTreeRoot"; "NotInTags" ]
 
+    /// The positions in order of the longest run of it that's in the order sequence already has
+    /// (a longest increasing subsequence of positions).
+    let private longestInOrder (positions: int list) : Set<int> =
+        let positions = Array.ofList positions
+        // tails[k]: the index ending the best run of length k + 1 found so far.
+        let tails = ResizeArray<int>()
+        let previous = Array.create positions.Length -1
+        for i in 0 .. positions.Length - 1 do
+            let mutable lo, hi = 0, tails.Count
+            while lo < hi do
+                let mid = (lo + hi) / 2
+                if positions[tails[mid]] < positions[i] then lo <- mid + 1 else hi <- mid
+            if lo > 0 then previous[i] <- tails[lo - 1]
+            if lo = tails.Count then tails.Add i else tails[lo] <- i
+        let mutable kept = Set.empty
+        let mutable at = if tails.Count = 0 then -1 else tails[tails.Count - 1]
+        while at >= 0 do
+            kept <- kept.Add at
+            at <- previous[at]
+        kept
+
     /// edits with parent's children in order: the fewest moves that give it (see SiblingOrder),
-    /// replacing those it had. Starting from none, each place where the order still differs gets a
-    /// move of the element that belongs there, after the one before it (or first).
+    /// replacing those it had. The longest run of order that's in the order they were read in
+    /// stays; each of the rest moves after the one before it (or first).
     let recordOrder (edits: RegionEdits.Edit list) (parent: StructureNode) (order: StructureNode list) =
         let setMove edits (node: StructureNode) move =
             match node.Geometry with
@@ -292,17 +313,33 @@ module private StructureView =
         let cleared =
             parent.Children
             |> Seq.fold (fun edits node -> if (editFor edits node |> Option.bind _.Move).IsSome then setMove edits node None else edits) edits
-        let rec place edits tries =
-            let now = orderedChildren edits parent
-            match List.zip now order |> List.tryFindIndex (fun (a, b) -> not (obj.ReferenceEquals(a, b))) with
-            | Some i when tries > 0 ->
-                let move = if i = 0 then Some First else order[i - 1].Geometry |> Option.ofObj |> Option.map After
-                match move, order[i].Geometry with
-                | Some _, NonNull _ -> place (setMove edits order[i] move) (tries - 1)
-                // One with no place on a page can't be named by a move.
+        let asRead = List.ofSeq parent.Children
+        let positionOf (node: StructureNode) = asRead |> List.findIndex (fun n -> obj.ReferenceEquals(n, node))
+        let kept = longestInOrder (order |> List.map positionOf)
+        let moved =
+            order
+            |> List.indexed
+            |> List.fold
+                (fun edits (i, node) ->
+                    if kept.Contains i then edits
+                    else
+                        let move = if i = 0 then Some First else order[i - 1].Geometry |> Option.ofObj |> Option.map After
+                        setMove edits node move)
+                cleared
+        let gives edits = List.forall2 (fun a b -> obj.ReferenceEquals(a, b)) (orderedChildren edits parent) order
+        if gives moved then moved
+        else
+            // One with no place on a page can't be named by a move: place them one at a time instead.
+            let rec place edits tries =
+                let now = orderedChildren edits parent
+                match List.zip now order |> List.tryFindIndex (fun (a, b) -> not (obj.ReferenceEquals(a, b))) with
+                | Some i when tries > 0 ->
+                    let move = if i = 0 then Some First else order[i - 1].Geometry |> Option.ofObj |> Option.map After
+                    match move, order[i].Geometry with
+                    | Some _, NonNull _ -> place (setMove edits order[i] move) (tries - 1)
+                    | _ -> edits
                 | _ -> edits
-            | _ -> edits
-        place cleared (order.Length + 1)
+            place cleared (order.Length + 1)
 
     /// For a paragraph or figure: how it's in a merge the user chose, if it is (merges are only
     /// ever not in the PDF yet where they're still apart, as they are wherever a block shows them).
@@ -821,6 +858,7 @@ module private StructureView =
         (sourceFilePath: string)
         (onEditsChanged: unit -> unit)
         (findings: FindingMarkers.Findings)
+        (layoutRegions: ((int -> StructureGeometry list) option) ref)
         =
         // What's drawn outside every tag, most likely decoration first.
         let tagged = sortUntagged tagged
@@ -871,6 +909,9 @@ module private StructureView =
             let edits = ctx.useState review.Edits
             // The edits as of the last move, which the blocks' order follows.
             let moves = ctx.useState review.Edits
+            // An order a page's layout suggests, to accept or not: the page, the parent whose
+            // children it orders, and their order.
+            let proposal = ctx.useState (None: (int * StructureNode * StructureNode list) option)
             /// Whether node is moved and isn't in that place in the PDF yet: its predecessor as read
             /// isn't the one its move names.
             let movePending (node: StructureNode) =
@@ -925,6 +966,7 @@ module private StructureView =
                     let version = previewVersion.Current
                     let tree = root.Current
                     let currentEdits = edits.Current
+                    let currentProposal = proposal.Current
                     previewImage.Set None
                     targetImage.Set None
                     targetNote.Set ""
@@ -965,6 +1007,18 @@ module private StructureView =
                                     page
                                     |> Option.map (fun page ->
                                         let elements = pageElements (orderedChildren currentEdits) tree page
+                                        // With an order suggested for the page: where each would go, where that differs.
+                                        let proposedFor =
+                                            match currentProposal with
+                                            | Some(forPage, parent, order) when forPage = page ->
+                                                let children (node: StructureNode) = if obj.ReferenceEquals(node, parent) then order else orderedChildren currentEdits node
+                                                let proposed = pageElements children tree page
+                                                fun (element: StructureNode) ->
+                                                    let now = elements |> List.findIndex (fun e -> obj.ReferenceEquals(e, element))
+                                                    match proposed |> List.tryFindIndex (fun e -> obj.ReferenceEquals(e, element)) with
+                                                    | Some next when next <> now -> Some $"→ {next + 1}"
+                                                    | _ -> None
+                                            | _ -> fun _ -> None
                                         // As edited: given another tag, or merged into its neighbour.
                                         let outlined =
                                             [ for i, element in List.indexed elements ->
@@ -978,13 +1032,14 @@ module private StructureView =
                                                     // Outside every tag (whatever's chosen for it): dashed.
                                                     Dashed = isUntagged element
                                                     Emphasised = within element
-                                                    Marker = markerFor element } ]
+                                                    Marker = markerFor element
+                                                    Proposed = proposedFor element } ]
                                         // A selection that isn't one of them (a span in a paragraph, say) is filled too.
                                         let extra =
                                             [ for node in nodes do
                                                   match node.Geometry with
                                                   | NonNull geometry when geometry.PageNumber = page && not (elements |> List.exists (fun e -> obj.ReferenceEquals(e, node))) ->
-                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true; Marker = markerFor node; Dashed = isUntagged node }
+                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true; Marker = markerFor node; Dashed = isUntagged node; Proposed = None }
                                                   | _ -> () ]
                                         // Only the selection, when asked: the rest are still there to click.
                                         let drawn =
@@ -1069,7 +1124,10 @@ module private StructureView =
                 task {
                     review.Edits <- next
                     edits.Set next
-                    if movesIn next <> movesIn moves.Current then moves.Set next
+                    if movesIn next <> movesIn moves.Current then
+                        moves.Set next
+                        // A suggested order was from the order before.
+                        proposal.Set None
                     onEditsChanged ()
                     // The overview labels elements as edited.
                     showPage selected.Current
@@ -1333,6 +1391,49 @@ module private StructureView =
 
             // The synthetic StructTreeRoot node itself carries no semantic info, so show
             // its children (the actual document hierarchy) as the top level in both views.
+            // Order by Page Layout: finding the page's layout.
+            let ordering = ctx.useState false
+            /// The element whose children are the tagged PDF's top level (its Document), if there's one.
+            let topLevel () =
+                match root.Current.Children |> Seq.filter (fun n -> n.Tag <> "NotInTags") |> List.ofSeq with
+                | [ document ] when not (fixedOrder.Contains document.Tag) -> Some document
+                | _ -> None
+            /// Suggests page's reading order from its layout, to accept or not.
+            let orderByLayout (page: int) =
+                task {
+                    match topLevel () with
+                    | None -> status.Set "Order by Page Layout orders a document's top-level elements; this PDF has no one element they're in."
+                    | Some parent ->
+                        ordering.Set true
+                        try
+                            try
+                                let! regions =
+                                    match layoutRegions.Value with
+                                    | Some regionsOf -> Task.FromResult(regionsOf page)
+                                    | None ->
+                                        task {
+                                            if not (LayoutModel.isDownloaded ()) then
+                                                downloadProgress.Set(Some 0.0)
+                                                do! LayoutModel.download (Progress<float>(fun fraction -> downloadProgress.Set(Some fraction))) CancellationToken.None
+                                                downloadProgress.Set None
+                                            return! Task.Run(fun () -> LayoutOrder.detect sourceFilePath page)
+                                        }
+                                let now = orderedChildren edits.Current parent
+                                let suggestion = LayoutOrder.propose now page regions
+                                if List.forall2 (fun a b -> obj.ReferenceEquals(a, b)) now suggestion then
+                                    status.Set $"Page {page}'s layout reads it in the order it's tagged already."
+                                else
+                                    status.Set ""
+                                    proposal.Set(Some(page, parent, suggestion))
+                                    showPage selected.Current
+                            with ex ->
+                                downloadProgress.Set None
+                                status.Set $"Couldn't find page {page}'s layout: {ex.Message}"
+                        finally
+                            ordering.Set false
+                }
+                |> ignore
+
             let layoutTab =
                 Grid.create [
                     Grid.columnDefinitions [
@@ -1398,12 +1499,64 @@ module private StructureView =
                                         ]
                                     ]
                                 ]
-                                TextBlock.create [
-                                    Grid.row 1
-                                    TextBlock.text previewNote.Current
-                                    TextBlock.textWrapping TextWrapping.Wrap
-                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                    TextBlock.margin (0.0, 0.0, 0.0, 8.0)
+                                StackPanel.create [
+                                  Grid.row 1
+                                  StackPanel.margin (0.0, 0.0, 0.0, 8.0)
+                                  StackPanel.children [
+                                    TextBlock.create [
+                                        TextBlock.text previewNote.Current
+                                        TextBlock.textWrapping TextWrapping.Wrap
+                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                    ]
+                                    // A tagged PDF's page can be put in the order its layout reads.
+                                    match (if isSuggested then None else shownPage.Current), proposal.Current with
+                                    | Some page, Some(forPage, parent, order) when forPage = page ->
+                                        TextBlock.create [
+                                            TextBlock.text $"Page {page}'s layout reads it in the order the purple numbers show. Use it, or keep the order it's tagged in."
+                                            TextBlock.textWrapping TextWrapping.Wrap
+                                            TextBlock.margin (0.0, 6.0, 0.0, 4.0)
+                                        ]
+                                        WrapPanel.create [
+                                            WrapPanel.children [
+                                                Button.create [
+                                                    Button.content "Use This Order"
+                                                    Button.margin (0.0, 0.0, 8.0, 0.0)
+                                                    ToolTip.tip "Record moves for the elements that move on this page, as if you'd moved them; the Edits tab lists them, and Export… writes them."
+                                                    Button.onClick (
+                                                        (fun _ -> recordOrder edits.Current parent order |> saveEdits |> ignore),
+                                                        SubPatchOptions.Always
+                                                    )
+                                                ]
+                                                Button.create [
+                                                    Button.content "Keep Current Order"
+                                                    Button.onClick (
+                                                        (fun _ ->
+                                                            proposal.Set None
+                                                            showPage selected.Current),
+                                                        SubPatchOptions.Always
+                                                    )
+                                                ]
+                                            ]
+                                        ]
+                                    | Some page, _ ->
+                                        Button.create [
+                                            Button.content (
+                                                match ordering.Current, downloadProgress.Current with
+                                                | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
+                                                | true, None -> $"Finding page {page}'s layout…"
+                                                | false, _ -> "Order by Page Layout"
+                                            )
+                                            Button.margin (0.0, 6.0, 0.0, 0.0)
+                                            Button.isEnabled (not ordering.Current && (topLevel ()).IsSome)
+                                            ToolTip.tip (
+                                                $"Suggest page {page}'s reading order from its layout, found by a layout detector (several seconds; "
+                                                + $"downloads its model, about {LayoutModel.DownloadSizeMegabytes} MB, the first time). "
+                                                + "Nothing changes unless you choose Use This Order. Never within a list or table, or across pages."
+                                            )
+                                            Button.onClick ((fun _ -> orderByLayout page), SubPatchOptions.Always)
+                                        ]
+                                    | None, _ -> ()
+                                  ]
                                 ]
                                 // A block of text can be given another tag; paragraphs next to each
                                 // other can be merged into one.
@@ -2177,12 +2330,20 @@ type StructureTreeWindow
             let suggester = new LayoutSuggester(sourceFilePath)
             Some(suggester, LayoutPrefetcher(suggester, review.Pages))
         | Tagged _ -> None
+    // Where Order by Page Layout gets a page's regions: the layout detector, unless replaced.
+    let layoutRegions = ref None
     do
         let tagged = match source with Tagged root -> root | Suggested -> SuggestedTree.build []
-        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged findings
+        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged findings layoutRegions
 
     /// The review its edits change.
     member _.Review = review
+
+    /// Where Order by Page Layout gets a page's regions, in reading order: None for the layout
+    /// detector (downloading its model first, if need be).
+    member _.LayoutRegions
+        with get (): (int -> StructureGeometry list) option = layoutRegions.Value
+        and set (value: (int -> StructureGeometry list) option) = layoutRegions.Value <- value
 
     /// Without findings to mark.
     new(source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit) =

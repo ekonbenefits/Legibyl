@@ -25,6 +25,7 @@
     <Compile Include="BusyStatus.fs" />
     <Compile Include="DocumentReview.fs" />
     <Compile Include="FindingMarkers.fs" />
+    <Compile Include="LayoutOrder.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="LinkTitleOffer.fs" />
     <Compile Include="RecentFiles.fs" />
