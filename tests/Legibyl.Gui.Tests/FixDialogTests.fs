@@ -257,3 +257,37 @@ let ``showing all repairs keeps the dialog's size: the list scrolls instead`` ()
 
         after |> should equal before
         scrolls |> should be True)
+
+[<Fact>]
+let ``the Export result with many changes fits the screen: they scroll, OK stays on it`` () =
+    onUiThread (fun () ->
+        let owner = HeadlessWindow.show 800.0 600.0
+        let fix: FixResult =
+            { FilePath = "sample.pdf"
+              Profile = PdfProfile.PdfUa1
+              RequestedOptions = PdfFixOptions.ApplyEdits
+              OutputPath = "sample.v2.pdf"
+              Status = RepairStatus.Success
+              AppliedFixes = [ for i in 1 .. 60 -> $"Change number {i}, described at some length so it wraps onto a second line in the dialog." ]
+              NotApplied = [ for i in 1 .. 20 -> $"Edit {i} wasn't applied." ]
+              OriginalReport = report [] }
+        let pending = Dialogs.showFixResult owner (Ok fix) None
+        pump ()
+        let dialog = owner.OwnedWindows |> Seq.exactlyOne
+        let limited = not (Double.IsInfinity dialog.MaxHeight)
+        // Here a short screen.
+        dialog.MaxHeight <- 500.0
+        pump ()
+        let height = dialog.Bounds.Height
+        let ok = descendants<Button> dialog |> List.find (fun b -> string b.Content = "OK")
+        let okBottom = (ok.TranslatePoint(Point(0.0, ok.Bounds.Height), dialog)).Value.Y
+        let list = descendants<ScrollViewer> dialog |> List.head
+        let scrolls = list.Extent.Height > list.Viewport.Height
+        dialog.Close()
+        HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> pending.IsCompleted) |> ignore
+        owner.Close()
+
+        limited |> should be True
+        height |> should be (lessThanOrEqualTo 500.0)
+        okBottom |> should be (lessThanOrEqualTo height)
+        scrolls |> should be True)
