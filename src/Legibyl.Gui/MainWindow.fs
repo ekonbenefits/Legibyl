@@ -973,7 +973,9 @@ module private MainView =
                         ]
                         Button.create [
                             Grid.column 2
-                            Button.content "Validate"
+                            // Opening a PDF checks it; this checks it again, after it's changed on disk.
+                            Button.content "Check Again"
+                            ToolTip.tip "Check this PDF again, after it's changed on disk."
                             Button.padding (16.0, 4.0)
                             Button.isEnabled (not busy && selectedFile.Current.IsSome)
                             Button.onClick (fun _ -> runValidation "Validating" |> ignore)

@@ -174,3 +174,29 @@ let ``a PDF 2.0 file is checked against PDF/UA-2 without choosing, and the banne
             pickers |> should be Empty)
     finally
         Directory.Delete(folder, true)
+
+[<Fact>]
+let ``Check Again checks the open PDF again, and needs one open`` () =
+    onUiThread (fun () ->
+        let checkAgain (window: Window) =
+            descendants<Button> window |> List.find (fun b -> string b.Content = "Check Again")
+        let empty = HeadlessWindow.show 1200.0 720.0
+        let enabledEmpty = (checkAgain empty).IsEnabled
+        empty.Close()
+        let window = openSample "pdfua1-fail.pdf"
+        let button = checkAgain window
+        let enabledOpen = button.IsEnabled
+        let tip = string (ToolTip.GetTip button)
+        let before = (HeadlessWindow.resultsGrid window).ItemsSource
+        button.RaiseEvent(Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent))
+        // A new report, once it's done.
+        let checkedAgain =
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 30.0) (fun () ->
+                let now = (HeadlessWindow.resultsGrid window).ItemsSource
+                not (isNull now) && not (obj.ReferenceEquals(now, before)) && button.IsEnabled)
+        window.Close()
+
+        enabledEmpty |> should be False
+        enabledOpen |> should be True
+        tip |> should equal "Check this PDF again, after it's changed on disk."
+        checkedAgain |> should be True)

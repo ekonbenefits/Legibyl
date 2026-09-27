@@ -12,7 +12,9 @@ separate process.
 ## Using the app
 
 1. **Open a PDF**: **Browse…**, drop it on the window, or **File › Open…**. Each
-   PDF opens in a window of its own.
+   PDF opens in a window of its own, and is checked as it opens; **Check Again**
+   checks it again after it's changed on disk (re-exported from the tool that
+   made it, say).
 2. **Read what's found.** Failures (red) are what PDF/UA requires; warnings
    (orange) are worth a look. Each says **What it means** and, where no auto fix
    repairs it, **What to do**. A wrench marks what an auto fix repairs; a wand,
