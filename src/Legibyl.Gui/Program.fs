@@ -18,6 +18,21 @@ type App() =
         // Follow the OS light/dark setting.
         this.RequestedThemeVariant <- ThemeVariant.Default
         this.Styles.Add(SemiTheme())
+        // macOS puts the application's own menu first, named for it: About goes there, for the
+        // window in front (Windows and Linux have it under Help). It has to be set here, before
+        // the menu bar is made: set later, macOS keeps Avalonia's own (About Avalonia).
+        if OperatingSystem.IsMacOS() then
+            let about = NativeMenuItem "About Legibyl"
+            about.Click.Add(fun _ ->
+                match this.ApplicationLifetime with
+                | :? IClassicDesktopStyleApplicationLifetime as desktop ->
+                    match desktop.Windows |> Seq.tryFind _.IsActive |> Option.orElse (Option.ofObj desktop.MainWindow) with
+                    | Some owner -> About.show owner |> ignore
+                    | None -> ()
+                | _ -> ())
+            let menu = NativeMenu()
+            menu.Items.Add about
+            NativeMenu.SetMenu(this, menu)
 
     override this.OnFrameworkInitializationCompleted() =
         // veraPDF's one-time setup takes a couple of seconds: done in the background now, while a
@@ -32,17 +47,6 @@ type App() =
         match this.ApplicationLifetime with
         | :? IClassicDesktopStyleApplicationLifetime as desktop ->
             desktop.MainWindow <- MainWindow()
-            // macOS puts the application's own menu first, named for it: About goes there, for
-            // the window in front (Windows and Linux have it under Help).
-            if OperatingSystem.IsMacOS() then
-                let about = NativeMenuItem "About Legibyl"
-                about.Click.Add(fun _ ->
-                    match desktop.Windows |> Seq.tryFind _.IsActive |> Option.orElse (Option.ofObj desktop.MainWindow) with
-                    | Some owner -> About.show owner |> ignore
-                    | None -> ())
-                let menu = NativeMenu()
-                menu.Items.Add about
-                NativeMenu.SetMenu(this, menu)
             let openPdf (path: string) =
                 if File.Exists path then MainWindow.Open(DocumentShell.Shared, path) |> ignore
             // PDFs named on the command line (as Windows' Open With passes them): the first in the
