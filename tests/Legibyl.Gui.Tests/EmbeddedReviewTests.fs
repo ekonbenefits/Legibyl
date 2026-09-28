@@ -156,7 +156,7 @@ let ``a copy tagged from the layout carries its edits as edits of the elements t
             |> List.exists (fun node ->
                 node.Tag = edit.Tag
                 && not (isNull node.Geometry)
-                && RegionEdits.overlap (nonNull node.Geometry) edit.Box >= RegionEdits.SameRegionOverlap)
+                && Boxes.overlap (nonNull node.Geometry) edit.Box >= RegionEdits.SameRegionOverlap)
             |> should be True
         ElementEdits.pending output (RegionEdits.toElementEdits carried) |> should equal 0
         // The original's file keeps them as they were made on its suggested structure.

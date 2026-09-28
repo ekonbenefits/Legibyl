@@ -13,16 +13,13 @@ open Legibyl.Validation.StructureTreeObjects
 [<Literal>]
 let SameElementOverlap = 0.6
 
-/// The intersection over union of two boxes (a hairline's taken as 2 pt wide; see Boxes).
-let overlap (a: StructureGeometry) (b: StructureGeometry) = Boxes.overlap a b
-
 // ---- Suggested regions ----
 
 /// The edit for region (made for the suggestion as found: same page and tag, about the same box).
 let private editFor (edits: ElementEdit list) (region: LayoutRegion) =
     edits
     |> List.filter (fun e -> e.MergeWith.IsEmpty && e.Page = region.Geometry.PageNumber && e.Tag = region.Tag)
-    |> List.map (fun e -> e, overlap e.Box region.Geometry)
+    |> List.map (fun e -> e, Boxes.overlap e.Box region.Geometry)
     |> List.filter (fun (_, o) -> o >= SameElementOverlap)
     |> List.sortByDescending snd
     |> List.tryHead
@@ -82,7 +79,7 @@ let internal mergeRun (document: PdfDocument) context (edit: ElementEdit) : Para
             (edit.Box :: edit.MergeWith)
             |> List.map (fun box ->
                 paragraphs
-                |> List.map (fun (parent, index, own) -> (parent, index), overlap own box)
+                |> List.map (fun (parent, index, own) -> (parent, index), Boxes.overlap own box)
                 |> List.filter (fun (_, o) -> o >= SameElementOverlap)
                 |> List.sortByDescending snd
                 |> List.tryHead
@@ -110,7 +107,7 @@ let private mergedBox (merge: ElementEdit) =
 let private boxesOf (merges: ElementEdit list) (edit: ElementEdit) =
     edit.Box
     :: [ for merge in merges do
-             if merge.Page = edit.Page && merge.Tag = edit.Tag && overlap merge.Box edit.Box >= SameElementOverlap then
+             if merge.Page = edit.Page && merge.Tag = edit.Tag && Boxes.overlap merge.Box edit.Box >= SameElementOverlap then
                  mergedBox merge ]
 
 /// Each edit with its element, for the edits whose element is found (in any of the places boxes
@@ -136,7 +133,7 @@ let private findIn (document: PdfDocument) context (boxes: ElementEdit -> Struct
         |> List.choose (fun edit ->
             candidates
             |> List.filter (fun (tag, box, _) -> List.contains tag (tagsOf edit) && box.PageNumber = edit.Page)
-            |> List.map (fun (_, box, element) -> element, boxes edit |> List.map (overlap box) |> List.max)
+            |> List.map (fun (_, box, element) -> element, boxes edit |> List.map (Boxes.overlap box) |> List.max)
             |> List.filter (fun (_, o) -> o >= SameElementOverlap)
             |> List.sortByDescending snd
             |> List.tryHead

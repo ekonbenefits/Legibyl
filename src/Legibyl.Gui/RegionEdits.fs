@@ -34,17 +34,12 @@ type Edit =
 [<Literal>]
 let SameRegionOverlap = 0.6
 
-let private area (box: StructureGeometry) = max 0.0 (box.Right - box.Left) * max 0.0 (box.Top - box.Bottom)
-
-/// The intersection over union of two boxes (a hairline's taken as 2 pt wide; see Boxes).
-let overlap (a: StructureGeometry) (b: StructureGeometry) = Boxes.overlap a b
-
 /// The edit for this region or element (not a merge): same page and tag (the one it was found
 /// with, or, once retagged, the one it was given), overlapping most.
 let find (edits: Edit list) (page: int) (tag: string) (box: StructureGeometry) : Edit option =
     edits
     |> List.filter (fun e -> e.Page = page && (e.Tag = tag || e.Retag = Some tag) && e.MergeWith.IsEmpty)
-    |> List.map (fun e -> e, overlap e.Box box)
+    |> List.map (fun e -> e, Boxes.overlap e.Box box)
     |> List.filter (fun (_, o) -> o >= SameRegionOverlap)
     |> List.sortByDescending snd
     |> List.tryHead
@@ -130,7 +125,7 @@ let onRegions (edits: Edit list) (blocks: SuggestedBlock list) : LayoutRegion li
 /// The merge of elements with tag (paragraphs, or figures; boxes, first to last) on page, added
 /// to edits. Merges it overlaps are replaced: an element is merged once.
 let mergeElements (edits: Edit list) (page: int) (tag: string) (boxes: StructureGeometry list) : Edit list =
-    let same (a: StructureGeometry) (b: StructureGeometry) = overlap a b >= SameRegionOverlap
+    let same (a: StructureGeometry) (b: StructureGeometry) = Boxes.overlap a b >= SameRegionOverlap
     let involves (e: Edit) =
         e.Page = page && not e.MergeWith.IsEmpty && (e.Box :: e.MergeWith) |> List.exists (fun box -> boxes |> List.exists (same box))
     (edits |> List.filter (not << involves))
@@ -142,7 +137,7 @@ let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry lis
 
 /// The merge that starts at box on page, if any.
 let findMerge (edits: Edit list) (page: int) (box: StructureGeometry) : Edit option =
-    edits |> List.tryFind (fun e -> e.Page = page && not e.MergeWith.IsEmpty && overlap e.Box box >= SameRegionOverlap)
+    edits |> List.tryFind (fun e -> e.Page = page && not e.MergeWith.IsEmpty && Boxes.overlap e.Box box >= SameRegionOverlap)
 
 /// Adds imported edits for regions that have none here; returns the result and how many were added.
 let merge (edits: Edit list) (imported: Edit list) : Edit list * int =

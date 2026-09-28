@@ -355,7 +355,7 @@ module private StructureView =
                 let merged =
                     edits
                     |> List.exists (fun e ->
-                        e.Page = box.PageNumber && e.MergeWith |> List.exists (fun other -> RegionEdits.overlap other box >= RegionEdits.SameRegionOverlap))
+                        e.Page = box.PageNumber && e.MergeWith |> List.exists (fun other -> Boxes.overlap other box >= RegionEdits.SameRegionOverlap))
                 if merged then Some $"✎ merged into the {noun} before, not in the PDF yet" else None
         | _ -> None
 
@@ -923,7 +923,7 @@ module private StructureView =
                     | First, None -> false
                     | After box, Some previous ->
                         match previous.Geometry with
-                        | NonNull own -> own.PageNumber <> box.PageNumber || RegionEdits.overlap own box < RegionEdits.SameRegionOverlap
+                        | NonNull own -> own.PageNumber <> box.PageNumber || Boxes.overlap own box < RegionEdits.SameRegionOverlap
                         | Null -> true
                     | _ -> true
                 | _ -> false
@@ -1863,7 +1863,7 @@ module private StructureView =
                             match node.Geometry with
                             // Once retagged, it has its new tag.
                             | NonNull geometry when (node.Tag = edit.Tag || edit.Retag = Some node.Tag) && geometry.PageNumber = edit.Page ->
-                                Some(node, RegionEdits.overlap geometry edit.Box)
+                                Some(node, Boxes.overlap geometry edit.Box)
                             | _ -> None)
                         |> List.filter (fun (_, o) -> o >= RegionEdits.SameRegionOverlap)
                         |> List.sortByDescending snd
@@ -1879,7 +1879,7 @@ module private StructureView =
                             |> List.exists (fun node ->
                                 match node.Geometry with
                                 | NonNull own when node.Tag = edit.Tag && own.PageNumber = edit.Page ->
-                                    RegionEdits.overlap own box >= RegionEdits.SameRegionOverlap
+                                    Boxes.overlap own box >= RegionEdits.SameRegionOverlap
                                 | _ -> false)
                         let status =
                             match suggested with
@@ -1934,7 +1934,7 @@ module private StructureView =
                                                         allNodes
                                                         |> List.choose (fun node ->
                                                             match node.Geometry with
-                                                            | NonNull own when own.PageNumber = box.PageNumber -> Some(node, RegionEdits.overlap own box)
+                                                            | NonNull own when own.PageNumber = box.PageNumber -> Some(node, Boxes.overlap own box)
                                                             | _ -> None)
                                                         |> List.filter (fun (_, o) -> o >= RegionEdits.SameRegionOverlap)
                                                         |> List.sortByDescending snd
@@ -1965,7 +1965,7 @@ module private StructureView =
                                                         |> List.tryFind (fun node ->
                                                             match node.Geometry with
                                                             | NonNull own when node.Tag = "P" && own.PageNumber = edit.Page ->
-                                                                RegionEdits.overlap own edit.Box >= RegionEdits.SameRegionOverlap
+                                                                Boxes.overlap own edit.Box >= RegionEdits.SameRegionOverlap
                                                             | _ -> false)
                                                         |> Option.bind (fun node -> Option.ofObj node.Content)
                                                         |> Option.map (fun text ->
