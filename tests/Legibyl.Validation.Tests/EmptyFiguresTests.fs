@@ -124,3 +124,70 @@ let ``a figure that draws nothing but has alt text is left alone`` () =
 
     result.AppliedFixes |> should contain "Removed 1 figure tag(s) that draw nothing."
     tags fixedAgain.Path |> should equal [ "P"; "Figure"; "Figure"; "Figure"; "Figure" ]
+
+[<Fact>]
+let ``once they're gone there's nothing to remove: no copy is written, and it says why`` () =
+    use input = new TempPdf()
+    use once = new TempPdf ".once"
+    use twice = new TempPdf ".twice"
+    createPdf input.Path
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, once.Path, PdfFixOptions.EmptyFigures) |> ignore
+
+    let result = VeraPdfValidator().Fix(once.Path, PdfProfile.PdfUa1, twice.Path, PdfFixOptions.EmptyFigures)
+
+    result.WasFixed |> should be False
+    System.IO.File.Exists twice.Path |> should be False
+    List.ofSeq result.NotApplied |> should equal [ "Remove figure tags that draw nothing: nothing in this PDF needed it." ]
+
+[<Fact>]
+let ``an untagged PDF has no figures to remove`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.AddNewPage() |> ignore
+
+    (VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyFigures)).WasFixed |> should be False
+
+[<Fact>]
+let ``with the safe fixes, the empty figures go and nothing new fails`` () =
+    use input = new TempPdf()
+    use alone = new TempPdf ".alone"
+    use withSafe = new TempPdf ".safe"
+    createPdf input.Path
+    // The safe fixes alone, to compare: their metadata claims PDF/UA, which brings checks of its own.
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, alone.Path, FixNames.safe) |> ignore
+
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, withSafe.Path, FixNames.safe ||| PdfFixOptions.EmptyFigures) |> ignore
+
+    tags withSafe.Path |> should equal [ "P"; "Figure"; "Figure"; "Figure" ]
+    emptyFigureWarnings withSafe.Path |> should be Empty
+    let failed (path: string) = VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    Set.difference (failed withSafe.Path) (failed alone.Path) |> should be Empty
+
+[<Fact>]
+let ``a figure drawn as an inline image draws something, and stays`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let page = document.AddNewPage()
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber 0) |> ignore
+        let pixels = [| 255uy; 0uy; 0uy; 0uy; 255uy; 0uy; 0uy; 0uy; 255uy; 255uy; 255uy; 0uy |]
+        // Inline (BI … ID … EI), as some tools write small images.
+        let canvas = PdfCanvas(page).BeginMarkedContent(PdfName.Figure, properties)
+        canvas.AddImageWithTransformationMatrix(ImageDataFactory.Create(2, 2, 3, 8, pixels, null), 100f, 0f, 0f, 100f, 72f, 550f, true) |> ignore
+        canvas.EndMarkedContent() |> ignore
+        let root = PdfDictionary()
+        root.Put(PdfName.Type, PdfName.StructTreeRoot) |> ignore
+        root.MakeIndirect document |> ignore
+        let tagged = element document "Document" page [ element document "Figure" page [ PdfNumber 0 ] ]
+        tagged.Put(PdfName.P, root) |> ignore
+        root.Put(PdfName.K, tagged) |> ignore
+        document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, root) |> ignore
+
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyFigures)
+
+    emptyFigureWarnings input.Path |> should be Empty
+    result.WasFixed |> should be False

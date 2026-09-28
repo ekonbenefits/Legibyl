@@ -507,7 +507,8 @@ let orderedFixes
 
 /// The structural fixes Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per fix that actually changed something, so a
-/// document that already had a given fix applied reports nothing for it.
+/// document that already had a given fix applied reports nothing for it; and the fixes asked
+/// for that found nothing to change.
 let applyFixes
     (inputPath: string)
     (outputPath: string)
@@ -516,11 +517,14 @@ let applyFixes
     (layout: PageLayout option)
     (edits: ElementEdit list)
     (title: string option)
-    : string list =
+    : string list * PdfFixOptions list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
-    [ for option, apply in orderedFixes titles layout edits title do
-          if options.HasFlag option then
-              yield! apply document context ]
+    let results =
+        [ for option, apply in orderedFixes titles layout edits title do
+              if options.HasFlag option then
+                  yield option, apply document context ]
+    // What each did, and those asked for that found nothing to change.
+    List.collect snd results, [ for option, lines in results do if lines.IsEmpty then option ]
