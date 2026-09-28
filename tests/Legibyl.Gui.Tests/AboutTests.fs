@@ -55,18 +55,48 @@ let ``Copy's text starts with the line legibyl --version prints`` () =
     lines[0] |> should startWith $"legibyl {BuildInfo.version} (vendored veraPDF engine "
     lines.Length |> should equal (About.components().Length + 1)
 
+/// What a text block shows: its text, or its runs'.
+let private shownText (t: TextBlock) =
+    match t.Inlines with
+    | NonNull inlines when inlines.Count > 0 ->
+        inlines |> Seq.map (function :? Documents.Run as r -> string r.Text | _ -> "") |> String.concat ""
+    | _ -> string t.Text
+
 [<Fact>]
-let ``Licenses… shows the NOTICE, and each license text`` () =
+let ``Licenses… draws the NOTICE from its Markdown, and shows each license as written`` () =
     withAbout (fun _ about ->
         (button about "Licenses…").RaiseEvent(RoutedEventArgs Button.ClickEvent)
         pump ()
         let licenses = about.OwnedWindows |> Seq.exactlyOne
-        let shown = texts licenses |> String.concat "\n"
-        let names = (descendants<ComboBox> licenses |> List.exactlyOne).Items |> Seq.map string |> List.ofSeq
+        let picker = descendants<ComboBox> licenses |> List.exactlyOne
+        let names = picker.Items |> Seq.map string |> List.ofSeq
+        let notice = descendants<TextBlock> licenses |> List.map shownText
+        let heading =
+            descendants<TextBlock> licenses
+            |> List.find (fun t -> shownText t = "Third-Party Notices")
+        let links = descendants<HyperlinkButton> licenses
+        picker.SelectedItem <- "LICENSE.AGPL"
+        pump ()
+        let agpl = descendants<TextBlock> licenses |> List.map shownText |> String.concat "\n"
 
-        shown |> should haveSubstring "# Third-Party Notices"
         names |> List.head |> should equal "NOTICE.md"
-        names |> should contain "LICENSE.AGPL")
+        names |> should contain "LICENSE.Markdig"
+        Automation.AutomationProperties.GetHeadingLevel heading |> should equal 1
+        // Bold and code drawn, not written out.
+        notice |> should contain "Legibyl's own source code is licensed under the GNU Affero General Public License v3.0 or later — see the LICENSE file at the repository root and LICENSE.AGPL in this directory."
+        for text in notice do
+            text |> should not' (haveSubstring "**")
+            text |> should not' (haveSubstring "](")
+        // The fenced block, as it's written.
+        notice |> List.exists (fun t -> t.StartsWith "Apache PDFBox\nCopyright 2014") |> should be True
+        // Links, bare addresses too, each going where it says.
+        let link text = links |> List.find (fun l -> (l.Content :?> TextBlock).Text = text)
+        (link "IKVM.NET").NavigateUri |> should equal (Uri "https://ikvm.org/")
+        (link "https://verapdf.org").NavigateUri |> should equal (Uri "https://verapdf.org")
+        // An underscore is a word's, not an access key.
+        (link "tessdata_fast").NavigateUri |> should equal (Uri "https://github.com/tesseract-ocr/tessdata_fast")
+        (link "Markdig").NavigateUri |> should equal (Uri "https://github.com/xoofx/markdig")
+        agpl |> should haveSubstring "GNU AFFERO GENERAL PUBLIC LICENSE")
 
 [<Fact>]
 let ``Help › About Legibyl… is in the window's menu where the application has no menu of its own`` () =

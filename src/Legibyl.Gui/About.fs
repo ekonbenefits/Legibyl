@@ -76,7 +76,7 @@ let private window (title: string) (width: float) =
         WindowStartupLocation = WindowStartupLocation.CenterOwner
     )
 
-/// The license texts, one at a time, scrolling.
+/// The license texts, one at a time, scrolling: the notice drawn from its Markdown.
 let showLicenses (owner: Window) : Task =
     let texts = licenses ()
     let shown = HostWindow(Title = "Licenses", Width = 720.0, Height = 560.0, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.CenterOwner)
@@ -103,15 +103,20 @@ let showLicenses (owner: Window) : Task =
                         Button.horizontalAlignment HorizontalAlignment.Right
                         Button.onClick (fun _ -> shown.Close())
                     ]
+                    let text = texts |> List.tryFind (fst >> (=) chosen.Current) |> Option.map snd |> Option.defaultValue ""
                     ScrollViewer.create [
-                        ScrollViewer.content (
-                            SelectableTextBlock.create [
-                                SelectableTextBlock.text (texts |> List.tryFind (fst >> (=) chosen.Current) |> Option.map snd |> Option.defaultValue "")
-                                SelectableTextBlock.textWrapping TextWrapping.Wrap
-                                SelectableTextBlock.fontFamily Fonts.Monospace
-                                SelectableTextBlock.fontSize 12.0
-                            ]
-                        )
+                        // The notice is Markdown, drawn; the licenses are plain text, as written.
+                        if chosen.Current.EndsWith(".md", StringComparison.OrdinalIgnoreCase) then
+                            ScrollViewer.content (Markdown.view text)
+                        else
+                            ScrollViewer.content (
+                                SelectableTextBlock.create [
+                                    SelectableTextBlock.text text
+                                    SelectableTextBlock.textWrapping TextWrapping.Wrap
+                                    SelectableTextBlock.fontFamily Fonts.Monospace
+                                    SelectableTextBlock.fontSize 12.0
+                                ]
+                            )
                     ]
                 ]
             ])

@@ -134,6 +134,13 @@ The plain-language explanations of PDF/UA failures (`RuleGuide.yaml`) are read
 with [YamlDotNet](https://github.com/aaubry/YamlDotNet), licensed under the MIT
 License, used unmodified via a NuGet package reference.
 
+## Markdig
+
+The GUI's Licenses window draws this notice from its Markdown, parsed with
+[Markdig](https://github.com/xoofx/markdig), copyright Alexandre Mutel,
+licensed under the BSD 2-Clause License (full text in `LICENSE.Markdig` in this
+directory), used unmodified via a NuGet package reference.
+
 ## ZXing.Net and qr-link-pdf
 
 QR codes are read with [ZXing.Net](https://github.com/micjahn/ZXing.Net),
