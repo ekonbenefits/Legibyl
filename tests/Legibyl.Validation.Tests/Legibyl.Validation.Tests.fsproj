@@ -42,6 +42,7 @@
     <Compile Include="ParentTreeTests.fs" />
     <Compile Include="SplitFiguresTests.fs" />
     <Compile Include="SavedResultsTests.fs" />
+    <Compile Include="RuleGuideTests.fs" />
     <Compile Include="UntaggedContentTests.fs" />
   </ItemGroup>
 

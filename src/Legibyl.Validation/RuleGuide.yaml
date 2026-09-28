@@ -189,6 +189,42 @@ rules:
     meaning: "Some text uses a font that doesn't say which characters it draws, so a screen reader (or copying the text) gets nothing, or the wrong letters."
     whatToDo: *fonts
 
+  - clause: "6.1"
+    meaning: "The file doesn't start the way a PDF 1.x file must, so some readers and assistive technology may not open it, or read it wrongly."
+    whatToDo: "Save or export it again from the tool that made it, or from a PDF editor; a file damaged in transfer may need getting again."
+
+  - clause: "7.10"
+    meaning: "The PDF has layers (optional content) set up in a way PDF/UA doesn't allow, so what a screen reader reads may not match what's shown."
+    whatToDo: "In a PDF editor's layers panel, give each layer configuration a name, and don't have layers turned on or off automatically (for printing or viewing); or flatten the layers where the PDF was made."
+
+  - clause: "7.11"
+    meaning: "A file attached to the PDF is missing the file name PDF/UA asks for, so a screen reader can't say what it is."
+    whatToDo: "Attach the file again in a PDF editor's attachments panel, which writes its file name."
+
+  - clause: "7.15"
+    meaning: "The PDF is a dynamic XFA form: its pages are built by a script as it's opened, which most readers and assistive technology can't read at all."
+    whatToDo: "Make it an ordinary (AcroForm) form: in the tool that made it, save it as a static PDF form, or rebuild it in a PDF editor."
+
+  - clause: "7.16"
+    meaning: "The PDF is encrypted in a way that stops assistive technology from reading its text."
+    whatToDo: "In the tool that encrypted it, allow content copying for accessibility (or remove the security), and save it again."
+
+  - clause: "7.18.2"
+    meaning: "The PDF has trap network annotations, a printing aid PDF/UA doesn't allow; they mean nothing to a reader."
+    whatToDo: "Remove them with a PDF editor's preflight tools, or export it again without printing marks."
+
+  - clause: "7.18.6.2"
+    meaning: "A media clip (a video or sound) in the PDF doesn't say what kind it is, or has no description, so a screen reader can't say what it is."
+    whatToDo: "In a PDF editor, give the media its content type and a description (its alternate text)."
+
+  - clause: "7.18.8"
+    meaning: "A printer's mark in the PDF isn't marked as decoration, so a screen reader may read it as if it were content."
+    whatToDo: "Remove printer's marks with a PDF editor's preflight tools, or export it again without printing marks."
+
+  - clause: "7.20"
+    meaning: "The PDF shows a page from another file (a reference XObject), which assistive technology can't read."
+    whatToDo: *inTheSource
+
 # PDF/UA-2 (ISO 14289-2), for PDF 2.0 files: the same, by its own clauses. Check them with
 # veraPDF's PDF/UA-2 profile (PDFUA-2-ISO32005.xml).
 pdfUa2Rules:
@@ -354,6 +390,52 @@ pdfUa2Rules:
   - clause: "8.14.1"
     meaning: "A file attached to the PDF has no description, so a screen reader can only say its file name."
     whatToDo: "Give the attachment a description in a PDF editor's attachments panel."
+
+  - clause: "8.2.5.23"
+    meaning: "Ruby text (the small reading aids set beside East Asian characters) is tagged in a way a screen reader can't follow, so the reading and the characters may be read out of step."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.24"
+    meaning: "Warichu (text set in two small lines within a line, in Japanese) is tagged in a way a screen reader can't follow."
+    whatToDo: *inTheSource
+
+  - clause: "8.2.5.29"
+    meaning: "Mathematics (MathML) is tagged outside a formula, so a screen reader may not read it as math."
+    whatToDo: *inTheSource
+
+  - clause: "8.9.2.3"
+    tests: [2]
+    meaning: "A comment's rich text and its plain text say different things, so what a screen reader reads may not be what's shown."
+    whatToDo: "Edit the comment in a PDF editor so its text is the same in both, or delete it and add it again."
+
+  - clause: "8.9.2.4.9"
+    meaning: "A comment's pop-up window is in the tags, so a screen reader reads the comment twice, or out of place."
+    whatToDo: "In a PDF editor's tags panel, take the pop-up annotation out of the tags (its comment stays tagged)."
+
+  - clause: "8.9.2.4.10"
+    meaning: "A file attached to a page doesn't say how it relates to the document (the source data, a supplement…), which PDF/UA-2 asks for."
+    whatToDo: "Attach the file again in a PDF editor that sets its relationship (AFRelationship), or set it in the editor's attachments panel."
+
+  - clause: "8.9.2.4.15"
+    meaning: "The PDF has trap network annotations, a printing aid PDF/UA-2 doesn't allow; they mean nothing to a reader."
+    whatToDo: "Remove them with a PDF editor's preflight tools, or export it again without printing marks."
+
+  - clause: "8.9.4.2"
+    meaning: "An annotation's description and its tag's alt text say different things, so a screen reader may read one and not the other."
+    whatToDo: "In Structure…, make the link's description and its alt text the same, or in a PDF editor's tags panel, remove the tag's alt text."
+
+  - clause: "8.10.1"
+    tests: [3]
+    meaning: "The PDF has an XFA form: its fields are described in a way most readers and assistive technology can't read."
+    whatToDo: "Make it an ordinary (AcroForm) form: in the tool that made it, save it as a static PDF form, or rebuild it in a PDF editor."
+
+  - clause: "8.10.3.3"
+    meaning: "A text field's formatted value and its plain value say different things, so a screen reader may read a value that isn't the one shown."
+    whatToDo: "Clear the field and type its value again in a PDF editor, or fix the field where the form was made."
+
+  - clause: "8.10.3.5"
+    meaning: "A signature is shown as a picture with no alt text, so a screen reader can't say who signed it."
+    whatToDo: "Sign it again with a signature appearance that has a description, or add alt text to the signature's picture in a PDF editor."
 
 # ISO 32005's rules for which tags may contain which, which PDF/UA-2 checks too. They're one
 # entry, for every one of its rules.
