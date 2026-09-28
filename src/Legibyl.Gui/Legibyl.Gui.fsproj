@@ -26,6 +26,11 @@
     <Compile Include="DocumentReview.fs" />
     <Compile Include="FindingMarkers.fs" />
     <Compile Include="LayoutOrder.fs" />
+    <Compile Include="StructureColors.fs" />
+    <Compile Include="StructurePreview.fs" />
+    <Compile Include="StructureActions.fs" />
+    <Compile Include="StructureBlocks.fs" />
+    <Compile Include="StructureEditsTab.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="LinkTitleOffer.fs" />
     <Compile Include="About.fs" />
