@@ -86,7 +86,13 @@ type ValidationResult =
       ValidatorNotes: IReadOnlyList<ValidatorNote>
       /// The steps a person checked, when the file is a copy Legibyl wrote carrying them and its
       /// content is still what was checked; null otherwise.
-      CheckedByPerson: CheckedByPerson | null }
+      CheckedByPerson: CheckedByPerson | null
+      /// How many warnings the review dismisses (as the GUI does): left out of Warnings, unless
+      /// --all-warnings asked for them all, and counted either way.
+      DismissedWarnings: int
+      /// Where the review came from: the .legibyl.json file next to the PDF, the PDF (a copy
+      /// carrying one), or --review's path; null when there's none.
+      Review: string | null }
 
     /// A result with only the file and what it's checked against filled in.
     static member Empty(file, target: Target) =
@@ -104,7 +110,9 @@ type ValidationResult =
           Structure = null
           StructureError = null
           ValidatorNotes = [||]
-          CheckedByPerson = null }
+          CheckedByPerson = null
+          DismissedWarnings = 0
+          Review = null }
 
 /// A document's standing against its profile: whether it complies, and how many checks failed.
 type Compliance = { IsCompliant: bool; FailedCount: int }

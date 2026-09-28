@@ -433,3 +433,32 @@ let checkedCopy (pdfPath: string) (outputPath: string) (review: SavedFile) (hash
           CheckedAt = Nullable checkedAt
           Length = FileInfo(pdfPath).Length }
     EmbeddedReview.write pdfPath outputPath (toJson { review with Validation = null; Checklist = checklist })
+
+// ---- Dismissed warnings ----
+
+/// A dismissal's location for every warning of its rule, wherever it is.
+[<Literal>]
+let AnyLocation = "*"
+
+/// The rule a dismissal names a warning by: its specification and rule, e.g. "Legibyl Structure-7".
+let dismissalRule (violation: RuleViolation) = $"{violation.Specification} {violation.RuleId}"
+
+/// The location a dismissal names a warning by: its location context ("" for none).
+let dismissalLocation (violation: RuleViolation) = violation.LocationContext |> Option.ofObj |> Option.defaultValue ""
+
+/// Whether review dismisses violation: a warning (failures can't be dismissed) whose rule it
+/// dismisses there, or everywhere.
+let dismisses (review: SavedFile) (violation: RuleViolation) =
+    violation.Severity = FindingSeverity.Warning
+    && (match review.DismissedWarnings with
+        | NonNull warnings ->
+            let rule, location = dismissalRule violation, dismissalLocation violation
+            warnings |> Array.exists (fun w -> w.Rule = rule && (w.Location = AnyLocation || w.Location = location))
+        | Null -> false)
+
+/// Where pdfPath's review is read from (see readFor): the file next to it, or the PDF itself when
+/// it carries one; None when it has none.
+let sourceFor (pdfPath: string) : string option =
+    if File.Exists(filePath pdfPath) then Some(filePath pdfPath)
+    elif (EmbeddedReview.read pdfPath).IsSome then Some pdfPath
+    else None
