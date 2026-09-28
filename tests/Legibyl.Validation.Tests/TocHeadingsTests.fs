@@ -244,7 +244,7 @@ let ``numbered headings become headings, not a list, when both repairs run`` () 
     // list too; the TOC says they're headings, and headings run first.
     createPdfWithToc input.Path false [ entry "1. Scope" 72f 2; entry "2. Terms" 72f 2 ] (paragraphs 2 [ "1. Scope"; "2. Terms" ])
 
-    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.HeadingsFromToc ||| PdfFixOptions.ListsFromParagraphs)
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.HeadingsFromToc ||| PdfFixOptions.Lists)
     |> ignore
 
     bodyTags output.Path |> should equal [ "H1"; "H1" ]
@@ -257,13 +257,13 @@ let ``the report counts what each repair would address`` () =
     let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1)
 
     report.FixableCount PdfFixOptions.HeadingsFromToc |> should equal 4
-    report.FixableCount PdfFixOptions.ListsFromParagraphs |> should equal 0
+    report.FixableCount PdfFixOptions.Lists |> should equal 0
     // No /DisplayDocTitle (7.1-10): the title repair sets it, so it counts.
     report.FailedAssertions
     |> Seq.filter (fun a -> a.RuleId = "7.1-10")
-    |> Seq.forall (fun a -> a.FixOptions.HasFlag PdfFixOptions.DocumentTitle)
+    |> Seq.forall (fun a -> a.FixOptions.HasFlag PdfFixOptions.Title)
     |> should be True
-    report.FixableCount PdfFixOptions.DocumentTitle |> should be (greaterThan 0)
+    report.FixableCount PdfFixOptions.Title |> should be (greaterThan 0)
 
 /// The first table-of-contents link annotation's action, and the document it's in.
 let private firstTocLinkAction (document: PdfDocument) =

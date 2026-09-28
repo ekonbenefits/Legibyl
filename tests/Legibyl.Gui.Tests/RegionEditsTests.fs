@@ -200,10 +200,10 @@ let ``a page that has changed since isn't taken from the saved layout`` () =
 [<Fact>]
 let ``the auto fixes chosen are saved by name, and choosing none is kept too`` () =
     withPdfPath (fun pdf ->
-        Reviews.save pdf (fun review -> review.AutoFixes <- Some(PdfFixOptions.Metadata ||| PdfFixOptions.AnnotationTabs))
+        Reviews.save pdf (fun review -> review.AutoFixes <- Some(PdfFixOptions.Metadata ||| PdfFixOptions.Tabs))
 
         File.ReadAllText(Dismissals.filePath pdf) |> should haveSubstring "\"fixes\": [\n    \"tabs\",\n    \"metadata\"\n  ]"
-        (Reviews.read pdf).AutoFixes |> should equal (Some(PdfFixOptions.Metadata ||| PdfFixOptions.AnnotationTabs))
+        (Reviews.read pdf).AutoFixes |> should equal (Some(PdfFixOptions.Metadata ||| PdfFixOptions.Tabs))
 
         Reviews.save pdf (fun review -> review.AutoFixes <- Some PdfFixOptions.None)
         (Reviews.read pdf).AutoFixes |> should equal (Some PdfFixOptions.None)

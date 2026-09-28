@@ -192,7 +192,7 @@ let ``tab order fix sets structure tab order on annotated pages`` (id: string) =
     annotatedPageTabs input |> should not' (be Empty)
     annotatedPageTabs input |> should not' (contain iText.Kernel.Pdf.PdfName.S)
 
-    let result = VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output.Path, PdfFixOptions.AnnotationTabs)
+    let result = VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Tabs)
 
     result.WasFixed |> should be True
     result.AppliedFixes |> Seq.exists (fun fix -> fix.Contains "/Tabs /S") |> should be True

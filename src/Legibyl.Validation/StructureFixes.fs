@@ -484,24 +484,24 @@ let orderedFixes
     (title: string option)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.ParentTree, ParentTree.rebuild
-      PdfFixOptions.LanguageFromText, setLanguageFromText
+      PdfFixOptions.Language, setLanguageFromText
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
-      PdfFixOptions.RemoveEmptyParagraphs, removeEmptyParagraphs
-      PdfFixOptions.RemoveEmptyTocEntries, removeEmptyTocEntries
-      PdfFixOptions.RemoveEmptyFigures, EmptyFigures.remove
+      PdfFixOptions.EmptyParagraphs, removeEmptyParagraphs
+      PdfFixOptions.EmptyTocEntries, removeEmptyTocEntries
+      PdfFixOptions.EmptyFigures, EmptyFigures.remove
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
-      PdfFixOptions.ListsFromParagraphs, tagParagraphLists
-      PdfFixOptions.BookmarksFromHeadings, addBookmarks
+      PdfFixOptions.Lists, tagParagraphLists
+      PdfFixOptions.Bookmarks, addBookmarks
       PdfFixOptions.ApplyEdits,
       (fun document context ->
           ElementEdits.apply document context edits
           @ (title |> Option.map (ElementEdits.applyTitle document) |> Option.defaultValue []))
       PdfFixOptions.LinkTargets, (fun document context -> LinkTargets.apply document (LinkTargets.find document context))
-      PdfFixOptions.AnnotationTabs, setAnnotationTabOrder
+      PdfFixOptions.Tabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
       PdfFixOptions.LinkTitlesFromWeb, describeWebLinks titles
-      PdfFixOptions.FontCidToGidMap, setIdentityCidToGidMaps
-      PdfFixOptions.DocumentTitle, setDocumentTitle false
+      PdfFixOptions.FontGlyphs, setIdentityCidToGidMaps
+      PdfFixOptions.Title, setDocumentTitle false
       PdfFixOptions.TitleFromFirstPage, setDocumentTitle true
       PdfFixOptions.Metadata, addMissingMetadata ]
 

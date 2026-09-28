@@ -1,6 +1,6 @@
 /// Finds lists tagged as plain paragraphs: runs of sibling paragraphs that each start with a
 /// list marker ("•", "(1)", "a.") drawn as ordinary text. LegibylChecks reports them; the
-/// ListsFromParagraphs fix tags each run as a list (L > LI > LBody > the original P). Only the
+/// Lists fix tags each run as a list (L > LI > LBody > the original P). Only the
 /// structure tree changes, never the page's drawn content, so the document looks the same;
 /// the marker stays part of each item's text rather than being split out into an Lbl.
 module internal Legibyl.Validation.ParagraphLists

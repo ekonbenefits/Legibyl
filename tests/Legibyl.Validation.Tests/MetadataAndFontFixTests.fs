@@ -91,7 +91,7 @@ let ``embedded TrueType CID fonts without a glyph mapping get Identity, and only
     // Embedded without a map, embedded with one, not embedded.
     createFonts input.Path [ true, false; true, true; false, false ]
 
-    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.FontCidToGidMap)
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.FontGlyphs)
 
     result.AppliedFixes
     |> should contain "Set /CIDToGIDMap /Identity on 1 embedded TrueType CID font(s), the mapping readers already use when it's missing."

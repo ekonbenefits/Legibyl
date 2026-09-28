@@ -86,7 +86,7 @@ let all: Check list =
     [ { TestNumber = 1
         Message =
           "Empty paragraph tag. A screen reader stops on it with nothing to read; an auto fix can remove it."
-        FixOptions = PdfFixOptions.RemoveEmptyParagraphs
+        FixOptions = PdfFixOptions.EmptyParagraphs
         Inspect = emptyParagraph }
       { TestNumber = 2
         Message =
@@ -96,7 +96,7 @@ let all: Check list =
       { TestNumber = 8
         Message =
           "Empty table-of-contents entry (TOCI). It adds a meaningless stop when a screen reader moves through the table of contents and can be removed as an auto fix."
-        FixOptions = PdfFixOptions.RemoveEmptyTocEntries
+        FixOptions = PdfFixOptions.EmptyTocEntries
         Inspect = emptyTocEntry } ]
 
 let private warning message (errorMessage: string | null) location testNumber fixOptions geometry =
@@ -164,7 +164,7 @@ let private paragraphListFindings (document: PdfDocument) context =
               $"{run.Items.Length} paragraphs on page {run.Page}, marked \"{run.FirstMarker}\" to \"{run.LastMarker}\"."
               run.Path
               6
-              PdfFixOptions.ListsFromParagraphs
+              PdfFixOptions.Lists
               (Option.toObj run.Geometry) ]
 
 // ---- Structure-7: headings but no bookmarks (see Bookmarks) ----
@@ -188,7 +188,7 @@ let private missingBookmarkFindings (document: PdfDocument) context =
                    detail)
               missing.FirstHeadingPath
               7
-              (if fixable then PdfFixOptions.BookmarksFromHeadings else PdfFixOptions.None)
+              (if fixable then PdfFixOptions.Bookmarks else PdfFixOptions.None)
               null ]
 
 // ---- Structure-9: the parent tree is missing or incomplete (see ParentTree) ----
@@ -235,7 +235,7 @@ let private EmptyFigureMessage =
 let private emptyFigureFindings (document: PdfDocument) context =
     [ for visit in EmptyFigures.visits document context ->
           let detail = visit.Page |> Option.map (fun page -> $"On page {page}.") |> Option.toObj
-          warning EmptyFigureMessage detail visit.Path 11 PdfFixOptions.RemoveEmptyFigures null ]
+          warning EmptyFigureMessage detail visit.Path 11 PdfFixOptions.EmptyFigures null ]
 
 // ---- Structure-12: a page read out of order, by a big jump ----
 

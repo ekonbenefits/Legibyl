@@ -263,14 +263,14 @@ let ``PDF/UA-2 failures map to the repairs that fix them, by rule`` () =
         report.FailedAssertions |> Seq.filter (fun f -> f.Specification.StartsWith "ISO 14289-2" && f.RuleId = rule) |> Seq.map _.FixOptions |> Seq.head
 
     fixesFor "5-1" |> should equal PdfFixOptions.Metadata
-    fixesFor "8.11.1-1" |> should equal (PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle)
-    fixesFor "8.11.2-1" |> should equal PdfFixOptions.DocumentTitle
-    fixesFor "8.9.3.3-1" |> should equal (PdfFixOptions.AnnotationTabs ||| PdfFixOptions.TagFromLayout)
+    fixesFor "8.11.1-1" |> should equal (PdfFixOptions.Metadata ||| PdfFixOptions.Title)
+    fixesFor "8.11.2-1" |> should equal PdfFixOptions.Title
+    fixesFor "8.9.3.3-1" |> should equal (PdfFixOptions.Tabs ||| PdfFixOptions.TagFromLayout)
     // Untagged: tagging it from its layout (Suggest Structure…) fixes these.
     fixesFor "6.2-1" |> should equal PdfFixOptions.TagFromLayout
     fixesFor "8.2.1-1" |> should equal PdfFixOptions.TagFromLayout
     // Every "natural language" rule falls back on the document's /Lang.
-    (fixesFor "8.4.4-1").HasFlag PdfFixOptions.LanguageFromText |> should be True
+    (fixesFor "8.4.4-1").HasFlag PdfFixOptions.Language |> should be True
     // And each has its guide.
     for finding in report.FailedAssertions do
         RuleGuide.forFinding finding |> Option.isSome |> should be True

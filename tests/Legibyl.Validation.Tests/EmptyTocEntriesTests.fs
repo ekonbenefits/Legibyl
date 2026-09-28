@@ -89,7 +89,7 @@ let ``empty table-of-contents entries are reported`` () =
     // The empty entry, and both the sub-entry and the entry holding only it; not the entry
     // with text, nor the one that owns a link annotation.
     warnings |> should haveLength 3
-    warnings |> List.forall (fun w -> w.FixOptions = PdfFixOptions.RemoveEmptyTocEntries) |> should be True
+    warnings |> List.forall (fun w -> w.FixOptions = PdfFixOptions.EmptyTocEntries) |> should be True
 
 [<Fact>]
 let ``the fix removes them and nothing else`` () =
@@ -97,7 +97,7 @@ let ``the fix removes them and nothing else`` () =
     use output = new TempPdf ".fixed"
     createPdfWithToc input.Path
 
-    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyTocEntries)
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyTocEntries)
 
     result.AppliedFixes |> should contain "Removed 3 empty table-of-contents entr(ies) (TOCI)."
     tocShape output.Path |> should equal [ "TOCI(Link)"; "TOCI(Link)" ]
@@ -114,6 +114,6 @@ let ``removing empty paragraphs leaves empty table-of-contents entries alone`` (
     use output = new TempPdf ".fixed"
     createPdfWithToc input.Path
 
-    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyParagraphs)
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyParagraphs)
 
     result.WasFixed |> should be False

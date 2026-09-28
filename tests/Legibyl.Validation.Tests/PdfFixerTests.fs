@@ -191,7 +191,7 @@ let ``Fix with no selected structural changes does not write output`` () =
             input.Path,
             PdfProfile.PdfUa1,
             output.Path,
-            PdfFixOptions.AnnotationTabs ||| PdfFixOptions.RemoveEmptyParagraphs
+            PdfFixOptions.Tabs ||| PdfFixOptions.EmptyParagraphs
         )
 
     result.WasFixed |> should be False
@@ -205,7 +205,7 @@ let ``Fix direct empty paragraph root kid removes root kid`` () =
     createPdfWithDirectEmptyParagraphRootKid input.Path
     let fixer = VeraPdfValidator()
 
-    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyParagraphs)
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyParagraphs)
 
     result.WasFixed |> should be True
     use document = new PdfDocument(new PdfReader(output.Path))
@@ -227,7 +227,7 @@ let ``Fix removes empty paragraphs under a single Document element`` () =
      setStructTreeRoot document documentElement)
     let fixer = VeraPdfValidator()
 
-    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyParagraphs)
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyParagraphs)
 
     result.WasFixed |> should be True
     result.AppliedFixes |> should contain "Removed 1 empty /P structure element(s)."
@@ -239,7 +239,7 @@ let ``Fix nested empty paragraph removes paragraph`` () =
     createPdfWithNestedEmptyParagraph input.Path
     let fixer = VeraPdfValidator()
 
-    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyParagraphs)
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyParagraphs)
 
     result.WasFixed |> should be True
     use document = new PdfDocument(new PdfReader(output.Path))
@@ -255,7 +255,7 @@ let ``Validate empty paragraph adds fixable warning`` () =
 
     let warning = report.Assertions |> single (fun a -> a.Severity = FindingSeverity.Warning)
     warning.Passed |> should be True
-    warning.FixOptions |> should equal PdfFixOptions.RemoveEmptyParagraphs
+    warning.FixOptions |> should equal PdfFixOptions.EmptyParagraphs
     warning.IsFixable |> should be True
     warning.Message |> should haveSubstring "Empty paragraph tag"
 
@@ -277,7 +277,7 @@ let ``Fix LibreOffice role-mapped whitespace paragraph is removed`` () =
 
     let result =
         VeraPdfValidator()
-            .Fix(corpusFile "libreoffice-empty-paragraph.pdf", PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyParagraphs)
+            .Fix(corpusFile "libreoffice-empty-paragraph.pdf", PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyParagraphs)
 
     result.AppliedFixes
     |> Seq.exists (fun fix -> fix.Contains("Removed 1 empty /P", StringComparison.Ordinal))
@@ -516,7 +516,7 @@ let ``Fix link contents leaves a link outside a table of contents failing`` (tex
     let fixer = VeraPdfValidator()
 
     // Tab order is fixed too, so there's an output file to validate.
-    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents ||| PdfFixOptions.AnnotationTabs)
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkContents ||| PdfFixOptions.Tabs)
 
     describedLinkCount result |> should be False
     linkContentsOf output.Path |> should equal [ (None: string option) ]
@@ -599,7 +599,7 @@ let ``Fix link titles leaves links without a web address, or with a description,
     let titles = FixedTitles [ "https://example.com/", "Example" ]
 
     // Tab order is fixed too, so there's an output file to read.
-    fixWithTitles titles input.Path output.Path (PdfFixOptions.LinkTitlesFromWeb ||| PdfFixOptions.AnnotationTabs) |> ignore
+    fixWithTitles titles input.Path output.Path (PdfFixOptions.LinkTitlesFromWeb ||| PdfFixOptions.Tabs) |> ignore
 
     titles.Asked |> should be Empty
     linkContentsOf output.Path |> should equal [ None; Some "Our home page"; None ]
@@ -640,7 +640,7 @@ let ``Fix document title moves a title the document carries in XMP into the Info
     setXmpTitle input.Path "Retirement Plan Summary"
     let fixer = VeraPdfValidator()
 
-    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle)
+    let result = fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Title)
 
     result.WasFixed |> should be True
     use document = new PdfDocument(new PdfReader(output.Path))
@@ -657,7 +657,7 @@ let ``Fix document title never invents a title for a document that carries none`
 
     // /DisplayDocTitle is still worth setting, so the file does change — but a title the
     // author never wrote is not ours to make up, least of all out of the file name.
-    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle) |> ignore
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Title) |> ignore
 
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetDocumentInfo().GetTitle() |> should be NullOrEmptyString
@@ -722,7 +722,7 @@ let ``Fix document title alone does not take a title from the first page`` () =
     use input = new TempPdf()
     createPdfWithFirstPage input.Path [ "Retirement Plan" ] 1
 
-    fixedTitle PdfFixOptions.DocumentTitle input |> should be NullOrEmptyString
+    fixedTitle PdfFixOptions.Title input |> should be NullOrEmptyString
 
 [<Fact>]
 let ``Fix title from first page prefers a title the document carries in XMP`` () =
@@ -753,7 +753,7 @@ let ``Title findings are fixable from the first page only when there is a title 
         use input = new TempPdf()
         createPdfWithFirstPage input.Path [ "Retirement Plan" ] extraPages
         VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).Findings
-        |> Seq.filter (fun a -> a.FixOptions.HasFlag PdfFixOptions.DocumentTitle)
+        |> Seq.filter (fun a -> a.FixOptions.HasFlag PdfFixOptions.Title)
         |> Seq.map (fun a -> a.FixOptions.HasFlag PdfFixOptions.TitleFromFirstPage)
         |> Seq.distinct
         |> List.ofSeq
@@ -771,7 +771,7 @@ let ``Fix document title keeps a title the document already has`` () =
     File.Copy(output.Path, input.Path, true)
     let fixer = VeraPdfValidator()
 
-    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.DocumentTitle) |> ignore
+    fixer.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Title) |> ignore
 
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetDocumentInfo().GetTitle() |> should equal "The Real Title"

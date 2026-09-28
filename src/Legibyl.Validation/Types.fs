@@ -6,37 +6,46 @@ type FindingSeverity =
     | Failure = 0
     | Warning = 1
 
+/// Legibyl's fixes. Each flag is named as the CLI's --fixes and a review's "fixes" name it, in
+/// kebab-case (FontGlyphs is font-glyphs; see RepairNames); its doc says what it does. The
+/// values are what a saved validation stores, so they never change.
 [<Flags>]
 type PdfFixOptions =
     | None = 0
+    /// Writes the metadata PDF/UA asks for, and its PDF/UA identifier (XMP), with veraPDF's
+    /// metadata fixer.
     | Metadata = 1
-    | AnnotationTabs = 2
-    | RemoveEmptyParagraphs = 4
+    /// Makes the Tab key follow the reading order on pages with annotations (/Tabs /S).
+    | Tabs = 2
+    /// Removes paragraph tags with nothing in them.
+    | EmptyParagraphs = 4
+    /// Describes table-of-contents links with their own text.
     | LinkContents = 8
-    | DocumentTitle = 16
+    /// Sets a document title the author wrote (in Info or XMP), shown in the title bar.
+    | Title = 16
     /// Tags paragraphs the table of contents lists as headings (H1-H6); see TocHeadings.
     | HeadingsFromToc = 32
     /// Tags runs of paragraphs that start with list markers as lists; see ParagraphLists.
-    | ListsFromParagraphs = 64
-    /// Like DocumentTitle, but when the document carries no title anywhere, falls back to
+    | Lists = 64
+    /// Like Title, but when the document carries no title anywhere, falls back to
     /// the text of a short first page (a title page); see StructureFixes.titlePageText.
     | TitleFromFirstPage = 128
     /// Adds bookmarks for the H1 and H2 headings when there are none; see Bookmarks.
-    | BookmarksFromHeadings = 256
-    /// Removes table-of-contents entries (TOCI) with nothing in them, like RemoveEmptyParagraphs.
-    | RemoveEmptyTocEntries = 512
+    | Bookmarks = 256
+    /// Removes table-of-contents entries (TOCI) with nothing in them, like EmptyParagraphs.
+    | EmptyTocEntries = 512
     /// Tags an untagged document from each page's layout (regions found by a layout detector),
     /// before the other fixes run; see LayoutTagging. Needs an IPageLayoutSource.
     | TagFromLayout = 1024
     /// Declares the document's language (/Lang), detected from its text, when it has none;
     /// see DocumentLanguage.
-    | LanguageFromText = 2048
+    | Language = 2048
     /// Writes /CIDToGIDMap /Identity on embedded TrueType CID fonts that leave it out (the
     /// mapping readers already use then), which PDF/UA requires.
-    | FontCidToGidMap = 4096
+    | FontGlyphs = 4096
     /// With TagFromLayout: adds a link over each QR code that encodes a web address, going
     /// there, tagged as a Link holding the figure.
-    | QrCodeLinks = 8192
+    | QrLinks = 8192
     /// Describes web links without a description (/Contents), and QR codes that encode web
     /// addresses, by the titles of the pages they go to, fetched from the internet (safely;
     /// see LinkTitles). Needs an IPageTitleSource.
@@ -56,7 +65,7 @@ type PdfFixOptions =
     | ParentTree = 262144
     /// Removes figures tagged around nothing (see EmptyFigures): they fail for having no alt text,
     /// with nothing on the page to describe.
-    | RemoveEmptyFigures = 524288
+    | EmptyFigures = 524288
     | All = 1048575
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF

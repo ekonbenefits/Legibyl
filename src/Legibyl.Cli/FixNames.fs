@@ -49,7 +49,7 @@ let repairs () =
               [ if safe.HasFlag option then "safe"
                 if not (all.HasFlag option) then "not in all: it visits web pages"
                 if usesLayout option then "downloads the layout model"
-                if option = PdfFixOptions.QrCodeLinks then "with tag-from-layout" ]
+                if option = PdfFixOptions.QrLinks then "with tag-from-layout" ]
           name, described, String.Join(", ", tags) ]
 
 /// One line per repair: its name, what it does, and notes on it (see repairs).

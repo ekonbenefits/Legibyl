@@ -188,7 +188,7 @@ module LayoutSuggestions =
     let private SameIndent = 6.0
 
     /// The detector has no list regions: a list's items come out as paragraphs. Like the
-    /// ListsFromParagraphs fix, runs of two or more consecutive paragraphs that start at the
+    /// Lists fix, runs of two or more consecutive paragraphs that start at the
     /// same indent with markers forming one list ("•", "1.", "(a)") become list items.
     let findLists (blocks: SuggestedBlock list) : SuggestedBlock list =
         let isCandidate (block: SuggestedBlock) = block.Tag = "P" && ParagraphLists.startsWithMarker block.Text

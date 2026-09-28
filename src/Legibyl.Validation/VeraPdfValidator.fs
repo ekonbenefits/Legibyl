@@ -76,7 +76,7 @@ module internal VeraPdf =
     let private fixesByRule: Map<PdfProfile * string, PdfFixOptions> =
         let ua1 rule options = (PdfProfile.PdfUa1, rule), options
         let ua2 rule options = (PdfProfile.PdfUa2, rule), options
-        let metadataAndTitle = PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle
+        let metadataAndTitle = PdfFixOptions.Metadata ||| PdfFixOptions.Title
         Map.ofList
             [ // The PDF/UA identifier in the metadata (pdfuaid:part, and PDF/UA-1's amd and
               // corr or PDF/UA-2's rev).
@@ -92,21 +92,21 @@ module internal VeraPdf =
               // No metadata stream; no dc:title in it; DisplayDocTitle not set.
               ua1 "7.1-8" PdfFixOptions.Metadata
               ua1 "7.1-9" metadataAndTitle
-              ua1 "7.1-10" PdfFixOptions.DocumentTitle
+              ua1 "7.1-10" PdfFixOptions.Title
               ua2 "8.11.1-2" PdfFixOptions.Metadata
               ua2 "8.11.1-1" metadataAndTitle
-              ua2 "8.11.2-1" PdfFixOptions.DocumentTitle
+              ua2 "8.11.2-1" PdfFixOptions.Title
               // The metadata's language (PDF/UA-2 has no such rule).
               ua1 "7.2-33" PdfFixOptions.Metadata
               // Annotations' descriptions (PDF/UA-2 doesn't require one on links).
               ua1 "7.18.1-2" PdfFixOptions.LinkContents
               ua1 "7.18.5-2" PdfFixOptions.LinkContents
               // Tab order on pages with annotations.
-              ua1 "7.18.3-1" PdfFixOptions.AnnotationTabs
-              ua2 "8.9.3.3-1" PdfFixOptions.AnnotationTabs
+              ua1 "7.18.3-1" PdfFixOptions.Tabs
+              ua2 "8.9.3.3-1" PdfFixOptions.Tabs
               // CIDToGIDMap on embedded Type 2 CIDFonts.
-              ua1 "7.21.3.2-1" PdfFixOptions.FontCidToGidMap
-              ua2 "8.4.5.3.2-1" PdfFixOptions.FontCidToGidMap ]
+              ua1 "7.21.3.2-1" PdfFixOptions.FontGlyphs
+              ua2 "8.4.5.3.2-1" PdfFixOptions.FontGlyphs ]
 
     let private determineFixOptions (assertion: RuleViolation) =
         match PdfUaTarget.ofSpecification assertion.Specification with
@@ -230,7 +230,7 @@ module internal VeraPdf =
                     // Titling from the first page does what DocumentTitle does, and can only
                     // add a title where the document has a title page to take it from.
                     let options =
-                        if options.HasFlag PdfFixOptions.DocumentTitle && hasTitlePage.Value then
+                        if options.HasFlag PdfFixOptions.Title && hasTitlePage.Value then
                             options ||| PdfFixOptions.TitleFromFirstPage
                         else
                             options
@@ -271,7 +271,7 @@ module internal VeraPdf =
                         | _ -> options
                     // Every "natural language ... shall be determined" rule falls back on /Lang.
                     if languageUndeclared && assertion.Message.Contains("Natural language", StringComparison.OrdinalIgnoreCase) then
-                        options ||| PdfFixOptions.LanguageFromText
+                        options ||| PdfFixOptions.Language
                     else
                         options
                 let located =
@@ -647,7 +647,7 @@ type VeraPdfValidator() =
                             currentInput
                             tempOutput
                             source
-                            (options.HasFlag PdfFixOptions.QrCodeLinks)
+                            (options.HasFlag PdfFixOptions.QrLinks)
                             (if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then Some this.PageTitleSource else None)
                             (report FixStage.Tagging)
                     with

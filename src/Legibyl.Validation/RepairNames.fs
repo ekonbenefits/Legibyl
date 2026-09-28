@@ -1,27 +1,35 @@
 /// Each repair's name, as the CLI's --fixes and a review's "fixes" have it.
 module Legibyl.Validation.RepairNames
 
-/// Each repair's name, in the order they run.
-let names =
-    [ "tag-from-layout", PdfFixOptions.TagFromLayout
-      "qr-links", PdfFixOptions.QrCodeLinks
-      "parent-tree", PdfFixOptions.ParentTree
-      "language", PdfFixOptions.LanguageFromText
-      "headings-from-toc", PdfFixOptions.HeadingsFromToc
-      "empty-paragraphs", PdfFixOptions.RemoveEmptyParagraphs
-      "empty-toc-entries", PdfFixOptions.RemoveEmptyTocEntries
-      "empty-figures", PdfFixOptions.RemoveEmptyFigures
-      "join-split-paragraphs", PdfFixOptions.JoinSplitParagraphs
-      "lists", PdfFixOptions.ListsFromParagraphs
-      "bookmarks", PdfFixOptions.BookmarksFromHeadings
-      "link-targets", PdfFixOptions.LinkTargets
-      "tabs", PdfFixOptions.AnnotationTabs
-      "font-glyphs", PdfFixOptions.FontCidToGidMap
-      "link-contents", PdfFixOptions.LinkContents
-      "link-titles-from-web", PdfFixOptions.LinkTitlesFromWeb
-      "title", PdfFixOptions.DocumentTitle
-      "title-from-first-page", PdfFixOptions.TitleFromFirstPage
-      "metadata", PdfFixOptions.Metadata ]
+/// The fixes in the order they run (ApplyEdits isn't one to name: edits apply with --edits).
+let order =
+    [ PdfFixOptions.TagFromLayout
+      PdfFixOptions.QrLinks
+      PdfFixOptions.ParentTree
+      PdfFixOptions.Language
+      PdfFixOptions.HeadingsFromToc
+      PdfFixOptions.EmptyParagraphs
+      PdfFixOptions.EmptyTocEntries
+      PdfFixOptions.EmptyFigures
+      PdfFixOptions.JoinSplitParagraphs
+      PdfFixOptions.Lists
+      PdfFixOptions.Bookmarks
+      PdfFixOptions.LinkTargets
+      PdfFixOptions.Tabs
+      PdfFixOptions.FontGlyphs
+      PdfFixOptions.LinkContents
+      PdfFixOptions.LinkTitlesFromWeb
+      PdfFixOptions.Title
+      PdfFixOptions.TitleFromFirstPage
+      PdfFixOptions.Metadata ]
+
+/// A fix's name as the CLI and a review have it: its flag's name in kebab-case (FontGlyphs is
+/// "font-glyphs").
+let nameOf (option: PdfFixOptions) =
+    System.Text.RegularExpressions.Regex.Replace(string option, "(?<=[a-z])(?=[A-Z])", "-").ToLowerInvariant()
+
+/// Each fix's name, in the order they run.
+let names = [ for option in order -> nameOf option, option ]
 
 /// The repairs that need no guesswork about the document's meaning: what the CLI's `fix` applies
 /// by default, and what the GUI's Auto Fixes start with ticked. The title only moves across a
@@ -29,10 +37,10 @@ let names =
 let safe =
     PdfFixOptions.ParentTree
     ||| PdfFixOptions.Metadata
-    ||| PdfFixOptions.AnnotationTabs
+    ||| PdfFixOptions.Tabs
     ||| PdfFixOptions.LinkContents
-    ||| PdfFixOptions.DocumentTitle
-    ||| PdfFixOptions.FontCidToGidMap
+    ||| PdfFixOptions.Title
+    ||| PdfFixOptions.FontGlyphs
 
 /// The names of the repairs in options, in the order they run.
 let ofOptions (options: PdfFixOptions) =

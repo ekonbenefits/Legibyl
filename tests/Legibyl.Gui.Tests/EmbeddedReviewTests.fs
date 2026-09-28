@@ -12,7 +12,7 @@ let private logo: StructureGeometry = { PageNumber = 1; Left = 100.0; Bottom = 5
 
 let private splitParagraphs = { Dismissals.Rule = "Legibyl Structure-2"; Dismissals.Location = Dismissals.AnyLocation }
 
-/// A PDF (with an annotation but no tab order, for the AnnotationTabs fix to repair) in a fresh
+/// A PDF (with an annotation but no tab order, for the Tabs fix to repair) in a fresh
 /// temporary folder, and where its fixed copy goes.
 let private withPdf (test: string -> string -> unit) =
     let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
@@ -32,7 +32,7 @@ let private withPdf (test: string -> string -> unit) =
 let private fixCarrying (pdf: string) (output: string) (dismissed: Dismissals.Dismissed) =
     let review = Reviews.read pdf
     review.Dismissed <- dismissed
-    VeraPdfValidator(Review = review.ForCopy pdf).Fix(pdf, PdfProfile.PdfUa1, output, PdfFixOptions.AnnotationTabs)
+    VeraPdfValidator(Review = review.ForCopy pdf).Fix(pdf, PdfProfile.PdfUa1, output, PdfFixOptions.Tabs)
     |> ignore
 
 [<Fact>]

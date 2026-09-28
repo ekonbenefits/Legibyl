@@ -8,7 +8,7 @@ open iText.Kernel.Pdf
 open Legibyl.Validation
 open Legibyl.Validation.Tests.TestSupport
 
-/// A page with an annotation but no tab order, for the AnnotationTabs fix to repair.
+/// A page with an annotation but no tab order, for the Tabs fix to repair.
 let private createNeedingTabs (path: string) =
     use document = new PdfDocument(new PdfWriter(path))
     let annotations = PdfArray()
@@ -34,8 +34,8 @@ let ``the fixed copy carries the review, compressed, out of readers' sight`` () 
     use without = new TempPdf()
     createNeedingTabs input.Path
 
-    VeraPdfValidator(Review = carrying review).Fix(input.Path, PdfProfile.PdfUa1, withReview.Path, PdfFixOptions.AnnotationTabs) |> ignore
-    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, without.Path, PdfFixOptions.AnnotationTabs) |> ignore
+    VeraPdfValidator(Review = carrying review).Fix(input.Path, PdfProfile.PdfUa1, withReview.Path, PdfFixOptions.Tabs) |> ignore
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, without.Path, PdfFixOptions.Tabs) |> ignore
 
     EmbeddedReview.read withReview.Path |> should equal (Some review)
     EmbeddedReview.read without.Path |> should equal None
@@ -50,10 +50,10 @@ let ``a review is only embedded when the fix saves a copy`` () =
     use input = new TempPdf()
     use output = new TempPdf()
     createNeedingTabs input.Path
-    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.AnnotationTabs) |> ignore
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Tabs) |> ignore
 
     // Already has its tab order: nothing to fix, so no copy.
-    let result = VeraPdfValidator(Review = carrying review).Fix(output.Path, PdfProfile.PdfUa1, input.Path + ".again.pdf", PdfFixOptions.AnnotationTabs)
+    let result = VeraPdfValidator(Review = carrying review).Fix(output.Path, PdfProfile.PdfUa1, input.Path + ".again.pdf", PdfFixOptions.Tabs)
 
     result.WasFixed |> should be False
     File.Exists(input.Path + ".again.pdf") |> should be False
