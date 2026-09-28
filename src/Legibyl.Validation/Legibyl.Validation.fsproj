@@ -49,7 +49,7 @@
     <!-- The text RuleGuide.fs reads, embedded so the CLI and the app need no file beside them. -->
     <EmbeddedResource Include="RuleGuide.yaml" LogicalName="Legibyl.Validation.RuleGuide.yaml" />
     <Compile Include="RuleGuide.fs" />
-    <Compile Include="RepairNames.fs" />
+    <Compile Include="FixNames.fs" />
     <Compile Include="ReviewFile.fs" />
     <Compile Include="VeraPdfValidator.fs" />
     <Compile Include="BuildInfo.fs" />

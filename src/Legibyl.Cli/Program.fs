@@ -116,7 +116,7 @@ let private formatOption () =
 let private fixesOption (defaultNames: string) =
     optionMaybe<string> "--fixes"
     |> desc
-        $"The repairs to run, comma-separated: \"safe\" (the ones that need no guesswork), \"all\" (every one \
+        $"The fixes to run, comma-separated: \"safe\" (the ones that need no guesswork), \"all\" (every one \
           but link-titles-from-web, which visits web pages), \"none\", or names from 'legibyl list fixes', e.g. \
           \"safe,lists,headings-from-toc\". Default: {defaultNames}. tag-from-layout and join-split-paragraphs \
           download the layout model (about 130 MB) the first time."
@@ -283,8 +283,8 @@ let private runValidate (args: ValidateArgs) =
 
 // ---- fix and layout apply ----
 
-/// What to repair a file with.
-type private Repair =
+/// What to fix a file with.
+type private FixRequest =
     { /// --ua's standard, if given; else each file's own.
       Ua: string option
       Fixes: PdfFixOptions
@@ -303,8 +303,8 @@ let private nextVersion (file: string) =
     | NonNull dir when dir <> "" -> Path.Combine(dir, name)
     | _ -> name
 
-let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: string) : RepairResult =
-    let target = targetFor repair.Ua file
+let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: string) : FixOutcome =
+    let target = targetFor request.Ua file
     let profile = target.Profile
     let result =
         { File = file
@@ -319,23 +319,23 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
           Before = null
           After = null
           ValidatorNotes = [||] }
-    let targetPath = repair.Output |> Option.defaultWith (fun () -> nextVersion file)
+    let targetPath = request.Output |> Option.defaultWith (fun () -> nextVersion file)
     // The review's edits (--edits: the file's own review), and a layout it recorded for an
     // untagged PDF (only the pages that haven't changed since).
     let review =
-        repair.Review
-        |> Option.orElseWith (fun () -> if repair.ReviewAsked then ReviewFile.readFor file else None)
+        request.Review
+        |> Option.orElseWith (fun () -> if request.ReviewAsked then ReviewFile.readFor file else None)
         |> Option.map (fun review ->
             match review.Layout with
             | NonNull layout -> { review with Layout = LayoutFile.current file layout }
             | Null -> review)
     let noReview =
-        [ if repair.ReviewAsked && review.IsNone then
+        [ if request.ReviewAsked && review.IsNone then
               $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
     let reviewLayout = review |> Option.bind (fun review -> Option.ofObj review.Layout)
     let options =
-        repair.Fixes
-        ||| (if repair.Layout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
+        request.Fixes
+        ||| (if request.Layout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
         ||| (match review with
              | Some review when not (ReviewFile.edits review).IsEmpty || not (String.IsNullOrWhiteSpace review.Title) -> PdfFixOptions.ApplyEdits
              | _ -> PdfFixOptions.None)
@@ -350,7 +350,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                 ValidatorNotes = before.Notes }
         | None -> { result with Error = $"'{file}' couldn't be validated." }
     else
-        // The layout model, for the repairs that read the page's layout, unless a layout given or
+        // The layout model, for the fixes that read the page's layout, unless a layout given or
         // reviewed has every page.
         let pageCount () =
             use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(file))
@@ -358,7 +358,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
         let model =
             let needed =
                 FixNames.usesLayout options
-                && (match repair.Layout |> Option.orElse reviewLayout with
+                && (match request.Layout |> Option.orElse reviewLayout with
                     | Some layout -> not (LayoutFile.covers layout (pageCount ()))
                     | None -> true)
             if needed then
@@ -368,7 +368,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                 None
         let modelSource = model |> Option.map (fun model -> model :> IPageLayoutSource)
         let layout: IPageLayoutSource option =
-            match repair.Layout, review with
+            match request.Layout, review with
             // The layout given, with the review's edits layered on (not a layout of its own).
             | Some given, Some review -> Some(ReviewFile.ReviewedRegions(LayoutFile.FileRegions(given, modelSource), { review with Layout = null }))
             | Some given, None -> Some(LayoutFile.FileRegions(given, modelSource))
@@ -392,12 +392,12 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                 let tagged = applied |> Array.exists (fun line -> line.StartsWith "Tagged ")
                 // Edits of the layout tagged from that it couldn't use, and why.
                 let unmatched =
-                    match repair.Layout |> Option.orElse reviewLayout, review with
+                    match request.Layout |> Option.orElse reviewLayout, review with
                     | Some layout, Some review when tagged -> LayoutFile.unmatched layout (ReviewFile.edits review)
                     | _ -> []
                 let notApplied = Array.ofList (List.ofSeq fix.NotApplied @ unmatched @ noReview)
                 match fix.OutputPath with
-                | _ when repair.Layout.IsSome && not tagged ->
+                | _ when request.Layout.IsSome && not tagged ->
                     { result with
                         Status = FixStatus.AlreadyTagged
                         OutputPath = fix.OutputPath
@@ -410,7 +410,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                             | Null -> null }
                 | NonNull copy ->
                     { result with
-                        Status = FixStatus.Repaired
+                        Status = FixStatus.Fixed
                         OutputPath = copy
                         Applied = applied
                         NotApplied = notApplied
@@ -427,15 +427,15 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
             validator.Review <- null
             model |> Option.iter (fun model -> (model :> IDisposable).Dispose())
 
-let private fixText (results: RepairResult list) =
+let private fixText (results: FixOutcome list) =
     let sb = StringBuilder()
     let line (text: string) = sb.AppendLine text |> ignore
     let standing (c: Compliance) = if c.IsCompliant then "PASS" else $"FAIL, {c.FailedCount} failed"
     for r in results do
         match r.Status, r.Before, r.After with
         | FixStatus.Error, _, _ -> line $"{r.File}: ERROR — {r.Error}"
-        | FixStatus.Repaired, NonNull before, NonNull after ->
-            line $"{r.File}: repaired → {r.OutputPath} (before: {standing before}; after: {standing after})"
+        | FixStatus.Fixed, NonNull before, NonNull after ->
+            line $"{r.File}: fixed → {r.OutputPath} (before: {standing before}; after: {standing after})"
         | FixStatus.AlreadyTagged, _, _ -> line $"{r.File}: already tagged; a layout is for an untagged file"
         | _, NonNull before, _ -> line $"{r.File}: nothing to do ({standing before})"
         | status, _, _ -> line $"{r.File}: {status}"
@@ -447,9 +447,9 @@ let private fixText (results: RepairResult list) =
             line (noteLine note)
     sb.ToString().TrimEnd('\n', '\r')
 
-/// The exit code for a repair: whether the document it leaves (the copy, else the original)
+/// The exit code for a fix: whether the document it leaves (the copy, else the original)
 /// complies.
-let private fixExit (r: RepairResult) =
+let private fixExit (r: FixOutcome) =
     match r.Status, r.After, r.Before with
     | FixStatus.Error, _, _ -> ExitCodes.ToolError
     | FixStatus.AlreadyTagged, _, _ -> ExitCodes.DocumentProblem
@@ -481,8 +481,8 @@ let private sidecarProblems (edits: bool) (files: string seq) =
     if not edits then None
     else files |> Seq.tryPick (fun file -> editProblems "--edits" (ReviewFile.filePath file))
 
-let private runRepair (validator: VeraPdfValidator) (files: string list) (repair: Repair) (format: string) (report: string option) =
-    let results = [ for file in files -> repairFile validator repair file ]
+let private runFixes (validator: VeraPdfValidator) (files: string list) (request: FixRequest) (format: string) (report: string option) =
+    let results = [ for file in files -> fixFile validator request file ]
     write report (if format = "json" then toJson results else fixText results)
     results |> List.map fixExit |> worst
 
@@ -504,13 +504,13 @@ let private runFix (args: FixArgs) =
     elif (sidecarProblems args.Edits args.Files).IsSome then
         usageError (sidecarProblems args.Edits args.Files).Value
     elif args.Output.IsSome && args.Files.Length > 1 then
-        usageError "--output names one repaired copy: use it with a single file (several get their next versions)."
+        usageError "--output names one fixed copy: use it with a single file (several get their next versions)."
     else
         match args.EditsFrom |> Option.map reviewFrom with
         | Some(Error message) -> usageError message
         | review ->
             let fixes = FixNames.parse (defaultArg args.Fixes "safe") |> Result.defaultValue FixNames.safe
-            runRepair
+            runFixes
                 (VeraPdfValidator())
                 (List.ofArray args.Files)
                 { Ua = args.Ua
@@ -623,7 +623,7 @@ let private runApply (args: ApplyArgs) =
         | _, Some(Error message) -> usageError message
         | Ok layout, review ->
             let fixes = FixNames.parse (defaultArg args.Fixes "none") |> Result.defaultValue PdfFixOptions.None
-            runRepair
+            runFixes
                 (VeraPdfValidator())
                 [ args.File ]
                 { Ua = args.Ua
@@ -719,14 +719,14 @@ let private validateCommand =
 let private fixCommand =
     command "fix" {
         description
-            "Repair PDFs, writing each one's next version (\"<name>.v2.pdf\"; \"<name>.v3.pdf\" for \"<name>.v2.pdf\"), and validate the copy."
+            "Fix PDFs, writing each one's next version (\"<name>.v2.pdf\"; \"<name>.v3.pdf\" for \"<name>.v2.pdf\"), and validate the copy."
         inputs (
             input {
                 let! files = filesArgument ()
                 and! fixes = fixesOption "safe"
                 and! edits = editsOption ()
                 and! editsFrom = editsFromOption ()
-                and! output = optionMaybe "--output" |> desc "The repaired copy's path (one file only)." |> helpName "path"
+                and! output = optionMaybe "--output" |> desc "The fixed copy's path (one file only)." |> helpName "path"
                 and! ua = uaOption ()
                 and! format = formatOption ()
                 and! report = reportOption ()
@@ -840,7 +840,7 @@ let private listCommand =
         noAction
         addCommand (
             command "fixes" {
-                description "The repairs 'fix --fixes' can name, with what each does."
+                description "The fixes 'fix --fixes' can name, with what each does."
                 inputs (listFormatOption ())
                 setAction listFixes
             }
@@ -852,7 +852,7 @@ let main argv =
     let root =
         ManualInvocation.rootCommand {
             description
-                "legibyl - PDF/UA validator and repairer (CLI), powered by veraPDF via IKVM.\n\n\
+                "legibyl - PDF/UA validator and fixer (CLI), powered by veraPDF via IKVM.\n\n\
                  Designed for scripting and AI-agent use: output is machine-readable JSON on stdout by default, and\n\
                  the exit code tells you the outcome without needing to parse output."
             noAction

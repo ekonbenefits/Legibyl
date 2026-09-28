@@ -116,7 +116,7 @@ type DocumentReview(modified: DateTime) =
           Edits = (if edits.Length = 0 then null else edits)
           Title = Option.toObj this.Title
           Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null)
-          Fixes = (this.AutoFixes |> Option.map (RepairNames.ofOptions >> Array.ofList) |> Option.toObj)
+          Fixes = (this.AutoFixes |> Option.map (FixNames.ofOptions >> Array.ofList) |> Option.toObj)
           Validation = Option.toObj this.Validation
           Checklist =
             match this.Checklist with
@@ -205,7 +205,7 @@ type DocumentReviews() =
             | Some saved ->
                 review.Edits <- RegionEdits.editsIn saved
                 review.Title <- Option.ofObj saved.Title
-                review.AutoFixes <- Option.ofObj saved.Fixes |> Option.map RepairNames.toOptions
+                review.AutoFixes <- Option.ofObj saved.Fixes |> Option.map FixNames.toOptions
                 review.Validation <- Option.ofObj saved.Validation
                 review.Checklist <-
                     match saved.Checklist with

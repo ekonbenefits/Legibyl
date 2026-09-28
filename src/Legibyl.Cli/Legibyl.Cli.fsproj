@@ -29,7 +29,6 @@
 
   <ItemGroup>
     <Compile Include="Results.fs" />
-    <Compile Include="FixNames.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

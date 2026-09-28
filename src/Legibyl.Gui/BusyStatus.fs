@@ -5,7 +5,7 @@ open Legibyl.Validation
 
 /// What the progress row under the file row is showing.
 type BusyProgress =
-    /// Validating, and what: "Validating", or "Validating the repaired copy".
+    /// Validating, and what: "Validating", or "Validating the fixed copy".
     | Validating of activity: string * ValidationProgress
     | ReadingStructure of StructureReadProgress
     /// Downloading the layout model for tagging from the layout: the fraction done.
@@ -41,8 +41,8 @@ let statusText (progress: BusyProgress) : string =
             | FixStage.CheckingOriginal -> $"{step}checking the original…"
             | FixStage.Tagging when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to tag it"
             | FixStage.Tagging -> $"{step}tagging from the layout…"
-            // Only joining split paragraphs reports pages while repairing.
-            | FixStage.Repairing when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to join split paragraphs"
-            | FixStage.Repairing -> $"{step}applying the repairs…"
-            | _ -> $"{step}repairing metadata with veraPDF…"
+            // Only joining split paragraphs reports pages while fixing.
+            | FixStage.Fixing when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to join split paragraphs"
+            | FixStage.Fixing -> $"{step}applying the fixes…"
+            | _ -> $"{step}fixing metadata with veraPDF…"
         status

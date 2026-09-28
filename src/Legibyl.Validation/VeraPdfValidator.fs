@@ -70,9 +70,9 @@ module internal VeraPdf =
         | Some(_, repairStatus) -> repairStatus
         | None -> raise (ArgumentOutOfRangeException(nameof status, string status, "Unknown veraPDF repair status"))
 
-    /// What repairs each rule's failure, by standard and rule ("clause-test", as veraPDF numbers
+    /// What fixes each rule's failure, by standard and rule ("clause-test", as veraPDF numbers
     /// them). PDF/UA-1 and PDF/UA-2 number the same requirements differently. Anything else has
-    /// no repair here (though withLegibylAnalysis adds some, from what's in the file).
+    /// no fix here (though withLegibylAnalysis adds some, from what's in the file).
     let private fixesByRule: Map<PdfProfile * string, PdfFixOptions> =
         let ua1 rule options = (PdfProfile.PdfUa1, rule), options
         let ua2 rule options = (PdfProfile.PdfUa2, rule), options
@@ -440,32 +440,32 @@ module internal VeraPdf =
         let flavour = toJavaFlavour profile
         let foundry = Foundries.defaultInstance ()
         // veraPDF's own output is an incremental update iText can't read reliably, so it only
-        // goes to a scratch file; MetadataTransfer copies the repair into outputPath.
-        let repairedPath = createTemporaryPdfPath outputPath
+        // goes to a scratch file; MetadataTransfer copies the fix into outputPath.
+        let fixedPath = createTemporaryPdfPath outputPath
         try
             let status, appliedFixes =
                 wrapErrors $"veraPDF failed to fix '{pdfPath}'" (fun () ->
                     use parser = foundry.createParser (java.io.File pdfPath, flavour)
                     let result = foundry.createValidator(flavour, false).validate parser
                     let fixResult =
-                        use outputStream = new java.io.FileOutputStream(repairedPath)
+                        use outputStream = new java.io.FileOutputStream(fixedPath)
                         foundry.createMetadataFixer().fixMetadata (parser, outputStream, result)
 
                     toRepairStatus (fixResult.getRepairStatus ()),
                     [ for fix in javaSeq (fixResult.getAppliedFixes ()) -> fix :?> string ])
 
             // Only Success/IdRemoved reflect the fixer actually changing something; NoAction,
-            // WontFix and FixError leave a repaired copy that's either empty or just a useless
+            // WontFix and FixError leave a fixed copy that's either empty or just a useless
             // byte-for-byte (or broken) duplicate of the original. Don't produce a file the user
             // didn't ask for and can't use.
             let changed =
                 (status = RepairStatus.Success || status = RepairStatus.IdRemoved)
-                && File.Exists repairedPath
-                && FileInfo(repairedPath).Length > 0L
+                && File.Exists fixedPath
+                && FileInfo(fixedPath).Length > 0L
             let revised =
                 changed
-                && wrapErrors $"veraPDF failed to read its repaired copy of '{pdfPath}'" (fun () ->
-                    MetadataTransfer.apply pdfPath repairedPath outputPath)
+                && wrapErrors $"veraPDF failed to read its fixed copy of '{pdfPath}'" (fun () ->
+                    MetadataTransfer.apply pdfPath fixedPath outputPath)
             // Say the revision it has, not the one veraPDF wrote.
             let revision = $"'rev' with value '{MetadataTransfer.PdfUa2Revision}'"
             let appliedFixes =
@@ -479,9 +479,9 @@ module internal VeraPdf =
               Status = status
               AppliedFixes = appliedFixes }
         finally
-            tryDeleteTemporary repairedPath
+            tryDeleteTemporary fixedPath
 
-    /// Moves the last repair step's temporary file to the requested output path.
+    /// Moves the last fix step's temporary file to the requested output path.
     ///
     /// veraPDF's parser can still be holding the file it read when the metadata fixer
     /// decided not to change anything: its Java handle is released on its own schedule
@@ -599,8 +599,8 @@ type VeraPdfValidator() =
         let steps =
             [ yield FixStage.CheckingOriginal
               if tagging then yield FixStage.Tagging
-              if options &&& structuralOptions <> PdfFixOptions.None then yield FixStage.Repairing
-              if options.HasFlag PdfFixOptions.Metadata then yield FixStage.RepairingMetadata ]
+              if options &&& structuralOptions <> PdfFixOptions.None then yield FixStage.Fixing
+              if options.HasFlag PdfFixOptions.Metadata then yield FixStage.FixingMetadata ]
         let report stage page pageCount =
             match progress with
             | NonNull progress ->
@@ -635,8 +635,8 @@ type VeraPdfValidator() =
 
         try
             try
-                // Tagging an untagged document comes first, so the structural repairs can work
-                // on its tags; then Legibyl's own repairs, then veraPDF's metadata fix.
+                // Tagging an untagged document comes first, so the structural fixes can work
+                // on its tags; then Legibyl's own fixes, then veraPDF's metadata fix.
                 match this.LayoutSource with
                 | NonNull source when tagging ->
                     report FixStage.Tagging 0 0
@@ -663,13 +663,13 @@ type VeraPdfValidator() =
                 | _ -> ()
 
                 if options &&& structuralOptions <> PdfFixOptions.None then
-                    report FixStage.Repairing 0 0
+                    report FixStage.Fixing 0 0
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempStructuralOutput <- tempOutput
                     // Joining paragraphs asks the layout detector about pages, which takes a while.
                     let layout =
                         match this.LayoutSource with
-                        | NonNull source -> Some { StructureFixes.Source = source; StructureFixes.PdfPath = pdfPath; StructureFixes.Report = report FixStage.Repairing }
+                        | NonNull source -> Some { StructureFixes.Source = source; StructureFixes.PdfPath = pdfPath; StructureFixes.Report = report FixStage.Fixing }
                         | Null -> None
                     // Edits of elements (not regions, which tagging takes) that won't change anything, and why.
                     if options.HasFlag PdfFixOptions.ApplyEdits && not (options.HasFlag PdfFixOptions.TagFromLayout) then
@@ -685,7 +685,7 @@ type VeraPdfValidator() =
                         status <- RepairStatus.Success
 
                 if options.HasFlag PdfFixOptions.Metadata then
-                    report FixStage.RepairingMetadata 0 0
+                    report FixStage.FixingMetadata 0 0
                     let tempOutput = createTemporaryPdfPath outputPath
                     tempMetadataOutput <- tempOutput
                     let metadataFix = fixMetadataOnly currentInput profile tempOutput
@@ -696,13 +696,13 @@ type VeraPdfValidator() =
                         status <- metadataFix.Status
                     else
                         // Its changes aren't kept, so they aren't applied fixes; say why, so a
-                        // repaired copy saved for other fixes doesn't look like it fixed metadata too.
+                        // fixed copy saved for other fixes doesn't look like it fixed metadata too.
                         match metadataFix.Status with
                         | RepairStatus.WontFix ->
                             notApplied.Add
-                                "The metadata wasn't repaired: veraPDF's metadata fixer found no way to make it conform (Won't fix), so its changes weren't kept."
+                                "The metadata wasn't fixed: veraPDF's metadata fixer found no way to make it conform (Won't fix), so its changes weren't kept."
                         | RepairStatus.FixError ->
-                            notApplied.Add "The metadata wasn't repaired: veraPDF's metadata fixer failed, so its changes weren't kept."
+                            notApplied.Add "The metadata wasn't fixed: veraPDF's metadata fixer failed, so its changes weren't kept."
                         | _ -> ()
                         if not changed then
                             status <- metadataFix.Status

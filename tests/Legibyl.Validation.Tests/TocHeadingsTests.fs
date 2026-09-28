@@ -237,7 +237,7 @@ let ``only a paragraph on the entry's destination page counts`` () =
     bodyTags output.Path |> should equal [ "H1"; "P"; "H1" ]
 
 [<Fact>]
-let ``numbered headings become headings, not a list, when both repairs run`` () =
+let ``numbered headings become headings, not a list, when both fixes run`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
     // "1. Scope" and "2. Terms" are consecutive numbered paragraphs, so they'd pass for a
@@ -250,7 +250,7 @@ let ``numbered headings become headings, not a list, when both repairs run`` () 
     bodyTags output.Path |> should equal [ "H1"; "H1" ]
 
 [<Fact>]
-let ``the report counts what each repair would address`` () =
+let ``the report counts what each fix would address`` () =
     use input = new TempPdf()
     createPdfWithToc input.Path false threeLevels threeLevelsBody
 
@@ -258,7 +258,7 @@ let ``the report counts what each repair would address`` () =
 
     report.FixableCount PdfFixOptions.HeadingsFromToc |> should equal 4
     report.FixableCount PdfFixOptions.Lists |> should equal 0
-    // No /DisplayDocTitle (7.1-10): the title repair sets it, so it counts.
+    // No /DisplayDocTitle (7.1-10): the title fix sets it, so it counts.
     report.FailedAssertions
     |> Seq.filter (fun a -> a.RuleId = "7.1-10")
     |> Seq.forall (fun a -> a.FixOptions.HasFlag PdfFixOptions.Title)

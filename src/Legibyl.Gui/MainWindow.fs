@@ -106,7 +106,7 @@ type RuleGroup =
     member group.RuleId = group.First.Violation.RuleId
     member group.Message = group.First.Message
     member group.Severity = group.First.Violation.Severity
-    /// Those an auto fix (or tagging from the suggested structure) repairs.
+    /// Those an auto fix (or tagging from the suggested structure) fixes.
     member group.Fixable = group.Findings |> List.filter _.Violation.IsFixable
     /// The pages its findings are on, in order.
     member group.Pages = group.Findings |> List.choose _.PageNumber |> List.distinct |> List.sort
@@ -347,7 +347,7 @@ module private MainView =
             (TextBlock.create [ TextBlock.text text; TextBlock.fontWeight FontWeight.SemiBold ])
 
     /// A wand for findings suggesting the structure fixes, a wrench for those an auto fix
-    /// repairs; nothing otherwise.
+    /// fixes; nothing otherwise.
     let fixableIcon (row: RuleViolationRow) : IView =
         if row.Violation.IsFixable then
             gridIcon (fixIconFor row.Violation) Theme.Tokens.Primary $"{fixedBy row.Violation}: {row.Fixable}"
@@ -511,7 +511,7 @@ module private MainView =
             let dismissed = ctx.useState (Map.empty: Dismissals.Dismissed)
             let showDismissed = ctx.useState false
             let edited = ctx.useState false
-            // The repairs chosen in Auto Fixes for the selected file, as its review has them (None
+            // The fixes chosen in Auto Fixes for the selected file, as its review has them (None
             // until they're chosen), and the user's changes Export writes too.
             let autoFixes = ctx.useState (None: PdfFixOptions option)
             let pending = ctx.useState noChanges
@@ -692,7 +692,7 @@ module private MainView =
             ctx.useEffect ((fun () -> window.Activated.Add(fun _ -> refreshPending ())), [ EffectTrigger.AfterInit ])
 
             /// Validates the selected file, returning its report (None if it couldn't be validated).
-            /// activity names it in the progress row ("Validating", "Validating the repaired copy").
+            /// activity names it in the progress row ("Validating", "Validating the fixed copy").
             /// Validates the selected file, or, unless fresh, shows the result its review saved for
             /// these exact bytes (see SavedResults). A validation run is a change to the review, as an
             /// edit is: Save keeps it, so the file opens with it next time.
@@ -930,13 +930,13 @@ module private MainView =
                 }
                 |> ignore
 
-            /// Chooses the repairs Export applies (it doesn't export).
+            /// Chooses the fixes Export applies (it doesn't export).
             let chooseAutoFixes _ =
                 task {
                     match selectedFile.Current, report with
                     | Some sourcePath, Some report ->
                         let review = layoutReviews.For sourcePath
-                        // An untagged PDF is tagged from its suggested structure, not by a repair.
+                        // An untagged PDF is tagged from its suggested structure, not by a fix.
                         let reviewNote =
                             if untagged () then
                                 Some "This PDF has no tags: Export… tags a copy from its suggested structure (Suggest Structure…), with your edits on it."
@@ -1021,7 +1021,7 @@ module private MainView =
                         match outputPath with
                         | None -> ()
                         | Some outputPath ->
-                            // The standard it was checked against, so the metadata repair writes its claim.
+                            // The standard it was checked against, so the metadata fix writes its claim.
                             let profile =
                                 match outcome.Current with
                                 | Validated(report, _) -> report.Profile
@@ -1053,7 +1053,7 @@ module private MainView =
                                             let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
                                             let! fix =
                                                 Task.Run(fun () ->
-                                                    // The review, as it is now, goes in the repaired copy. Recording
+                                                    // The review, as it is now, goes in the fixed copy. Recording
                                                     // its layout reads the PDF, so it's done here too.
                                                     validator.Review <- review.ForCopy sourcePath
                                                     validator.Edits <- RegionEdits.toElementEdits review.Edits
@@ -1074,7 +1074,7 @@ module private MainView =
 
                             // Open the exported copy in its own window, where it's validated, to show
                             // what improved; this one stays on the original.
-                            let! shownIn, repairedReport =
+                            let! shownIn, fixedReport =
                                 match fixOutcome with
                                 | Ok fix when fix.WasFixed ->
                                     match fix.OutputPath with
@@ -1083,7 +1083,7 @@ module private MainView =
                                     | Null -> Task.FromResult(window, None)
                                 | _ -> Task.FromResult(window, None)
 
-                            do! Dialogs.showFixResult shownIn fixOutcome repairedReport
+                            do! Dialogs.showFixResult shownIn fixOutcome fixedReport
                     | _ -> ()
                 }
                 |> ignore
@@ -1718,9 +1718,9 @@ module private MainView =
                         panel [
                             heading "Making a PDF accessible"
                             line "1." "Open a PDF: Browse…, drop it on this window, or File › Open…."
-                            line "2." "Read what's found. Failures (red) are what PDF/UA requires; warnings (orange) are worth a look. A wrench marks what an auto fix can repair; a wand, what suggesting the structure fixes."
+                            line "2." "Read what's found. Failures (red) are what PDF/UA requires; warnings (orange) are worth a look. A wrench marks what has an auto fix; a wand, what suggesting the structure fixes."
                             line "3." "Structure… shows the tags a screen reader uses. Check the headings, the figures' alt text and the reading order, and edit them there. A PDF with no tags gets Suggest Structure… instead."
-                            line "4." "Auto Fixes… chooses repairs, like the document's language and title."
+                            line "4." "Auto Fixes… chooses fixes, like the document's language and title."
                             line "5." "Export… writes a fixed copy and opens it, to check again. The PDF you opened isn't changed. File › Save keeps your review (edits, dismissed warnings, chosen fixes) to pick up later."
                             note "PDF/UA is the standard for PDFs that screen readers and other assistive technology can use."
                             // Which Legibyl this is, and About…, without the menu bar.
@@ -1990,7 +1990,7 @@ module private MainView =
                                         |> View.withAttrs [ Control.margin (0.0, 0.0, 0.0, 8.0) ]
                                         TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
                                         detailText row.Message false [ TextBox.maxHeight 130.0 ]
-                                        // In plain language, and what to do when no auto fix repairs it.
+                                        // In plain language, and what to do when no auto fix fixes it.
                                         match RuleGuide.forFinding row.Violation with
                                         | Some guide ->
                                             TextBlock.create [
@@ -2204,7 +2204,7 @@ module private MainView =
                                     Button.margin (0.0, 0.0, 8.0, 0.0)
                                     Button.isEnabled (not busy && canAttemptFix)
                                     ToolTip.tip
-                                        "Choose the repairs Export applies, like the document's language, title and metadata; it lists the ones this PDF needs. Disabled when it passes with no warnings, since there's nothing left to fix."
+                                        "Choose the fixes Export applies, like the document's language, title and metadata; it lists the ones this PDF needs. Disabled when it passes with no warnings, since there's nothing left to fix."
                                     Button.onClick chooseAutoFixes
                                 ]
                                 // Badged with the steps a person checked that the copy will carry: the one

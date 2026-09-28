@@ -1,6 +1,6 @@
 /// Reading a tagged PDF's raw structure tree objects via iText: resolving pages, text,
 /// and page geometry for structure elements. Shared by LegibylChecks (warnings) and
-/// StructureFixes (repairs).
+/// StructureFixes (fixes).
 module internal Legibyl.Validation.StructureTreeObjects
 
 open System

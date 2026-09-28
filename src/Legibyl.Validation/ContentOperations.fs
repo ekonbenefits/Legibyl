@@ -1,4 +1,4 @@
-/// A page's content stream as its operators, with where each is in the bytes, so a repair can
+/// A page's content stream as its operators, with where each is in the bytes, so a fix can
 /// copy the stream with its marked content added or changed (see LayoutTagging, and
 /// ElementEdits' Not Read).
 module internal Legibyl.Validation.ContentOperations

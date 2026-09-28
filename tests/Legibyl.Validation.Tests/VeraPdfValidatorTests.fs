@@ -246,7 +246,7 @@ let ``a PDF/UA-2 file checked as PDF/UA-1 fails: its identifier claims the other
     report.IsCompliant |> should be False
 
 [<Fact>]
-let ``PDF/UA-2 failures map to the repairs that fix them, by rule`` () =
+let ``PDF/UA-2 failures map to the fixes that fix them, by rule`` () =
     use pdf20 = new TempPdf()
     do
         use document = new PdfDocument(new PdfWriter(pdf20.Path, WriterProperties().SetPdfVersion(PdfVersion.PDF_2_0)))

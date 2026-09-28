@@ -14,7 +14,7 @@ let private failedRules (path: string) =
     |> Set.ofSeq
 
 [<Fact>]
-let ``a document with no XMP metadata gets a stream from its Info dictionary, which veraPDF then repairs`` () =
+let ``a document with no XMP metadata gets a stream from its Info dictionary, which veraPDF then fixes`` () =
     use input = new TempPdf()
     use output = new TempPdf()
     do
@@ -38,7 +38,7 @@ let ``a document with no XMP metadata gets a stream from its Info dictionary, wh
     failedRules output.Path |> should not' (contain "7.1-8")
 
 [<Fact>]
-let ``a document's own XMP metadata is left for veraPDF to repair`` () =
+let ``a document's own XMP metadata is left for veraPDF to fix`` () =
     use output = new TempPdf()
     let result = VeraPdfValidator().Fix(corpusFile "pdfua1-fail.pdf", PdfProfile.PdfUa1, output.Path, PdfFixOptions.Metadata)
     result.AppliedFixes |> should not' (contain "Added an XMP metadata stream, from the document information dictionary.")

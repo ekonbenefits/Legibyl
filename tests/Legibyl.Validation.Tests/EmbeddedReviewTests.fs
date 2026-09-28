@@ -8,7 +8,7 @@ open iText.Kernel.Pdf
 open Legibyl.Validation
 open Legibyl.Validation.Tests.TestSupport
 
-/// A page with an annotation but no tab order, for the Tabs fix to repair.
+/// A page with an annotation but no tab order, for the Tabs fix to fix.
 let private createNeedingTabs (path: string) =
     use document = new PdfDocument(new PdfWriter(path))
     let annotations = PdfArray()

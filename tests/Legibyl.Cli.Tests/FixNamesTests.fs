@@ -6,13 +6,13 @@ open Legibyl.Cli
 open Legibyl.Validation
 
 [<Fact>]
-let ``repairs are named in a list, with the safe set and every repair`` () =
+let ``fixes are named in a list, with the safe set and every fix`` () =
     FixNames.parse "safe, Lists,headings-from-toc"
     |> should equal (Ok(FixNames.safe ||| PdfFixOptions.Lists ||| PdfFixOptions.HeadingsFromToc) : Result<PdfFixOptions, string>)
     FixNames.parse "all" |> should equal (Ok FixNames.all : Result<PdfFixOptions, string>)
 
 [<Fact>]
-let ``every repair leaves out only the one that visits web pages`` () =
+let ``every fix leaves out only the one that visits web pages`` () =
     FixNames.all.HasFlag PdfFixOptions.LinkTitlesFromWeb |> should be False
     for _, option in FixNames.names do
         if option <> PdfFixOptions.LinkTitlesFromWeb then
@@ -20,18 +20,18 @@ let ``every repair leaves out only the one that visits web pages`` () =
 
 [<Fact>]
 let ``an unknown or missing name says so`` () =
-    FixNames.parse "safe,nope" |> should equal (Error "Unknown repair 'nope'. Run 'legibyl list fixes' to see the names." : Result<PdfFixOptions, string>)
+    FixNames.parse "safe,nope" |> should equal (Error "Unknown fix 'nope'. Run 'legibyl list fixes' to see the names." : Result<PdfFixOptions, string>)
     FixNames.parse " , " |> Result.isError |> should be True
 
 [<Fact>]
-let ``each repair is listed with what it does`` () =
+let ``each fix is listed with what it does`` () =
     let listing = FixNames.listing ()
     listing |> should haveLength FixNames.names.Length
     listing |> List.find (fun line -> line.StartsWith "lists ") |> should haveSubstring "Tag paragraphs that start with list markers"
     listing |> List.find (fun line -> line.StartsWith "metadata ") |> should haveSubstring "(safe)"
 
 [<Fact>]
-let ``none names no repairs, for edits or a layout alone`` () =
+let ``none names no fixes, for edits or a layout alone`` () =
     FixNames.parse "none" |> should equal (Ok PdfFixOptions.None : Result<PdfFixOptions, string>)
     FixNames.parse "none,lists" |> should equal (Ok PdfFixOptions.Lists : Result<PdfFixOptions, string>)
 
@@ -47,9 +47,9 @@ let private readme () =
     System.IO.File.ReadAllText(find (System.IO.DirectoryInfo System.AppContext.BaseDirectory))
 
 [<Fact>]
-let ``the README's table of repairs is every repair, as list fixes gives it`` () =
+let ``the README's table of fixes is every fix, as list fixes gives it`` () =
     let text = readme ()
-    let table = text.Substring(text.IndexOf "<!-- repairs:start -->", text.IndexOf "<!-- repairs:end -->" - text.IndexOf "<!-- repairs:start -->")
+    let table = text.Substring(text.IndexOf "<!-- fixes:start -->", text.IndexOf "<!-- fixes:end -->" - text.IndexOf "<!-- fixes:start -->")
     let rows =
         [ for line in table.Split('\n') do
               let line = line.Trim()
@@ -58,7 +58,7 @@ let ``the README's table of repairs is every repair, as list fixes gives it`` ()
                   | [| name; does; notes |] -> yield name.Trim('`'), does, notes
                   | cells -> failwith $"A row with {cells.Length} cells: {line}" ]
 
-    rows |> should equal (FixNames.repairs ())
+    rows |> should equal (FixNames.fixes ())
 
 [<Fact>]
 let ``every fix's name is its flag's, in kebab-case, and reads back as it`` () =
@@ -67,13 +67,35 @@ let ``every fix's name is its flag's, in kebab-case, and reads back as it`` () =
         |> Array.filter (fun f -> f <> PdfFixOptions.None && f <> PdfFixOptions.All && f <> PdfFixOptions.ApplyEdits)
         |> Set.ofArray
     // Each fix is named, once.
-    RepairNames.order |> Set.ofList |> should equal flags
-    RepairNames.order |> List.distinct |> List.length |> should equal RepairNames.order.Length
-    for name, option in RepairNames.names do
-        name |> should equal (RepairNames.nameOf option)
+    FixNames.order |> Set.ofList |> should equal flags
+    FixNames.order |> List.distinct |> List.length |> should equal FixNames.order.Length
+    for name, option in FixNames.names do
+        name |> should equal (FixNames.nameOf option)
         name |> should equal (System.Text.RegularExpressions.Regex.Replace(string option, "([a-z])([A-Z])", "$1-$2").ToLowerInvariant())
-        RepairNames.toOptions [ name ] |> should equal option
-    RepairNames.nameOf PdfFixOptions.FontGlyphs |> should equal "font-glyphs"
-    RepairNames.nameOf PdfFixOptions.LinkTitlesFromWeb |> should equal "link-titles-from-web"
+        FixNames.toOptions [ name ] |> should equal option
+    FixNames.nameOf PdfFixOptions.FontGlyphs |> should equal "font-glyphs"
+    FixNames.nameOf PdfFixOptions.LinkTitlesFromWeb |> should equal "link-titles-from-web"
     // All is every flag.
     PdfFixOptions.All |> should equal (flags |> Set.fold (|||) PdfFixOptions.ApplyEdits)
+
+[<Fact>]
+let ``what people read says fix, not repair, except veraPDF's own names`` () =
+    let readmePath =
+        let rec find (folder: System.IO.DirectoryInfo | null) =
+            match folder with
+            | null -> failwith "README.md not found above the test output"
+            | folder when System.IO.Directory.Exists(System.IO.Path.Combine(folder.FullName, "src")) -> folder.FullName
+            | folder -> find folder.Parent
+        find (System.IO.DirectoryInfo System.AppContext.BaseDirectory)
+    // veraPDF's metadata fixer reports a "repair status" (MetadataFixerResult.RepairStatus).
+    let allowed (text: string) = System.Text.RegularExpressions.Regex.Replace(text, "(?i)repair ?status", "")
+    let saysRepair (text: string) = (allowed text).Contains("repair", System.StringComparison.OrdinalIgnoreCase)
+    let inReadme = [ for line in readme().Split('\n') do if saysRepair line then yield $"README.md: {line.Trim()}" ]
+    // Every string in the sources: CLI help and errors, the GUI's text, the library's messages.
+    let inStrings =
+        [ for project in [ "Legibyl.Cli"; "Legibyl.Gui"; "Legibyl.Validation"; "Legibyl.Layout" ] do
+              for file in System.IO.Directory.GetFiles(System.IO.Path.Combine(readmePath, "src", project), "*.fs") do
+                  for m in System.Text.RegularExpressions.Regex.Matches(System.IO.File.ReadAllText file, "\"(?:[^\"\\\\\\n]|\\\\.)*\"") do
+                      if saysRepair m.Value then yield $"{System.IO.Path.GetFileName file}: {m.Value}" ]
+
+    inReadme @ inStrings |> should be Empty

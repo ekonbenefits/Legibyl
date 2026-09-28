@@ -161,7 +161,7 @@ type SavedFile =
       [<JsonPropertyName "layout">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       Layout: LayoutFile.SavedLayout | null
-      /// The auto fixes chosen, by name (see RepairNames); null if none have been.
+      /// The auto fixes chosen, by name (see FixNames); null if none have been.
       [<JsonPropertyName "fixes">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       Fixes: string array | null

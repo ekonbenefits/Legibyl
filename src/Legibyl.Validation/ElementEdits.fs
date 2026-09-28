@@ -8,7 +8,7 @@ open iText.Kernel.Pdf
 open Legibyl.Validation.StructureTreeObjects
 
 /// How much an element's box must overlap an edit's to be its element: their intersection over
-/// their union, as for a region in Suggest Structure. Repairs and regenerated PDFs move things a
+/// their union, as for a region in Suggest Structure. Fixes and regenerated PDFs move things a
 /// little; different elements with the same tag rarely overlap this much.
 [<Literal>]
 let SameElementOverlap = 0.6
@@ -359,7 +359,7 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
 // ---- The document's title ----
 
 /// The document's title where readers and PDF/UA look for it: the Info dictionary's /Title and
-/// the XMP metadata's dc:title (when it has XMP; the metadata repair writes XMP from Info
+/// the XMP metadata's dc:title (when it has XMP; the metadata fix writes XMP from Info
 /// otherwise), shown in place of the file name (/DisplayDocTitle).
 let private titleChanges (document: PdfDocument) (title: string) =
     let info = document.GetDocumentInfo().GetTitle() |> Option.ofObj

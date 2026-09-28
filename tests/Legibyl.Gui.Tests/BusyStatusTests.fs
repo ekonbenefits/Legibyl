@@ -23,7 +23,7 @@ let private fixing stage step steps page pageCount =
 let ``every progress line says what's happening first`` () =
     [ Validating("Validating", validation ValidationStage.Preparing 0 0)
       Validating("Validating", validation ValidationStage.CheckingPages 57 675)
-      Validating("Validating the repaired copy", validation ValidationStage.Finishing 10 10)
+      Validating("Validating the fixed copy", validation ValidationStage.Finishing 10 10)
       ReadingStructure
           { Stage = StructureReadStage.ReadingText
             Page = 3
@@ -33,19 +33,19 @@ let ``every progress line says what's happening first`` () =
       DownloadingLayoutModel 0.45
       fixing FixStage.CheckingOriginal 1 4 12 40
       fixing FixStage.Tagging 2 4 3 10
-      fixing FixStage.Repairing 3 4 0 0
-      fixing FixStage.Repairing 3 4 2 10
-      fixing FixStage.RepairingMetadata 4 4 0 0 ]
+      fixing FixStage.Fixing 3 4 0 0
+      fixing FixStage.Fixing 3 4 2 10
+      fixing FixStage.FixingMetadata 4 4 0 0 ]
     |> List.map statusText
     |> should
         equal
         [ "Validating: reading the PDF…"
           "Validating: page 57 of 675"
-          "Validating the repaired copy: finishing up…"
+          "Validating the fixed copy: finishing up…"
           "Reading the structure: page text 3 of 10"
           "Downloading the layout model: 45%"
           "Fixing, step 1 of 4: checking the original, page 12 of 40"
           "Fixing, step 2 of 4: finding page 3 of 10's layout, to tag it"
-          "Fixing, step 3 of 4: applying the repairs…"
+          "Fixing, step 3 of 4: applying the fixes…"
           "Fixing, step 3 of 4: finding page 2 of 10's layout, to join split paragraphs"
-          "Fixing, step 4 of 4: repairing metadata with veraPDF…" ]
+          "Fixing, step 4 of 4: fixing metadata with veraPDF…" ]

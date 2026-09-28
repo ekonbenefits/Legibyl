@@ -100,9 +100,9 @@ let ``a file with its parent tree has no warning, and the fix has nothing to do`
     result.AppliedFixes |> should be Empty
 
 [<Fact>]
-let ``the parent tree repair is one of the safe ones, named parent-tree`` () =
-    RepairNames.safe.HasFlag PdfFixOptions.ParentTree |> should be True
-    RepairNames.toOptions [ "parent-tree" ] |> should equal PdfFixOptions.ParentTree
+let ``the parent tree fix is one of the safe ones, named parent-tree`` () =
+    FixNames.safe.HasFlag PdfFixOptions.ParentTree |> should be True
+    FixNames.toOptions [ "parent-tree" ] |> should equal PdfFixOptions.ParentTree
 
 [<Fact>]
 let ``a Pages export with no parent tree: rebuilding it leaves only the drawing outside every tag`` () =

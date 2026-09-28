@@ -345,8 +345,8 @@ let ``a fix reports each step it runs, in order, with pages where there are page
         equal
         [ FixStage.CheckingOriginal, 1, 4
           FixStage.Tagging, 2, 4
-          FixStage.Repairing, 3, 4
-          FixStage.RepairingMetadata, 4, 4 ]
+          FixStage.Fixing, 3, 4
+          FixStage.FixingMetadata, 4, 4 ]
     reports |> Seq.exists (fun p -> p.Stage = FixStage.CheckingOriginal && p.Page = 1 && p.PageCount = 1) |> should be True
     reports |> Seq.exists (fun p -> p.Stage = FixStage.Tagging && p.Page = 1 && p.PageCount = 1) |> should be True
 
@@ -508,7 +508,7 @@ let ``a PDF 2.0 file tagged from its layout, with the safe fixes, is PDF/UA-2 co
     createUntaggedPdf20 input.Path
     let validator = VeraPdfValidator(LayoutSource = FixedLayout(reviewedRegions, "The example site", "The Title"))
 
-    let result = validator.Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.Language)
+    let result = validator.Fix(input.Path, PdfProfile.PdfUa2, output.Path, FixNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.Language)
 
     failedUa2Rules output.Path |> should be Empty
     use document = new PdfDocument(new PdfReader(output.Path))
@@ -536,7 +536,7 @@ let ``on a tagged PDF 2.0 file, lists and bookmarks keep it PDF/UA-2 compliant, 
 
     let result =
         VeraPdfValidator().Fix(tagged.Path, PdfProfile.PdfUa2, output.Path,
-                               RepairNames.safe ||| PdfFixOptions.Language ||| PdfFixOptions.Lists ||| PdfFixOptions.Bookmarks)
+                               FixNames.safe ||| PdfFixOptions.Language ||| PdfFixOptions.Lists ||| PdfFixOptions.Bookmarks)
 
     result.AppliedFixes |> should contain "Tagged 1 run(s) of marked paragraphs as lists."
     result.AppliedFixes |> should contain "Added 1 bookmark(s) for the H1 and H2 headings."
@@ -559,6 +559,6 @@ let ``QR code links on a PDF 2.0 file are PDF/UA-2 compliant, with alt text a pe
         let qr = reviewedRegions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = alt; QrText = "https://example.com/apply" } else r)
         let result =
             VeraPdfValidator(LayoutSource = FixedLayout(qr, "The example site", "The Title"))
-                .Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.Language ||| PdfFixOptions.QrLinks)
+                .Fix(input.Path, PdfProfile.PdfUa2, output.Path, FixNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.Language ||| PdfFixOptions.QrLinks)
         result.AppliedFixes |> should contain "Linked 1 QR code to the web address they encode"
         failedUa2Rules output.Path |> should be Empty
