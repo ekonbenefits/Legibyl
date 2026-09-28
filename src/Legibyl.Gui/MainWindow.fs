@@ -36,191 +36,6 @@ type DocumentShell() =
 /// A PDF for a window to open, and what's told its report once it's validated.
 type OpenRequest = { Path: string; Opened: TaskCompletionSource<ValidationReport option> }
 
-/// Flattened, display-friendly view of a RuleViolation for the results grid.
-type RuleViolationRow =
-    { Violation: RuleViolation
-      Clause: string
-      TestNumber: int
-      Severity: string
-      /// What an auto fix can do about this finding, e.g. "Fix XMP metadata"; empty if nothing.
-      Fixable: string
-      Message: string
-      LocationContext: string | null
-      /// 1-based page number, if the failure is anchored to a page.
-      PageNumber: int option
-      /// "Page 3" or "—" if no page is known — bound directly to the grid's Page column.
-      PageDisplay: string
-      /// Plain-English breadcrumb, e.g. "Document → Page 2 → Link annotation". Falls back to the raw context.
-      FriendlyLocation: string
-      /// A warning the user has dismissed (see Dismissals).
-      Dismissed: bool
-      /// How many findings break the same rule, it included.
-      Occurrences: int }
-
-    static member Of(violation: RuleViolation) =
-        let location = violation.Location
-        let pageNumber =
-            match location, violation.Geometry with
-            | NonNull location, _ when location.PageNumber.HasValue -> Some location.PageNumber.Value
-            | _, NonNull geometry -> Some geometry.PageNumber
-            | _ -> None
-
-        { Violation = violation
-          Clause = violation.Clause
-          TestNumber = violation.TestNumber
-          Severity = violation.Severity.ToString()
-          Fixable = violation.FixDescription
-          Message = violation.Message
-          LocationContext = violation.LocationContext
-          PageNumber = pageNumber
-          PageDisplay =
-            match pageNumber with
-            | Some page -> $"Page {page}"
-            | None -> "—"
-          FriendlyLocation =
-            match location, violation.LocationContext with
-            | NonNull location, _ -> location.Breadcrumb
-            | Null, NonNull context -> context
-            | Null, Null -> ""
-          Dismissed = false
-          Occurrences = 1 }
-
-/// A rule's findings, as the results list shows them: a row for the rule, its findings under it.
-/// The same rule, by its key, is the same group (whichever findings of it are shown).
-[<CustomEquality; NoComparison>]
-type RuleGroup =
-    { /// What makes findings the same rule: "7.1-3: Content shall be marked as…".
-      Key: string
-      /// In the order found (by page).
-      Findings: RuleViolationRow list }
-
-    override group.Equals(other: obj) =
-        match other with
-        | :? RuleGroup as other -> group.Key = other.Key
-        | _ -> false
-
-    override group.GetHashCode() = group.Key.GetHashCode()
-
-    member group.First = group.Findings.Head
-    /// "7.1-3", or "Structure-9" for Legibyl's own.
-    member group.RuleId = group.First.Violation.RuleId
-    member group.Message = group.First.Message
-    member group.Severity = group.First.Violation.Severity
-    /// Those an auto fix (or tagging from the suggested structure) fixes.
-    member group.Fixable = group.Findings |> List.filter _.Violation.IsFixable
-    /// The pages its findings are on, in order.
-    member group.Pages = group.Findings |> List.choose _.PageNumber |> List.distinct |> List.sort
-
-    /// Findings grouped by rule, in the order each rule is first found.
-    static member OfRows(rows: RuleViolationRow list) : RuleGroup list =
-        let key (row: RuleViolationRow) = $"{row.Violation.RuleId}: {row.Message}"
-        rows
-        |> List.groupBy key
-        |> List.map (fun (key, findings) -> { Key = key; Findings = findings })
-
-    /// Whether its findings start shown: a rule found more than three times starts collapsed.
-    member group.ExpandedAtFirst = group.Findings.Length <= 3
-
-/// An item of the results list: a rule (and whether its findings are shown), or a finding; or,
-/// for a PDF that passes, the pass, first (and how far a person has checked it).
-type ResultItem =
-    | RuleItem of RuleGroup * expanded: bool
-    | FindingItem of RuleViolationRow
-    | PassItem of progress: string
-
-/// A step of the checklist a person works through for a PDF that passes (see the Pass row).
-type ChecklistStep =
-    { /// Its name, as the review keeps it ticked: "title", "alt-text"…
-      Id: string
-      Title: string
-      /// What the file has, where it shows ("Title: Annual Report").
-      Shown: string option
-      /// What to check, and where to do it.
-      What: string
-      /// Whether it's done in Structure… (the step has a button to open it).
-      InStructure: bool }
-
-module Checklist =
-    /// The steps for a passing PDF, those that don't apply (no figures, tables or links) left out.
-    let steps (facts: DocumentFacts.Facts) : ChecklistStep list =
-        let plural (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
-        [ { Id = "title"
-            Title = "Title"
-            Shown = Some(match facts.Title with Some title -> $"Title: {title}" | None -> "No title of its own")
-            What = "Is it the document's real title (not \"Untitled\", or a file name)? If not, give it one in Structure…'s Document title, or where the PDF was made."
-            InStructure = true }
-          { Id = "language"
-            Title = "Language"
-            Shown =
-              Some(
-                  match facts.Language with
-                  | Some(tag, Some name) -> $"Language: {tag} ({name})"
-                  | Some(tag, None) -> $"Language: {tag}"
-                  | None -> "No language declared"
-              )
-            What = "Is it the language the text is in? If not, set it where the PDF was made (Auto Fixes… › Declare the language only adds one where there's none)."
-            InStructure = false }
-          if facts.Figures > 0 then
-              { Id = "alt-text"
-                Title = "Alt text"
-                Shown = Some(plural facts.Figures "figure" + $", {facts.FiguresWithAlt} with alt text")
-                What =
-                  "In Structure…, right-click a figure › Edit Alt Text…: say what it's for here, in a sentence. A figure that's only decoration: select it › Not Read (Artifact)."
-                InStructure = true }
-          { Id = "headings"
-            Title = "Headings"
-            Shown =
-              Some(
-                  match facts.Headings with
-                  | [] -> "No headings"
-                  | levels ->
-                      let counts = levels |> List.map (fun (level, n) -> $"{level} ×{n}") |> String.concat ", "
-                      "Headings: " + counts
-              )
-            What = "In Structure…, check each is a heading at the right level and every section has one; the Tag picker changes a level."
-            InStructure = true }
-          { Id = "reading-order"
-            Title = "Reading order"
-            Shown = None
-            What = "Structure… numbers each page's elements in the order they're read. Legibyl can't reorder them: fix the order where the PDF was made."
-            InStructure = true }
-          if facts.Tables > 0 then
-              { Id = "tables"
-                Title = "Tables"
-                Shown = Some(plural facts.Tables "table")
-                What = "Header cells should be marked as headers (TH): in the tool that made the PDF, or a PDF editor's table tools."
-                InStructure = false }
-          if facts.Links > 0 then
-              { Id = "links"
-                Title = "Links"
-                Shown = Some(plural facts.Links "link")
-                What = "Each link's text or description should say where it goes: Structure…, right-click a link › Edit Link Description…."
-                InStructure = true }
-          { Id = "colour"
-            Title = "Colour"
-            Shown = None
-            What = "Nothing should be conveyed by colour, contrast or position alone: look at the page."
-            InStructure = false } ]
-
-    /// How far a person has checked it, as the Pass row says: "3 of 7 checked", "Checked by a
-    /// person"; before any, that it passes.
-    let progress (profile: string) (steps: ChecklistStep list) (ticked: Set<string>) =
-        let done' = steps |> List.filter (fun s -> ticked.Contains s.Id) |> List.length
-        if steps.IsEmpty || done' = 0 then $"Passes {profile}'s automated checks"
-        elif done' = steps.Length then "Checked by a person"
-        else $"{done'} of {steps.Length} checked"
-
-    /// The checklist as a report has it: what a person verified, not only what a program did.
-    let text (profile: string) (steps: ChecklistStep list) (ticked: Set<string>) =
-        let lines =
-            [ $"PASS — compliant with {profile}. {progress profile steps ticked}."
-              "PDF/UA also needs a person to check:"
-              for i, step in List.indexed steps do
-                  let mark = if ticked.Contains step.Id then "[x]" else "[ ]"
-                  let shown = match step.Shown with Some shown -> $" ({shown})" | None -> ""
-                  $"{mark} {i + 1}. {step.Title}{shown}: {step.What}" ]
-        String.concat Environment.NewLine lines + Environment.NewLine + Environment.NewLine
-
 module private MainView =
     let pdfFileType =
         FilePickerFileType(
@@ -249,159 +64,15 @@ module private MainView =
 
     let noChanges = { Changes = 0; TagsFromReview = false }
 
-    /// A menu item's command: runs action when the item's chosen (from the menu bar, the in-window
-    /// menu, or a test).
-    let command (action: unit -> unit) =
-        let changed = Event<EventHandler, EventArgs>()
-        { new System.Windows.Input.ICommand with
-            member _.CanExecute _ = true
-            member _.Execute _ = action ()
-            [<CLIEvent>]
-            member _.CanExecuteChanged = changed.Publish }
+    /// A menu item's command (see MainMenu.command).
+    let command = MainMenu.command
 
     let createBitmap (pngBytes: byte array) =
         use stream = new MemoryStream(pngBytes)
         new Bitmap(stream)
 
-    // 16x16 icons (see Icons). The wrench is a single outline (head, notch, handle) rotated 45°.
-    let private warningIcon = Icons.warning
-
-    let private failureIcon = Icons.failure
-
-    let private fixIcon =
-        Geometry.Parse
-            "F1 M10.68,8.56 L17.25,15.13 A1.5,1.5 0 0 1 15.13,17.25 L8.56,10.68 A4,4 0 0 1 3.45,5.15 L5.44,7.14 L7.14,5.44 L5.15,3.45 A4,4 0 0 1 10.68,8.56 Z"
-
-    /// A magic wand (a stick, and two sparkles): for what suggesting the structure fixes.
-    let private wandIcon =
-        Geometry.Parse
-            "F1 M1.5,13.4 L9.9,5 L11,6.1 L2.6,14.5 Z M12.5,0.5 L13.3,2.7 L15.5,3.5 L13.3,4.3 L12.5,6.5 L11.7,4.3 L9.5,3.5 L11.7,2.7 Z M5,1.5 L5.5,2.5 L6.5,3 L5.5,3.5 L5,4.5 L4.5,3.5 L3.5,3 L4.5,2.5 Z"
-
-    let private iconPath (icon: Geometry) (color: string) (size: float) (attrs: IAttr<Shapes.Path> list) =
-        // Qualified: System.IO also defines Path.
-        Avalonia.FuncUI.DSL.Path.create [
-            AttrBuilder<Shapes.Path>.CreateProperty<Geometry | null>(Shapes.Path.DataProperty, icon, ValueNone)
-            Shapes.Shape.stretch Stretch.Uniform
-            Control.width size
-            Control.height size
-            Control.verticalAlignment VerticalAlignment.Center
-            Theme.resources [ Shapes.Shape.FillProperty, color ]
-            yield! attrs
-        ]
-
-    /// A small results-grid icon, with name as its tooltip and screen-reader text.
-    let gridIcon (icon: Geometry) (color: string) (name: string) =
-        iconPath icon color 14.0 [
-            Control.horizontalAlignment HorizontalAlignment.Center
-            ToolTip.tip name
-            AttrBuilder<Shapes.Path>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, name, ValueNone)
-        ]
-
-    /// An icon beside text that already says the same thing, so screen readers skip it.
-    let private decorativeIcon (icon: Geometry) (color: string) (size: float) =
-        iconPath icon color size [
-            Control.margin (0.0, 0.0, 6.0, 0.0)
-            AttrBuilder<Shapes.Path>.CreateProperty<Automation.AccessibilityView>(
-                Automation.AutomationProperties.AccessibilityViewProperty, Automation.AccessibilityView.Raw, ValueNone)
-        ]
-
-    /// Puts a decorative icon in front of content, keeping the content's own wrapping.
-    let private withIcon (icon: IView) (content: IView) =
-        Grid.create [
-            Grid.columnDefinitions "Auto,*"
-            Grid.children [
-                icon
-                Border.create [ Grid.column 1; Border.child content ]
-            ]
-        ]
-
-    let private severityIconAndColor (violation: RuleViolation) =
-        match violation.Severity with
-        | FindingSeverity.Warning -> warningIcon, Theme.Tokens.Warning
-        | _ -> failureIcon, Theme.Tokens.Danger
-
-    let severityIcon (violation: RuleViolation) =
-        let icon, color = severityIconAndColor violation
-        gridIcon icon color (string violation.Severity)
-
-    /// The details pane's title, anchored by the severity icon.
-    let detailTitle (violation: RuleViolation) (title: IView) =
-        let icon, color = severityIconAndColor violation
-        withIcon (decorativeIcon icon color 18.0) title
-
-    /// The icon for how a finding is fixed: a wand for tagging from the suggested structure, a
-    /// wrench for an auto fix.
-    let private fixIconFor (violation: RuleViolation) =
-        if violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then wandIcon else fixIcon
-
-    /// How a finding is fixed, named after the button that does it: "Auto fix", or, for tagging
-    /// from the suggested structure, "Suggest Structure" (the heading adds "fixes it").
-    let fixedBy (violation: RuleViolation) =
-        if violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then "Suggest Structure" else "Auto fix"
-
-    /// The details pane's heading for how a finding is fixed, anchored by its icon.
-    let fixableHeading (violation: RuleViolation) =
-        let text = if violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout then "Suggest Structure fixes it" else "Auto fix"
-        withIcon
-            (decorativeIcon (fixIconFor violation) Theme.Tokens.Primary 14.0)
-            (TextBlock.create [ TextBlock.text text; TextBlock.fontWeight FontWeight.SemiBold ])
-
-    /// A wand for findings suggesting the structure fixes, a wrench for those an auto fix
-    /// fixes; nothing otherwise.
-    let fixableIcon (row: RuleViolationRow) : IView =
-        if row.Violation.IsFixable then
-            gridIcon (fixIconFor row.Violation) Theme.Tokens.Primary $"{fixedBy row.Violation}: {row.Fixable}"
-        else
-            TextBlock.create []
-
-    /// The Auto Fixes button's icon: the wrench its fixes have in the results.
-    let autoFixesIcon = Some(fixIcon, Theme.Tokens.Primary)
-
-    /// The Suggest Structure button's icon: the wand its fixes have, white on its filled colour.
-    let suggestIcon = Some(wandIcon, "SemiColorWhite")
-
-    /// A button's label, after an icon (its geometry and colour token) if given, with a count
-    /// beside it (none when it's 0).
-    let badged (icon: (Geometry * string) option) (label: string) (count: int) : IView =
-        StackPanel.create [
-            StackPanel.orientation Orientation.Horizontal
-            StackPanel.children [
-                match icon with
-                | Some(geometry, color) -> decorativeIcon geometry color 14.0
-                | None -> ()
-                TextBlock.create [ TextBlock.text label; TextBlock.verticalAlignment VerticalAlignment.Center ]
-                if count > 0 then
-                    Border.create [
-                        Border.margin (6.0, 0.0, 0.0, 0.0)
-                        Border.padding (6.0, 0.0)
-                        Border.cornerRadius 8.0
-                        Border.verticalAlignment VerticalAlignment.Center
-                        Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Primary ]
-                        Border.child (
-                            TextBlock.create [
-                                TextBlock.text (string count)
-                                TextBlock.fontSize 11.0
-                                TextBlock.fontWeight FontWeight.SemiBold
-                                TextBlock.foreground Brushes.White
-                            ]
-                        )
-                    ]
-            ]
-        ]
-
-    let detailText (text: string) (secondary: bool) (attrs: IAttr<TextBox> list) =
-        TextBox.create [
-            if secondary then
-                Theme.resources [ TextBox.ForegroundProperty, Theme.Tokens.SecondaryText ]
-            TextBox.text text
-            TextBox.isReadOnly true
-            TextBox.textWrapping TextWrapping.Wrap
-            TextBox.borderThickness 0.0
-            TextBox.background "Transparent"
-            TextBox.padding (0.0, 2.0)
-            TextBox.minHeight 0.0
-            yield! attrs
-        ]
+    open Legibyl.Gui.Icons
+    open Legibyl.Gui.FindingDetails
 
     /// Equal-width digits, so a number that changes doesn't change width.
     let private tabularFigures: IAttr<TextBlock> =
@@ -1088,65 +759,22 @@ module private MainView =
                 }
                 |> ignore
 
-            // The File menu: in the menu bar on macOS (with its ⌘ shortcuts), and at the top of the
-            // window elsewhere (where the keys below are Ctrl+O, Ctrl+W, Ctrl+S and Ctrl+E).
+            // The menus (see MainMenu), once: the File menu's Save and Export… follow the buttons.
             let menuItems = ctx.useState ((None: (NativeMenuItem * NativeMenuItem) option), false)
             ctx.useEffect (
                 (fun () ->
-                    let mac = OperatingSystem.IsMacOS()
-                    let item (header: string) (key: Key) (action: unit -> unit) =
-                        let item = NativeMenuItem(header, Command = command action)
-                        if mac then item.Gesture <- KeyGesture(key, KeyModifiers.Meta)
-                        item
-                    let save = item "Save" Key.S (fun () -> if not isBusy.Current && edited.Current then saveReview () |> ignore)
-                    save.ToolTip <-
-                        "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed. Closing the window asks about changes not saved."
-                    let exportItem = item "Export…" Key.E (fun () -> if not isBusy.Current then export ())
-                    // The PDFs opened lately, each opened as File › Open… would.
-                    let recent = NativeMenu()
-                    let fillRecent () =
-                        recent.Items.Clear()
-                        let paths = RecentFiles.read ()
-                        for path, label in List.zip paths (RecentFiles.labels paths) do
-                            let entry = NativeMenuItem(label, ToolTip = path)
-                            entry.Command <- command (fun () -> setSelectedFile path)
-                            recent.Items.Add entry
-                        if not paths.IsEmpty then recent.Items.Add(NativeMenuItemSeparator())
-                        let clear = NativeMenuItem("Clear Menu", IsEnabled = not paths.IsEmpty)
-                        clear.Command <- command RecentFiles.clear
-                        recent.Items.Add clear
-                    fillRecent ()
-                    let refill = RecentFiles.Changed.Subscribe(fun () -> Avalonia.Threading.Dispatcher.UIThread.Post fillRecent)
-                    window.Closed.Add(fun _ -> refill.Dispose())
-                    let file = NativeMenu()
-                    file.Items.Add(item "Open…" Key.O (fun () -> browse ()))
-                    file.Items.Add(NativeMenuItem("Open Recent", Menu = recent))
-                    file.Items.Add(NativeMenuItemSeparator())
-                    file.Items.Add(item "Close Window" Key.W (fun () -> window.Close()))
-                    file.Items.Add(save)
-                    file.Items.Add(exportItem)
-                    let menu = NativeMenu()
-                    menu.Items.Add(NativeMenuItem("File", Menu = file))
-                    // About: in the application menu on macOS (see App); a Help menu elsewhere.
-                    if not mac then
-                        let help = NativeMenu()
-                        help.Items.Add(NativeMenuItem("About Legibyl…", Command = command (fun () -> About.show window |> ignore)))
-                        menu.Items.Add(NativeMenuItem("Help", Menu = help))
-                    NativeMenu.SetMenu(window, menu)
-                    menuItems.Set(Some(save, exportItem))
-                    if not mac then
-                        window.KeyDown.Add(fun e ->
-                            if e.KeyModifiers.HasFlag KeyModifiers.Control then
-                                match e.Key with
-                                | Key.O -> e.Handled <- true; browse ()
-                                | Key.W -> e.Handled <- true; window.Close()
-                                | Key.S when not isBusy.Current && edited.Current ->
-                                    e.Handled <- true
-                                    saveReview () |> ignore
-                                | Key.E when not isBusy.Current ->
-                                    e.Handled <- true
-                                    export ()
-                                | _ -> ())),
+                    menuItems.Set(
+                        Some(
+                            MainMenu.install
+                                window
+                                { Open = browse
+                                  OpenPath = setSelectedFile
+                                  CanSave = fun () -> not isBusy.Current && edited.Current
+                                  Save = fun () -> saveReview () |> ignore
+                                  CanExport = fun () -> not isBusy.Current
+                                  Export = fun () -> export () }
+                        )
+                    )),
                 [ EffectTrigger.AfterInit ]
             )
 
@@ -1671,80 +1299,10 @@ module private MainView =
                             Border.create [ Border.margin (0.0, 0.0, 10.0, 0.0); Border.child view ] ]
                 ]
 
-            /// What the details pane says when no finding is selected: how to start, in an empty window;
-            /// for a PDF that passes, what automated checks can't judge.
+            /// What the details pane says when no finding is selected, in an empty window (see Guidance).
             let guidance () : IView option =
-                let heading (text: string) =
-                    TextBlock.create [
-                        TextBlock.text text
-                        TextBlock.fontSize 16.0
-                        TextBlock.fontWeight FontWeight.SemiBold
-                        TextBlock.margin (0.0, 0.0, 0.0, 10.0)
-                        TextBlock.textWrapping TextWrapping.Wrap
-                    ]
-                    :> IView
-                let line (marker: string) (text: string) =
-                    Grid.create [
-                        Grid.columnDefinitions "Auto,*"
-                        Grid.margin (0.0, 0.0, 0.0, 8.0)
-                        Grid.children [
-                            TextBlock.create [
-                                TextBlock.text marker
-                                TextBlock.width 22.0
-                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                            ]
-                            TextBlock.create [ Grid.column 1; TextBlock.text text; TextBlock.textWrapping TextWrapping.Wrap ]
-                        ]
-                    ]
-                    :> IView
-                let note (text: string) =
-                    TextBlock.create [
-                        TextBlock.text text
-                        TextBlock.textWrapping TextWrapping.Wrap
-                        TextBlock.margin (0.0, 6.0, 0.0, 0.0)
-                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                    ]
-                    :> IView
-                let panel (children: IView list) : IView =
-                    ScrollViewer.create [
-                        Grid.column 2
-                        ScrollViewer.margin (12.0, 0.0, 0.0, 0.0)
-                        ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
-                        ScrollViewer.content (StackPanel.create [ StackPanel.maxWidth 560.0; StackPanel.horizontalAlignment HorizontalAlignment.Left; StackPanel.children children ])
-                    ]
                 match selectedFile.Current, outcome.Current with
-                | None, _ when not busy ->
-                    Some(
-                        panel [
-                            heading "Making a PDF accessible"
-                            line "1." "Open a PDF: Browse…, drop it on this window, or File › Open…."
-                            line "2." "Read what's found. Failures (red) are what PDF/UA requires; warnings (orange) are worth a look. A wrench marks what has an auto fix; a wand, what suggesting the structure fixes."
-                            line "3." "Structure… shows the tags a screen reader uses. Check the headings, the figures' alt text and the reading order, and edit them there. A PDF with no tags gets Suggest Structure… instead."
-                            line "4." "Auto Fixes… chooses fixes, like the document's language and title."
-                            line "5." "Export… writes a fixed copy and opens it, to check again. The PDF you opened isn't changed. File › Save keeps your review (edits, dismissed warnings, chosen fixes) to pick up later."
-                            note "PDF/UA is the standard for PDFs that screen readers and other assistive technology can use."
-                            // Which Legibyl this is, and About…, without the menu bar.
-                            StackPanel.create [
-                                StackPanel.orientation Orientation.Horizontal
-                                StackPanel.margin (0.0, 12.0, 0.0, 0.0)
-                                StackPanel.children [
-                                    TextBlock.create [
-                                        TextBlock.text $"Legibyl {Legibyl.Validation.BuildInfo.version} · "
-                                        TextBlock.verticalAlignment VerticalAlignment.Center
-                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                    ]
-                                    Button.create [
-                                        Button.content "About…"
-                                        Button.padding (0.0, 0.0)
-                                        Button.background Brushes.Transparent
-                                        Button.borderThickness 0.0
-                                        Theme.resources [ Button.ForegroundProperty, Theme.Tokens.Primary ]
-                                        Button.onClick (fun _ -> About.show window |> ignore)
-                                    ]
-                                ]
-                            ]
-                        ]
-                    )
+                | None, _ when not busy -> Some(Guidance.emptyWindow window)
                 | _ -> None
 
             /// Details above the page preview: a finding's, or a rule's (with its first finding's page).

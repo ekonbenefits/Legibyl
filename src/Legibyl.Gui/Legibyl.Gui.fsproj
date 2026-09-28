@@ -35,6 +35,11 @@
     <Compile Include="LinkTitleOffer.fs" />
     <Compile Include="About.fs" />
     <Compile Include="RecentFiles.fs" />
+    <Compile Include="ResultsList.fs" />
+    <Compile Include="FindingDetails.fs" />
+    <Compile Include="PassChecklist.fs" />
+    <Compile Include="Guidance.fs" />
+    <Compile Include="MainMenu.fs" />
     <Compile Include="MainWindow.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
