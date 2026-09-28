@@ -248,9 +248,8 @@ let private validationText (results: ValidationResult list) =
                     match f.Region with
                     | NonNull region -> line $"    region: {ValidationReportTextFormatter.FormatRegion region}"
                     | Null -> ()
-            match r.ValidatorNotes with
-            | NonNull notes -> for note in notes do line (noteLine note)
-            | Null -> ()
+            for note in r.ValidatorNotes do
+                line (noteLine note)
             match r.CheckedByPerson with
             | NonNull checkedBy ->
                 let date = checkedBy.CheckedAt |> Option.ofNullable |> Option.map (fun at -> " on " + at.ToString("yyyy-MM-dd", Globalization.CultureInfo.InvariantCulture)) |> Option.defaultValue ""
@@ -312,8 +311,8 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
           Applied = [||]
           NotApplied = [||]
           Error = null
-          Before = None
-          After = None
+          Before = null
+          After = null
           ValidatorNotes = [||] }
     let targetPath = repair.Output |> Option.defaultWith (fun () -> nextVersion file)
     // The review's edits (--edits: the file's own review), and a layout it recorded for an
@@ -342,7 +341,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
             { result with
                 Status = FixStatus.NothingToDo
                 NotApplied = Array.ofList noReview
-                Before = Some(compliance before)
+                Before = compliance before
                 ValidatorNotes = before.Notes }
         | None -> { result with Error = $"'{file}' couldn't be validated." }
     else
@@ -382,7 +381,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                     validator.Review <- ReviewFile.forCopy (Some review)
                 | None -> ()
                 let fix = validator.Fix(file, profile, targetPath, options)
-                let before = Some(compliance fix.OriginalReport)
+                let before = compliance fix.OriginalReport
                 let result = { result with ValidatorNotes = fix.OriginalReport.Notes }
                 let applied = Array.ofSeq fix.AppliedFixes
                 let tagged = applied |> Array.exists (fun line -> line.StartsWith "Tagged ")
@@ -400,7 +399,10 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                         Applied = applied
                         NotApplied = notApplied
                         Before = before
-                        After = fix.OutputPath |> Option.ofObj |> Option.map (fun copy -> compliance (validator.Validate(copy, profile))) }
+                        After =
+                            match fix.OutputPath with
+                            | NonNull copy -> compliance (validator.Validate(copy, profile))
+                            | Null -> null }
                 | NonNull copy ->
                     { result with
                         Status = FixStatus.Repaired
@@ -408,7 +410,7 @@ let private repairFile (validator: VeraPdfValidator) (repair: Repair) (file: str
                         Applied = applied
                         NotApplied = notApplied
                         Before = before
-                        After = Some(compliance (validator.Validate(copy, profile))) }
+                        After = compliance (validator.Validate(copy, profile)) }
                 | Null -> { result with Status = FixStatus.NothingToDo; Applied = applied; NotApplied = notApplied; Before = before }
             with
             | :? VeraPdfValidationException as ex -> { result with Error = ex.Message }
@@ -427,10 +429,10 @@ let private fixText (results: RepairResult list) =
     for r in results do
         match r.Status, r.Before, r.After with
         | FixStatus.Error, _, _ -> line $"{r.File}: ERROR — {r.Error}"
-        | FixStatus.Repaired, Some before, Some after ->
+        | FixStatus.Repaired, NonNull before, NonNull after ->
             line $"{r.File}: repaired → {r.OutputPath} (before: {standing before}; after: {standing after})"
         | FixStatus.AlreadyTagged, _, _ -> line $"{r.File}: already tagged; a layout is for an untagged file"
-        | _, Some before, _ -> line $"{r.File}: nothing to do ({standing before})"
+        | _, NonNull before, _ -> line $"{r.File}: nothing to do ({standing before})"
         | status, _, _ -> line $"{r.File}: {status}"
         for applied in r.Applied do
             line $"  - {applied}"
@@ -446,8 +448,8 @@ let private fixExit (r: RepairResult) =
     match r.Status, r.After, r.Before with
     | FixStatus.Error, _, _ -> ExitCodes.ToolError
     | FixStatus.AlreadyTagged, _, _ -> ExitCodes.DocumentProblem
-    | _, Some after, _ -> if after.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
-    | _, None, Some before -> if before.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
+    | _, NonNull after, _ -> if after.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
+    | _, Null, NonNull before -> if before.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
     | _ -> ExitCodes.Success
 
 /// What's wrong with the edits in a review file (see ReviewFile.problems), as one message naming

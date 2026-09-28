@@ -912,8 +912,12 @@ non-compliant file):
 ```
 
 If a file can't be validated at all (missing, corrupt, encrypted), its entry has
-`"error": "<message>"` and the other fields are `null` — check `error` first
-before reading `isCompliant`.
+`"error": "<message>"`, its results (`isCompliant`, `totalAssertions`,
+`failedCount`) are `null`, and its lists are empty — check `error` first before
+reading `isCompliant`. On every command, a list (`failures`, `warnings`,
+`validatorNotes`, `applied`, `notApplied`) is `[]` when there's nothing in it,
+never `null`; `null` is kept for what's absent: no structure tree, no result, no
+copy (`before`, `after`), nothing checked by a person.
 
 Each failure's `location` says where it is readably, ending with what's there: the
 element that owns the content, by its tag and first words, or "content not in the
@@ -952,7 +956,8 @@ after:
     "notApplied": [],
     "error": null,
     "before": { "isCompliant": false, "failedCount": 13 },
-    "after": { "isCompliant": false, "failedCount": 7 }
+    "after": { "isCompliant": false, "failedCount": 7 },
+    "validatorNotes": []
   }
 ]
 ```

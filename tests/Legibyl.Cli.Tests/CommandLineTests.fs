@@ -377,3 +377,32 @@ let ``validate reports the steps a person checked, carried in a copy Legibyl wro
         let checkedBy = copied.Value.GetProperty "checkedByPerson"
         [ for step in checkedBy.GetProperty("steps").EnumerateArray() -> string (step.GetString()) ] |> List.sort |> should equal [ "headings"; "title" ]
         checkedBy.GetProperty("checkedAt").GetDateTime() |> should equal (DateTime(2026, 9, 27)))
+
+[<Fact>]
+let ``a result with nothing in it has empty lists, never null, on every command`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    try
+        // Not a PDF: it can't be validated or repaired, so there's nothing to list.
+        let broken = Path.Combine(folder, "broken.pdf")
+        File.WriteAllText(broken, "not a PDF")
+
+        let _, validated = run [ "validate"; broken ]
+        let _, repaired = run [ "fix"; broken ]
+
+        let kind (element: JsonElement) (name: string) = element.GetProperty(name).ValueKind
+        let isEmptyList (element: JsonElement) (name: string) =
+            kind element name = JsonValueKind.Array && element.GetProperty(name).GetArrayLength() = 0
+        validated.Value.GetProperty("error").ValueKind |> should equal JsonValueKind.String
+        for name in [ "failures"; "warnings"; "validatorNotes" ] do
+            (name, isEmptyList validated.Value name) |> should equal (name, true)
+        // Null where null means something: no structure tree, no result, nothing checked.
+        for name in [ "structure"; "isCompliant"; "checkedByPerson" ] do
+            (name, kind validated.Value name) |> should equal (name, JsonValueKind.Null)
+        repaired.Value.GetProperty("error").ValueKind |> should equal JsonValueKind.String
+        for name in [ "applied"; "notApplied"; "validatorNotes" ] do
+            (name, isEmptyList repaired.Value name) |> should equal (name, true)
+        for name in [ "before"; "after" ] do
+            (name, kind repaired.Value name) |> should equal (name, JsonValueKind.Null)
+    finally
+        Directory.Delete(folder, true)
