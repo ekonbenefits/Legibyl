@@ -19,9 +19,9 @@ let libraryVersion (assembly: Assembly) =
         attribute.InformationalVersion.Split('+').[0]
     | _ -> string (assembly.GetName().Version)
 
-/// What validating and repairing run on, each with its version and what it does here.
+/// What validating and fixing run on, each with its version and what it does here.
 let validationComponents () =
     [ "veraPDF", VeraPdfValidator.EngineVersion, "validation against PDF/UA"
       "IKVM.NET", libraryVersion typeof<IKVM.Runtime.JVM>.Assembly, "runs veraPDF's Java in .NET"
-      "iText", libraryVersion typeof<iText.Kernel.Pdf.PdfDocument>.Assembly, "reading and repairing PDFs"
+      "iText", libraryVersion typeof<iText.Kernel.Pdf.PdfDocument>.Assembly, "reading and fixing PDFs"
       "PdfPig", libraryVersion typeof<UglyToad.PdfPig.PdfDocument>.Assembly, "reading pages' text and drawing" ]

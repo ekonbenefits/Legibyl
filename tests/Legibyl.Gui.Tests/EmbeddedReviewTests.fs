@@ -12,7 +12,7 @@ let private logo: StructureGeometry = { PageNumber = 1; Left = 100.0; Bottom = 5
 
 let private splitParagraphs = { Dismissals.Rule = "Legibyl Structure-2"; Dismissals.Location = Dismissals.AnyLocation }
 
-/// A PDF (with an annotation but no tab order, for the Tabs fix to repair) in a fresh
+/// A PDF (with an annotation but no tab order, for the Tabs fix to fix) in a fresh
 /// temporary folder, and where its fixed copy goes.
 let private withPdf (test: string -> string -> unit) =
     let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
@@ -81,7 +81,7 @@ let ``a copy of a copy carries the dismissals as its original has them`` () =
         review.Dismissed <- review.Dismissed.Add(other, "Empty paragraph")
         let third = Path.ChangeExtension(output, ".v3.pdf") |> nonNull
 
-        // Another repair: the copy's tab order is fixed already.
+        // Another fix: the copy's tab order is fixed already.
         VeraPdfValidator(Review = review.ForCopy output).Fix(output, PdfProfile.PdfUa1, third, PdfFixOptions.Metadata) |> ignore
 
         File.Exists third |> should be True

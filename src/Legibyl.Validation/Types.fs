@@ -7,7 +7,7 @@ type FindingSeverity =
     | Warning = 1
 
 /// Legibyl's fixes. Each flag is named as the CLI's --fixes and a review's "fixes" name it, in
-/// kebab-case (FontGlyphs is font-glyphs; see RepairNames); its doc says what it does. The
+/// kebab-case (FontGlyphs is font-glyphs; see FixNames); its doc says what it does. The
 /// values are what a saved validation stores, so they never change.
 [<Flags>]
 type PdfFixOptions =
@@ -76,13 +76,14 @@ type PdfProfile =
     /// PDF/UA-2 (ISO 14289-2), for PDF 2.0.
     | PdfUa2 = 1
 
-/// Mirrors org.verapdf.pdfa.results.MetadataFixerResult.RepairStatus.
+/// Mirrors org.verapdf.pdfa.results.MetadataFixerResult.RepairStatus, and keeps veraPDF's name for it
+/// (elsewhere Legibyl says fix, not repair).
 type RepairStatus =
-    /// Metadata repair was carried out successfully.
+    /// Metadata fix was carried out successfully.
     | Success = 0
-    /// Metadata repair was attempted but failed.
+    /// Metadata fix was attempted but failed.
     | FixError = 1
-    /// The fixer could not determine any action that could repair the document.
+    /// The fixer could not determine any action that could fix the document.
     | WontFix = 2
     /// No action was taken because the file was already valid.
     | NoAction = 3
@@ -127,7 +128,7 @@ module Boxes =
 /// (in Suggest Structure, or a layout's edits): its alt text, its replacement text, its tag,
 /// paragraphs merged into it, or (for a region) leaving it out. What it changes is left as it
 /// was found; the edit is layered on top. The element is found again by its page, its tag and about the same box,
-/// so the edit still applies after repairs have rearranged the structure tree.
+/// so the edit still applies after fixes have rearranged the structure tree.
 /// Where an element goes among its siblings (Structure's Move Up and Move Down): what it now
 /// follows.
 type ElementMove =

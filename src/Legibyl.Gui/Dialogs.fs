@@ -212,17 +212,17 @@ let promptText (owner: Window) (title: string) (prompt: string) (initial: string
         return chosen
     }
 
-/// A repair the Auto Fixes dialog offers.
+/// A fix the Auto Fixes dialog offers.
 type private FixChoice =
     { Option: PdfFixOptions
       Title: string
       Detail: string }
 
-    /// Stays unticked even when found: it isn't one of the safe repairs (RepairNames.safe, as the
+    /// Stays unticked even when found: it isn't one of the safe fixes (FixNames.safe, as the
     /// CLI's fix applies by default), since it changes what the document says it is, or guesses.
-    member choice.OptIn = not (RepairNames.safe.HasFlag choice.Option)
+    member choice.OptIn = not (FixNames.safe.HasFlag choice.Option)
 
-/// The repairs, in the order they run: tagging first, then StructureFixes.orderedFixes, then
+/// The fixes, in the order they run: tagging first, then StructureFixes.orderedFixes, then
 /// veraPDF's metadata fix.
 let private fixChoices =
     // Tagging an untagged PDF isn't among them: it's tagged from its suggested structure.
@@ -283,16 +283,16 @@ let private fixChoices =
         Title = "Title from the first page"
         Detail = "If the document has no title anywhere, use the text of a short first page (a title page)." }
       { Option = PdfFixOptions.Metadata
-        Title = "Repair XMP metadata"
-        Detail = "Write the metadata PDF/UA asks for, and the identifier saying the file follows PDF/UA (veraPDF's repair)." } ]
+        Title = "Fix XMP metadata"
+        Detail = "Write the metadata PDF/UA asks for, and the identifier saying the file follows PDF/UA (veraPDF's fix)." } ]
 
-/// Lets the user pick which repairs to run, showing how many of the report's findings each
-/// one addresses. Lists only the repairs this PDF needs, unless asked for all of them.
+/// Lets the user pick which fixes to run, showing how many of the report's findings each
+/// one addresses. Lists only the fixes this PDF needs, unless asked for all of them.
 /// Returns None if the user cancelled.
 /// tagNote, if any, says how an untagged PDF is tagged (from its suggested structure), shown
-/// above the repairs.
-/// chosen is what was chosen before, if anything; the first time, the safe repairs this PDF
-/// needs start ticked. Export writes the chosen repairs (and the user's edits) to a copy.
+/// above the fixes.
+/// chosen is what was chosen before, if anything; the first time, the safe fixes this PDF
+/// needs start ticked. Export writes the chosen fixes (and the user's edits) to a copy.
 let chooseFixOptions
     (owner: Window)
     (report: ValidationReport)
@@ -300,10 +300,10 @@ let chooseFixOptions
     (chosen: PdfFixOptions option)
     : Task<PdfFixOptions option> =
     let window = dialogWindow "Auto Fixes" 560.0
-    // Never taller than the screen: the list scrolls in whatever room is left. (All the repairs
+    // Never taller than the screen: the list scrolls in whatever room is left. (All the fixes
     // at once are taller than a laptop screen.)
     window.MaxHeight <- screenLimit owner
-    // Its size is set once it opens, room enough for most of the repairs: showing all of them
+    // Its size is set once it opens, room enough for most of the fixes: showing all of them
     // then scrolls the list rather than resizing the window, which grew down from where it
     // opened, past the bottom of the screen.
     window.Opened.Add(fun _ ->
@@ -319,13 +319,13 @@ let chooseFixOptions
             Avalonia.Threading.DispatcherPriority.Background
         ))
     let found (option: PdfFixOptions) = report.FixableCount option
-    /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
+    /// Whether this PDF has something for the fix to do. Linking QR codes comes with tagging,
     /// and so can describing them from the pages they go to.
     let withTagging (choice: FixChoice) =
         (choice.Option = PdfFixOptions.QrLinks || choice.Option = PdfFixOptions.LinkTitlesFromWeb)
         && found PdfFixOptions.TagFromLayout > 0
     let applies (choice: FixChoice) = found choice.Option > 0 || withTagging choice
-    // veraPDF only repairs metadata (adding the PDF/UA identifier) when the document would then
+    // veraPDF only fixes metadata (adding the PDF/UA identifier) when the document would then
     // conform, so it's only worth ticking when every failure can be fixed here.
     let everyFailureFixable =
         report.Findings |> Seq.forall (fun f -> f.Passed || f.Severity <> FindingSeverity.Failure || f.IsFixable)
@@ -342,7 +342,7 @@ let chooseFixOptions
             let showAll = ctx.useState false
             let needed = fixChoices |> List.filter applies
 
-            /// The repair's title and detail, with how many findings it addresses on the right.
+            /// The fix's title and detail, with how many findings it addresses on the right.
             let row (choice: FixChoice) =
                 let count =
                     match found choice.Option with
@@ -351,7 +351,7 @@ let chooseFixOptions
                     | n -> $"{n} found"
                 let detail =
                     if choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
-                        $"{choice.Detail} Unticked: veraPDF only repairs metadata once every other failure is fixed, and some here can't be fixed automatically."
+                        $"{choice.Detail} Unticked: veraPDF only fixes metadata once every other failure is fixed, and some here can't be fixed automatically."
                     else
                         choice.Detail
                 CheckBox.create [
@@ -414,7 +414,7 @@ let chooseFixOptions
                 ]
 
             let onDone _ =
-                // Only what's shown: a repair ticked under "all" and then hidden again isn't run.
+                // Only what's shown: a fix ticked under "all" and then hidden again isn't run.
                 let shown = if showAll.Current then fixChoices else needed
                 window.Close(Some(shown |> List.fold (fun all c -> if selected.Current.HasFlag c.Option then all ||| c.Option else all) PdfFixOptions.None))
 
@@ -425,8 +425,8 @@ let chooseFixOptions
                     TextBlock.create [
                         TextBlock.text (
                             match tagNote with
-                            | Some note -> $"{note}\n\nChoose the repairs Export applies to the copy:"
-                            | None -> "Choose the repairs Export applies to a copy of this PDF:"
+                            | Some note -> $"{note}\n\nChoose the fixes Export applies to the copy:"
+                            | None -> "Choose the fixes Export applies to a copy of this PDF:"
                         )
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 0.0, 0.0, 8.0)
@@ -435,7 +435,7 @@ let chooseFixOptions
                         Grid.row 1
                         ToggleSwitch.margin (0.0, 0.0, 0.0, 10.0)
                         ToggleSwitch.isChecked showAll.Current
-                        ToggleSwitch.onContent $"Showing all {fixChoices.Length} repairs"
+                        ToggleSwitch.onContent $"Showing all {fixChoices.Length} fixes"
                         ToggleSwitch.offContent $"Showing the {needed.Length} this PDF needs"
                         ToggleSwitch.onIsCheckedChanged (fun e ->
                             match e.Source with
@@ -454,7 +454,7 @@ let chooseFixOptions
                                             TextBlock.create [
                                                 TextBlock.textWrapping TextWrapping.Wrap
                                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                                                TextBlock.text "Nothing in these results can be repaired automatically. Show all repairs to choose one anyway."
+                                                TextBlock.text "Nothing in these results has an auto fix. Show all fixes to choose one anyway."
                                             ]
                                             :> IView
                                     for choice in shown do
@@ -469,7 +469,7 @@ let chooseFixOptions
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 8.0, 0.0, 16.0)
                         TextBlock.text
-                            "Counts are findings in the current results, dismissed warnings included. These repairs are best-effort: they don't write alt text themselves (Export writes the alt text you wrote, with your other edits) or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
+                            "Counts are findings in the current results, dismissed warnings included. These fixes are best-effort: they don't write alt text themselves (Export writes the alt text you wrote, with your other edits) or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
                     ]
                     StackPanel.create [
                         Grid.row 4
@@ -508,7 +508,7 @@ type private StatusStyle =
 let private statusStyle (outcome: Result<FixResult, string>) =
     match outcome with
     | Error message ->
-        { Title = "Repair failed"; Detail = message; Glyph = "✕"; ColorToken = Theme.Tokens.Danger }
+        { Title = "Fix failed"; Detail = message; Glyph = "✕"; ColorToken = Theme.Tokens.Danger }
     | Ok fix ->
         match fix.Status with
         | RepairStatus.Success ->
@@ -525,7 +525,7 @@ let private statusStyle (outcome: Result<FixResult, string>) =
               Detail =
                 "The file claimed PDF/UA conformance it doesn't meet, so veraPDF removed that claim. "
                 + "Without it, the check that requires a conformance claim now fails too, "
-                + "so the repaired copy can show one more failure."
+                + "so the fixed copy can show one more failure."
               Glyph = "!"
               ColorToken = Theme.Tokens.Warning }
         | RepairStatus.NoAction ->
@@ -534,13 +534,13 @@ let private statusStyle (outcome: Result<FixResult, string>) =
               Glyph = "i"
               ColorToken = Theme.Tokens.Primary }
         | RepairStatus.WontFix ->
-            { Title = "Couldn't repair"
-              Detail = "veraPDF found no way to fix these problems with the selected repairs, so no copy was written."
+            { Title = "Couldn't fix"
+              Detail = "veraPDF found no way to fix these problems with the selected fixes, so no copy was written."
               Glyph = "!"
               ColorToken = Theme.Tokens.Warning }
         | _ ->
-            { Title = "Repair failed"
-              Detail = "veraPDF tried to repair the metadata but failed, so no copy was written."
+            { Title = "Fix failed"
+              Detail = "veraPDF tried to fix the metadata but failed, so no copy was written."
               Glyph = "✕"
               ColorToken = Theme.Tokens.Danger }
 
@@ -596,7 +596,7 @@ let private comparison (before: ValidationReport) (after: ValidationReport) : IV
     ]
 
 /// Shows the outcome of a Fix: a plain-language status, what changed, how the
-/// repaired copy validates compared with the original, and where it was written.
+/// fixed copy validates compared with the original, and where it was written.
 let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: ValidationReport option) : Task =
     let window = dialogWindow "Export" 540.0
     let style = statusStyle outcome
@@ -667,7 +667,7 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                                 // Before → after
                                 match outcome, after with
                                 | Ok fix, Some after ->
-                                    sectionHeading "Result (original → repaired copy)"
+                                    sectionHeading "Result (original → fixed copy)"
                                     comparison fix.OriginalReport after
                                 | _ -> ()
 
@@ -701,7 +701,7 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                                 // Attempted but not kept
                                 match outcome with
                                 | Ok fix when fix.NotApplied.Count > 0 ->
-                                    sectionHeading "Not repaired"
+                                    sectionHeading "Not fixed"
                                     StackPanel.create [
                                         StackPanel.spacing 4.0
                                         StackPanel.children [
@@ -777,7 +777,7 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                             | Ok _ ->
                                 TextBlock.create [
                                     TextBlock.text
-                                        "Fixes are best-effort and limited to the repairs you selected. They don't write alt text themselves (only the alt text you wrote) or infer table headers, and tags from the layout are a detector's best guess, to check."
+                                        "Fixes are best-effort and limited to the ones you selected. They don't write alt text themselves (only the alt text you wrote) or infer table headers, and tags from the layout are a detector's best guess, to check."
                                     TextBlock.fontSize 12.0
                                     TextBlock.textWrapping TextWrapping.Wrap
                                     TextBlock.margin (0.0, 0.0, 16.0, 0.0)

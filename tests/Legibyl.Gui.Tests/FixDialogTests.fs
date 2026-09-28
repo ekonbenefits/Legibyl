@@ -40,7 +40,7 @@ let private lines (checkBox: CheckBox) =
     |> Seq.choose (fun v -> match box v with :? TextBlock as t -> Some(string t.Text) | _ -> None)
     |> List.ofSeq
 
-/// Each repair's title, whether it's ticked, and its count, in the order listed.
+/// Each fix's title, whether it's ticked, and its count, in the order listed.
 let private rows (dialog: Window) =
     dialog.GetVisualDescendants()
     |> Seq.choose (fun v -> match box v with :? CheckBox as c -> Some c | _ -> None)
@@ -49,7 +49,7 @@ let private rows (dialog: Window) =
 
 let private options (dialog: Window) = rows dialog |> Map.ofList
 
-/// Everything a repair's row says.
+/// Everything a fix's row says.
 let private rowText (dialog: Window) (title: string) =
     dialog.GetVisualDescendants()
     |> Seq.choose (fun v -> match box v with :? CheckBox as c -> Some c | _ -> None)
@@ -90,7 +90,7 @@ let private findings =
       finding PdfFixOptions.FontGlyphs ]
 
 [<Fact>]
-let ``the fix dialog lists what this PDF needs, in the order repairs run, ticking only safe ones`` () =
+let ``the fix dialog lists what this PDF needs, in the order fixes run, ticking only safe ones`` () =
     onUiThread (fun () ->
         let mutable shown = []
         withDialog findings (fun dialog -> shown <- rows dialog) |> ignore
@@ -106,11 +106,11 @@ let ``the fix dialog lists what this PDF needs, in the order repairs run, tickin
               // Opt-in: it visits the web.
               "Describe web links from their pages", (false, "with tagging")
               "Document title", (true, "1 found")
-              // Every failure here is fixable, so veraPDF can repair the metadata.
-              "Repair XMP metadata", (true, "1 found") ])
+              // Every failure here is fixable, so veraPDF can fix the metadata.
+              "Fix XMP metadata", (true, "1 found") ])
 
 [<Fact>]
-let ``showing all repairs lists the ones this PDF doesn't need too, still in order`` () =
+let ``showing all fixes lists the ones this PDF doesn't need too, still in order`` () =
     onUiThread (fun () ->
         let mutable shown = []
         withDialog findings (fun dialog ->
@@ -140,7 +140,7 @@ let ``showing all repairs lists the ones this PDF doesn't need too, still in ord
               "Describe web links from their pages"
               "Document title"
               "Title from the first page"
-              "Repair XMP metadata" ]
+              "Fix XMP metadata" ]
         (Map.ofList shown)["Describe contents links"] |> should equal (false, "none found"))
 
 [<Fact>]
@@ -150,14 +150,14 @@ let ``metadata starts unticked when some failure can't be fixed, and says why`` 
         let mutable text = ""
         withDialog (finding PdfFixOptions.Metadata :: finding PdfFixOptions.None :: findings) (fun dialog ->
             shown <- options dialog
-            text <- rowText dialog "Repair XMP metadata")
+            text <- rowText dialog "Fix XMP metadata")
         |> ignore
 
-        shown["Repair XMP metadata"] |> should equal (false, "2 found")
-        text |> should haveSubstring "veraPDF only repairs metadata once every other failure is fixed")
+        shown["Fix XMP metadata"] |> should equal (false, "2 found")
+        text |> should haveSubstring "veraPDF only fixes metadata once every other failure is fixed")
 
 [<Fact>]
-let ``continuing applies the ticked repairs`` () =
+let ``continuing applies the ticked fixes`` () =
     onUiThread (fun () ->
         let result =
             withDialog findings (fun dialog ->
@@ -187,7 +187,7 @@ let ``for an untagged PDF, the dialog says it's tagged from its suggested struct
         texts |> should not' (contain "Tag from the page layout"))
 
 [<Fact>]
-let ``only the CLI's safe repairs start ticked: bookmarks don't`` () =
+let ``only the CLI's safe fixes start ticked: bookmarks don't`` () =
     onUiThread (fun () ->
         let mutable shown = Map.empty
         withDialog (finding PdfFixOptions.Bookmarks :: findings) (fun dialog -> shown <- options dialog) |> ignore
@@ -195,7 +195,7 @@ let ``only the CLI's safe repairs start ticked: bookmarks don't`` () =
         fst shown["Add bookmarks"] |> should be False)
 
 [<Fact>]
-let ``with every repair shown on a short screen, the list scrolls and the buttons stay on screen`` () =
+let ``with every fix shown on a short screen, the list scrolls and the buttons stay on screen`` () =
     onUiThread (fun () ->
         let mutable height = 0.0
         let mutable continueBottom = Double.MaxValue
@@ -242,7 +242,7 @@ let ``done with nothing ticked chooses nothing, and cancelling keeps what was ch
         withDialogChosen (Some PdfFixOptions.Tabs) None findings ignore |> should equal None)
 
 [<Fact>]
-let ``showing all repairs keeps the dialog's size: the list scrolls instead`` () =
+let ``showing all fixes keeps the dialog's size: the list scrolls instead`` () =
     onUiThread (fun () ->
         let mutable before = 0.0
         let mutable after = 0.0

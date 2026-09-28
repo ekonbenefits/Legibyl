@@ -89,7 +89,7 @@ let private writeReview (path: string) (alt: string) =
     File.WriteAllText(path, ReviewFile.toJson review)
 
 [<Fact>]
-let ``--edits writes the review next to the PDF into the repaired copy, and carries it`` () =
+let ``--edits writes the review next to the PDF into the fixed copy, and carries it`` () =
     withTaggedPdf (fun pdf ->
         writeReview (ReviewFile.filePath pdf) "Tomato seedlings"
         let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
@@ -98,7 +98,7 @@ let ``--edits writes the review next to the PDF into the repaired copy, and carr
 
         strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
         figureAlt copy |> should equal (Some "Tomato seedlings")
-        // Only the edits: no other repair was asked for.
+        // Only the edits: no other fix was asked for.
         strings result.Value "applied" |> should haveLength 1
         EmbeddedReview.read copy |> Option.isSome |> should be True)
 
@@ -165,14 +165,14 @@ let ``--edits without a review says there's nothing to apply`` () =
         strings result.Value "notApplied" |> List.head |> should haveSubstring "No edits were applied: there's no garden.pdf.legibyl.json next to it")
 
 [<Fact>]
-let ``--fixes runs the repairs named`` () =
+let ``--fixes runs the fixes named`` () =
     withTaggedPdf (fun pdf ->
         let _, result = run [ "fix"; pdf; "--fixes"; "language" ]
 
         strings result.Value "applied" |> should equal [ "Declared the document's language as en (English), detected from its text." ])
 
 [<Fact>]
-let ``an unknown repair is a usage error`` () =
+let ``an unknown fix is a usage error`` () =
     withTaggedPdf (fun pdf ->
         let code, _ = run [ "fix"; pdf; "--fixes"; "safe,nope" ]
         code |> should equal 64)
@@ -191,7 +191,7 @@ let ``structure nodes say where they are as edits do: page and box`` () =
         [ for v in figure.GetProperty("box").EnumerateArray() -> v.GetDouble() ] |> should haveLength 4)
 
 [<Fact>]
-let ``validate reports compliance, with nothing about repairs`` () =
+let ``validate reports compliance, with nothing about fixes`` () =
     withTaggedPdf (fun pdf ->
         let code, result = run [ "validate"; pdf ]
 
@@ -204,7 +204,7 @@ let ``fix validates the copy it writes, and its exit code is about that copy`` (
     withTaggedPdf (fun pdf ->
         let code, result = run [ "fix"; pdf; "--fixes"; "language" ]
 
-        result.Value.GetProperty("status").GetString() |> should equal "repaired"
+        result.Value.GetProperty("status").GetString() |> should equal "fixed"
         let before = result.Value.GetProperty "before"
         let after = result.Value.GetProperty "after"
         after.GetProperty("failedCount").GetInt32() |> should be (lessThan (before.GetProperty("failedCount").GetInt32()))
@@ -396,12 +396,12 @@ let ``a result with nothing in it has empty lists, never null, on every command`
     let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
     Directory.CreateDirectory folder |> ignore
     try
-        // Not a PDF: it can't be validated or repaired, so there's nothing to list.
+        // Not a PDF: it can't be validated or fixed, so there's nothing to list.
         let broken = Path.Combine(folder, "broken.pdf")
         File.WriteAllText(broken, "not a PDF")
 
         let _, validated = run [ "validate"; broken ]
-        let _, repaired = run [ "fix"; broken ]
+        let _, fixedResult = run [ "fix"; broken ]
 
         let kind (element: JsonElement) (name: string) = element.GetProperty(name).ValueKind
         let isEmptyList (element: JsonElement) (name: string) =
@@ -412,10 +412,10 @@ let ``a result with nothing in it has empty lists, never null, on every command`
         // Null where null means something: no structure tree, no result, nothing checked.
         for name in [ "structure"; "isCompliant"; "checkedByPerson" ] do
             (name, kind validated.Value name) |> should equal (name, JsonValueKind.Null)
-        repaired.Value.GetProperty("error").ValueKind |> should equal JsonValueKind.String
+        fixedResult.Value.GetProperty("error").ValueKind |> should equal JsonValueKind.String
         for name in [ "applied"; "notApplied"; "validatorNotes" ] do
-            (name, isEmptyList repaired.Value name) |> should equal (name, true)
+            (name, isEmptyList fixedResult.Value name) |> should equal (name, true)
         for name in [ "before"; "after" ] do
-            (name, kind repaired.Value name) |> should equal (name, JsonValueKind.Null)
+            (name, kind fixedResult.Value name) |> should equal (name, JsonValueKind.Null)
     finally
         Directory.Delete(folder, true)

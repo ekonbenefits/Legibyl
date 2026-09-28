@@ -1,4 +1,4 @@
-/// Structural repairs that work on the raw PDF objects via iText: removing empty /P
+/// Structural fixes that work on the raw PDF objects via iText: removing empty /P
 /// elements, setting annotation tab order, describing links, and naming the document.
 /// The warnings that point users at these problems live in LegibylChecks.
 module internal Legibyl.Validation.StructureFixes
@@ -174,7 +174,7 @@ let describeWebLinks (titles: IPageTitleSource) (document: PdfDocument) (_: Cont
 // ---- Document title ----
 
 /// The document's XMP `dc:title`, if it has one. Best-effort: a malformed XMP packet
-/// should not stop the rest of the repairs.
+/// should not stop the rest of the fixes.
 let xmpTitle (document: PdfDocument) =
     try
         match document.GetXmpMetadata() with
@@ -394,7 +394,7 @@ let private setIdentityCidToGidMaps (document: PdfDocument) _ =
         []
 
 /// For a document with no XMP metadata stream, writes one from its Info dictionary, so
-/// veraPDF's metadata fixer (which runs next) has metadata to repair: for a document without
+/// veraPDF's metadata fixer (which runs next) has metadata to fix: for a document without
 /// any, it answers Won't fix.
 let private addMissingMetadata (document: PdfDocument) _ =
     if not (isNull (document.GetCatalog().GetPdfObject().Get PdfName.Metadata)) then
@@ -449,16 +449,16 @@ let private setLanguageFromText (document: PdfDocument) context =
             [ $"Declared the document's language as {language} ({DocumentLanguage.nameOf language}), detected from its text." ]
         | None -> []
 
-/// Legibyl's own repairs, in the order they run. Each takes the open document and returns a
-/// line per change it made. The order matters where one repair changes what another sees:
+/// Legibyl's own fixes, in the order they run. Each takes the open document and returns a
+/// line per change it made. The order matters where one fix changes what another sees:
 ///
 ///   0. The parent tree first, where it's missing: until it's rebuilt, every tag reads as
 ///      untagged. Then the document's language: it only sets /Lang, and bookmarks need it.
 ///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
-///      heading before the list repair could take it for a list item.
+///      heading before the list fix could take it for a list item.
 ///   2. Empty paragraphs, table-of-contents entries and figures next, so blank lines between list items
-///      are gone before lists are tagged. (The list repair copes with them either way, keeping
+///      are gone before lists are tagged. (The list fix copes with them either way, keeping
 ///      them in the item.)
 ///   3. Paragraphs tagged line by line are joined, so a list item's second line is part of
 ///      the item before lists are found (a line starting with a marker is never joined on).
@@ -470,13 +470,13 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///      paragraphs, so their order among themselves doesn't matter (except that a contents
 ///      link is described from its own text before any is from a web page's title)...
 ///   7. ...except that a missing XMP stream is written last, from the Info dictionary the
-///      title repairs may have just filled in.
+///      title fixes may have just filled in.
 ///
 /// veraPDF's metadata fix runs after all of these (in VeraPdfValidator.Fix): it validates the
-/// result, and syncs XMP with the Info dictionary the title repair may have just set.
+/// result, and syncs XMP with the Info dictionary the title fix may have just set.
 /// titles is where LinkTitlesFromWeb reads the titles of the pages links go to, layout where
 /// JoinSplitParagraphs finds the pages' regions (without one, it does nothing), and edits and title
-/// what ApplyEdits writes (the title before the title repairs, which then leave it).
+/// what ApplyEdits writes (the title before the title fixes, which then leave it).
 let orderedFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
@@ -505,8 +505,8 @@ let orderedFixes
       PdfFixOptions.TitleFromFirstPage, setDocumentTitle true
       PdfFixOptions.Metadata, addMissingMetadata ]
 
-/// The structural repairs Legibyl makes itself, writing the result to outputPath.
-/// Returns one plain-language line per repair that actually changed something, so a
+/// The structural fixes Legibyl makes itself, writing the result to outputPath.
+/// Returns one plain-language line per fix that actually changed something, so a
 /// document that already had a given fix applied reports nothing for it.
 let applyFixes
     (inputPath: string)

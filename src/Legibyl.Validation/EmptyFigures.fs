@@ -1,6 +1,6 @@
 /// Figures tagged around nothing: an authoring app's empty marked-content sequence ("/MCID 16 BDC
 /// EMC") given a Figure tag. It fails for having no alt text, but there's nothing on the page for
-/// alt text to describe, so the repair is to take the tag out.
+/// alt text to describe, so the fix is to take the tag out.
 module internal Legibyl.Validation.EmptyFigures
 
 open System

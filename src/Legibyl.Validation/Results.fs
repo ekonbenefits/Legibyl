@@ -4,7 +4,7 @@ open System
 open System.Collections.Generic
 open System.Runtime.InteropServices
 
-/// Plain-language descriptions of the repairs, worded like the GUI's Auto Fixes dialog.
+/// Plain-language descriptions of the fixes, worded like the GUI's Auto Fixes dialog.
 module PdfFixDescriptions =
     /// One description per option set in options, e.g. "Remove empty /P structure elements".
     let Describe (options: PdfFixOptions) : string list =
@@ -49,7 +49,7 @@ type RuleViolation =
       LocationContext: string | null
       /// Whether this is a failing validation assertion or a Legibyl warning.
       Severity: FindingSeverity
-      /// Best-effort repair options that can address this finding, if any.
+      /// Best-effort fix options that can address this finding, if any.
       FixOptions: PdfFixOptions
       /// The page region to highlight for this finding, if known. veraPDF findings leave
       /// this null (annotation regions come from Location instead); Legibyl's structure
@@ -77,7 +77,7 @@ type RuleViolation =
 
     member this.IsFixable = this.FixOptions <> PdfFixOptions.None
 
-    /// What the available repairs do, e.g. "Remove empty /P structure elements"; empty if none.
+    /// What the available fixes do, e.g. "Remove empty /P structure elements"; empty if none.
     member this.FixDescription = String.Join("; ", PdfFixDescriptions.Describe this.FixOptions)
 
     override this.ToString() = $"[{this.Specification} {this.RuleId}] {this.Message}"
@@ -124,24 +124,24 @@ type ValidationReport =
 
     member this.FailedCount = this.Assertions |> Seq.filter (fun a -> not a.Passed) |> Seq.length
 
-    /// How many findings (failures and warnings) a repair addresses.
+    /// How many findings (failures and warnings) a fix addresses.
     member this.FixableCount(option: PdfFixOptions) =
         this.Findings |> Seq.filter (fun a -> a.FixOptions.HasFlag option) |> Seq.length
 
     member this.WarningCount =
         this.Assertions |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning) |> Seq.length
 
-/// The outcome of running selected best-effort repairs against a PDF.
+/// The outcome of running selected best-effort fixes against a PDF.
 type FixResult =
     { FilePath: string
       Profile: PdfProfile
       RequestedOptions: PdfFixOptions
-      /// Path to the repaired copy, or null if no output file was produced
+      /// Path to the fixed copy, or null if no output file was produced
       /// (nothing needed fixing, or veraPDF determined it couldn't fix anything).
       OutputPath: string | null
       Status: RepairStatus
       AppliedFixes: IReadOnlyList<string>
-      /// Requested repairs that were attempted but not kept, and why: e.g. veraPDF's metadata
+      /// Requested fixes that were attempted but not kept, and why: e.g. veraPDF's metadata
       /// fixer answering Won't fix. Empty when every attempt either applied or had nothing to do.
       NotApplied: IReadOnlyList<string>
       /// The validation report for the original (unfixed) file, for reference.
@@ -198,10 +198,10 @@ type FixStage =
     | CheckingOriginal = 0
     /// Tagging an untagged document from its layout, page by page.
     | Tagging = 1
-    /// Legibyl's own structural repairs.
-    | Repairing = 2
-    /// veraPDF's metadata repair, which validates the document again as it goes.
-    | RepairingMetadata = 3
+    /// Legibyl's own structural fixes.
+    | Fixing = 2
+    /// veraPDF's metadata fix, which validates the document again as it goes.
+    | FixingMetadata = 3
 
 /// How far a fix has got.
 type FixProgress =
@@ -213,11 +213,11 @@ type FixProgress =
       Page: int
       PageCount: int }
 
-/// Repairs selected PDF/UA issues. Implementations keep veraPDF/IKVM
+/// Fixes selected PDF/UA issues. Implementations keep veraPDF/IKVM
 /// and PDF writer details behind this façade.
 type IPdfFixer =
     /// Validates the PDF at pdfPath against profile, then attempts the selected fixes,
-    /// writing a repaired copy to outputPath only if at least one fix changed the file.
+    /// writing a fixed copy to outputPath only if at least one fix changed the file.
     /// Throws VeraPdfValidationException if the file cannot be parsed (corrupt/invalid
     /// PDF, encrypted, IO error, etc).
     abstract Fix:

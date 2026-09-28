@@ -2,7 +2,7 @@
 
 Legibyl checks PDFs for accessibility (PDF/UA-1 and PDF/UA-2) and helps fix them:
 a desktop app (Avalonia, on Windows, macOS and Linux), and a command-line tool
-for scripts and AI agents. It explains each failure in plain language, repairs
+for scripts and AI agents. It explains each failure in plain language, fixes
 what it safely can, lets you check and edit the tags a screen reader uses (alt
 text, headings, link descriptions), and tags untagged PDFs from what their pages
 look like. Checking is done by the real [veraPDF](https://verapdf.org/)
@@ -16,14 +16,14 @@ separate process.
    checks it again after it's changed on disk (re-exported from the tool that
    made it, say).
 2. **Read what's found.** Failures (red) are what PDF/UA requires; warnings
-   (orange) are worth a look. Each says **What it means** and, where no auto fix
-   repairs it, **What to do**. A wrench marks what an auto fix repairs; a wand,
+   (orange) are worth a look. Each says **What it means** and, where there's no
+   auto fix for it, **What to do**. A wrench marks what has an auto fix; a wand,
    what tagging from the suggested structure fixes.
 3. **Structure…** shows the tags a screen reader uses. Check the headings, the
    figures' alt text and the reading order, and edit them there. A PDF with no
    tags gets **Suggest Structure…** instead, to check and edit what a layout
    detector suggests.
-4. **Auto Fixes…** chooses repairs, like the document's language and title.
+4. **Auto Fixes…** chooses fixes, like the document's language and title.
 5. **Export…** writes a fixed copy and opens it beside the original, to check
    again. The PDF you opened is never changed. **File › Save** keeps your review
    (edits, dismissed warnings, chosen fixes) next to it, to pick up later.
@@ -58,7 +58,7 @@ which translates the Java bytecode into a .NET assembly at build time. The
 `ValidationReport`, a `FixResult` and a `StructureNode`; see `Results.fs` for
 their signatures) that fully isolates all Java/IKVM types from the rest of the
 app. `IPdfFixer` combines
-veraPDF's metadata fixer with a small iText-based structural repair pass for
+veraPDF's metadata fixer with a small iText-based structural fix pass for
 selected safe object-level fixes, such as setting page `/Tabs /S` when a
 page has annotations, describing table-of-contents links from their own
 text, naming the document, and removing empty semantic `/P` structure elements.
@@ -99,7 +99,7 @@ src/
 tests/
   Legibyl.Validation.Tests/   xUnit v3 + FsUnit tests using real PDF/UA-1 corpus samples
   Legibyl.Gui.Tests/          xUnit v3 + FsUnit tests of the GUI on Avalonia's headless platform
-  Legibyl.Cli.Tests/          xUnit v3 + FsUnit tests of the command line: repair names, --fixes and --edits
+  Legibyl.Cli.Tests/          xUnit v3 + FsUnit tests of the command line: fix names, --fixes and --edits
 tools/
   Legibyl.Screenshots/        Dev-only: saves GUI screenshots without a display (headless)
 installer/
@@ -232,9 +232,9 @@ well as their pages (and `link-targets`, **Point links at their tags** in
 Auto Fixes…, does the same for the links, bookmarks and open action a PDF 2.0
 file has already: each also names the tag where it lands, the first at or just
 below that point on its page; it leaves a PDF 1.x file alone), and the
-metadata repair claims `pdfuaid:part` 2 with
+metadata fix claims `pdfuaid:part` 2 with
 `pdfuaid:rev` 2024 (veraPDF writes no year). Failures map to the fixes that
-repair them, and to their plain-language guide (`RuleGuide.yaml`), by rule,
+fix them, and to their plain-language guide (`RuleGuide.yaml`), by rule,
 for both standards. PDF/UA-2's checks include ISO 32005's rules on which tags
 may contain which. Whether to upgrade a PDF 1.7 file to 2.0 is left to the
 tool that made it.
@@ -265,7 +265,7 @@ Each PDF is checked against the PDF/UA its PDF version calls for (PDF/UA-2 for a
 PDF 2.0 file, PDF/UA-1 for an earlier one; see Supported standards), with no
 choice to make, and the result banner says which and why ("FAIL — 12 of 794
 checks failed against PDF/UA-2 (a PDF 2.0 file; …)"). Export checks the copy
-against the same one, so the metadata repair writes the matching claim.
+against the same one, so the metadata fix writes the matching claim.
 
 While a file validates, the progress bar fills page by page ("Page 57 of
 675"): veraPDF checks the pages in order, and that's nearly all of its time.
@@ -327,7 +327,7 @@ content, like paragraph (P) "The garden in spring…", or content not in the tag
 what's drawn there), raw veraPDF location context, and page preview
 in a resizable details panel beside the list. For the PDF/UA-1 and PDF/UA-2 failures a
 document commonly has, it also says **What it means** in plain language (what
-it does to someone using a screen reader), and, where no auto fix repairs it,
+it does to someone using a screen reader), and, where there's no auto fix for it,
 **What to do**: where in Legibyl to fix it (Structure…, Suggest Structure…), or
 that it's fixed where the PDF was made or in a PDF editor (`RuleGuide.yaml`, which `RuleGuide.fs` reads). All detail text is selectable,
 and **Copy Finding** copies the selected rule, message, error detail, and
@@ -337,11 +337,11 @@ Legibyl also adds warning rows for fixable cleanup issues that veraPDF does
 not report directly, such as empty semantic `/P` structure elements (Structure-1)
 and empty table-of-contents entries (`TOCI`, Structure-8; an entry that still
 owns a link annotation isn't empty), and
-marks known repairable rows in the **Fix** column: a wrench for what an auto fix
-repairs (as on the **Auto Fixes…** button), and a wand for what tagging from the
+marks known fixable rows in the **Fix** column: a wrench for what an auto fix
+fixes (as on the **Auto Fixes…** button), and a wand for what tagging from the
 suggested structure fixes (as on **Suggest Structure…**). It also warns about
 adjacent sibling `/P` tags that look like visual line fragments from the same
-sentence (Structure-2); those are intentionally warning-only because the safest repair is
+sentence (Structure-2); those are intentionally warning-only because the safest fix is
 usually in the source document (for example, the original Word file) rather
 than rewriting paragraph semantics in the PDF after export. These warnings
 (reported as `Legibyl` / `Structure-N`) are all defined in
@@ -434,7 +434,7 @@ when the PDF is opened again (see Saving below). Failures can't be dismissed. Th
 - **Edits**: what a person changes, layered on either one: alt text, replacement
   (or corrected OCR) text, another tag, merged paragraphs, a link's description,
   or merging a region into its neighbour, or marking it not read. Each names what it's for by its `page`, `tag` and
-  `box`, so it still applies after other repairs, or to another version of the
+  `box`, so it still applies after other fixes, or to another version of the
   PDF.
 - **Review**: everything decided about a PDF: dismissed warnings, edits, the
   layout they're on, a title, and the auto fixes chosen. **Save** keeps it in `<name>.pdf.legibyl.json`
@@ -454,11 +454,11 @@ the changes are written to a new copy. Three buttons under the details, and
   structure (and a changed title). Edits
   already in the PDF are reference, and for importing into another version of
   it; they don't count.
-- **Auto Fixes…** chooses repairs (the dialog doesn't export); tagging an
+- **Auto Fixes…** chooses fixes (the dialog doesn't export); tagging an
   untagged PDF isn't one of them, since it's tagged from its suggested
-  structure. The repairs are part of the review, so **Save** keeps them (as `fixes`, by the names `--fixes` takes)
+  structure. The fixes are part of the review, so **Save** keeps them (as `fixes`, by the names `--fixes` takes)
   and they're chosen again when the PDF is reopened. Until some are chosen, the
-  first time the dialog opens the safe repairs the PDF needs start ticked (the
+  first time the dialog opens the safe fixes the PDF needs start ticked (the
   same ones as the CLI's `safe`); after
   that it shows what was chosen. Its badge counts the chosen ones.
 - **File › Save** (⌘S / Ctrl+S; there's no button, since closing asks) keeps your review (dismissed warnings, edits, the
@@ -607,7 +607,7 @@ about the same size, on any page, as decoration, after showing how many and wher
 A tagged piece goes in reading order after what's tagged before it on its page. The **Edits** tab lists every edit and whether it's in the PDF
 yet, and removes ones you no longer want. **Export…** writes the ones not in it
 yet to a copy (`ElementEdits.fs`), each to the element with its tag in about the
-same place, so they still apply after other repairs have rearranged the tree.
+same place, so they still apply after other fixes have rearranged the tree.
 
 Edits made on a suggested structure are the same kind of edit, keyed to the
 regions suggested. A copy tagged from them carries them moved to the elements
@@ -747,7 +747,7 @@ first H1 offered beside it, and a marker beside the label for the title failures
 (7.1-9 and 7.1-10; PDF/UA-2's 8.11.1-1 and 8.11.2-1), as on the blocks. A title
 typed there is saved as `title` and counts as a change not in the PDF yet;
 **Export…** writes it (`ElementEdits.applyTitle`) to the Info `/Title`, the XMP
-`dc:title` where there's XMP (the metadata repair writes XMP from Info otherwise),
+`dc:title` where there's XMP (the metadata fix writes XMP from Info otherwise),
 and `/DisplayDocTitle`, before the title auto fixes, which then leave it. The
 CLI's `fix --edits` does the same with a review's `title`.
 
@@ -937,29 +937,29 @@ copy (`before`, `after`), nothing checked by a person.
 Each failure's `location` says where it is readably, ending with what's there: the
 element that owns the content, by its tag and first words, or "content not in the
 tags" and what's drawn there (`locationContext` is veraPDF's own path). Its `fixes`
-names the repairs that fix it, as `--fixes` takes them
+names its fixes, as `--fixes` takes them
 (`tag-from-layout` is what `layout apply` does), and `meaning` says what it
 means for a reader in plain language, for the common PDF/UA-1 and PDF/UA-2 failures (`null`
 for others); the text format prints it as `means:`.
 
 ### fix
 
-Repairs PDFs, writing each one's next version — `<name>.v2<ext>` (a name that
+Fixes PDFs, writing each one's next version — `<name>.v2<ext>` (a name that
 already ends in a version, like `flyer v2.pdf`, goes to `flyer v3.pdf`),
 skipping versions that already exist, or `--output <path>` for one file — and
-validates the copy. `--fixes` names the repairs, comma-separated: `safe` (the
-default), `all` (every repair but `link-titles-from-web`, which visits web
+validates the copy. `--fixes` names the fixes, comma-separated: `safe` (the
+default), `all` (every fix but `link-titles-from-web`, which visits web
 pages and has to be named), `none` (only edits), or names from `legibyl list
 fixes`, e.g. `--fixes safe,lists,headings-from-toc`. `tag-from-layout` (with
 `qr-links`) and `join-split-paragraphs` use the layout model, downloading it
 (about 130 MB) the first time, with progress on stderr. `--report <path>` writes
 the report to a file.
 
-Every repair, in the order they run (`legibyl list fixes` gives the same; a test
+Every fix, in the order they run (`legibyl list fixes` gives the same; a test
 keeps this table in step with it):
 
-<!-- repairs:start -->
-| Repair | Does | Notes |
+<!-- fixes:start -->
+| Fix | Does | Notes |
 |---|---|---|
 | `tag-from-layout` | Tag an untagged document from each page's layout | downloads the layout model |
 | `qr-links` | Link QR codes to the web addresses they encode | with tag-from-layout |
@@ -980,7 +980,7 @@ keeps this table in step with it):
 | `title` | Set a document title and show it in the title bar | safe |
 | `title-from-first-page` | Title an untitled document from its title page's text |  |
 | `metadata` | Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP) | safe |
-<!-- repairs:end -->
+<!-- fixes:end -->
 
 Each file's result says what happened and how the document stands before and
 after:
@@ -992,7 +992,7 @@ after:
     "standard": "PDF/UA-1",
     "pdfVersion": "1.7",
     "standardFrom": "file",
-    "status": "repaired",
+    "status": "fixed",
     "outputPath": "document.v2.pdf",
     "applied": [ "Declared the document's language as en (English), detected from its text." ],
     "notApplied": [],
@@ -1004,14 +1004,14 @@ after:
 ]
 ```
 
-`status` is `repaired` (a copy was written), `nothing-to-do`, or `error`; the
+`status` is `fixed` (a copy was written), `nothing-to-do`, or `error`; the
 exit code is about the copy (or, with nothing to do, the original).
 
-The `safe` repairs need no guesswork about what the document means: XMP
+The `safe` fixes need no guesswork about what the document means: XMP
 **metadata** via veraPDF's metadata fixer (missing PDF/UA identifier,
 false conformance claims, Info-dictionary sync; for a document with **no
 metadata stream at all**, which veraPDF won't fix, Legibyl first writes one
-from the Info dictionary for it to repair); page annotation tab order (`/Tabs
+from the Info dictionary for it to fix); page annotation tab order (`/Tabs
 /S`); the **glyph mapping** embedded TrueType CID fonts leave out
 (`/CIDToGIDMap /Identity`, which PDF/UA requires written down and readers
 already assume when it's missing, so nothing draws differently; macOS Quartz
@@ -1033,16 +1033,16 @@ failure, rather than being quietly given a made-up one — unless you name
 `title-from-first-page`: then a document with no title in Info or XMP is titled
 from the text of its first page, as long as more pages follow and that page is
 short enough to be a title page (at most 30 words and 200 characters). The
-GUI's Auto Fixes dialog lists the same repairs, in the order they run.
+GUI's Auto Fixes dialog lists the same fixes, in the order they run.
 
-Structural fixes run before the veraPDF metadata fixer so metadata is repaired
+Structural fixes run before the veraPDF metadata fixer so metadata is fixed
 against the already-cleaned copy in the same operation. veraPDF saves its
-metadata repair as an incremental update that iText can't read reliably (a
+metadata fix as an incremental update that iText can't read reliably (a
 classic xref section chained onto xref streams, with an off-by-one `/Prev`), so
-Legibyl reads the repaired XMP and Info dictionary back with veraPDF's own
-parser and writes them into the input with iText instead. Intermediate repair
+Legibyl reads the fixed XMP and Info dictionary back with veraPDF's own
+parser and writes them into the input with iText instead. Intermediate fix
 files are created under the operating system temp directory, not beside the
-source PDF or requested output path. No repair writes alt text a person didn't
+source PDF or requested output path. No fix writes alt text a person didn't
 (edits write theirs) or infers table headers.
 
 `--edits` also writes the edits in each file's review: the
@@ -1132,7 +1132,7 @@ structure in their order, less those excluded, retagged, with alt text,
 recognized text (as corrected) as replacement text, and the title. A QR code
 linked with `qr-links` is described with the figure's alt text if you wrote it
 (else "QR code link to" its address). It needs no
-layout model. Other repairs can come with it (`--fixes safe,qr-links`); the
+layout model. Other fixes can come with it (`--fixes safe,qr-links`); the
 result is the same shape as `fix`'s, with `status` `already-tagged` (exit `1`)
 for a file that already has a structure tree. (A layout file changed by hand
 still tags; edits are the way that's kept apart, re-appliable to another version
@@ -1147,7 +1147,7 @@ legibyl layout apply scan.pdf --layout scan.layout.json --edits-from scan.edits.
 
 ### list
 
-`legibyl list fixes` prints the repairs `--fixes` can name, with what each does
+`legibyl list fixes` prints the fixes `--fixes` can name, with what each does
 and which are in `safe`. `--format json` gives them as JSON. `legibyl --version` prints the tool
 build and the vendored veraPDF engine version.
 

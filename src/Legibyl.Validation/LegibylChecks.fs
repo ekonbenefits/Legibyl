@@ -8,7 +8,7 @@
 ///      are in StructureTreeObjects.
 ///   2. Add it to `all` below with the next unused TestNumber (numbers are shown to
 ///      users as "Structure-N", so never reuse or renumber one).
-///   3. If an auto fix can repair it, set FixOptions and implement the repair (in
+///   3. If an auto fix can fix it, set FixOptions and implement the fix (in
 ///      StructureFixes, or a module of its own that StructureFixes.orderedFixes runs).
 ///   4. Cover it in a test file of its own in tests/Legibyl.Validation.Tests (as
 ///      EmptyTocEntriesTests.fs, ParentTreeTests.fs and EmptyFiguresTests.fs do), and add it to
@@ -36,7 +36,7 @@ type Finding =
 type Check =
     { TestNumber: int
       Message: string
-      /// The auto fix that repairs this finding, or None if it's warning-only.
+      /// The auto fix that fixes this finding, or None if it's warning-only.
       FixOptions: PdfFixOptions
       Inspect: Context -> StructElemVisit -> Finding option }
 

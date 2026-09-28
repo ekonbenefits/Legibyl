@@ -17,7 +17,7 @@ type FailureDetail =
       /// Page region the finding refers to, in PDF points (origin bottom-left), if known.
       Region: StructureGeometry | null
       IsFixable: bool
-      /// The repairs that fix it, by the names --fixes takes ("tag-from-layout" for tagging an
+      /// The fixes for it, by the names --fixes takes ("tag-from-layout" for tagging an
       /// untagged PDF, which `layout apply` does too); empty when none do.
       Fixes: string array
       /// What it means for a reader, in plain language, for the common PDF/UA failures (see
@@ -34,7 +34,7 @@ type FailureDetail =
           Location = violation.Location |> Option.ofObj |> Option.map _.Breadcrumb |> Option.toObj
           Region = violation.Geometry
           IsFixable = violation.IsFixable
-          Fixes = RepairNames.ofOptions violation.FixOptions |> Array.ofList
+          Fixes = FixNames.ofOptions violation.FixOptions |> Array.ofList
           Meaning = RuleGuide.forFinding violation |> Option.map _.Meaning |> Option.toObj }
 
 /// The PDF/UA standard a file is checked against, and why.
@@ -111,11 +111,11 @@ type Compliance = { IsCompliant: bool; FailedCount: int }
 
 /// What `fix` or `layout apply` did to one file.
 module FixStatus =
-    /// A repaired copy was written (OutputPath).
+    /// A fixed copy was written (OutputPath).
     [<Literal>]
-    let Repaired = "repaired"
+    let Fixed = "fixed"
 
-    /// The repairs asked for had nothing to change; no copy was written.
+    /// The fixes asked for had nothing to change; no copy was written.
     [<Literal>]
     let NothingToDo = "nothing-to-do"
 
@@ -123,27 +123,27 @@ module FixStatus =
     [<Literal>]
     let AlreadyTagged = "already-tagged"
 
-    /// The file couldn't be repaired (Error says why).
+    /// The file couldn't be fixed (Error says why).
     [<Literal>]
     let Error = "error"
 
 /// `fix`'s or `layout apply`'s result for one file.
-type RepairResult =
+type FixOutcome =
     { File: string
-      /// The standard checked against, as for validate (the metadata repair writes its claim).
+      /// The standard checked against, as for validate (the metadata fix writes its claim).
       Standard: string
       PdfVersion: string | null
       StandardFrom: string
       /// One of FixStatus.
       Status: string
-      /// The repaired copy, if one was written.
+      /// The fixed copy, if one was written.
       OutputPath: string | null
-      /// What each repair changed, in plain words.
+      /// What each fix changed, in plain words.
       Applied: IReadOnlyList<string>
-      /// Repairs asked for that weren't kept or couldn't apply, and why.
+      /// Fixes asked for that weren't kept or couldn't apply, and why.
       NotApplied: IReadOnlyList<string>
       Error: string | null
-      /// The file as it was, and the repaired copy (validated again): null when there's none.
+      /// The file as it was, and the fixed copy (validated again): null when there's none.
       Before: Compliance | null
       After: Compliance | null
       /// What veraPDF logged while it read the file as it was (see ValidationResult); empty for none.

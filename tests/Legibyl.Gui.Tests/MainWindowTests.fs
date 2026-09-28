@@ -145,7 +145,7 @@ let ``a PDF that fails has no Pass row, and opens on its first finding`` () =
         items |> List.exists (function PassItem _ -> true | _ -> false) |> should be False)
 
 [<Fact>]
-let ``a failure no auto fix repairs says what it means, and what to do`` () =
+let ``a failure no auto fix fixes says what it means, and what to do`` () =
     onUiThread (fun () ->
         let window = openSample "pdfua1-fail.pdf"
         let rows = HeadlessWindow.findings window

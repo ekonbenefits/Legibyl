@@ -1,5 +1,5 @@
 /// What PDF/UA's failures mean in plain language, and what to do about those no auto fix
-/// repairs, read from RuleGuide.yaml (embedded in this assembly), where the text is kept to read
+/// fixes, read from RuleGuide.yaml (embedded in this assembly), where the text is kept to read
 /// and edit on its own.
 module Legibyl.Validation.RuleGuide
 
@@ -8,7 +8,7 @@ open System.IO
 open YamlDotNet.Serialization
 open YamlDotNet.Serialization.NamingConventions
 
-/// A failure explained: what it means for a reader, and, where no auto fix repairs it, what to
+/// A failure explained: what it means for a reader, and, where no auto fix fixes it, what to
 /// do instead.
 type Guide = { Meaning: string; WhatToDo: string }
 

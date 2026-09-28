@@ -146,7 +146,7 @@ let merge (edits: Edit list) (imported: Edit list) : Edit list * int =
     let added = imported |> List.filter isNew
     edits @ added, added.Length
 
-/// An edit as the review file and the repairs have it (see ElementEdit), for the window.
+/// An edit as the review file and the fixes have it (see ElementEdit), for the window.
 let ofElementEdit (e: ElementEdit) : Edit =
     { Page = e.Page
       Tag = e.Tag

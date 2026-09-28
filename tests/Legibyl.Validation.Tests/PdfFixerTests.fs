@@ -666,8 +666,8 @@ let ``Fix document title never invents a title for a document that carries none`
 let ``Fix writes output when a structural fix applies but the metadata fixer changes nothing`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    // No title anywhere, so veraPDF's metadata fixer won't repair dc:title and reports
-    // WontFix. The structural repair still has to reach outputPath — the file it moves
+    // No title anywhere, so veraPDF's metadata fixer won't fix dc:title and reports
+    // WontFix. The structural fix still has to reach outputPath — the file it moves
     // there is the one veraPDF's parser just had open.
     createPdfWithLinks input.Path TableOfContents [ "Our privacy policy", None ]
     let fixer = VeraPdfValidator()
@@ -679,7 +679,7 @@ let ``Fix writes output when a structural fix applies but the metadata fixer cha
     File.Exists output.Path |> should be True
     linkContentsOf output.Path |> should equal [ Some "Our privacy policy" ]
     // veraPDF's metadata changes weren't kept, so they aren't reported as made; that they
-    // weren't is. (The XMP stream the document lacked is Legibyl's own repair, and kept.)
+    // weren't is. (The XMP stream the document lacked is Legibyl's own fix, and kept.)
     List.ofSeq result.AppliedFixes
     |> should
         equal
@@ -688,7 +688,7 @@ let ``Fix writes output when a structural fix applies but the metadata fixer cha
     List.ofSeq result.NotApplied
     |> should
         equal
-        [ "The metadata wasn't repaired: veraPDF's metadata fixer found no way to make it conform (Won't fix), so its changes weren't kept." ]
+        [ "The metadata wasn't fixed: veraPDF's metadata fixer found no way to make it conform (Won't fix), so its changes weren't kept." ]
 
 /// A document whose first page draws lines, one under another, followed by
 /// extraPages blank pages.

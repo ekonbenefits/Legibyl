@@ -1,10 +1,10 @@
-/// Carries veraPDF's metadata repair over into a PDF saved by iText.
+/// Carries veraPDF's metadata fix over into a PDF saved by iText.
 ///
-/// veraPDF saves its repair as an incremental update with a classic xref table, even when the
+/// veraPDF saves its fix as an incremental update with a classic xref table, even when the
 /// original uses xref streams (and with a /Prev one byte past the original startxref). iText
 /// can't follow that chain, so it rebuilds the xref by scanning the file, and on files with
 /// object streams or linearization that rebuild loses or mixes up objects, or fails outright.
-/// So rather than letting iText read veraPDF's output, this reads the repaired XMP and Info
+/// So rather than letting iText read veraPDF's output, this reads the fixed XMP and Info
 /// dictionary from it with veraPDF's own parser and writes them into the input through a
 /// normal iText save.
 module internal Legibyl.Validation.MetadataTransfer
@@ -32,9 +32,9 @@ let private readAll (stream: java.io.InputStream) =
         read <- stream.read buffer
     bytes.ToArray()
 
-/// The repaired XMP packet (decoded) and Info entries, as veraPDF's parser sees them.
-let private readRepaired (repairedPath: string) =
-    let document = PDDocument(repairedPath)
+/// The fixed XMP packet (decoded) and Info entries, as veraPDF's parser sees them.
+let private readFixed (fixedPath: string) =
+    let document = PDDocument(fixedPath)
     try
         let xmp =
             match document.getMetadata () with
@@ -91,10 +91,10 @@ let private revisePdfUa2 (xmp: XMPMeta) =
         false
 
 /// Writes inputPath to outputPath with its XMP metadata and Info dictionary replaced by
-/// those in repairedPath (veraPDF's metadata-fixer output for the same input); returns whether
+/// those in fixedPath (veraPDF's metadata-fixer output for the same input); returns whether
 /// it also corrected the PDF/UA-2 identifier's revision.
-let apply (inputPath: string) (repairedPath: string) (outputPath: string) =
-    let xmp, info = readRepaired repairedPath
+let apply (inputPath: string) (fixedPath: string) (outputPath: string) =
+    let xmp, info = readFixed fixedPath
     use document = new PdfDocument(new PdfReader(inputPath), new PdfWriter(outputPath))
 
     let revised =
