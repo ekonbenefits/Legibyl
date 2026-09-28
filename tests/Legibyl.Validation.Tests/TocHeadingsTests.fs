@@ -346,3 +346,62 @@ let ``in a PDF 2.0 file, contents links that don't point to structure can be fix
     VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa2, output.Path, PdfFixOptions.HeadingsFromToc) |> ignore
 
     structureDestinationFailures output.Path |> should be Empty
+
+// ---- Structure-5: headings not recovered ----
+
+/// The Structure-5 warning a table of contents gets, and whether any heading was offered with it
+/// (Structure-3).
+let private unrecovered (path: string) =
+    let warnings = tocWarnings (VeraPdfValidator().Validate(path, PdfProfile.PdfUa1))
+    warnings |> List.filter (fun w -> w.TestNumber = 5), warnings |> List.exists (fun w -> w.TestNumber = 3)
+
+[<Fact>]
+let ``indents that don't fall into clear levels aren't recovered, and say why`` () =
+    use input = new TempPdf()
+    // Each a little further in than the last: a gradual slope, not levels.
+    let entries = [ entry "Introduction" 72f 2; entry "Scope" 73.2f 2; entry "Details" 74.4f 3; entry "Summary" 75.6f 3; entry "Notes" 76.8f 3 ]
+    createPdfWithToc input.Path false entries (paragraphs 2 [ "Introduction"; "Scope" ] @ paragraphs 3 [ "Details"; "Summary"; "Notes" ])
+
+    let found, offered = unrecovered input.Path
+
+    let warning = found |> List.exactlyOne
+    warning.Message |> should equal "Headings weren't recovered from the table of contents."
+    warning.ErrorMessage |> should equal "Not recovered because its entries' indents vary gradually instead of falling into clear levels."
+    warning.FixOptions |> should equal PdfFixOptions.None
+    offered |> should be False
+
+[<Fact>]
+let ``headings that would start at H2 aren't recovered`` () =
+    use input = new TempPdf()
+    // The top-level entry matches no paragraph, so those that do would all be H2.
+    let entries = [ entry "Part One" 72f 2; entry "Scope" 90f 2; entry "Details" 90f 3 ]
+    createPdfWithToc input.Path false entries (paragraphs 2 [ "Some body text."; "Scope" ] @ paragraphs 3 [ "Details" ])
+
+    let found, offered = unrecovered input.Path
+
+    (found |> List.exactlyOne).ErrorMessage
+    |> should equal "Not recovered because the headings that could be matched would start at H2, not H1."
+    offered |> should be False
+
+[<Fact>]
+let ``headings that would skip a level aren't recovered`` () =
+    use input = new TempPdf()
+    // The middle level matches no paragraph, so H1 would go straight to H3.
+    let entries = [ entry "Introduction" 72f 2; entry "Scope" 90f 2; entry "Details" 108f 3 ]
+    createPdfWithToc input.Path false entries (paragraphs 2 [ "Introduction"; "Some body text." ] @ paragraphs 3 [ "Details" ])
+
+    let found, offered = unrecovered input.Path
+
+    (found |> List.exactlyOne).ErrorMessage
+    |> should equal "Not recovered because some entries couldn't be matched, so the headings that could be would skip from H1 to H3."
+    offered |> should be False
+
+[<Fact>]
+let ``headings that recover don't say they weren't`` () =
+    use input = new TempPdf()
+    createPdfWithToc input.Path false threeLevels threeLevelsBody
+
+    let found, offered = unrecovered input.Path
+
+    found |> should be Empty
+    offered |> should be True
