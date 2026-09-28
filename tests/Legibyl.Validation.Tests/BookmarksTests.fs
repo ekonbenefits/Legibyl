@@ -78,7 +78,7 @@ let private bookmarkWarnings (path: string) =
     |> List.ofSeq
 
 let private addBookmarks (input: string) (output: string) =
-    VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.BookmarksFromHeadings)
+    VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.Bookmarks)
 
 let private failedRules (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
@@ -99,7 +99,7 @@ let ``H1 and H2 headings get bookmarks, H2s under the H1 before them`` () =
 
     let warning = bookmarkWarnings input.Path |> List.exactlyOne
     warning.ErrorMessage |> should equal "5 heading(s), 4 of them H1 or H2 with text to bookmark."
-    warning.FixOptions |> should equal PdfFixOptions.BookmarksFromHeadings
+    warning.FixOptions |> should equal PdfFixOptions.Bookmarks
 
     let result = addBookmarks input.Path output.Path
 

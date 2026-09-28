@@ -30,7 +30,7 @@ let private createPdf (path: string) (lines: string list) (language: string opti
     language |> Option.iter (fun language -> document.GetCatalog().Put(PdfName.Lang, PdfString language) |> ignore)
 
 let private fixLanguage (input: string) (output: string) =
-    VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.LanguageFromText)
+    VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.Language)
 
 let private declaredLanguage (path: string) =
     use document = new PdfDocument(new PdfReader(path))
@@ -77,4 +77,4 @@ let ``undetermined language findings are fixable by declaring the language`` () 
     let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1)
     let language = report.Findings |> Seq.filter (fun f -> not f.Passed && f.Message.Contains "Natural language") |> List.ofSeq
     language |> should not' (be Empty)
-    language |> List.forall (fun f -> f.FixOptions.HasFlag PdfFixOptions.LanguageFromText) |> should be True
+    language |> List.forall (fun f -> f.FixOptions.HasFlag PdfFixOptions.Language) |> should be True

@@ -319,7 +319,7 @@ let ``a title given for a tagged PDF is written to it, shown in place of the fil
 let ``a title given wins over the one the file carries, in its XMP metadata too`` () =
     use output = new TempPdf()
     let result =
-        VeraPdfValidator(Title = "A better title").Fix(corpusFile "pdfua1-pass.pdf", PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits ||| PdfFixOptions.DocumentTitle)
+        VeraPdfValidator(Title = "A better title").Fix(corpusFile "pdfua1-pass.pdf", PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits ||| PdfFixOptions.Title)
 
     result.AppliedFixes |> Seq.exists (fun f -> f.StartsWith "Titled the document \"A better title\"") |> should be True
     use document = new PdfDocument(new PdfReader(output.Path))

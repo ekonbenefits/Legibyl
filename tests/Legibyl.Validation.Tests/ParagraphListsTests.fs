@@ -103,7 +103,7 @@ let private listNumbering (path: string) =
     find (document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot))
 
 let private fixLists (input: string) (output: string) =
-    VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.ListsFromParagraphs)
+    VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.Lists)
 
 let private failedRules (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
@@ -118,7 +118,7 @@ let ``numbered paragraphs are reported and tagged as a decimal list`` () =
 
     let warning = listWarnings input.Path |> List.exactlyOne
     warning.ErrorMessage |> should equal "3 paragraphs on page 1, marked \"(1)\" to \"(3)\"."
-    warning.FixOptions |> should equal PdfFixOptions.ListsFromParagraphs
+    warning.FixOptions |> should equal PdfFixOptions.Lists
 
     let result = fixLists input.Path output.Path
 
@@ -228,6 +228,6 @@ let ``blank paragraphs between items don't split the list`` () =
 
     // With empty paragraph removal too, the blanks go first and the list comes out clean.
     let result =
-        VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, withEmptyRemoval.Path, PdfFixOptions.ListsFromParagraphs ||| PdfFixOptions.RemoveEmptyParagraphs)
+        VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, withEmptyRemoval.Path, PdfFixOptions.Lists ||| PdfFixOptions.EmptyParagraphs)
     List.ofSeq result.AppliedFixes |> should equal [ "Removed 2 empty /P structure element(s)."; "Tagged 1 run(s) of marked paragraphs as lists." ]
     shape withEmptyRemoval.Path |> should equal [ "L(LI(LBody(P)),LI(LBody(P)),LI(LBody(P)))" ]

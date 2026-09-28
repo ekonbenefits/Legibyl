@@ -8,7 +8,7 @@ open Legibyl.Validation
 [<Fact>]
 let ``repairs are named in a list, with the safe set and every repair`` () =
     FixNames.parse "safe, Lists,headings-from-toc"
-    |> should equal (Ok(FixNames.safe ||| PdfFixOptions.ListsFromParagraphs ||| PdfFixOptions.HeadingsFromToc) : Result<PdfFixOptions, string>)
+    |> should equal (Ok(FixNames.safe ||| PdfFixOptions.Lists ||| PdfFixOptions.HeadingsFromToc) : Result<PdfFixOptions, string>)
     FixNames.parse "all" |> should equal (Ok FixNames.all : Result<PdfFixOptions, string>)
 
 [<Fact>]
@@ -33,7 +33,7 @@ let ``each repair is listed with what it does`` () =
 [<Fact>]
 let ``none names no repairs, for edits or a layout alone`` () =
     FixNames.parse "none" |> should equal (Ok PdfFixOptions.None : Result<PdfFixOptions, string>)
-    FixNames.parse "none,lists" |> should equal (Ok PdfFixOptions.ListsFromParagraphs : Result<PdfFixOptions, string>)
+    FixNames.parse "none,lists" |> should equal (Ok PdfFixOptions.Lists : Result<PdfFixOptions, string>)
 
 /// The repository's README.md, found above the tests' output folder.
 let private readme () =
@@ -59,3 +59,21 @@ let ``the README's table of repairs is every repair, as list fixes gives it`` ()
                   | cells -> failwith $"A row with {cells.Length} cells: {line}" ]
 
     rows |> should equal (FixNames.repairs ())
+
+[<Fact>]
+let ``every fix's name is its flag's, in kebab-case, and reads back as it`` () =
+    let flags =
+        System.Enum.GetValues<PdfFixOptions>()
+        |> Array.filter (fun f -> f <> PdfFixOptions.None && f <> PdfFixOptions.All && f <> PdfFixOptions.ApplyEdits)
+        |> Set.ofArray
+    // Each fix is named, once.
+    RepairNames.order |> Set.ofList |> should equal flags
+    RepairNames.order |> List.distinct |> List.length |> should equal RepairNames.order.Length
+    for name, option in RepairNames.names do
+        name |> should equal (RepairNames.nameOf option)
+        name |> should equal (System.Text.RegularExpressions.Regex.Replace(string option, "([a-z])([A-Z])", "$1-$2").ToLowerInvariant())
+        RepairNames.toOptions [ name ] |> should equal option
+    RepairNames.nameOf PdfFixOptions.FontGlyphs |> should equal "font-glyphs"
+    RepairNames.nameOf PdfFixOptions.LinkTitlesFromWeb |> should equal "link-titles-from-web"
+    // All is every flag.
+    PdfFixOptions.All |> should equal (flags |> Set.fold (|||) PdfFixOptions.ApplyEdits)

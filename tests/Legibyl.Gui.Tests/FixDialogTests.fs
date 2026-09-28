@@ -80,14 +80,14 @@ let private descendants<'T when 'T :> Visual> (root: Visual) : 'T list =
     root.GetVisualDescendants() |> Seq.choose (fun v -> match box v with :? 'T as c -> Some c | _ -> None) |> List.ofSeq
 
 let private findings =
-    [ finding PdfFixOptions.AnnotationTabs
-      finding PdfFixOptions.AnnotationTabs
-      finding (PdfFixOptions.Metadata ||| PdfFixOptions.DocumentTitle)
-      finding PdfFixOptions.ListsFromParagraphs
-      finding PdfFixOptions.ListsFromParagraphs
-      finding PdfFixOptions.ListsFromParagraphs
+    [ finding PdfFixOptions.Tabs
+      finding PdfFixOptions.Tabs
+      finding (PdfFixOptions.Metadata ||| PdfFixOptions.Title)
+      finding PdfFixOptions.Lists
+      finding PdfFixOptions.Lists
+      finding PdfFixOptions.Lists
       finding PdfFixOptions.TagFromLayout
-      finding PdfFixOptions.FontCidToGidMap ]
+      finding PdfFixOptions.FontGlyphs ]
 
 [<Fact>]
 let ``the fix dialog lists what this PDF needs, in the order repairs run, ticking only safe ones`` () =
@@ -169,9 +169,9 @@ let ``continuing applies the ticked repairs`` () =
         |> should
             equal
             (Some(
-                PdfFixOptions.AnnotationTabs
-                ||| PdfFixOptions.FontCidToGidMap
-                ||| PdfFixOptions.DocumentTitle
+                PdfFixOptions.Tabs
+                ||| PdfFixOptions.FontGlyphs
+                ||| PdfFixOptions.Title
                 ||| PdfFixOptions.Metadata
             )))
 
@@ -190,7 +190,7 @@ let ``for an untagged PDF, the dialog says it's tagged from its suggested struct
 let ``only the CLI's safe repairs start ticked: bookmarks don't`` () =
     onUiThread (fun () ->
         let mutable shown = Map.empty
-        withDialog (finding PdfFixOptions.BookmarksFromHeadings :: findings) (fun dialog -> shown <- options dialog) |> ignore
+        withDialog (finding PdfFixOptions.Bookmarks :: findings) (fun dialog -> shown <- options dialog) |> ignore
 
         fst shown["Add bookmarks"] |> should be False)
 
@@ -224,7 +224,7 @@ let ``with every repair shown on a short screen, the list scrolls and the button
 let ``reopened, it shows what was chosen before rather than the safe defaults`` () =
     onUiThread (fun () ->
         let mutable shown = []
-        withDialogChosen (Some PdfFixOptions.ListsFromParagraphs) None findings (fun dialog -> shown <- rows dialog) |> ignore
+        withDialogChosen (Some PdfFixOptions.Lists) None findings (fun dialog -> shown <- rows dialog) |> ignore
 
         shown |> List.filter (snd >> fst) |> List.map fst |> should equal [ "Tag lists" ])
 
@@ -239,7 +239,7 @@ let ``done with nothing ticked chooses nothing, and cancelling keeps what was ch
             pump ()
 
         withDialog findings untickAllAndFinish |> should equal (Some PdfFixOptions.None)
-        withDialogChosen (Some PdfFixOptions.AnnotationTabs) None findings ignore |> should equal None)
+        withDialogChosen (Some PdfFixOptions.Tabs) None findings ignore |> should equal None)
 
 [<Fact>]
 let ``showing all repairs keeps the dialog's size: the list scrolls instead`` () =

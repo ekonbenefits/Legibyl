@@ -231,7 +231,7 @@ let private withQrCode (regions: LayoutRegion list) =
 let private tagWithQrLinks (input: string) (output: string) (source: IPageLayoutSource) =
     let validator = VeraPdfValidator()
     validator.LayoutSource <- source
-    validator.Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.TagFromLayout ||| PdfFixOptions.QrCodeLinks)
+    validator.Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.TagFromLayout ||| PdfFixOptions.QrLinks)
 
 [<Fact>]
 let ``a figure that's a QR code is described by what it encodes`` () =
@@ -256,7 +256,7 @@ let ``with link titles, a QR code's description names the page it goes to`` () =
     let validator = VeraPdfValidator(LayoutSource = FixedLayout(withQrCode regions), PageTitleSource = FixedTitles [ "https://example.com/apply", "Apply for benefits" ])
 
     let result =
-        validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout ||| PdfFixOptions.QrCodeLinks ||| PdfFixOptions.LinkTitlesFromWeb)
+        validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout ||| PdfFixOptions.QrLinks ||| PdfFixOptions.LinkTitlesFromWeb)
 
     result.AppliedFixes |> should contain "1 QR code's description names the title of the web page it goes to, read from the web: to check"
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
@@ -336,7 +336,7 @@ let ``a fix reports each step it runs, in order, with pages where there are page
     let validator = VeraPdfValidator()
     validator.LayoutSource <- FixedLayout regions
 
-    validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout ||| PdfFixOptions.AnnotationTabs ||| PdfFixOptions.Metadata, progress)
+    validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout ||| PdfFixOptions.Tabs ||| PdfFixOptions.Metadata, progress)
     |> ignore
 
     // The distinct steps, in order, each numbered out of four.
@@ -508,7 +508,7 @@ let ``a PDF 2.0 file tagged from its layout, with the safe fixes, is PDF/UA-2 co
     createUntaggedPdf20 input.Path
     let validator = VeraPdfValidator(LayoutSource = FixedLayout(reviewedRegions, "The example site", "The Title"))
 
-    let result = validator.Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.LanguageFromText)
+    let result = validator.Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.Language)
 
     failedUa2Rules output.Path |> should be Empty
     use document = new PdfDocument(new PdfReader(output.Path))
@@ -536,7 +536,7 @@ let ``on a tagged PDF 2.0 file, lists and bookmarks keep it PDF/UA-2 compliant, 
 
     let result =
         VeraPdfValidator().Fix(tagged.Path, PdfProfile.PdfUa2, output.Path,
-                               RepairNames.safe ||| PdfFixOptions.LanguageFromText ||| PdfFixOptions.ListsFromParagraphs ||| PdfFixOptions.BookmarksFromHeadings)
+                               RepairNames.safe ||| PdfFixOptions.Language ||| PdfFixOptions.Lists ||| PdfFixOptions.Bookmarks)
 
     result.AppliedFixes |> should contain "Tagged 1 run(s) of marked paragraphs as lists."
     result.AppliedFixes |> should contain "Added 1 bookmark(s) for the H1 and H2 headings."
@@ -559,6 +559,6 @@ let ``QR code links on a PDF 2.0 file are PDF/UA-2 compliant, with alt text a pe
         let qr = reviewedRegions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = alt; QrText = "https://example.com/apply" } else r)
         let result =
             VeraPdfValidator(LayoutSource = FixedLayout(qr, "The example site", "The Title"))
-                .Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.LanguageFromText ||| PdfFixOptions.QrCodeLinks)
+                .Fix(input.Path, PdfProfile.PdfUa2, output.Path, RepairNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.Language ||| PdfFixOptions.QrLinks)
         result.AppliedFixes |> should contain "Linked 1 QR code to the web address they encode"
         failedUa2Rules output.Path |> should be Empty

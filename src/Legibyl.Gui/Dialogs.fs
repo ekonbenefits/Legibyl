@@ -226,25 +226,25 @@ type private FixChoice =
 /// veraPDF's metadata fix.
 let private fixChoices =
     // Tagging an untagged PDF isn't among them: it's tagged from its suggested structure.
-    [ { Option = PdfFixOptions.QrCodeLinks
+    [ { Option = PdfFixOptions.QrLinks
         Title = "Link QR codes"
         Detail = "With tagging: a borderless link over each QR code that encodes a web address." }
       { Option = PdfFixOptions.ParentTree
         Title = "Rebuild the parent tree"
         Detail = "The tags are there, but the PDF doesn't say which page content each covers, so they read as untagged. Rebuilt from the tags; nothing on the page changes." }
-      { Option = PdfFixOptions.LanguageFromText
+      { Option = PdfFixOptions.Language
         Title = "Declare the language"
         Detail = "Say what language the document is in, detected from its text when there's enough to be sure, so a screen reader reads it with the right voice (/Lang)." }
       { Option = PdfFixOptions.HeadingsFromToc
         Title = "Headings from the table of contents"
         Detail = "Tag paragraphs a contents entry names as headings (H1–H6, from its indent), and point its links at them." }
-      { Option = PdfFixOptions.RemoveEmptyParagraphs
+      { Option = PdfFixOptions.EmptyParagraphs
         Title = "Remove empty paragraphs"
         Detail = "Paragraph tags with nothing in them, which a screen reader stops on." }
-      { Option = PdfFixOptions.RemoveEmptyTocEntries
+      { Option = PdfFixOptions.EmptyTocEntries
         Title = "Remove empty contents entries"
         Detail = "Entries in the table of contents' tags with nothing in them, which a screen reader stops on." }
-      { Option = PdfFixOptions.RemoveEmptyFigures
+      { Option = PdfFixOptions.EmptyFigures
         Title = "Remove empty figures"
         Detail = "Figure tags around nothing on the page, which fail for having no alt text when there's nothing to describe." }
       { Option = PdfFixOptions.JoinSplitParagraphs
@@ -252,19 +252,19 @@ let private fixChoices =
         Detail =
           "Paragraphs the split-paragraph warning flags become one where a layout detector confirms they're one block of text; the page looks the same. "
           + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time." }
-      { Option = PdfFixOptions.ListsFromParagraphs
+      { Option = PdfFixOptions.Lists
         Title = "Tag lists"
         Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become a list, so a screen reader announces it and its number of items; the page looks the same." }
-      { Option = PdfFixOptions.BookmarksFromHeadings
+      { Option = PdfFixOptions.Bookmarks
         Title = "Add bookmarks"
         Detail = "Bookmarks for the H1 and H2 headings, when the document has none." }
       { Option = PdfFixOptions.LinkTargets
         Title = "Point links at their tags"
         Detail = "PDF 2.0 only: links, bookmarks and where the document opens name the tag they go to as well as the page (a structure destination), as PDF/UA-2 asks. They go to the same place." }
-      { Option = PdfFixOptions.AnnotationTabs
+      { Option = PdfFixOptions.Tabs
         Title = "Tab order for annotations"
         Detail = "On pages with links or other annotations, the Tab key moves through them in reading order (/Tabs /S)." }
-      { Option = PdfFixOptions.FontCidToGidMap
+      { Option = PdfFixOptions.FontGlyphs
         Title = "Font glyph mapping"
         Detail = "Some embedded fonts leave out how their character codes map to their glyphs; readers assume the usual mapping, and this writes it down (/CIDToGIDMap). Nothing changes on the page." }
       { Option = PdfFixOptions.LinkContents
@@ -276,7 +276,7 @@ let private fixChoices =
           "Visits each web address a link without a description (or, with tagging, a QR code) goes to, and uses the page's title, "
           + "with the link's own site: \"Apply for benefits (example.com)\". Only public web pages are visited, and only their titles read; "
           + "the sites see the visit. Check the descriptions." }
-      { Option = PdfFixOptions.DocumentTitle
+      { Option = PdfFixOptions.Title
         Title = "Document title"
         Detail = "Use the title the document carries, and have readers show it in place of the file name." }
       { Option = PdfFixOptions.TitleFromFirstPage
@@ -322,7 +322,7 @@ let chooseFixOptions
     /// Whether this PDF has something for the repair to do. Linking QR codes comes with tagging,
     /// and so can describing them from the pages they go to.
     let withTagging (choice: FixChoice) =
-        (choice.Option = PdfFixOptions.QrCodeLinks || choice.Option = PdfFixOptions.LinkTitlesFromWeb)
+        (choice.Option = PdfFixOptions.QrLinks || choice.Option = PdfFixOptions.LinkTitlesFromWeb)
         && found PdfFixOptions.TagFromLayout > 0
     let applies (choice: FixChoice) = found choice.Option > 0 || withTagging choice
     // veraPDF only repairs metadata (adding the PDF/UA identifier) when the document would then

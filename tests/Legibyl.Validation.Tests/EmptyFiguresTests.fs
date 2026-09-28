@@ -74,7 +74,7 @@ let private noAltFailures (path: string) =
 let private emptyFigureWarnings (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
     |> Seq.filter (fun a -> a.Specification = "Legibyl" && a.TestNumber = 11)
-    |> Seq.map (fun a -> a.FixOptions = PdfFixOptions.RemoveEmptyFigures)
+    |> Seq.map (fun a -> a.FixOptions = PdfFixOptions.EmptyFigures)
     |> List.ofSeq
 
 let private tags (path: string) =
@@ -97,7 +97,7 @@ let ``the fix removes the figures that draw nothing, and the page looks the same
     use output = new TempPdf ".fixed"
     createPdf input.Path
 
-    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.RemoveEmptyFigures)
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyFigures)
 
     result.AppliedFixes |> should contain "Removed 2 figure tag(s) that draw nothing."
     tags output.Path |> should equal [ "P"; "Figure"; "Figure"; "Figure" ]
@@ -120,7 +120,7 @@ let ``a figure that draws nothing but has alt text is left alone`` () =
         empty.Put(PdfName.Alt, PdfString "A spacer") |> ignore
     use fixedAgain = new TempPdf ".again"
 
-    let result = VeraPdfValidator().Fix(output.Path, PdfProfile.PdfUa1, fixedAgain.Path, PdfFixOptions.RemoveEmptyFigures)
+    let result = VeraPdfValidator().Fix(output.Path, PdfProfile.PdfUa1, fixedAgain.Path, PdfFixOptions.EmptyFigures)
 
     result.AppliedFixes |> should contain "Removed 1 figure tag(s) that draw nothing."
     tags fixedAgain.Path |> should equal [ "P"; "Figure"; "Figure"; "Figure"; "Figure" ]

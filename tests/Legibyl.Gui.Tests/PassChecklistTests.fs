@@ -220,7 +220,7 @@ let ``a copy changed since doesn't carry its checks, nor one exported with chang
         let fixedCopy = Path.ChangeExtension(copy, ".fixed.pdf") |> nonNull
         let review = DocumentReviews().For pdf
         review.Checklist <- Some(SavedResults.hashOf pdf, set [ "title" ])
-        VeraPdfValidator(Review = review.ForCopy pdf).Fix(pdf, PdfProfile.PdfUa1, fixedCopy, PdfFixOptions.BookmarksFromHeadings) |> ignore
+        VeraPdfValidator(Review = review.ForCopy pdf).Fix(pdf, PdfProfile.PdfUa1, fixedCopy, PdfFixOptions.Bookmarks) |> ignore
 
         ReviewFile.carriedChecklist changed |> should equal None
         File.Exists fixedCopy |> should be True
