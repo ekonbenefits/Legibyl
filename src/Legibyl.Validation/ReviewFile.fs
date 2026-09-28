@@ -1,5 +1,5 @@
 /// A PDF's review, as Legibyl keeps it: the dismissed warnings, the edits made in Suggest
-/// Structure and View Structure, and the title, in a "<name>.pdf.legibyl.json" file next to the
+/// Structure… and Structure…, and the title, in a "<name>.pdf.legibyl.json" file next to the
 /// PDF, and inside the copies Legibyl saves (see EmbeddedReview). The GUI reads and writes it;
 /// the CLI applies its edits when fixing.
 module Legibyl.Validation.ReviewFile
@@ -37,7 +37,7 @@ type SavedEdit =
       [<JsonPropertyName "text">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       Text: string | null
-      /// For paragraphs merged into this one (in View Structure): their boxes, like Box.
+      /// For paragraphs merged into this one (in Structure…): their boxes, like Box.
       [<JsonPropertyName "mergeWith">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       MergeWith: float array array | null

@@ -179,7 +179,7 @@ type ValidationProgress =
       /// Time since validation started.
       Elapsed: TimeSpan }
 
-/// Validates PDF documents against PDF/A or PDF/UA profiles. Implementations
+/// Validates PDF documents against PDF/UA-1 or PDF/UA-2. Implementations
 /// wrap the veraPDF Java validation engine (loaded via IKVM); callers never
 /// need to reference IKVM or Java types directly.
 type IPdfValidator =
@@ -213,7 +213,7 @@ type FixProgress =
       Page: int
       PageCount: int }
 
-/// Repairs selected PDF/A or PDF/UA issues. Implementations keep veraPDF/IKVM
+/// Repairs selected PDF/UA issues. Implementations keep veraPDF/IKVM
 /// and PDF writer details behind this façade.
 type IPdfFixer =
     /// Validates the PDF at pdfPath against profile, then attempts the selected fixes,

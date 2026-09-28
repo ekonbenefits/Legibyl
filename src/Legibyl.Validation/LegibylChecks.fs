@@ -8,14 +8,17 @@
 ///      are in StructureTreeObjects.
 ///   2. Add it to `all` below with the next unused TestNumber (numbers are shown to
 ///      users as "Structure-N", so never reuse or renumber one).
-///   3. If an auto fix can repair it, set FixOptions and implement the repair in
-///      StructureFixes.
-///   4. Cover it in tests/Legibyl.Validation.Tests/PdfFixerTests.fs.
+///   3. If an auto fix can repair it, set FixOptions and implement the repair (in
+///      StructureFixes, or a module of its own that StructureFixes.orderedFixes runs).
+///   4. Cover it in a test file of its own in tests/Legibyl.Validation.Tests (as
+///      EmptyTocEntriesTests.fs, ParentTreeTests.fs and EmptyFiguresTests.fs do), and add it to
+///      the README's table of checks.
 ///
-/// Checks that look at the document as a whole rather than one element at a time (like
-/// the table-of-contents heading checks, Structure-3 to 5, lists tagged as paragraphs,
-/// Structure-6, missing bookmarks, Structure-7, figures that draw nothing, Structure-11, and pages
-/// read out of order, Structure-12) are added in `run` directly.
+/// Checks that look at the document as a whole rather than one element at a time (the
+/// table-of-contents heading checks, Structure-3 to 5; lists tagged as paragraphs, Structure-6;
+/// missing bookmarks, Structure-7; the parent tree, Structure-9; figures in pieces, Structure-10;
+/// figures that draw nothing, Structure-11; and pages read out of order, Structure-12) are added
+/// in `run` directly, and their messages to messageFor.
 module internal Legibyl.Validation.LegibylChecks
 
 open System

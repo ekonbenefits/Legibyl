@@ -847,7 +847,7 @@ let main argv =
     let root =
         ManualInvocation.rootCommand {
             description
-                "legibyl - PDF/UA & PDF/A validator and repairer (CLI), powered by veraPDF via IKVM.\n\n\
+                "legibyl - PDF/UA validator and repairer (CLI), powered by veraPDF via IKVM.\n\n\
                  Designed for scripting and AI-agent use: output is machine-readable JSON on stdout by default, and\n\
                  the exit code tells you the outcome without needing to parse output."
             noAction

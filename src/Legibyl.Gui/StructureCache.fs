@@ -4,7 +4,7 @@ open System
 open System.IO
 open Legibyl.Validation
 
-/// The last structure tree read, so reopening View Structure on the same, unchanged file
+/// The last structure tree read, so reopening Structure… on the same, unchanged file
 /// doesn't read it all again (that takes about 18 s on a 675-page document). Remembers an
 /// untagged file's "no structure tree" (null) too.
 [<Sealed>]
