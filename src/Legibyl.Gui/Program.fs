@@ -3,6 +3,7 @@ namespace Legibyl.Gui
 open System
 open System.IO
 open Avalonia
+open Avalonia.Controls
 open Avalonia.Controls.ApplicationLifetimes
 open Avalonia.Platform.Storage
 open Avalonia.Styling
@@ -31,6 +32,17 @@ type App() =
         match this.ApplicationLifetime with
         | :? IClassicDesktopStyleApplicationLifetime as desktop ->
             desktop.MainWindow <- MainWindow()
+            // macOS puts the application's own menu first, named for it: About goes there, for
+            // the window in front (Windows and Linux have it under Help).
+            if OperatingSystem.IsMacOS() then
+                let about = NativeMenuItem "About Legibyl"
+                about.Click.Add(fun _ ->
+                    match desktop.Windows |> Seq.tryFind _.IsActive |> Option.orElse (Option.ofObj desktop.MainWindow) with
+                    | Some owner -> About.show owner |> ignore
+                    | None -> ())
+                let menu = NativeMenu()
+                menu.Items.Add about
+                NativeMenu.SetMenu(this, menu)
             let openPdf (path: string) =
                 if File.Exists path then MainWindow.Open(DocumentShell.Shared, path) |> ignore
             // PDFs named on the command line (as Windows' Open With passes them): the first in the

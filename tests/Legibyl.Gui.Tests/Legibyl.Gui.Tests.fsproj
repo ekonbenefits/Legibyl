@@ -37,6 +37,7 @@
     <Compile Include="SuggestedStructureTests.fs" />
     <Compile Include="DocumentWindowsTests.fs" />
     <Compile Include="RecentFilesTests.fs" />
+    <Compile Include="AboutTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -662,15 +662,9 @@ EXAMPLES:
   legibyl list fixes --format json
 """
 
-/// Version of the veraPDF engine, stamped from VeraPdfVersion in Directory.Build.props.
-let private vendoredEngineVersion =
-    Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
-    |> Seq.tryFind (fun a -> a.Key = "VeraPdfVersion")
-    |> Option.bind (fun a -> Option.ofObj a.Value)
-    |> Option.defaultValue "unknown"
-
+/// The version line, as the GUI's About window gives it too (see BuildInfo).
 let private printVersion _ =
-    printfn $"legibyl {Assembly.GetExecutingAssembly().GetName().Version} (vendored veraPDF engine {vendoredEngineVersion})"
+    printfn $"{BuildInfo.versionLine}"
     ExitCodes.Success
 
 /// Reports a parse error the same way as the CLI's other usage errors.

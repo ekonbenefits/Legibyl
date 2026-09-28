@@ -52,6 +52,7 @@
     <Compile Include="RepairNames.fs" />
     <Compile Include="ReviewFile.fs" />
     <Compile Include="VeraPdfValidator.fs" />
+    <Compile Include="BuildInfo.fs" />
     <Compile Include="SavedResults.fs" />
   </ItemGroup>
 

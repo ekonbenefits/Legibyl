@@ -31,6 +31,13 @@ separate process.
 Automated checks can't judge everything: whether alt text says what a figure is
 for, heading levels, reading order and table headers still need a person.
 
+**About Legibyl** (in the application menu on macOS, **Help** elsewhere, and under
+the steps in an empty window) says which version this is, the veraPDF it bundles
+and the versions of what else it's built on (all read from the build, as
+`legibyl --version` is), its license, with **Licenses…** showing `licenses/`'s
+texts, links to the project, and where its own files are. **Copy** gives a bug
+report the same, starting with `legibyl --version`'s line.
+
 ## Using the command line
 
 `legibyl validate`, `legibyl fix`, `legibyl structure`, and `legibyl layout

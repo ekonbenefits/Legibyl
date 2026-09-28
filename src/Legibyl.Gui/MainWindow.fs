@@ -1081,6 +1081,11 @@ module private MainView =
                     file.Items.Add(exportItem)
                     let menu = NativeMenu()
                     menu.Items.Add(NativeMenuItem("File", Menu = file))
+                    // About: in the application menu on macOS (see App); a Help menu elsewhere.
+                    if not mac then
+                        let help = NativeMenu()
+                        help.Items.Add(NativeMenuItem("About Legibyl…", Command = command (fun () -> About.show window |> ignore)))
+                        menu.Items.Add(NativeMenuItem("Help", Menu = help))
                     NativeMenu.SetMenu(window, menu)
                     menuItems.Set(Some(save, exportItem))
                     if not mac then
@@ -1672,6 +1677,26 @@ module private MainView =
                             line "4." "Auto Fixes… chooses repairs, like the document's language and title."
                             line "5." "Export… writes a fixed copy and opens it, to check again. The PDF you opened isn't changed. File › Save keeps your review (edits, dismissed warnings, chosen fixes) to pick up later."
                             note "PDF/UA is the standard for PDFs that screen readers and other assistive technology can use."
+                            // Which Legibyl this is, and About…, without the menu bar.
+                            StackPanel.create [
+                                StackPanel.orientation Orientation.Horizontal
+                                StackPanel.margin (0.0, 12.0, 0.0, 0.0)
+                                StackPanel.children [
+                                    TextBlock.create [
+                                        TextBlock.text $"Legibyl {Legibyl.Validation.BuildInfo.version} · "
+                                        TextBlock.verticalAlignment VerticalAlignment.Center
+                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                    ]
+                                    Button.create [
+                                        Button.content "About…"
+                                        Button.padding (0.0, 0.0)
+                                        Button.background Brushes.Transparent
+                                        Button.borderThickness 0.0
+                                        Theme.resources [ Button.ForegroundProperty, Theme.Tokens.Primary ]
+                                        Button.onClick (fun _ -> About.show window |> ignore)
+                                    ]
+                                ]
+                            ]
                         ]
                     )
                 | _ -> None
