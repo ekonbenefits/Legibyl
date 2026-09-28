@@ -1,5 +1,7 @@
 # Third-Party Notices
 
+Legibyl is Copyright © 2026 Ekon Benefits <opensource@ekonbenefits.com>.
+
 **Legibyl's own source code is licensed under the GNU Affero General
 Public License v3.0 or later — see the `LICENSE` file at the repository
 root and `LICENSE.AGPL` in this directory.**
