@@ -58,7 +58,7 @@ let ``a copy's review doesn't carry the saved result, or the checklist`` () =
     let file: ReviewFile.SavedFile =
         { Version = 1; DismissedWarnings = [||]; Edits = null; Title = "A title"; Layout = null; Fixes = null
           Validation = SavedResults.ofReport report (SavedResults.hashOf pdf) DateTime.Now
-          Checklist = { Hash = "abc"; Checked = [| "title" |] } }
+          Checklist = { Hash = "abc"; Checked = [| "title" |]; CheckedAt = Nullable(); Length = 0L } }
 
     let json = (ReviewFile.forCopy (Some file)).Invoke([]) |> nonNull
 

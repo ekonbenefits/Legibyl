@@ -48,6 +48,19 @@ type DocumentReview(modified: DateTime) =
     /// were ticked for (its hash); None before any.
     member val Checklist: (string * Set<string>) option = None with get, set
 
+    /// When a step was last ticked (or unticked).
+    member val ChecklistAt: DateTime option = None with get, set
+
+    /// The checklist carried inside the PDF, if it's a copy Legibyl wrote for steps a person
+    /// checked, and its content is still what was checked (see ReviewFile.carriedChecklist).
+    member val CarriedChecklist: ReviewFile.SavedChecklist option = None with get, set
+
+    /// The steps checked in the copy it is (see CarriedChecklist): ticked already, read-only.
+    member this.CarriedChecked =
+        match this.CarriedChecklist with
+        | Some checklist -> checklist.Checked |> Option.ofObj |> Option.map Set.ofArray |> Option.defaultValue Set.empty
+        | None -> Set.empty
+
     /// The steps ticked for the file with hash; none if they were ticked for another.
     member this.CheckedFor(hash: string) =
         match this.Checklist with
@@ -107,7 +120,8 @@ type DocumentReview(modified: DateTime) =
           Validation = Option.toObj this.Validation
           Checklist =
             match this.Checklist with
-            | Some(hash, steps) when not steps.IsEmpty -> { Hash = hash; Checked = Array.ofSeq steps }
+            | Some(hash, steps) when not steps.IsEmpty ->
+                { Hash = hash; Checked = Array.ofSeq steps; CheckedAt = Option.toNullable this.ChecklistAt; Length = 0L }
             | _ -> null }
 
     /// Keeps the review in the file next to pdfPath (deleting it if there's nothing to keep).
@@ -122,17 +136,26 @@ type DocumentReview(modified: DateTime) =
     /// with the edits carried inside pdfPath under its own; its edits moved to the elements tagging
     /// made. Its dismissals are this one's; its auto fixes those the copy was made with.
     member this.ForCopy(pdfPath: string) =
-        let own = this.ToFile pdfPath
-        let file =
-            match this.Carried with
-            | Some carried ->
-                let edits = Array.append (Option.ofObj carried.Edits |> Option.defaultValue [||]) (Option.ofObj own.Edits |> Option.defaultValue [||])
-                { own with
-                    Edits = (if edits.Length = 0 then null else edits)
-                    Title = (if isNull own.Title then carried.Title else own.Title)
-                    Fixes = own.Fixes }
-            | None -> own
+        let file = this.CopyFile pdfPath
         ReviewFile.forCopy (if ReviewFile.isEmpty file then None else Some file)
+
+    /// The review a copy carries: this one, with the edits carried inside pdfPath under its own.
+    member private this.CopyFile(pdfPath: string) =
+        let own = this.ToFile pdfPath
+        match this.Carried with
+        | Some carried ->
+            let edits = Array.append (Option.ofObj carried.Edits |> Option.defaultValue [||]) (Option.ofObj own.Edits |> Option.defaultValue [||])
+            { own with
+                Edits = (if edits.Length = 0 then null else edits)
+                Title = (if isNull own.Title then carried.Title else own.Title)
+                Fixes = own.Fixes }
+        | None -> own
+
+    /// Writes pdfPath to outputPath unchanged, carrying its review with the steps a person checked
+    /// of it (those ticked here, and any the copy it is carries), for the file with hash.
+    member this.WriteCheckedCopy(pdfPath: string, outputPath: string, hash: string) =
+        let checkedSteps = Set.union (this.CheckedFor hash) this.CarriedChecked
+        ReviewFile.checkedCopy pdfPath outputPath (this.CopyFile pdfPath) hash checkedSteps (this.ChecklistAt |> Option.defaultValue DateTime.Now)
 
     /// Whether there are changes Save hasn't kept: the dismissals, edits, title or auto fixes differ
     /// from what was last saved (changing one back isn't a change), or there's a newer validation.
@@ -189,6 +212,7 @@ type DocumentReviews() =
                     | NonNull checklist ->
                         // A hand-edited file may leave the steps out.
                         let ticked = match box checklist.Checked with :? (string array) as steps -> Set.ofArray steps | _ -> Set.empty
+                        review.ChecklistAt <- Option.ofNullable checklist.CheckedAt
                         Some(checklist.Hash, ticked)
                     | Null -> None
                 match Option.ofObj saved.Layout |> Option.map (LayoutFile.current fullPath) with
@@ -199,6 +223,7 @@ type DocumentReviews() =
                 | None -> ()
             | None -> ()
             review.Carried <- if File.Exists fullPath then EmbeddedReview.read fullPath |> Option.bind ReviewFile.parse else None
+            review.CarriedChecklist <- if File.Exists fullPath then ReviewFile.carriedChecklist fullPath else None
             // The file's dismissals, if it has any (even none), override those carried inside.
             review.Dismissed <-
                 match file with

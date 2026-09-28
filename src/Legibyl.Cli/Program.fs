@@ -170,6 +170,10 @@ let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (fil
                 TotalAssertions = Nullable report.TotalAssertions
                 FailedCount = Nullable report.FailedCount
                 ValidatorNotes = report.Notes
+                CheckedByPerson =
+                    match ReviewFile.carriedChecklist file with
+                    | Some checklist -> { Steps = nonNull checklist.Checked; CheckedAt = checklist.CheckedAt }
+                    | None -> null
                 Failures = report.FailedAssertions |> Seq.map FailureDetail.Of |> Array.ofSeq
                 Warnings =
                     report.Assertions
@@ -246,6 +250,11 @@ let private validationText (results: ValidationResult list) =
                     | Null -> ()
             match r.ValidatorNotes with
             | NonNull notes -> for note in notes do line (noteLine note)
+            | Null -> ()
+            match r.CheckedByPerson with
+            | NonNull checkedBy ->
+                let date = checkedBy.CheckedAt |> Option.ofNullable |> Option.map (fun at -> " on " + at.ToString("yyyy-MM-dd", Globalization.CultureInfo.InvariantCulture)) |> Option.defaultValue ""
+                line $"""  checked by a person{date}: {String.Join(", ", checkedBy.Steps)}"""
             | Null -> ()
             match r.StructureError, r.Structure with
             | NonNull error, _ -> line $"  structure: ERROR — {error}"

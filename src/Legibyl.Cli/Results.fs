@@ -48,6 +48,14 @@ type Target =
     /// Why, as the results say it: "file" or "--ua".
     member target.From = if target.FromFile then "file" else "--ua"
 
+/// The steps of PDF/UA's checklist a person checked, as a copy Legibyl wrote carries them (see
+/// ReviewFile.carriedChecklist): only while its content is still what was checked.
+type CheckedByPerson =
+    { /// By name: "title", "language", "alt-text", "headings", "reading-order", "tables",
+      /// "links", "colour".
+      Steps: string array
+      CheckedAt: Nullable<DateTime> }
+
 /// `validate`'s result for one file. Field names are camelCased on output.
 type ValidationResult =
     { File: string
@@ -75,7 +83,10 @@ type ValidationResult =
       StructureError: string | null
       /// What veraPDF logged while it read the file (a font it couldn't read, nested marked
       /// content), counted; not findings. Empty when none, null when errored.
-      ValidatorNotes: IReadOnlyList<ValidatorNote> | null }
+      ValidatorNotes: IReadOnlyList<ValidatorNote> | null
+      /// The steps a person checked, when the file is a copy Legibyl wrote carrying them and its
+      /// content is still what was checked; null otherwise.
+      CheckedByPerson: CheckedByPerson | null }
 
     /// A result with only the file and what it's checked against filled in.
     static member Empty(file, target: Target) =
@@ -92,7 +103,8 @@ type ValidationResult =
           Error = null
           Structure = null
           StructureError = null
-          ValidatorNotes = null }
+          ValidatorNotes = null
+          CheckedByPerson = null }
 
 /// A document's standing against its profile: whether it complies, and how many checks failed.
 type Compliance = { IsCompliant: bool; FailedCount: int }
