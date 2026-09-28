@@ -155,14 +155,27 @@ type private ValidateArgs =
       Format: string
       Output: string option
       Structure: bool
-      Verbose: bool }
+      Verbose: bool
+      /// Report the warnings the review dismisses too.
+      AllWarnings: bool
+      /// --review: the review to use for every file (a .legibyl.json file, or a PDF whose review
+      /// to use), instead of each one's own.
+      Review: string option }
 
-let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (file: string) =
+/// Validates file; its warnings the review (given, else its own) dismisses are left out.
+let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (given: (string * ReviewFile.SavedFile) option) (file: string) =
     let target = targetFor args.Ua file
     let result = ValidationResult.Empty(file, target)
     match (try Ok(validator.Validate(file, target.Profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) with
     | Error message -> { result with Error = message }
     | Ok report ->
+        // The review's dismissals, as the GUI shows them: --review's, else the file's own.
+        let reviewPath, review =
+            match given with
+            | Some(path, review) -> Some path, Some review
+            | None -> ReviewFile.sourceFor file, ReviewFile.readFor file
+        let warnings = report.Assertions |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning) |> List.ofSeq
+        let dismissed = warnings |> List.filter (fun w -> review |> Option.exists (fun r -> ReviewFile.dismisses r w))
         let result =
             { result with
                 FlavourId = report.FlavourId
@@ -176,10 +189,12 @@ let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (fil
                     | None -> null
                 Failures = report.FailedAssertions |> Seq.map FailureDetail.Of |> Array.ofSeq
                 Warnings =
-                    report.Assertions
-                    |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning)
-                    |> Seq.map FailureDetail.Of
-                    |> Array.ofSeq }
+                    warnings
+                    |> List.filter (fun w -> args.AllWarnings || not (List.contains w dismissed))
+                    |> List.map FailureDetail.Of
+                    |> Array.ofList
+                DismissedWarnings = dismissed.Length
+                Review = Option.toObj reviewPath }
         if not args.Structure then
             result
         else
@@ -248,6 +263,9 @@ let private validationText (results: ValidationResult list) =
                     match f.Region with
                     | NonNull region -> line $"    region: {ValidationReportTextFormatter.FormatRegion region}"
                     | Null -> ()
+            if r.DismissedWarnings > 0 then
+                let what = if r.DismissedWarnings = 1 then "1 warning" else $"{r.DismissedWarnings} warnings"
+                line $"  {what} dismissed in the review ({r.Review})"
             for note in r.ValidatorNotes do
                 line (noteLine note)
             match r.CheckedByPerson with
@@ -271,15 +289,27 @@ let private printingLog (verbose: bool) : IDisposable =
 
 let private runValidate (args: ValidateArgs) =
     use _ = printingLog args.Verbose
-    let validator = VeraPdfValidator()
-    let results = [ for file in args.Files -> validateFile validator args file ]
-    write args.Output (if args.Format = "json" then toJson results else validationText results)
-    results
-    |> List.map (fun r ->
-        if not (isNull r.Error) then ExitCodes.ToolError
-        elif r.IsCompliant = Nullable false then ExitCodes.DocumentProblem
-        else ExitCodes.Success)
-    |> worst
+    let given =
+        args.Review
+        |> Option.map (fun path ->
+            if not (File.Exists path) then Error $"--review: {path} doesn't exist."
+            else
+                match ReviewFile.readFrom path with
+                | Some review -> Ok(path, review)
+                | None -> Error $"--review: {path} has no review in it.")
+    match given with
+    | Some(Error message) -> usageError message
+    | _ ->
+        let given = given |> Option.bind Result.toOption
+        let validator = VeraPdfValidator()
+        let results = [ for file in args.Files -> validateFile validator args given file ]
+        write args.Output (if args.Format = "json" then toJson results else validationText results)
+        results
+        |> List.map (fun r ->
+            if not (isNull r.Error) then ExitCodes.ToolError
+            elif r.IsCompliant = Nullable false then ExitCodes.DocumentProblem
+            else ExitCodes.Success)
+        |> worst
 
 // ---- fix and layout apply ----
 
@@ -704,13 +734,23 @@ let private validateCommand =
                     option<bool> "--structure"
                     |> desc "Also include each file's structure tree (as 'legibyl structure' gives it)."
                 and! verbose = verboseOption ()
+                and! allWarnings =
+                    option<bool> "--all-warnings"
+                    |> desc "Report every warning, those the review dismisses too (they're counted in dismissedWarnings either way)."
+                and! review =
+                    optionMaybe<string> "--review"
+                    |> desc
+                        "Leave out the warnings this review dismisses (a .legibyl.json file, or a PDF whose review to use), instead of                          each file's own: the file next to it, or the review inside a copy Legibyl saved."
+                    |> helpName "path"
                 return
                     { Files = files
                       Ua = ua
                       Format = format
                       Output = output
                       Structure = structure
-                      Verbose = verbose }
+                      Verbose = verbose
+                      AllWarnings = allWarnings
+                      Review = review }
             }
         )
         setAction runValidate

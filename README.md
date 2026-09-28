@@ -847,7 +847,7 @@ scripts or by an AI agent iterating on PDF/UA compatibility fixes. It has a
 command for each job:
 
 ```
-legibyl validate <files>… [--ua 1|2] [--format json|text] [--output report] [--structure] [--verbose]
+legibyl validate <files>… [--ua 1|2] [--format json|text] [--output report] [--structure] [--all-warnings] [--review path] [--verbose]
 legibyl fix <files>… [--ua 1|2] [--fixes safe|all|none|names] [--edits | --edits-from review] [--output out.pdf] [--format json|text] [--report path] [--verbose]
 legibyl structure <files>… [--format json|text] [--output path]
 legibyl layout suggest <file> [--output layout.json] [--figure-images]
@@ -884,7 +884,7 @@ every file against `--ua 1` or `--ua 2`. `--format json|text`, and `--output
 against (`standard`, `flavourId`), the file's `pdfVersion`, and why
 (`standardFrom`: `file`, or `--ua`); `fix` and `layout apply` choose the same way,
 and say the same. `--structure` also includes each file's structure tree, as
-`structure` gives it. `checkedByPerson` gives the steps a person checked (`steps`, `checkedAt`) when the file is a copy Legibyl wrote carrying them and its content is still what was checked; `null` otherwise. `validatorNotes` lists what veraPDF logged while it read the
+`structure` gives it. Warnings the PDF's review dismisses (as the GUI's **Dismiss warning** and **Dismiss all … warnings** do: the `.legibyl.json` file next to it, or else the review inside a copy Legibyl saved) are left out of `warnings`, as the GUI's banner leaves them out; `dismissedWarnings` counts them and `review` says where the review came from (`null` for none). `--all-warnings` reports them all (still counting them), and `--review <path>` uses another review (a `.legibyl.json` file, or a PDF's). Warnings never set the exit code. `checkedByPerson` gives the steps a person checked (`steps`, `checkedAt`) when the file is a copy Legibyl wrote carrying them and its content is still what was checked; `null` otherwise. `validatorNotes` lists what veraPDF logged while it read the
 file, counted (e.g. `{ "level": "WARNING", "logger": "OperatorParser", "message":
 "Content stream (object 16 0 obj): Nested MCID", "count": 13 }`); the text format
 lists them after the findings, and `--verbose` (on `validate` and `fix`) prints
@@ -921,7 +921,10 @@ non-compliant file):
     "error": null,
     "structure": null,
     "structureError": null,
-    "validatorNotes": []
+    "validatorNotes": [],
+    "checkedByPerson": null,
+    "dismissedWarnings": 0,
+    "review": null
   }
 ]
 ```

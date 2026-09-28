@@ -438,3 +438,79 @@ let ``--fixes names each of the five, and says why when there was nothing for it
             [ "Remove empty table-of-contents entries: nothing in this PDF needed it."
               "Remove figure tags that draw nothing: nothing in this PDF needed it." ])
 
+
+/// A tagged page with a heading and no bookmarks, which Legibyl warns about (Structure-7), in a
+/// fresh folder.
+let private withWarning (test: string -> unit) =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    try
+        let untagged = Path.Combine(folder, "untagged.pdf")
+        do
+            use document = new PdfDocument(new PdfWriter(untagged))
+            let canvas = PdfCanvas(document.AddNewPage())
+            let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+            canvas.BeginText().SetFontAndSize(font, 20f).MoveText(72.0, 720.0).ShowText("The Community Garden").EndText() |> ignore
+            canvas.BeginText().SetFontAndSize(font, 10f).MoveText(72.0, 690.0).ShowText("Open to every resident of the neighbourhood.").EndText() |> ignore
+        let region tag bounds : LayoutRegion =
+            { Tag = tag; Geometry = rect bounds; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
+        let pdf = Path.Combine(folder, "garden.pdf")
+        VeraPdfValidator(LayoutSource = FixedLayout [ region "H1" (70.0, 715.0, 400.0, 745.0); region "P" (70.0, 685.0, 400.0, 705.0) ])
+            .Fix(untagged, PdfProfile.PdfUa1, pdf, PdfFixOptions.TagFromLayout)
+        |> ignore
+        test pdf
+    finally
+        Directory.Delete(folder, true)
+
+/// A review dismissing every warning of rule (e.g. "Legibyl Structure-7").
+let private dismissing (rule: string) : ReviewFile.SavedFile =
+    { Version = 1
+      DismissedWarnings = [| { Rule = rule; Location = ReviewFile.AnyLocation; Message = "" } |]
+      Edits = null; Title = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+
+let private warningRules (result: JsonElement) =
+    [ for w in result.GetProperty("warnings").EnumerateArray() ->
+          let clause = w.GetProperty("clause").GetString()
+          let test = w.GetProperty("testNumber").GetInt32()
+          $"{clause}-{test}" ]
+
+[<Fact>]
+let ``validate leaves out the warnings the review dismisses, says how many and where from; --all-warnings reports them`` () =
+    withWarning (fun pdf ->
+        let _, before = run [ "validate"; pdf ]
+        File.WriteAllText(ReviewFile.filePath pdf, ReviewFile.toJson (dismissing "Legibyl Structure-7"))
+        let _, after = run [ "validate"; pdf ]
+        let _, all = run [ "validate"; pdf; "--all-warnings" ]
+
+        warningRules before.Value |> should contain "Structure-7"
+        before.Value.GetProperty("dismissedWarnings").GetInt32() |> should equal 0
+        before.Value.GetProperty("review").ValueKind |> should equal JsonValueKind.Null
+        warningRules after.Value |> should not' (contain "Structure-7")
+        after.Value.GetProperty("dismissedWarnings").GetInt32() |> should equal 1
+        after.Value.GetProperty("review").GetString() |> should equal (ReviewFile.filePath pdf)
+        warningRules all.Value |> should contain "Structure-7"
+        all.Value.GetProperty("dismissedWarnings").GetInt32() |> should equal 1)
+
+[<Fact>]
+let ``a review inside a copy is honoured, and the file next to it wins; --review uses another`` () =
+    withWarning (fun pdf ->
+        let folder = Path.GetDirectoryName pdf |> nonNull
+        // A copy carrying a review that dismisses the warning.
+        let copy = Path.Combine(folder, "garden.v2.pdf")
+        EmbeddedReview.write pdf copy (ReviewFile.toJson (dismissing "Legibyl Structure-7"))
+        let _, carried = run [ "validate"; copy ]
+        // A file next to the copy that dismisses nothing wins over the one inside it.
+        File.WriteAllText(ReviewFile.filePath copy, ReviewFile.toJson { dismissing "Legibyl Structure-7" with DismissedWarnings = [||] })
+        let _, overridden = run [ "validate"; copy ]
+        // --review: another's.
+        let other = Path.Combine(folder, "other.legibyl.json")
+        File.WriteAllText(other, ReviewFile.toJson (dismissing "Legibyl Structure-7"))
+        let _, given = run [ "validate"; pdf; "--review"; other ]
+        let missing, _ = run [ "validate"; pdf; "--review"; Path.Combine(folder, "none.json") ]
+
+        carried.Value.GetProperty("dismissedWarnings").GetInt32() |> should equal 1
+        carried.Value.GetProperty("review").GetString() |> should equal copy
+        overridden.Value.GetProperty("dismissedWarnings").GetInt32() |> should equal 0
+        given.Value.GetProperty("dismissedWarnings").GetInt32() |> should equal 1
+        given.Value.GetProperty("review").GetString() |> should equal other
+        missing |> should equal 64)

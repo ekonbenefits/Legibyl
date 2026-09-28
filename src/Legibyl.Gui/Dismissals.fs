@@ -17,13 +17,14 @@ type Dismissed = Map<Key, string>
 /// Only warnings can be dismissed; failures are what the profile requires.
 let canDismiss (violation: RuleViolation) = violation.Severity = FindingSeverity.Warning
 
+/// A warning's key, as the review names it (see ReviewFile.dismisses, which the CLI uses).
 let keyOf (violation: RuleViolation) =
-    { Rule = $"{violation.Specification} {violation.RuleId}"
-      Location = violation.LocationContext |> Option.ofObj |> Option.defaultValue "" }
+    { Rule = ReviewFile.dismissalRule violation
+      Location = ReviewFile.dismissalLocation violation }
 
 /// The location of a key that dismisses every warning of its rule, wherever it is.
 [<Literal>]
-let AnyLocation = "*"
+let AnyLocation = ReviewFile.AnyLocation
 
 /// The key that ignores every warning of violation's rule (type).
 let ruleKeyOf (violation: RuleViolation) =
