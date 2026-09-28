@@ -28,6 +28,7 @@
     <Compile Include="LayoutOrder.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="LinkTitleOffer.fs" />
+    <Compile Include="About.fs" />
     <Compile Include="RecentFiles.fs" />
     <Compile Include="MainWindow.fs" />
     <Compile Include="Program.fs" />
@@ -42,6 +43,15 @@
     <PackageReference Include="Avalonia.FuncUI" />
     <!-- Builds Legibyl.app on `dotnet msbuild -t:BundleApp` (see README "macOS app") - MIT. Build-time only. -->
     <PackageReference Include="Dotnet.Bundle" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- For the About window: what it says it's built on (see AboutWindow). -->
+    <AssemblyMetadata Include="PdfiumVersion" Value="$(PdfiumVersion)" />
+    <AssemblyMetadata Include="TessdataVersion" Value="$(TessdataVersion)" />
+    <!-- The license texts it shows (Licenses…), however it's installed. -->
+    <EmbeddedResource Include="..\..\licenses\*" LogicalName="licenses/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\assets\logo_raw.png" LogicalName="logo.png" />
   </ItemGroup>
 
   <!-- macOS .app bundle (Info.plist values for Dotnet.Bundle). Unsigned for now. -->

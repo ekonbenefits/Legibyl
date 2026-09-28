@@ -1,4 +1,8 @@
 <Project>
+  <PropertyGroup>
+    <!-- PDFium's builds, one per platform, all the same version (the About window says it). -->
+    <PdfiumVersion>156.0.8066</PdfiumVersion>
+  </PropertyGroup>
 
   <!-- Every NuGet package version, in one place (Central Package Management). Projects reference
        packages without a Version. Transitive pinning means a PackageVersion here also pins that
@@ -22,9 +26,9 @@
     <PackageVersion Include="PdfPig" Version="0.1.16" />
     <!-- Page rendering: PDFium's native builds (BSD-3), drawn into SkiaSharp bitmaps. SkiaSharp
          stays on the major version Avalonia uses. -->
-    <PackageVersion Include="bblanchon.PDFium.Linux" Version="156.0.8066" />
-    <PackageVersion Include="bblanchon.PDFium.macOS" Version="156.0.8066" />
-    <PackageVersion Include="bblanchon.PDFium.Win32" Version="156.0.8066" />
+    <PackageVersion Include="bblanchon.PDFium.Linux" Version="$(PdfiumVersion)" />
+    <PackageVersion Include="bblanchon.PDFium.macOS" Version="$(PdfiumVersion)" />
+    <PackageVersion Include="bblanchon.PDFium.Win32" Version="$(PdfiumVersion)" />
     <PackageVersion Include="SkiaSharp" Version="3.119.4" />
   </ItemGroup>
 

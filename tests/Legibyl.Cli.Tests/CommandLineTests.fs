@@ -346,3 +346,18 @@ let ``fix keeps what veraPDF logged reading the file as it was`` () =
         |> List.exists (fun m -> m.Contains "Nested MCID")
         |> should be True
         errors |> should not' (haveSubstring "Nested MCID"))
+
+[<Fact>]
+let ``--version prints the line the GUI's About window copies`` () =
+    let original = Console.Out
+    use writer = new StringWriter()
+    Console.SetOut writer
+    let code =
+        try
+            Legibyl.Cli.Program.main [| "--version" |]
+        finally
+            Console.SetOut original
+
+    code |> should equal 0
+    writer.ToString().Trim() |> should equal BuildInfo.versionLine
+    BuildInfo.versionLine |> should startWith $"legibyl {BuildInfo.version} (vendored veraPDF engine {VeraPdfValidator.EngineVersion})"
