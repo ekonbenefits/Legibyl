@@ -336,7 +336,7 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
                   |> List.choose (fun t ->
                       match t.Box with
                       | NonNull box when t.Region.Tag = regionTag && t.Region.Geometry.PageNumber = e.Page ->
-                          Some(t.Tag, box, ElementEdits.overlap t.Region.Geometry e.Box)
+                          Some(t.Tag, box, Boxes.overlap t.Region.Geometry e.Box)
                       | _ -> None)
                   |> List.filter (fun (_, _, o) -> o >= ElementEdits.SameElementOverlap)
                   |> List.sortByDescending (fun (_, _, o) -> o)

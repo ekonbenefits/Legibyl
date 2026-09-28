@@ -27,10 +27,12 @@ let private isTextRegion (region: LayoutRegion) =
 [<Literal>]
 let private Inside = 0.7
 
-let private overlap (a: StructureGeometry) (b: StructureGeometry) =
-    let width = min a.Right b.Right - max a.Left b.Left
-    let height = min a.Top b.Top - max a.Bottom b.Bottom
-    if width <= 0.0 || height <= 0.0 then 0.0 else width * height
+/// How much of box lies in region, 0 to 1 (box has area; see regionOf).
+let private insideFraction (box: StructureGeometry) (region: StructureGeometry) =
+    let width = min box.Right region.Right - max box.Left region.Left
+    let height = min box.Top region.Top - max box.Bottom region.Bottom
+    let area = (box.Right - box.Left) * (box.Top - box.Bottom)
+    if width <= 0.0 || height <= 0.0 then 0.0 else width * height / area
 
 /// The text region most of geometry lies in, by its position in regions.
 let private regionOf (regions: IReadOnlyList<LayoutRegion>) (geometry: StructureGeometry) =
@@ -38,7 +40,7 @@ let private regionOf (regions: IReadOnlyList<LayoutRegion>) (geometry: Structure
     let x, y = (geometry.Left + geometry.Right) / 2.0, (geometry.Bottom + geometry.Top) / 2.0
     let share (region: LayoutRegion) =
         let r = region.Geometry
-        if area > 0.0 then overlap geometry r / area
+        if area > 0.0 then insideFraction geometry r
         elif x >= r.Left && x <= r.Right && y >= r.Bottom && y <= r.Top then 1.0
         else 0.0
     [ for i in 0 .. regions.Count - 1 do

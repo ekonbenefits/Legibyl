@@ -248,7 +248,7 @@ let unmatched (layout: SavedLayout) (edits: ElementEdit list) : string list =
                       |> Array.exists (fun region ->
                           region.Tag = edit.Tag
                           && region.Box.Length = 4
-                          && ElementEdits.overlap
+                          && Boxes.overlap
                               { PageNumber = page.Page; Left = region.Box[0]; Bottom = region.Box[1]; Right = region.Box[2]; Top = region.Box[3] }
                               edit.Box
                              >= ElementEdits.SameElementOverlap)

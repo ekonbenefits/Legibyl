@@ -320,7 +320,7 @@ type ReviewedLayout(prefetcher: LayoutPrefetcher, review: DocumentReview) =
 
         member _.LinkDescription(_, page, rectangle) =
             review.WebLinks
-            |> List.tryFind (fun link -> link.Page = page && RegionEdits.overlap link.Box rectangle >= RegionEdits.SameRegionOverlap)
+            |> List.tryFind (fun link -> link.Page = page && Boxes.overlap link.Box rectangle >= RegionEdits.SameRegionOverlap)
             |> Option.bind review.LinkDescription
             |> Option.toObj
 
