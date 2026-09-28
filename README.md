@@ -512,14 +512,15 @@ text or replacement text), **Merge N Paragraphs** records the merge as an edit,
 keyed by each paragraph's box; **Don't Merge These** drops it again. Export joins
 them into the first, as **Join split paragraphs** does. Figures merge the same
 way (**Merge N Figures**: neighbours on one page, with no alt text or all the
-same), for a picture some tools tag in pieces; alt text or Not Read given to the
-first then applies to the whole merged figure. Legibyl warns about three or more
+same), for a picture some tools tag in pieces; alt text or the tag Artifact given
+to the first then applies to the whole merged figure. Legibyl warns about three or more
 small figures side by side (`SplitFigures.fs`, Structure-10: each at most 36 pt,
 at most 6 pt apart, none described), pointing to Merge N Figures: which pieces
 make one picture is a person's call, so there's no auto fix for it. A figure that's only
 decoration (a rule, a background, a border, which some tools tag as figures) can
-be made **Not Read (Artifact)** (shift-click for several; **Read It** undoes it),
-as a `retag` edit to `Artifact`, as on a suggested structure: export marks its
+be tagged **Artifact** in the **Tag** picker, which offers a figure Figure or
+Artifact (shift-click for several; picking Figure again undoes it), as a `retag`
+edit to `Artifact`, as on a suggested structure: export marks its
 content as an artifact (its `/Tag <</MCID n>> BDC` becomes `/Artifact BMC`), so
 it's still drawn but not read, and takes it out of the tags; the preview draws
 it grey until then.

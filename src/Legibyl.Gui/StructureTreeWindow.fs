@@ -1003,11 +1003,10 @@ module private StructureView =
                         let title, prompt, current, placeholder =
                             match kind with
                             | AltText ->
-                                // Decoration isn't described but not read: a suggested region tagged Artifact,
-                                // or a tagged PDF's figure made Not Read.
+                                // Decoration isn't described but tagged Artifact, not read: a suggested region,
+                                // or a tagged PDF's figure.
                                 let decoration =
-                                    if isSuggested then " If it's only decoration, close this and give it the tag Artifact instead."
-                                    elif node.Tag = "Figure" then " If it's only decoration, close this and use Not Read (Artifact) instead."
+                                    if isSuggested || node.Tag = "Figure" then " If it's only decoration, close this and give it the tag Artifact instead."
                                     else ""
                                 // A piece outside the tags is given alt text as the figure it's tagged as.
                                 let shownTag = if isUntagged node then "Figure" else node.Tag
@@ -1327,12 +1326,15 @@ module private StructureView =
                                 StackPanel.create [
                                   Grid.row 2
                                   StackPanel.children [
-                                // What the Tag picker tags: a tagged PDF's block of text; a suggested structure's
-                                // selected regions, several at once (Artifact for those not read).
+                                // What the Tag picker tags: a tagged PDF's block of text, or its figures (Figure,
+                                // or Artifact for decoration not read), several at once; a suggested
+                                // structure's selected regions, several at once (Artifact for those not read).
+                                let figures = selected.Current |> List.filter (fun n -> n.Tag = "Figure" && not (isNull n.Geometry))
                                 let tagging =
                                     match selected.Current with
                                     | _ when isSuggested -> regionsIn selected.Current |> List.filter (canRetag true)
                                     | [ single ] when canRetag false single -> [ single ]
+                                    | chosen when not figures.IsEmpty && figures.Length = chosen.Length -> figures
                                     | _ -> []
                                 match tagging with
                                 | [] -> ()
@@ -1344,7 +1346,10 @@ module private StructureView =
                                         | [ tag ] -> Some tag
                                         | _ -> None
                                     let chosen = selected.Current
-                                    let tags = if isSuggested then LayoutFile.tags else retagTags
+                                    let tags =
+                                        if isSuggested then LayoutFile.tags
+                                        elif targets |> List.forall (fun n -> n.Tag = "Figure") then [ "Figure"; "Artifact" ]
+                                        else retagTags
                                     DockPanel.create [
                                         DockPanel.margin (0.0, 0.0, 0.0, 8.0)
                                         DockPanel.children [
@@ -1361,11 +1366,16 @@ module private StructureView =
                                                 ComboBox.selectedItem (match tag with Some tag -> box tag | None -> null)
                                                 AttrBuilder<ComboBox>.CreateProperty<string | null>(
                                                     Automation.AutomationProperties.NameProperty,
-                                                    (match targets with [ single ] -> $"Tag for this <{single.Tag}>" | _ -> $"Tag for these {targets.Length} regions"),
+                                                    (match targets with
+                                                     | [ single ] -> $"Tag for this <{single.Tag}>"
+                                                     | _ when isSuggested -> $"Tag for these {targets.Length} regions"
+                                                     | _ -> $"Tag for these {targets.Length} elements"),
                                                     ValueNone)
                                                 ToolTip.tip (
                                                     if isSuggested then
                                                         "The tag to give it: H1 (the title), H (a heading, given the next level under the title when tagged, since one page can't tell), H2 to H6, P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
+                                                    elif targets |> List.forall (fun n -> n.Tag = "Figure") then
+                                                        "Figure, or Artifact for decoration a screen reader should skip, like a rule, a background or a border: on export, it's still drawn but marked as an artifact, and leaves the tags."
                                                     else
                                                         "Give this element another tag, e.g. a heading tagged as a paragraph."
                                                 )
@@ -1415,33 +1425,6 @@ module private StructureView =
                                                     (fun all r ->
                                                         let box = nonNull r.Geometry
                                                         RegionEdits.setExcluded all box.PageNumber r.Tag box (not merged))
-                                                    edits.Current
-                                                |> saveEdits
-                                                |> ignore),
-                                            SubPatchOptions.Always
-                                        )
-                                    ]
-                                // A tagged PDF's figures can be kept from being read (decoration: an artifact),
-                                // and back again; several at once.
-                                match (if isSuggested then [] else selected.Current |> List.filter (fun n -> n.Tag = "Figure" && not (isNull n.Geometry))) with
-                                | [] -> ()
-                                | figures ->
-                                    let what = if figures.Length = 1 then "" else $" {figures.Length} Figures"
-                                    let notRead = figures |> List.forall (fun f -> editFor edits.Current f |> Option.bind _.Retag = Some "Artifact")
-                                    Button.create [
-                                        Button.content (if notRead then $"Read It{what}" else $"Not Read (Artifact){what}")
-                                        Button.margin (0.0, 0.0, 0.0, 8.0)
-                                        ToolTip.tip (
-                                            if notRead then "Read it after all: keep it as a figure (it needs alt text)."
-                                            else "Decoration a screen reader should skip, like a rule, a background or a border: on export, it's still drawn but marked as an artifact, and leaves the tags."
-                                        )
-                                        Button.onClick (
-                                            (fun _ ->
-                                                figures
-                                                |> List.fold
-                                                    (fun all f ->
-                                                        let box = nonNull f.Geometry
-                                                        RegionEdits.setRetag all box.PageNumber f.Tag box (if notRead then f.Tag else "Artifact"))
                                                     edits.Current
                                                 |> saveEdits
                                                 |> ignore),
@@ -1520,7 +1503,7 @@ module private StructureView =
                                         Button.content (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs")
                                         Button.margin (0.0, 0.0, 0.0, 8.0)
                                         ToolTip.tip (
-                                            if figures then "Make these one figure: a picture drawn in pieces. Then give the first alt text, or Not Read, for all of them."
+                                            if figures then "Make these one figure: a picture drawn in pieces. Then give the first alt text, or the tag Artifact, for all of them."
                                             else "Make these paragraphs one."
                                         )
                                         Button.onClick (
@@ -1739,7 +1722,7 @@ module private StructureView =
                                             elif isSuggested then
                                                 $"Your edits on the suggested structure. Save in the main window keeps them in {file} next to the PDF; Export… tags a copy with the layout and them."
                                             elif edits.Current.IsEmpty then
-                                                "No edits yet. In the Blocks tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs (or figures drawn in pieces) to merge them; select a figure that's only decoration to mark it Not Read."
+                                                "No edits yet. In the Blocks tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs (or figures drawn in pieces) to merge them; select a figure that's only decoration to tag it Artifact (not read)."
                                             else
                                                 $"Your edits. Save in the main window keeps them in {file} next to the PDF; Export… writes the ones not in it yet to a copy."
                                         )
