@@ -321,8 +321,6 @@ let private runCapturingErrors (args: string list) =
         code, result, writer.ToString()
     finally
         Console.SetError original
-        // --verbose lasts for the process: not for the tests after.
-        VeraPdfValidator.EchoLog <- false
 
 [<Fact>]
 let ``validate keeps what veraPDF logs as validatorNotes, off stderr; --verbose prints it too`` () =
@@ -335,7 +333,22 @@ let ``validate keeps what veraPDF logs as validatorNotes, off stderr; --verbose 
         nested.GetProperty("count").GetInt32() |> should equal 2
         nested.GetProperty("logger").GetString() |> should equal "OperatorParser"
         errors |> should not' (haveSubstring "Nested MCID")
-        verboseErrors |> should haveSubstring "Nested MCID")
+        // Each as it comes, whole: the library raises it, the CLI prints it.
+        verboseErrors |> should haveSubstring "veraPDF WARNING OperatorParser: Content stream"
+        verboseErrors |> should haveSubstring "Nested MCID - 1")
+
+[<Fact>]
+let ``what veraPDF logs is raised as it comes, for a caller to show`` () =
+    withNestedPdf (fun pdf ->
+        let received = Collections.Concurrent.ConcurrentQueue<ValidatorNote>()
+        use _ = VeraPdfValidator.Recorded.Subscribe received.Enqueue
+        let report = VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1)
+
+        let nested = received |> Seq.filter (fun n -> n.Message.Contains "Nested MCID") |> List.ofSeq
+        // Each record, as logged (with the number the report's note leaves off).
+        nested |> List.map _.Count |> should equal [ 1; 1 ]
+        nested |> List.forall (fun n -> n.Logger = "OperatorParser" && n.Level = "WARNING") |> should be True
+        (report.Notes |> Seq.find (fun n -> n.Message.Contains "Nested MCID")).Count |> should equal nested.Length)
 
 [<Fact>]
 let ``fix keeps what veraPDF logged reading the file as it was`` () =

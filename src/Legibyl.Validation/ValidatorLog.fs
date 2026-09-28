@@ -14,8 +14,9 @@ type private Record = { Level: string; Logger: string; Message: string }
 /// The records of the validation running here (the flow of one Validate call), if any.
 let private current = AsyncLocal<ConcurrentQueue<Record> | null>()
 
-/// Whether to print records to stderr as they come, too (the CLI's --verbose).
-let mutable echo = false
+/// Each record kept, as it comes (Count 1, its message whole): for a caller to show as it goes,
+/// as the CLI's --verbose prints them. The library itself never writes to the console.
+let recorded = Event<ValidatorNote>()
 
 type private Collector() =
     inherit java.util.logging.Handler()
@@ -31,8 +32,7 @@ type private Collector() =
                 { Level = record.getLevel().getName ()
                   Logger = name.Substring(name.LastIndexOf '.' + 1)
                   Message = formatter.formatMessage record |> Option.ofObj |> Option.defaultValue "" }
-            if echo then
-                eprintfn $"veraPDF {kept.Level} {kept.Logger}: {kept.Message}"
+            recorded.Trigger { Level = kept.Level; Logger = kept.Logger; Message = kept.Message; Count = 1 }
             match current.Value with
             | null -> ()
             | records -> records.Enqueue kept

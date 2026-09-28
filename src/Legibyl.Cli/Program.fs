@@ -264,8 +264,13 @@ let private validationText (results: ValidationResult list) =
 
     sb.ToString().TrimEnd('\n', '\r')
 
+/// With --verbose, prints each record veraPDF logs on stderr as it comes, until disposed.
+let private printingLog (verbose: bool) : IDisposable =
+    if verbose then VeraPdfValidator.Recorded.Subscribe(fun note -> eprintfn $"veraPDF {note.Level} {note.Logger}: {note.Message}")
+    else { new IDisposable with member _.Dispose() = () }
+
 let private runValidate (args: ValidateArgs) =
-    VeraPdfValidator.EchoLog <- args.Verbose
+    use _ = printingLog args.Verbose
     let validator = VeraPdfValidator()
     let results = [ for file in args.Files -> validateFile validator args file ]
     write args.Output (if args.Format = "json" then toJson results else validationText results)
@@ -493,7 +498,7 @@ type private FixArgs =
       Verbose: bool }
 
 let private runFix (args: FixArgs) =
-    VeraPdfValidator.EchoLog <- args.Verbose
+    use _ = printingLog args.Verbose
     if args.Edits && args.EditsFrom.IsSome then
         usageError "Use --edits or --edits-from, not both."
     elif (sidecarProblems args.Edits args.Files).IsSome then
