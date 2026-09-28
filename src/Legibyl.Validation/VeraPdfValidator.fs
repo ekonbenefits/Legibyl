@@ -794,6 +794,16 @@ type VeraPdfValidator() =
             )
         table |> Map.tryFind (specification, clause, testNumber)
 
+    /// Every rule of profile's: its specification ("ISO 14289-1:2014"), clause and test, and what
+    /// it says.
+    static member Rules(profile: PdfProfile) : (string * string * int * string) list =
+        ensureInitialised ()
+        let validationProfile = Profiles.getVeraProfileDirectory().getValidationProfileByFlavour (toJavaFlavour profile)
+        [ for item in javaSeq (validationProfile.getRules ()) do
+              let rule = item :?> Rule
+              let id = rule.getRuleId ()
+              yield id.getSpecification().ToString(), id.getClause (), id.getTestNumber (), rule.getDescription () ]
+
     /// Gets veraPDF ready ahead of time, e.g. on a background thread as an app starts: its
     /// one-time setup (a second or two), and a validation of a tiny PDF, so the code the first
     /// real validation runs is compiled already (most of a second more). Safe to run alongside
