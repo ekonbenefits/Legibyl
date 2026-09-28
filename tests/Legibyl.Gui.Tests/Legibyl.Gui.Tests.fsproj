@@ -38,6 +38,7 @@
     <Compile Include="DocumentWindowsTests.fs" />
     <Compile Include="RecentFilesTests.fs" />
     <Compile Include="AboutTests.fs" />
+    <Compile Include="AccessibilityTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

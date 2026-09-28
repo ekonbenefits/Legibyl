@@ -677,6 +677,9 @@ module private StructureView =
                             ScrollViewer.content (
                                 StackPanel.create [
                                     StackPanel.margin 8.0
+                                    // The blocks are one tab stop: Up and Down move between them (see StructureBlocks).
+                                    AttrBuilder<StackPanel>.CreateProperty<KeyboardNavigationMode>(
+                                        KeyboardNavigation.TabNavigationProperty, KeyboardNavigationMode.Once, ValueNone)
                                     StackPanel.children [
                                         let levels = levelsWithinBudget root.Current.Children
                                         for child in root.Current.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
@@ -910,6 +913,7 @@ module private StructureView =
                         TextBox.create [
                             Grid.column 1
                             TextBox.text shownTitle
+                            AttrBuilder<TextBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Document title", ValueNone)
                             TextBox.placeHolderText "What a screen reader and the title bar call this document"
                             ToolTip.tip (
                                 if isSuggested then "Given to the tagged copy as its title, shown in place of the file name. Save keeps a change next to the PDF."

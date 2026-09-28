@@ -27,12 +27,14 @@ open Legibyl.Validation
 
 // Tag -> (border color, header background) by rough semantic category, so the
 // layout view reads like a color-coded HTML block diagram at a glance.
+/// (Each border is at least 3:1 against the blocks' background, light and dark, and each tag's text
+/// 4.5:1 against its chip; see AccessibilityTests.)
 let categoryColors =
     let heading = Colors.SteelBlue, Color.FromRgb(0xDDuy, 0xE9uy, 0xFBuy)
     let text = Colors.Gray, Color.FromRgb(0xF0uy, 0xF0uy, 0xF0uy)
     let list = Colors.SeaGreen, Color.FromRgb(0xDEuy, 0xF2uy, 0xE3uy)
     let reference = Colors.MediumPurple, Color.FromRgb(0xEBuy, 0xE3uy, 0xF7uy)
-    let table = Colors.DarkOrange, Color.FromRgb(0xFDuy, 0xEAuy, 0xD3uy)
+    let table = Colors.Chocolate, Color.FromRgb(0xFDuy, 0xEAuy, 0xD3uy)
     let figure = Colors.IndianRed, Color.FromRgb(0xFBuy, 0xE1uy, 0xE1uy)
     dict
         [ for tag in [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6" ] -> tag, heading
@@ -45,7 +47,7 @@ let categoryColors =
 let colorsFor (tag: string) =
     match categoryColors.TryGetValue tag with
     | true, colors -> colors
-    | _ -> Colors.DarkGray, Color.FromRgb(0xEEuy, 0xEEuy, 0xEEuy)
+    | _ -> Colors.SlateGray, Color.FromRgb(0xEEuy, 0xEEuy, 0xEEuy)
 
 let brush (color: Color) : IBrush = SolidColorBrush(color)
 
@@ -75,4 +77,4 @@ let outlineColor (tag: string) =
 
 
 /// A suggested region merged into its neighbour is outlined grey.
-let leftOutColor = 0x9E9E9Eu
+let leftOutColor = 0x8A8A8Au

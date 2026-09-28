@@ -182,6 +182,8 @@ module private MainView =
             let dismissed = ctx.useState (Map.empty: Dismissals.Dismissed)
             let showDismissed = ctx.useState false
             let edited = ctx.useState false
+            // What was just done (the review saved, a copy exported), announced to a screen reader.
+            let notice = ctx.useState ""
             // The fixes chosen in Auto Fixes for the selected file, as its review has them (None
             // until they're chosen), and the user's changes Export writes too.
             let autoFixes = ctx.useState (None: PdfFixOptions option)
@@ -446,6 +448,7 @@ module private MainView =
                         try
                             (layoutReviews.For path).Save path
                             edited.Set false
+                            notice.Set $"Saved the review in {Path.GetFileName(ReviewFile.filePath path)}."
                             return true
                         with :? IOException | :? UnauthorizedAccessException as ex ->
                             do! Dialogs.showMessage window $"Couldn't save the review next to the PDF: {ex.Message}" "Save"
@@ -672,7 +675,9 @@ module private MainView =
                                         isBusy.Set false
                                 }
                             match written with
-                            | Ok() -> do! openElsewhere outputPath true :> Task
+                            | Ok() ->
+                                notice.Set $"Exported {Path.GetFileName outputPath}, carrying the steps checked."
+                                do! openElsewhere outputPath true :> Task
                             | Error message -> do! Dialogs.showMessage window $"The copy couldn't be written: {message}" "Export"
                         | _ -> ()
                     | Some sourcePath when saveOptions () <> PdfFixOptions.None ->
@@ -748,6 +753,7 @@ module private MainView =
                             let! shownIn, fixedReport =
                                 match fixOutcome with
                                 | Ok fix when fix.WasFixed ->
+                                    notice.Set $"Exported {Path.GetFileName outputPath}."
                                     match fix.OutputPath with
                                     // It may be open already, from an earlier export to the same file.
                                     | NonNull path -> openElsewhere path true
@@ -865,6 +871,7 @@ module private MainView =
                             TextBox.margin (0.0, 0.0, 8.0, 0.0)
                             TextBox.verticalContentAlignment VerticalAlignment.Center
                             TextBox.isReadOnly true
+                            AttrBuilder<TextBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "PDF file", ValueNone)
                             TextBox.text (selectedFile.Current |> Option.defaultValue "Drop a PDF here or click Browse…")
                         ]
                         Button.create [
@@ -900,7 +907,10 @@ module private MainView =
                                 TextBlock.text text
                                 TextBlock.fontWeight FontWeight.Bold
                                 TextBlock.textWrapping TextWrapping.Wrap
-                                TextBlock.foreground Brushes.White
+                                // Black: 4.5:1 or more on the banner's colours, light and dark (see AccessibilityTests).
+                                TextBlock.foreground Brushes.Black
+                                // A validation's result (PASS, FAIL, an error) is announced as it comes.
+                                AttrBuilder<TextBlock>.CreateProperty<Automation.AutomationLiveSetting>(Automation.AutomationProperties.LiveSettingProperty, Automation.AutomationLiveSetting.Polite, ValueNone)
                             ]
                         )
                     ]
@@ -1068,7 +1078,8 @@ module private MainView =
                             TextBlock.text text
                             TextBlock.fontSize 11.0
                             TextBlock.fontWeight FontWeight.SemiBold
-                            TextBlock.foreground Brushes.White
+                            // Black: 4.5:1 or more on the failure and warning colours, light and dark.
+                            TextBlock.foreground Brushes.Black
                         ]
                     )
                 ]
@@ -1350,6 +1361,8 @@ module private MainView =
             let sectionHeading (text: string) =
                 TextBlock.create [
                     TextBlock.text text
+                    // A heading a screen reader can jump between.
+                    AttrBuilder<TextBlock>.CreateProperty<int>(Automation.AutomationProperties.HeadingLevelProperty, 3, ValueNone)
                     TextBlock.fontWeight FontWeight.SemiBold
                     TextBlock.margin (0.0, 8.0, 0.0, 0.0)
                 ]
@@ -1383,14 +1396,14 @@ module private MainView =
                                 ])
                             |> View.withAttrs [ Control.margin (0.0, 0.0, 0.0, 8.0) ]
                             TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
-                            detailText group.Message false [ TextBox.maxHeight 130.0 ]
+                            detailText "Message" group.Message false [ TextBox.maxHeight 130.0 ]
                             match RuleGuide.forFinding first with
                             | Some guide ->
                                 sectionHeading "What it means"
-                                detailText guide.Meaning false []
+                                detailText "What it means" guide.Meaning false []
                                 if group.Fixable.IsEmpty then
                                     sectionHeading "What to do"
-                                    detailText guide.WhatToDo false []
+                                    detailText "What to do" guide.WhatToDo false []
                             | None -> ()
                             match group.Fixable with
                             | [] -> ()
@@ -1400,7 +1413,7 @@ module private MainView =
                                 let how = if fixable.Length = group.Findings.Length then "" else $"{fixable.Length} of {group.Findings.Length} places: "
                                 // Each way its findings are fixed, as some rules' are more than one.
                                 let ways = fixable |> List.map _.Fixable |> List.distinct |> String.concat "; "
-                                detailText $"{how}{ways}." false []
+                                detailText (fixedBy fixable.Head.Violation) $"{how}{ways}." false []
                             TextBlock.create [
                                 TextBlock.text "Select a place in the list for its details; its first is shown below."
                                 TextBlock.textWrapping TextWrapping.Wrap
@@ -1547,7 +1560,7 @@ module private MainView =
                                             ])
                                         |> View.withAttrs [ Control.margin (0.0, 0.0, 0.0, 8.0) ]
                                         TextBlock.create [ TextBlock.text "Message"; TextBlock.fontWeight FontWeight.SemiBold ]
-                                        detailText row.Message false [ TextBox.maxHeight 130.0 ]
+                                        detailText "Message" row.Message false [ TextBox.maxHeight 130.0 ]
                                         // In plain language, and what to do when no auto fix fixes it.
                                         match RuleGuide.forFinding row.Violation with
                                         | Some guide ->
@@ -1556,14 +1569,14 @@ module private MainView =
                                                 TextBlock.fontWeight FontWeight.SemiBold
                                                 TextBlock.margin (0.0, 8.0, 0.0, 0.0)
                                             ]
-                                            detailText guide.Meaning false []
+                                            detailText "What it means" guide.Meaning false []
                                             if not row.Violation.IsFixable then
                                                 TextBlock.create [
                                                     TextBlock.text "What to do"
                                                     TextBlock.fontWeight FontWeight.SemiBold
                                                     TextBlock.margin (0.0, 8.0, 0.0, 0.0)
                                                 ]
-                                                detailText guide.WhatToDo false []
+                                                detailText "What to do" guide.WhatToDo false []
                                         | None -> ()
                                         if row.Violation.IsFixable then
                                             fixableHeading row.Violation
@@ -1575,19 +1588,20 @@ module private MainView =
                                                     "Open Suggest Structure… to see the headings, figures and reading order suggested for each page; Export… then tags a copy from it."
                                                 else
                                                     "Choose it in Auto Fixes…, then Export… a copy of this PDF."
-                                            detailText $"{row.Fixable}. {next}" false []
+                                            detailText (fixedBy row.Violation) $"{row.Fixable}. {next}" false []
                                         TextBlock.create [
                                             TextBlock.text "Location"
                                             TextBlock.fontWeight FontWeight.SemiBold
                                             TextBlock.margin (0.0, 8.0, 0.0, 0.0)
                                         ]
-                                        detailText row.FriendlyLocation true []
+                                        detailText "Location" row.FriendlyLocation true []
                                         TextBlock.create [
                                             TextBlock.text "Raw location"
                                             TextBlock.fontWeight FontWeight.SemiBold
                                             TextBlock.margin (0.0, 8.0, 0.0, 0.0)
                                         ]
                                         detailText
+                                            "Raw location"
                                             (row.LocationContext |> Option.ofObj |> Option.defaultValue "Not available")
                                             true
                                             [ TextBox.maxHeight 90.0
@@ -1681,6 +1695,14 @@ module private MainView =
                                             StackPanel.orientation Orientation.Horizontal
                                             StackPanel.horizontalAlignment HorizontalAlignment.Right
                                             StackPanel.children [
+                                                // What was just done, announced as it's done.
+                                                TextBlock.create [
+                                                    TextBlock.text notice.Current
+                                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                                    TextBlock.margin (0.0, 0.0, 12.0, 0.0)
+                                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                    AttrBuilder<TextBlock>.CreateProperty<Automation.AutomationLiveSetting>(Automation.AutomationProperties.LiveSettingProperty, Automation.AutomationLiveSetting.Polite, ValueNone)
+                                                ]
                                                 Button.create [
                                                     Button.content "Copy Summary"
                                                     Button.padding (12.0, 4.0)

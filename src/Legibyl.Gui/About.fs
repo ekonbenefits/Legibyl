@@ -9,6 +9,7 @@ open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
 open Avalonia.FuncUI
+open Avalonia.FuncUI.Builder
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.Hosts
 open Avalonia.Layout
@@ -89,6 +90,7 @@ let showLicenses (owner: Window) : Task =
                         DockPanel.dock Dock.Top
                         ComboBox.margin (0.0, 0.0, 0.0, 8.0)
                         ComboBox.dataItems (texts |> List.map fst)
+                        AttrBuilder<ComboBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "License", ValueNone)
                         ComboBox.selectedItem chosen.Current
                         ComboBox.onSelectedItemChanged (fun item -> match item with :? string as name -> chosen.Set name | _ -> ())
                     ]

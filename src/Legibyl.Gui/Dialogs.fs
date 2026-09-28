@@ -5,6 +5,7 @@ open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
 open Avalonia.FuncUI
+open Avalonia.FuncUI.Builder
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.Hosts
 open Avalonia.FuncUI.Types
@@ -175,6 +176,7 @@ let promptText (owner: Window) (title: string) (prompt: string) (initial: string
                 StackPanel.children [
                     TextBlock.create [ TextBlock.text prompt; TextBlock.textWrapping TextWrapping.Wrap ]
                     TextBox.create [
+                        AttrBuilder<TextBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, prompt, ValueNone)
                         TextBox.text text.Current
                         TextBox.placeHolderText placeholder
                         TextBox.acceptsReturn true
@@ -435,6 +437,7 @@ let chooseFixOptions
                         Grid.row 1
                         ToggleSwitch.margin (0.0, 0.0, 0.0, 10.0)
                         ToggleSwitch.isChecked showAll.Current
+                        AttrBuilder<ToggleSwitch>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Show every fix, not only those this PDF needs", ValueNone)
                         ToggleSwitch.onContent $"Showing all {fixChoices.Length} fixes"
                         ToggleSwitch.offContent $"Showing the {needed.Length} this PDF needs"
                         ToggleSwitch.onIsCheckedChanged (fun e ->
@@ -639,7 +642,8 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                                                     TextBlock.text style.Glyph
                                                     TextBlock.fontSize 18.0
                                                     TextBlock.fontWeight FontWeight.Bold
-                                                    TextBlock.foreground Brushes.White
+                                                    // Black: at least 3:1 (large text) on each status colour, light and dark.
+                                                    TextBlock.foreground Brushes.Black
                                                     TextBlock.horizontalAlignment HorizontalAlignment.Center
                                                     TextBlock.verticalAlignment VerticalAlignment.Center
                                                 ]
