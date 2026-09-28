@@ -260,16 +260,18 @@ let orderBar (needs: OrderBarNeeds) : IView =
             WrapPanel.children [
                 Button.create [
                     Button.content "Move Up"
+                    AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.Up, KeyModifiers.Alt), ValueNone)
                     Button.margin (0.0, 0.0, 6.0, 4.0)
                     Button.isEnabled (match moving with Some(_, _, _, before, _) -> before.IsSome | None -> false)
-                    ToolTip.tip "Read the selected element before the one above it: one place earlier in the reading order, among the elements in the same one, on its page."
+                    ToolTip.tip "Read the selected element before the one above it (Alt+Up): one place earlier in the reading order, among the elements in the same one, on its page."
                     Button.onClick ((fun _ -> move true), SubPatchOptions.Always)
                 ]
                 Button.create [
                     Button.content "Move Down"
+                    AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.Down, KeyModifiers.Alt), ValueNone)
                     Button.margin (0.0, 0.0, 16.0, 4.0)
                     Button.isEnabled (match moving with Some(_, _, _, _, after) -> after.IsSome | None -> false)
-                    ToolTip.tip "Read the selected element after the one below it: one place later in the reading order, among the elements in the same one, on its page."
+                    ToolTip.tip "Read the selected element after the one below it (Alt+Down): one place later in the reading order, among the elements in the same one, on its page."
                     Button.onClick ((fun _ -> move false), SubPatchOptions.Always)
                 ]
                 Button.create [

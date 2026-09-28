@@ -95,7 +95,9 @@ let badged (icon: (Geometry * string) option) (label: string) (count: int) : IVi
                             TextBlock.text (string count)
                             TextBlock.fontSize 11.0
                             TextBlock.fontWeight FontWeight.SemiBold
-                            TextBlock.foreground Brushes.White
+                            // The background's colour on the primary one: white in light mode, near black in dark,
+                            // 4.5:1 or more either way (see AccessibilityTests).
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Background ]
                         ]
                     )
                 ]

@@ -117,3 +117,22 @@ type ResultItem =
     | RuleItem of RuleGroup * expanded: bool
     | FindingItem of RuleViolationRow
     | PassItem of progress: string
+
+    /// The item as a screen reader says it (a list item's name is its item's text): a rule's
+    /// severity, rule, message, how many places, how it's fixed and whether it's open; a finding's
+    /// severity, page and where it is; the pass, and how far a person has checked it.
+    override item.ToString() =
+        match item with
+        | RuleItem(group, expanded) ->
+            let places = if group.Findings.Length = 1 then "1 place" else $"{group.Findings.Length} places"
+            let fixable =
+                match group.Fixable.Length with
+                | 0 -> ""
+                | n when n = group.Findings.Length -> ", has an auto fix"
+                | n -> $", {n} with an auto fix"
+            let shown = if expanded then "expanded" else "collapsed"
+            $"{group.Severity} {group.RuleId}: {group.Message}. {places}{fixable}, {shown}"
+        | FindingItem row ->
+            let dismissed = if row.Dismissed then ", dismissed" else ""
+            $"{row.Severity}, {row.PageDisplay}: {row.FriendlyLocation}{dismissed}"
+        | PassItem progress -> progress

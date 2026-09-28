@@ -10,6 +10,7 @@ open System.Threading
 open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
+open Avalonia.Controls.Templates
 open Avalonia.FuncUI
 open Avalonia.FuncUI.Builder
 open Avalonia.FuncUI.DSL
@@ -153,6 +154,53 @@ let tagChip (tag: string) (borderColor: Color) (headerColor: Color) =
         )
     ]
 
+/// A block as a screen reader names it: its tag and the start of what it says.
+let blockName (node: StructureNode) =
+    let said =
+        [ node.Content; node.ActualText; node.AlternateDescription; node.LinkDescription ]
+        |> List.tryPick (fun text -> if String.IsNullOrWhiteSpace text then None else Some(text.Trim()))
+    match said with
+    | Some text when text.Length > 80 -> $"{node.Tag}: {text.Substring(0, 80)}…"
+    | Some text -> $"{node.Tag}: {text}"
+    | None -> node.Tag
+
+/// The outline a focused block gets.
+let private focusOutline: ITemplate<Control> | null =
+    FuncTemplate<Control>(fun () ->
+        Shapes.Rectangle(Stroke = Brushes.DodgerBlue, StrokeThickness = 2.0, StrokeDashArray = Collections.AvaloniaList<float>([ 2.0; 2.0 ])) :> Control)
+
+/// A focused block's keys: Enter or Space selects it (with Shift, extends the selection to it, as
+/// shift-click does); Up and Down move to the block before or after it.
+let private blockKeys (selection: Selection) (node: StructureNode) (e: KeyEventArgs) =
+    match e.Source with
+    // Only the focused block's own handler (the event also bubbles to the blocks around it).
+    | :? Border as border when obj.ReferenceEquals(border.Tag, node) ->
+        match e.Key with
+        | Key.Enter
+        | Key.Space ->
+            e.Handled <- true
+            selection.Select node border (e.KeyModifiers.HasFlag KeyModifiers.Shift)
+        | Key.Up
+        | Key.Down when e.KeyModifiers = KeyModifiers.None ->
+            let blocks =
+                border.GetVisualAncestors()
+                |> Seq.tryPick (function :? ScrollViewer as scroll -> Some scroll | _ -> None)
+                |> Option.map (fun scroll ->
+                    scroll.GetVisualDescendants()
+                    |> Seq.choose (function :? Border as b when (b.Tag :? StructureNode) && b.Focusable -> Some b | _ -> None)
+                    |> List.ofSeq)
+                |> Option.defaultValue []
+            match blocks |> List.tryFindIndex (fun b -> obj.ReferenceEquals(b, border)) with
+            | Some index ->
+                let next = if e.Key = Key.Up then index - 1 else index + 1
+                if next >= 0 && next < blocks.Length then
+                    blocks[next].Focus(NavigationMethod.Directional) |> ignore
+                    blocks[next].BringIntoView()
+                e.Handled <- true
+            | None -> ()
+        | _ -> ()
+    | _ -> ()
+
 /// A bordered, clickable block. Selection restyles the clicked border directly
 /// (see StructureTreeWindow's view) rather than re-rendering the whole layout.
 let selectableBorder
@@ -169,6 +217,11 @@ let selectableBorder
         Border.borderThickness thickness
         Border.tag node
         ToolTip.tip tip
+        // Reachable from the keyboard (see blockKeys), and named for a screen reader by its tag and text.
+        Border.focusable true
+        AttrBuilder<Border>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, blockName node, ValueNone)
+        AttrBuilder<Border>.CreateProperty<ITemplate<Control> | null>(Control.FocusAdornerProperty, focusOutline, ValueNone)
+        Border.onKeyDown (blockKeys selection node)
         match editKinds node with
         | [] -> ()
         | kinds ->

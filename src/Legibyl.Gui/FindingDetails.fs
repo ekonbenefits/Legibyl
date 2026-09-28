@@ -76,8 +76,11 @@ let autoFixesIcon = Some(fixIcon, Theme.Tokens.Primary)
 /// The Suggest Structure button's icon: the wand its fixes have, white on its filled colour.
 let suggestIcon = Some(wandIcon, "SemiColorWhite")
 
-let detailText (text: string) (secondary: bool) (attrs: IAttr<TextBox> list) =
+/// Text in the details pane, selectable (a read-only text box), named for a screen reader by the
+/// heading it's under (label).
+let detailText (label: string) (text: string) (secondary: bool) (attrs: IAttr<TextBox> list) =
     TextBox.create [
+        AttrBuilder<TextBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, label, ValueNone)
         if secondary then
             Theme.resources [ TextBox.ForegroundProperty, Theme.Tokens.SecondaryText ]
         TextBox.text text

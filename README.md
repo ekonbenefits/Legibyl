@@ -422,6 +422,24 @@ brings them back. Dismissals are part of the PDF's review: **Save** keeps them, 
 edits, in `<name>.pdf.legibyl.json` next to it, which is loaded automatically
 when the PDF is opened again (see Saving below). Failures can't be dismissed. The CLI applies their edits with `--edits` (see below).
 
+### Legibyl's own accessibility
+
+Every button, picker, check box, switch and text box has a name a screen reader
+reads: its text, or a name set on it (a read-only details text box is named by its
+heading, like "What it means"). The results list's rows and the structure tree's
+items are said as a sentence ("Failure 7.1-1: … 3 places, has an auto fix,
+collapsed"), not as the data behind them. The banner (PASS, FAIL) and a notice line
+by Copy Summary ("Saved the review in …", "Exported …") are polite live regions, so
+a finished validation, a save and an export are announced. The details pane's
+section headings are headings. In Structure…, the blocks are one tab stop: Up and
+Down move between them, Enter or Space selects one (Shift extends the selection),
+and each is named by its tag and what it says; Move Up and Move Down are Alt+Up and
+Alt+Down. Each tag's block border has at least 3:1 contrast against the background
+in light and dark mode, its chip's text 4.5:1, and each outline on the page preview
+3:1 against the page; text on the banner, the count pills and the badges is 4.5:1
+against its colour in both themes (black on the status colours, which white wasn't). Tests keep each of these (`AccessibilityTests.fs`). Not yet
+checked by ear with VoiceOver, Narrator or NVDA, nor with Increase Contrast on.
+
 ### Terms
 
 - **Structure**: a tagged PDF's tag tree, made of **elements** (the Blocks tab

@@ -357,3 +357,14 @@ type StructureNode =
         match this.Geometry with
         | NonNull g -> [| g.Left; g.Bottom; g.Right; g.Top |] |> Array.map (fun v -> Math.Round(v, 1))
         | Null -> null
+
+    /// The element as it's said (a screen reader names a tree item by its item's text): its tag,
+    /// the start of what it says, and its page.
+    override this.ToString() =
+        let said =
+            [ this.Content; this.ActualText; this.AlternateDescription; this.LinkDescription ]
+            |> List.tryPick (fun text -> if String.IsNullOrWhiteSpace text then None else Some(text.Trim()))
+            |> Option.map (fun text -> if text.Length > 80 then " \"" + text.Substring(0, 80) + "…\"" else " \"" + text + "\"")
+            |> Option.defaultValue ""
+        let page = if this.PageNumber.HasValue then $", page {this.PageNumber.Value}" else ""
+        $"<{this.Tag}>{said}{page}"

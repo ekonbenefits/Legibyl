@@ -56,6 +56,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The tests check the Structure window's colours (see AccessibilityTests). -->
+    <InternalsVisibleTo Include="Legibyl.Gui.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- For the About window: what it says it's built on (see AboutWindow). -->
     <AssemblyMetadata Include="PdfiumVersion" Value="$(PdfiumVersion)" />
     <AssemblyMetadata Include="TessdataVersion" Value="$(TessdataVersion)" />
