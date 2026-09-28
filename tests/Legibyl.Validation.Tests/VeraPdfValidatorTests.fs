@@ -155,8 +155,8 @@ let ``common PDF/UA failures are explained in plain language, with what to do`` 
     (RuleGuide.forRule "ISO 14289-1:2014" "7.3" 1).Value.WhatToDo |> should haveSubstring "Edit Alt Text…"
     // Every test of a clause the guide covers as a whole.
     RuleGuide.forRule "ISO 14289-1:2014" "7.21.6" 4 |> Option.isSome |> should be True
-    // Rules it doesn't cover have only veraPDF's own text.
-    RuleGuide.forRule "ISO 14289-1:2014" "7.15" 1 |> should equal None
+    // A rule it doesn't cover (none, now: see RuleGuideTests) would have only veraPDF's own text.
+    RuleGuide.forRule "ISO 14289-1:2014" "9.9" 1 |> should equal None
     // PDF/UA-2's rules have their own entries, by its own clauses.
     (RuleGuide.forRule "ISO 14289-2:2024" "8.2.5.28.2" 1).Value.WhatToDo |> should haveSubstring "Edit Alt Text…"
     (RuleGuide.forRule "ISO 14289-2:2024" "8.2.1" 1).Value.WhatToDo |> should haveSubstring "Suggest Structure…"
