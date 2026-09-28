@@ -71,10 +71,10 @@ type ValidationResult =
       IsCompliant: Nullable<bool>
       TotalAssertions: Nullable<int>
       FailedCount: Nullable<int>
-      /// Only the failed rule checks; empty (not omitted) when compliant, null when errored.
-      Failures: IReadOnlyList<FailureDetail> | null
-      /// Legibyl warnings; empty (not omitted) when none, null when errored.
-      Warnings: IReadOnlyList<FailureDetail> | null
+      /// Only the failed rule checks; empty (never null) when compliant or errored.
+      Failures: IReadOnlyList<FailureDetail>
+      /// Legibyl warnings; empty (never null) when none or errored.
+      Warnings: IReadOnlyList<FailureDetail>
       /// Non-null only if the file could not be validated (missing, corrupt, encrypted, etc).
       Error: string | null
       /// With --structure: the tagged structure tree; null if the file has none (untagged).
@@ -82,8 +82,8 @@ type ValidationResult =
       /// With --structure: why reading the tree failed, if it did.
       StructureError: string | null
       /// What veraPDF logged while it read the file (a font it couldn't read, nested marked
-      /// content), counted; not findings. Empty when none, null when errored.
-      ValidatorNotes: IReadOnlyList<ValidatorNote> | null
+      /// content), counted; not findings. Empty (never null) when none or errored.
+      ValidatorNotes: IReadOnlyList<ValidatorNote>
       /// The steps a person checked, when the file is a copy Legibyl wrote carrying them and its
       /// content is still what was checked; null otherwise.
       CheckedByPerson: CheckedByPerson | null }
@@ -98,12 +98,12 @@ type ValidationResult =
           IsCompliant = Nullable()
           TotalAssertions = Nullable()
           FailedCount = Nullable()
-          Failures = null
-          Warnings = null
+          Failures = [||]
+          Warnings = [||]
           Error = null
           Structure = null
           StructureError = null
-          ValidatorNotes = null
+          ValidatorNotes = [||]
           CheckedByPerson = null }
 
 /// A document's standing against its profile: whether it complies, and how many checks failed.
@@ -143,9 +143,9 @@ type RepairResult =
       /// Repairs asked for that weren't kept or couldn't apply, and why.
       NotApplied: IReadOnlyList<string>
       Error: string | null
-      /// The file as it was, and the repaired copy (validated again), when there's one.
-      Before: Compliance option
-      After: Compliance option
+      /// The file as it was, and the repaired copy (validated again): null when there's none.
+      Before: Compliance | null
+      After: Compliance | null
       /// What veraPDF logged while it read the file as it was (see ValidationResult); empty for none.
       ValidatorNotes: IReadOnlyList<ValidatorNote> }
 
