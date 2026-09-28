@@ -117,7 +117,7 @@ let private shown (window: Window) =
         | _ -> None)
 
 [<Fact>]
-let ``Order by Page Layout suggests the page's order; Use This Order records moves only for what moves`` () =
+let ``Order Page 1 by Layout reorders the blocks at once, as moves only for what moves; Restore puts it back`` () =
     onUiThread (fun () ->
         let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
         Directory.CreateDirectory folder |> ignore
@@ -127,21 +127,24 @@ let ``Order by Page Layout suggests the page's order; Use This Order records mov
             window.LayoutRegions <- Some(fun page -> if page = 1 then regions else [])
             window.Show()
             pump ()
-            // The first page is shown to begin with.
-            press window "Order by Page Layout"
-            let offered = (button window "Use This Order").IsSome
             let before = shown window
-            press window "Use This Order"
+            let restoreAtFirst = (button window "Restore Page 1 Original Order").IsSome
+            // The first page is shown to begin with: the button names it.
+            press window "Order Page 1 by Layout"
             let after = shown window
             let moved = window.Review.Edits |> List.map (fun e -> e.Tag, e.Move.IsSome)
+            press window "Restore Page 1 Original Order"
+            let restored = shown window
+            let left = window.Review.Edits
             window.Close()
 
-            offered |> should be True
-            // Nothing changes until it's used.
             before |> should equal [ "Author or Publication Name"; "Page 1"; "Left column"; "L"; "Figure"; "Today's news"; "Right column"; "Page two" ]
+            restoreAtFirst |> should be False
             after |> should equal [ "Author or Publication Name"; "Today's news"; "Left column"; "L"; "Figure"; "Right column"; "Page 1"; "Page two" ]
             // The masthead first after the header, the footer after the right column: the rest
             // follow on their own.
             moved |> List.sort |> should equal [ "H1", true; "P", true ]
+            restored |> should equal before
+            left |> should be Empty
         finally
             Directory.Delete(folder, true))

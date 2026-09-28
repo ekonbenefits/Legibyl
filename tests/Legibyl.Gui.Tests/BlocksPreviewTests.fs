@@ -177,7 +177,7 @@ let ``a block selected on the preview inside collapsed blocks is opened and scro
             top |> should be (lessThan scroller.Viewport.Height)))
 
 let private selectionOnlyBox (window: Window) =
-    descendants<CheckBox> window |> List.find (fun c -> string c.Content = "Selection only")
+    descendants<CheckBox> window |> List.find (fun c -> string c.Content = "Show selected block only")
 
 /// What the preview's note says, once it's rendered.
 let private note (window: Window) =
@@ -187,7 +187,7 @@ let private note (window: Window) =
     descendants<TextBlock> window |> List.map (fun t -> string t.Text) |> List.find (fun t -> t.StartsWith "Page 1:")
 
 [<Fact>]
-let ``with Selection only, the preview draws just the selection, and the page can still be clicked`` () =
+let ``with Show selected block only, the preview draws just the selection, and the page can still be clicked`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let window, image = show page pdf
