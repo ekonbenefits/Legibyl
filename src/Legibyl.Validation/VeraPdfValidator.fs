@@ -762,11 +762,10 @@ type VeraPdfValidator() =
         ensureInitialised ()
         wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath progress)
 
-    /// Whether to print what veraPDF logs to stderr as it comes, as well as keeping it on the
-    /// report's Notes (the CLI's --verbose). Off: nothing veraPDF logs reaches the console.
-    static member EchoLog
-        with get () = ValidatorLog.echo
-        and set (value: bool) = ValidatorLog.echo <- value
+    /// Each record veraPDF logs (WARNING and above) as it comes, for a caller to show as it goes
+    /// (the CLI's --verbose prints them); the report's Notes keep them too, counted. Nothing veraPDF
+    /// logs reaches the console.
+    static member Recorded: IEvent<ValidatorNote> = ValidatorLog.recorded.Publish
 
     /// The veraPDF version its results come from (stamped from VeraPdfVersion in
     /// Directory.Build.props).

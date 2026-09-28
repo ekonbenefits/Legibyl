@@ -84,3 +84,21 @@ let ``a saved result keeps its notes`` () =
     let back = SavedResults.toReport saved input.Path
 
     back.Notes |> should equal report.Notes
+
+[<Fact>]
+let ``the libraries never write to the console: their callers decide what to print`` () =
+    let rec repository (folder: IO.DirectoryInfo | null) =
+        match folder with
+        | null -> failwith "The repository isn't above the test output"
+        | folder when IO.Directory.Exists(Path.Combine(folder.FullName, "src", "Legibyl.Validation")) -> folder.FullName
+        | folder -> repository folder.Parent
+    let root = repository (IO.DirectoryInfo AppContext.BaseDirectory)
+    let writes =
+        [ for library in [ "Legibyl.Validation"; "Legibyl.Layout"; "Legibyl.Rendering" ] do
+              for file in Directory.GetFiles(Path.Combine(root, "src", library), "*.fs") do
+                  for number, line in Seq.indexed (File.ReadAllLines file) do
+                      let code = line.Split("//").[0]
+                      if Text.RegularExpressions.Regex.IsMatch(code, @"\b(e?printfn?|Console\.)") then
+                          yield $"{Path.GetFileName file}:{number + 1}: {line.Trim()}" ]
+
+    writes |> should be Empty
