@@ -49,7 +49,7 @@ let private firstRuleContainer (window: Window) =
     containerFor window (function RuleItem(group, _) -> obj.ReferenceEquals(group.First, (HeadlessWindow.findings window).Head) | _ -> false)
 
 /// A row's icons' screen-reader names.
-let private iconNames (row: Visual) = descendants<Path> row |> List.map AutomationProperties.GetName
+let private iconNames (row: Visual) = descendants<Path> row |> List.map (AutomationProperties.GetName >> string)
 
 [<Fact>]
 let ``empty paragraph warning shows its icons, page, fix, and preview`` () =

@@ -352,6 +352,7 @@ let selectionActions (needs: SelectionNeeds) : IView =
             if needs.Suggested then LayoutFile.tags
             elif targets |> List.forall (fun n -> n.Tag = "Figure") then [ "Figure"; "Artifact" ]
             else retagTags
+        let items = match tag with Some tag when not (List.contains tag tags) -> tag :: tags | _ -> tags
         DockPanel.create [
             DockPanel.margin (0.0, 0.0, 0.0, 8.0)
             DockPanel.children [
@@ -364,8 +365,9 @@ let selectionActions (needs: SelectionNeeds) : IView =
                 ComboBox.create [
                     ComboBox.minWidth 120.0
                     ComboBox.horizontalAlignment HorizontalAlignment.Left
-                    ComboBox.dataItems (match tag with Some tag when not (List.contains tag tags) -> tag :: tags | _ -> tags)
-                    ComboBox.selectedItem (match tag with Some tag -> box tag | None -> null)
+                    ComboBox.dataItems items
+                    // Nothing chosen when they don't share a tag.
+                    ComboBox.selectedIndex (match tag with Some tag -> List.findIndex ((=) tag) items | None -> -1)
                     AttrBuilder<ComboBox>.CreateProperty<string | null>(
                         Automation.AutomationProperties.NameProperty,
                         (match targets with
@@ -405,7 +407,6 @@ let selectionActions (needs: SelectionNeeds) : IView =
                 ]
             ]
         ]
-    | _ -> ()
     // A suggested region can be merged into its neighbour (its text still read), and
     // kept again; several at once. (Not read is the Tag picker's Artifact.)
     match (if needs.Suggested then regionsIn needs.Selected.Current else []) with

@@ -329,7 +329,7 @@ let ``validate keeps what veraPDF logs as validatorNotes, off stderr; --verbose 
         let _, _, verboseErrors = runCapturingErrors [ "validate"; pdf; "--verbose" ]
 
         let notes = [ for note in result.Value.GetProperty("validatorNotes").EnumerateArray() -> note ]
-        let nested = notes |> List.find (fun n -> n.GetProperty("message").GetString().Contains "Nested MCID")
+        let nested = notes |> List.find (fun n -> (string (n.GetProperty("message").GetString())).Contains "Nested MCID")
         nested.GetProperty("count").GetInt32() |> should equal 2
         nested.GetProperty("logger").GetString() |> should equal "OperatorParser"
         errors |> should not' (haveSubstring "Nested MCID")
@@ -355,7 +355,7 @@ let ``fix keeps what veraPDF logged reading the file as it was`` () =
     withNestedPdf (fun pdf ->
         let _, result, errors = runCapturingErrors [ "fix"; pdf; "--fixes"; "tabs" ]
 
-        [ for note in result.Value.GetProperty("validatorNotes").EnumerateArray() -> note.GetProperty("message").GetString() ]
+        [ for note in result.Value.GetProperty("validatorNotes").EnumerateArray() -> string (note.GetProperty("message").GetString()) ]
         |> List.exists (fun m -> m.Contains "Nested MCID")
         |> should be True
         errors |> should not' (haveSubstring "Nested MCID"))

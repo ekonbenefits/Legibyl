@@ -140,7 +140,7 @@ let show (owner: Window) : Task =
             Button.padding (0.0, 2.0)
             Button.background Brushes.Transparent
             Button.borderThickness 0.0
-            Button.cursor (Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand))
+            Button.cursor (new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand))
             Theme.resources [ Button.ForegroundProperty, Theme.Tokens.Primary ]
             ToolTip.tip address
             Button.onClick (fun _ -> about.Launcher.LaunchUriAsync(Uri address) |> ignore)

@@ -182,7 +182,7 @@ let ``a block can be reached, selected and left with the keyboard, and Move Up a
             first.Focus() |> ignore
             first.RaiseEvent(Input.KeyEventArgs(RoutedEvent = Input.InputElement.KeyDownEvent, Key = Input.Key.Down, Source = first))
             pump ()
-            let moved = structure.FocusManager |> Option.ofObj |> Option.bind (fun f -> Option.ofObj (f.GetFocusedElement())) |> Option.map box
+            let moved = structure.FocusManager.GetFocusedElement() |> Option.ofObj |> Option.map box
             let second = blocks[1]
             second.RaiseEvent(Input.KeyEventArgs(RoutedEvent = Input.InputElement.KeyDownEvent, Key = Input.Key.Enter, Source = second))
             pump ()
@@ -195,7 +195,7 @@ let ``a block can be reached, selected and left with the keyboard, and Move Up a
 
             blocks.Length |> should be (greaterThan 1)
             moved |> should equal (Some(box second))
-            named |> should equal (StructureBlocks.blockName (second.Tag :?> StructureNode))
+            named |> should equal (StructureBlocks.blockName (nonNull second.Tag :?> StructureNode))
             note |> should be True
             shortcut |> should equal (Some(Input.Key.Up, Input.KeyModifiers.Alt))))
 

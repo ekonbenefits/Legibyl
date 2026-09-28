@@ -198,7 +198,7 @@ let ``the copy carries the steps checked, the original's hash and the date, and 
         let original = VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1)
         let copied = VeraPdfValidator().Validate(copy, PdfProfile.PdfUa1)
 
-        carried.Checked |> Array.sort |> should equal [| "language"; "title" |]
+        nonNull carried.Checked |> Array.sort |> should equal [| "language"; "title" |]
         carried.Hash |> should equal (SavedResults.hashOf pdf)
         carried.CheckedAt |> should equal (Nullable(DateTime(2026, 9, 27, 10, 0, 0)))
         // The original, unchanged, with the review added after it.

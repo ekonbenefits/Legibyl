@@ -90,7 +90,7 @@ let ``Licenses… draws the NOTICE from its Markdown, and shows each license as 
         // The fenced block, as it's written.
         notice |> List.exists (fun t -> t.StartsWith "Apache PDFBox\nCopyright 2014") |> should be True
         // Links, bare addresses too, each going where it says.
-        let link text = links |> List.find (fun l -> (l.Content :?> TextBlock).Text = text)
+        let link text = links |> List.find (fun l -> match l.Content with :? TextBlock as words -> words.Text = text | _ -> false)
         (link "IKVM.NET").NavigateUri |> should equal (Uri "https://ikvm.org/")
         (link "https://verapdf.org").NavigateUri |> should equal (Uri "https://verapdf.org")
         // An underscore is a word's, not an access key.

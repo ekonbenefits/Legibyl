@@ -158,7 +158,7 @@ let tagChip (tag: string) (borderColor: Color) (headerColor: Color) =
 let blockName (node: StructureNode) =
     let said =
         [ node.Content; node.ActualText; node.AlternateDescription; node.LinkDescription ]
-        |> List.tryPick (fun text -> if String.IsNullOrWhiteSpace text then None else Some(text.Trim()))
+        |> List.tryPick (fun text -> match text with NonNull text when not (String.IsNullOrWhiteSpace text) -> Some(text.Trim()) | _ -> None)
     match said with
     | Some text when text.Length > 80 -> $"{node.Tag}: {text.Substring(0, 80)}…"
     | Some text -> $"{node.Tag}: {text}"
