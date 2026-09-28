@@ -211,7 +211,7 @@ let private parentTreeFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private SplitFiguresMessage =
-    "Small figures side by side look like one picture drawn in pieces: a screen reader announces each, and each needs alt text. In Structure…, shift-click them and Merge them into one, then describe it once, or mark it Not Read if it's decoration."
+    "Small figures side by side look like one picture drawn in pieces: a screen reader announces each, and each needs alt text. In Structure…, shift-click them and Merge them into one, then describe it once, or tag it Artifact (not read) if it's decoration."
 
 let private splitFigureFindings (document: PdfDocument) context =
     [ for run in SplitFigures.find document context ->

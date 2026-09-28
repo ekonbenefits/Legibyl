@@ -108,7 +108,7 @@ rules:
   - clause: "7.3"
     tests: [1]
     meaning: "A figure has no alt text, so a screen reader can only say it's an image."
-    whatToDo: "In Structure…, right-click the figure and choose Edit Alt Text…: say what it's for here, in a sentence. If it's only decoration (a rule, a background, a border), select it and choose Not Read (Artifact) instead."
+    whatToDo: "In Structure…, right-click the figure and choose Edit Alt Text…: say what it's for here, in a sentence. If it's only decoration (a rule, a background, a border), select it and give it the tag Artifact (not read) instead."
 
   - clause: "7.4.2"
     tests: [1]
@@ -266,7 +266,7 @@ pdfUa2Rules:
 
   - clause: "8.2.5.28.2"
     meaning: "A figure has no alt text, so a screen reader can only say it's an image."
-    whatToDo: "In Structure…, right-click the figure and choose Edit Alt Text…: say what it's for here, in a sentence. If it's only decoration (a rule, a background, a border), select it and choose Not Read (Artifact) instead."
+    whatToDo: "In Structure…, right-click the figure and choose Edit Alt Text…: say what it's for here, in a sentence. If it's only decoration (a rule, a background, a border), select it and give it the tag Artifact (not read) instead."
 
   - clauses: ["8.4.3", "8.6"]
     meaning: "Some text uses private characters (from Unicode's Private Use Area) that mean nothing to a screen reader, and has no replacement text to read instead."

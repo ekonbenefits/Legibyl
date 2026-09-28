@@ -316,7 +316,7 @@ let ``the tag picker retags the block selected now, not one selected before`` ()
             window.Review.Edits |> List.map (fun e -> e.Box, e.Retag) |> should equal [ second, Some "Caption" ]))
 
 [<Fact>]
-let ``a retag the PDF already has shows as in it, and figures get no tag picker`` () =
+let ``a retag the PDF already has shows as in it, and figures are only offered Figure or Artifact`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let paragraph = rect 72.0 697.0 238.0 712.0
@@ -327,13 +327,13 @@ let ``a retag the PDF already has shows as in it, and figures get no tag picker`
             click heading false
             let picked = tagPicker window |> Option.map (fun c -> string c.SelectedItem)
             click (blockFor window "Figure") false
-            let forFigure = tagPicker window
+            let forFigure = tagPicker window |> Option.map (fun c -> c.Items |> Seq.map string |> List.ofSeq)
             selectTab window "Edits"
             let editsTab = texts window
             window.Close()
 
             picked |> should equal (Some "H1")
-            forFigure |> should equal None
+            forFigure |> should equal (Some [ "Figure"; "Artifact" ])
             editsTab |> should contain "In this PDF."))
 
 [<Fact>]
@@ -364,34 +364,38 @@ let ``a link's description can be edited, starting from the one it has`` () =
             window.Review.Edits |> List.map (fun e -> e.Tag, e.Alt) |> should equal [ "Link", Some "Example (example.com)" ]))
 
 [<Fact>]
-let ``a tagged PDF's figure can be made not read, and read again`` () =
+let ``a tagged PDF's figure can be tagged Artifact, not read, and Figure again`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let window = show (structure null) pdf
             click (blockFor window "Figure") false
-            let button (label: string) = descendants<Button> window |> List.tryFind (fun b -> string b.Content = label)
-            (button "Not Read (Artifact)").Value.RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            let picker () = descendants<ComboBox> window |> List.exactlyOne
+            let choices = picker().Items |> Seq.map string |> List.ofSeq
+            picker().SelectedItem <- "Artifact"
             pump ()
             let recorded = window.Review.Edits |> List.map (fun e -> e.Tag, e.Retag)
             let header = descendants<TabItem> window |> List.map (fun t -> string t.Header)
             let pendingLine = texts window |> List.exists (fun t -> t = "✎ not read (decoration), not in the PDF yet")
-            let readIt = button "Read It"
-            readIt.Value.RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            // No button for it: the Tag picker says it.
+            let buttons = descendants<Button> window |> List.map (fun b -> string b.Content)
+            picker().SelectedItem <- "Figure"
             pump ()
             let after = window.Review.Edits
-            // A paragraph isn't offered it.
+            // A paragraph isn't offered Artifact.
             click (blockFor window "P") false
-            let forParagraph = button "Not Read (Artifact)"
+            let forParagraph = descendants<ComboBox> window |> List.collect (fun c -> c.Items |> Seq.map string |> List.ofSeq)
             window.Close()
 
+            choices |> should equal [ "Figure"; "Artifact" ]
             recorded |> should equal [ "Figure", Some "Artifact" ]
             header |> should contain "Edits (1)"
             pendingLine |> should be True
+            buttons |> List.exists (fun b -> b.StartsWith "Not Read" || b.StartsWith "Read It") |> should be False
             after |> should be Empty
-            forParagraph |> should equal None))
+            forParagraph |> should not' (contain "Artifact")))
 
 [<Fact>]
-let ``a tagged PDF's figure's alt text prompt suggests Not Read for decoration`` () =
+let ``a tagged PDF's figure's alt text prompt suggests the tag Artifact for decoration`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let window = show (structure null) pdf
@@ -402,7 +406,7 @@ let ``a tagged PDF's figure's alt text prompt suggests Not Read for decoration``
             prompt.Close()
             window.Close()
 
-            said |> List.exists (fun t -> t.Contains "use Not Read (Artifact) instead") |> should be True))
+            said |> List.exists (fun t -> t.Contains "give it the tag Artifact instead") |> should be True))
 
 /// Two small figures side by side, the second with alt text if given.
 let private twoFigures (secondAlt: string | null) =
@@ -440,3 +444,21 @@ let ``neighbouring figures can be merged as an edit, but not ones described diff
             recorded |> should equal [ "Figure", 1 ]
             line |> should be True
             offered |> should be False))
+
+[<Fact>]
+let ``several figures are tagged Artifact at once`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show (twoFigures null) pdf
+            let figures = descendants<Border> window |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "Figure" | _ -> false)
+            click figures[0] false
+            click figures[1] true
+            let picker = descendants<ComboBox> window |> List.exactlyOne
+            let named = string (Automation.AutomationProperties.GetName picker)
+            picker.SelectedItem <- "Artifact"
+            pump ()
+            let recorded = window.Review.Edits |> List.map (fun e -> e.Tag, e.Retag)
+            window.Close()
+
+            named |> should equal "Tag for these 2 elements"
+            recorded |> should equal [ "Figure", Some "Artifact"; "Figure", Some "Artifact" ]))
