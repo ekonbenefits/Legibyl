@@ -380,10 +380,10 @@ says so instead.
 Warnings can be dismissed from a row's right-click menu (or the keyboard's
 context-menu key): they drop out of the list, the banner's warning count, and
 Copy Summary/Save Report, and a **Show N dismissed** button beside those shows
-them again, dimmed, so they can be restored. **Ignore all *rule* warnings** in
+them again, dimmed, so they can be restored. **Dismiss all *rule* warnings** in
 the same menu dismisses every warning of that type in the PDF, wherever it is,
-including ones that turn up later; **Stop ignoring** on any of them brings them
-back. Dismissals are part of the PDF's review: **Save** keeps them, with your
+including ones that turn up later; **Restore all *rule* warnings** on any of them
+brings them back. Dismissals are part of the PDF's review: **Save** keeps them, with your
 edits, in `<name>.pdf.legibyl.json` next to it, which is loaded automatically
 when the PDF is opened again (see Saving below). Failures can't be dismissed. The CLI applies their edits with `--edits` (see below).
 

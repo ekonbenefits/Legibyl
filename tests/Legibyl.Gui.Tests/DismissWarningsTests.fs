@@ -190,7 +190,7 @@ let ``a warning dismissed in the review inside a saved copy stays dismissed, unt
             dismissedAfter |> should be False))
 
 [<Fact>]
-let ``ignoring a type of warning hides all of them until it's stopped`` () =
+let ``dismissing all warnings of a type hides them until they're restored`` () =
     // Every warning of the rule, wherever it is, is covered by DismissalsTests; this is the menu.
     withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
         onUiThread (fun () ->
@@ -199,19 +199,19 @@ let ``ignoring a type of warning hides all of them until it's stopped`` () =
             let warning = before |> List.find (fun r -> r.Severity = "Warning")
 
             rightClickRow window (before |> List.findIndex (fun r -> obj.ReferenceEquals(r, warning)))
-            click (menuItem window $"Ignore all {warning.Violation.RuleId} warnings")
-            let ignored = rows window
+            click (menuItem window $"Dismiss all {warning.Violation.RuleId} warnings")
+            let dismissedAll = rows window
 
             clickButton window "Show 1 dismissed"
             rightClickRow window (rows window |> List.findIndex _.Dismissed)
             // Nothing to restore on its own: it's hidden with the rest of its type.
             let headers =
                 (HeadlessWindow.resultsList window).ContextMenu |> nonNull |> _.Items |> Seq.cast<obj> |> Seq.choose (function :? MenuItem as m -> Some(string m.Header) | _ -> None) |> List.ofSeq
-            click (menuItem window "Stop ignoring")
+            click (menuItem window "Restore all")
             let restored = rows window
             close window
-            ignored |> should haveLength (before.Length - 1)
-            headers |> should contain $"Stop ignoring {warning.Violation.RuleId} warnings"
+            dismissedAll |> should haveLength (before.Length - 1)
+            headers |> should contain $"Restore all {warning.Violation.RuleId} warnings"
             headers |> should not' (contain "Restore warning")
             restored |> should haveLength before.Length
             restored |> List.exists _.Dismissed |> should be False))
