@@ -523,7 +523,7 @@ let private statusStyle (outcome: Result<FixResult, string>) =
         | RepairStatus.IdRemoved ->
             { Title = "Conformance claim removed"
               Detail =
-                "The file claimed PDF/A or PDF/UA conformance it doesn't meet, so veraPDF removed that claim. "
+                "The file claimed PDF/UA conformance it doesn't meet, so veraPDF removed that claim. "
                 + "Without it, the check that requires a conformance claim now fails too, "
                 + "so the repaired copy can show one more failure."
               Glyph = "!"

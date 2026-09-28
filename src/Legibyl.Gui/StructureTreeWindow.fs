@@ -22,7 +22,7 @@ open Legibyl.Layout
 open Legibyl.Rendering
 open Legibyl.Validation
 
-/// What View Structure shows: a tagged PDF's structure, or for an untagged one, the layout
+/// What Structure… shows: a tagged PDF's structure, or for an untagged one, the layout
 /// suggested for it (found page by page as the window is open), with the review's edits on it.
 type StructureSource =
     | Tagged of StructureNode

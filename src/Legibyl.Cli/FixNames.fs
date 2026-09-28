@@ -40,8 +40,9 @@ let parse (text: string) : Result<PdfFixOptions, string> =
 let usesLayout (options: PdfFixOptions) =
     options.HasFlag PdfFixOptions.TagFromLayout || options.HasFlag PdfFixOptions.JoinSplitParagraphs
 
-/// One line per repair: its name, what it does, and whether it's in "safe".
-let listing () =
+/// Each repair, in the order they run: its name, what it does, and notes on it (whether it's in
+/// "safe", needs the layout model, visits web pages). The README's table of repairs is this.
+let repairs () =
     [ for name, option in names ->
           let described = PdfFixDescriptions.Describe option |> List.tryHead |> Option.defaultValue ""
           let tags =
@@ -49,6 +50,10 @@ let listing () =
                 if not (all.HasFlag option) then "not in all: it visits web pages"
                 if usesLayout option then "downloads the layout model"
                 if option = PdfFixOptions.QrCodeLinks then "with tag-from-layout" ]
-          let joined = String.Join(", ", tags)
-          let tags = if tags.IsEmpty then "" else $" ({joined})"
-          $"{name,-22} {described}{tags}" ]
+          name, described, String.Join(", ", tags) ]
+
+/// One line per repair: its name, what it does, and notes on it (see repairs).
+let listing () =
+    [ for name, described, notes in repairs () ->
+          let notes = if notes = "" then "" else $" ({notes})"
+          $"{name,-22} {described}{notes}" ]

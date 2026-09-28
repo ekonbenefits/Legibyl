@@ -1,5 +1,5 @@
-/// Changes made to suggested regions (an untagged PDF's structure in View Structure): a figure's alt text, and corrected
-/// OCR text; and the same, plus paragraphs merged, to elements in View Structure. Part of the
+/// Changes made to suggested regions (an untagged PDF's, in Suggest Structure…): a figure's alt text, and corrected
+/// OCR text; and the same, plus paragraphs merged, to elements in Structure…. Part of the
 /// PDF's review (see DocumentReview), which Save keeps in the "edits" section of the
 /// "<name>.pdf.legibyl.json" file next to the PDF. A region is found again by its page, its suggested tag and
 /// its box, so an edit still applies when the layout is suggested again, even for a regenerated

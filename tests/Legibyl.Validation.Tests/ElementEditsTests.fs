@@ -38,7 +38,7 @@ let private createTagged (path: string) =
     let layout = FixedLayout [ region "P" (70.0, 695.0, 300.0, 715.0); region "Figure" (70.0, 548.0, 175.0, 652.0) ]
     VeraPdfValidator(LayoutSource = layout).Fix(untagged.Path, PdfProfile.PdfUa1, path, PdfFixOptions.TagFromLayout) |> ignore
 
-/// The figure's alt text, as given in View Structure: its box is about where the image is.
+/// The figure's alt text, as given in Structure…: its box is about where the image is.
 let private altEdit =
     { Page = 1; Tag = "Figure"; Box = box (73.0, 551.0, 171.0, 649.0); Alt = "Tomato seedlings in a tray"; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None }
 
@@ -126,7 +126,7 @@ let private createLines (path: string) =
     let layout = FixedLayout [ for y in [ 700.0; 686.0; 672.0 ] -> region "P" (70.0, y - 4.0, 300.0, y + 11.0) ]
     VeraPdfValidator(LayoutSource = layout).Fix(untagged.Path, PdfProfile.PdfUa1, path, PdfFixOptions.TagFromLayout) |> ignore
 
-/// About where a line's paragraph is, as View Structure would give it.
+/// About where a line's paragraph is, as Structure… would give it.
 let private line y = box (72.0, y - 2.0, 236.0, y + 12.0)
 
 let private merge (boxes: StructureGeometry list) =
@@ -258,7 +258,7 @@ let ``a link's description is its annotation's, read and written from an edit`` 
     after.AlternateDescription |> should be Null
     ElementEdits.pending output.Path [ described ] |> should equal 0
 
-/// Making the figure decoration: Not Read (Artifact) in View Structure.
+/// Making the figure decoration: the tag Artifact in Structure….
 let private notReadEdit = { altEdit with Alt = null; Retag = "Artifact" }
 
 let private render (path: string) =

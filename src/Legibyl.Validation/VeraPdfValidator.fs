@@ -751,7 +751,7 @@ type VeraPdfValidator() =
     /// plain PD model (org.verapdf.pd.PDDocument) — the same model the validator
     /// itself uses internally. This is intentionally independent of Validate / Fix
     /// (no shared parser/session state), since reading the tagged structure is a
-    /// distinct concern from PDF/A|UA rule validation and callers may want it without
+    /// distinct concern from PDF/UA rule validation and callers may want it without
     /// running a full validation pass.
     member _.ReadStructureTree
         (

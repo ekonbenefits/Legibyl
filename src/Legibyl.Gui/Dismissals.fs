@@ -1,5 +1,5 @@
 /// Warnings the user has dismissed for a PDF: part of its review (see DocumentReview), which Save
-/// keeps in a "<name>.pdf.legibyl.json" file next to the PDF, with the edits made in View Structure.
+/// keeps in a "<name>.pdf.legibyl.json" file next to the PDF, with the edits made in Structure….
 module Legibyl.Gui.Dismissals
 
 open System

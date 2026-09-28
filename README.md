@@ -54,10 +54,10 @@ and SHA-256 in `Directory.Build.props`, cached under `obj/`) and referenced
 from the `Legibyl.Validation` project via IKVM's `<IkvmReference>` MSBuild item,
 which translates the Java bytecode into a .NET assembly at build time. The
 `Legibyl.Validation` project exposes a small, plain .NET API
-(`IPdfValidator.Validate(path, profile) -> ValidationReport`,
-`IPdfFixer.Fix(path, profile, outputPath) -> FixResult`, and
-`IStructureTreeReader.ReadStructureTree(path) -> StructureNode?`) that fully
-isolates all Java/IKVM types from the rest of the app. `IPdfFixer` combines
+(`IPdfValidator`, `IPdfFixer` and `IStructureTreeReader`, returning a
+`ValidationReport`, a `FixResult` and a `StructureNode`; see `Results.fs` for
+their signatures) that fully isolates all Java/IKVM types from the rest of the
+app. `IPdfFixer` combines
 veraPDF's metadata fixer with a small iText-based structural repair pass for
 selected safe object-level fixes, such as setting page `/Tabs /S` when a
 page has annotations, describing table-of-contents links from their own
@@ -334,19 +334,34 @@ and **Copy Finding** copies the selected rule, message, error detail, and
 both location forms. **Copy Summary** and **Save Report** sit below the
 results list and include the same location information for every finding.
 Legibyl also adds warning rows for fixable cleanup issues that veraPDF does
-not report directly, such as empty semantic `/P` structure elements and empty
-table-of-contents entries (`TOCI`, Structure-8; an entry that still owns a link
-annotation isn't empty), and
+not report directly, such as empty semantic `/P` structure elements (Structure-1)
+and empty table-of-contents entries (`TOCI`, Structure-8; an entry that still
+owns a link annotation isn't empty), and
 marks known repairable rows in the **Fix** column: a wrench for what an auto fix
 repairs (as on the **Auto Fixes…** button), and a wand for what tagging from the
 suggested structure fixes (as on **Suggest Structure…**). It also warns about
 adjacent sibling `/P` tags that look like visual line fragments from the same
-sentence; those are intentionally warning-only because the safest repair is
+sentence (Structure-2); those are intentionally warning-only because the safest repair is
 usually in the source document (for example, the original Word file) rather
 than rewriting paragraph semantics in the PDF after export. These warnings
 (reported as `Legibyl` / `Structure-N`) are all defined in
 `src/Legibyl.Validation/LegibylChecks.fs`; its header explains how to add a
-new one.
+new one. All of them:
+
+| Check | Warns about | Auto fix |
+|---|---|---|
+| Structure-1 | An empty paragraph tag | `empty-paragraphs` |
+| Structure-2 | Neighbouring paragraphs that look like lines of one sentence | `join-split-paragraphs`, where the page layout agrees |
+| Structure-3 | A paragraph the table of contents lists as a heading | `headings-from-toc` |
+| Structure-4 | A table-of-contents entry that matches no one paragraph | — |
+| Structure-5 | Headings the table of contents lists that couldn't be recovered | — |
+| Structure-6 | A list tagged as plain paragraphs | `lists` |
+| Structure-7 | Headings but no bookmarks | `bookmarks` |
+| Structure-8 | An empty table-of-contents entry | `empty-toc-entries` |
+| Structure-9 | A missing or incomplete parent tree | `parent-tree` |
+| Structure-10 | Small figures side by side: one picture tagged in pieces | — (merge them in Structure…) |
+| Structure-11 | A figure tag that draws nothing | `empty-figures` |
+| Structure-12 | A page read out of order by a big jump | — (Order Page N by Layout, Move Up / Move Down) |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -832,11 +847,11 @@ scripts or by an AI agent iterating on PDF/UA compatibility fixes. It has a
 command for each job:
 
 ```
-legibyl validate <files>… [--ua 1|2] [--format json|text] [--output report] [--structure]
-legibyl fix <files>… [--ua 1|2] [--fixes safe|all|none|names] [--edits | --edits-from review] [--output out.pdf] [--report path]
+legibyl validate <files>… [--ua 1|2] [--format json|text] [--output report] [--structure] [--verbose]
+legibyl fix <files>… [--ua 1|2] [--fixes safe|all|none|names] [--edits | --edits-from review] [--output out.pdf] [--format json|text] [--report path] [--verbose]
 legibyl structure <files>… [--format json|text] [--output path]
 legibyl layout suggest <file> [--output layout.json] [--figure-images]
-legibyl layout apply <file> --layout layout.json [--ua 1|2] [--edits | --edits-from review] [--fixes names] [--output out.pdf]
+legibyl layout apply <file> --layout layout.json [--ua 1|2] [--edits | --edits-from review] [--fixes names] [--output out.pdf] [--format json|text] [--report path]
 legibyl list fixes [--format text|json]
 ```
 
@@ -940,6 +955,33 @@ fixes`, e.g. `--fixes safe,lists,headings-from-toc`. `tag-from-layout` (with
 (about 130 MB) the first time, with progress on stderr. `--report <path>` writes
 the report to a file.
 
+Every repair, in the order they run (`legibyl list fixes` gives the same; a test
+keeps this table in step with it):
+
+<!-- repairs:start -->
+| Repair | Does | Notes |
+|---|---|---|
+| `tag-from-layout` | Tag an untagged document from each page's layout | downloads the layout model |
+| `qr-links` | Link QR codes to the web addresses they encode | with tag-from-layout |
+| `parent-tree` | Rebuild the parent tree, so the tags are found for the content they hold | safe |
+| `language` | Declare the document's language, detected from its text |  |
+| `headings-from-toc` | Tag headings the table of contents lists (H1–H6) and point its links at them |  |
+| `empty-paragraphs` | Remove empty paragraph tags |  |
+| `empty-toc-entries` | Remove empty table-of-contents entries |  |
+| `empty-figures` | Remove figure tags that draw nothing |  |
+| `join-split-paragraphs` | Join paragraphs tagged line by line where the page layout shows one block of text | downloads the layout model |
+| `lists` | Tag paragraphs that start with list markers as a list |  |
+| `bookmarks` | Add bookmarks for the H1 and H2 headings |  |
+| `link-targets` | Point links and bookmarks within a PDF 2.0 document at the tags they go to |  |
+| `tabs` | Make the Tab key follow the reading order on pages with links or other annotations | safe |
+| `font-glyphs` | Write down how embedded fonts map their character codes to glyphs (/CIDToGIDMap) | safe |
+| `link-contents` | Describe table-of-contents links with their own text | safe |
+| `link-titles-from-web` | Describe web links and QR codes by the titles of the pages they go to | not in all: it visits web pages |
+| `title` | Set a document title and show it in the title bar | safe |
+| `title-from-first-page` | Title an untitled document from its title page's text |  |
+| `metadata` | Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP) | safe |
+<!-- repairs:end -->
+
 Each file's result says what happened and how the document stands before and
 after:
 
@@ -966,7 +1008,7 @@ after:
 exit code is about the copy (or, with nothing to do, the original).
 
 The `safe` repairs need no guesswork about what the document means: XMP
-**metadata** via veraPDF's metadata fixer (missing PDF/A|PDF/UA identifier,
+**metadata** via veraPDF's metadata fixer (missing PDF/UA identifier,
 false conformance claims, Info-dictionary sync; for a document with **no
 metadata stream at all**, which veraPDF won't fix, Legibyl first writes one
 from the Info dictionary for it to repair); page annotation tab order (`/Tabs

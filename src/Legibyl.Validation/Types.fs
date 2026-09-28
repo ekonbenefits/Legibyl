@@ -114,7 +114,7 @@ module Boxes =
         let union = area a + area b - intersection
         if union <= 0.0 then 0.0 else intersection / union
 
-/// A change a person made to a structure element (in View Structure) or to a suggested region
+/// A change a person made to a structure element (in Structure…) or to a suggested region
 /// (in Suggest Structure, or a layout's edits): its alt text, its replacement text, its tag,
 /// paragraphs merged into it, or (for a region) leaving it out. What it changes is left as it
 /// was found; the edit is layered on top. The element is found again by its page, its tag and about the same box,

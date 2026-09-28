@@ -324,7 +324,7 @@ type ReviewedLayout(prefetcher: LayoutPrefetcher, review: DocumentReview) =
             |> Option.bind review.LinkDescription
             |> Option.toObj
 
-/// A suggested layout as a structure, to show as View Structure shows a tagged PDF's: each
+/// A suggested layout as a structure, to show as Structure… shows a tagged PDF's: each
 /// region an element with the tag it was found with (edits stay on top), in reading order,
 /// consecutive list items in a list, and a page's web links inside the region they're in.
 module SuggestedTree =
