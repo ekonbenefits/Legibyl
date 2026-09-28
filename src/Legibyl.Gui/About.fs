@@ -171,6 +171,7 @@ let show (owner: Window) : Task =
                                 StackPanel.children [
                                     TextBlock.create [ TextBlock.text "Legibyl"; TextBlock.fontSize 22.0; TextBlock.fontWeight FontWeight.SemiBold ]
                                     line $"Version {BuildInfo.version} (vendored veraPDF engine {VeraPdfValidator.EngineVersion})" false
+                                    line $"{BuildInfo.copyright} <{BuildInfo.contact}>" true
                                 ]
                             ]
                         ]

@@ -1185,6 +1185,8 @@ changes that don't touch the vendored jar). `VersionPrefix` is derived from
 
 ## Licensing
 
+Copyright © 2026 Ekon Benefits <opensource@ekonbenefits.com>.
+
 This project's own code (everything outside `lib/vendor/`) is licensed
 under the **GNU Affero General Public License v3.0 or later** — see
 `LICENSE`.

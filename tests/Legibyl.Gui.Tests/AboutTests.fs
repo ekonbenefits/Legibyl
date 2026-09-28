@@ -37,7 +37,7 @@ let private withAbout (test: Window -> Window -> unit) =
             owner.Close())
 
 [<Fact>]
-let ``About says the version and the veraPDF it bundles, and what it's built on`` () =
+let ``About says the version and the veraPDF it bundles, its copyright, and what it's built on`` () =
     withAbout (fun _ about ->
         let shown = texts about
         shown |> should contain $"Version {BuildInfo.version} (vendored veraPDF engine {VeraPdfValidator.EngineVersion})"
@@ -46,6 +46,7 @@ let ``About says the version and the veraPDF it bundles, and what it's built on`
         for name in [ "veraPDF"; "IKVM.NET"; "iText"; "PdfPig"; "PDFium"; "Tesseract tessdata"; "Avalonia" ] do
             shown |> List.exists (fun t -> t.StartsWith(name + " ")) |> should be True
         shown |> List.exists (fun t -> t.Contains "unknown") |> should be False
+        shown |> should contain "Copyright © 2026 Ekon Benefits <opensource@ekonbenefits.com>"
         shown |> List.exists (fun t -> t.StartsWith "Legibyl is free software under the GNU Affero General Public License") |> should be True)
 
 [<Fact>]

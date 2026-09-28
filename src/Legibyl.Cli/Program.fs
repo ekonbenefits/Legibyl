@@ -708,9 +708,10 @@ EXAMPLES:
   legibyl list fixes --format json
 """
 
-/// The version line, as the GUI's About window gives it too (see BuildInfo).
+/// The version line, as the GUI's About window gives it too (see BuildInfo), then the copyright.
 let private printVersion _ =
     printfn $"{BuildInfo.versionLine}"
+    printfn $"{BuildInfo.copyright} <{BuildInfo.contact}>"
     ExitCodes.Success
 
 /// Reports a parse error the same way as the CLI's other usage errors.

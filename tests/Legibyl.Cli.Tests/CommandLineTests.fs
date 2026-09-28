@@ -361,7 +361,7 @@ let ``fix keeps what veraPDF logged reading the file as it was`` () =
         errors |> should not' (haveSubstring "Nested MCID"))
 
 [<Fact>]
-let ``--version prints the line the GUI's About window copies`` () =
+let ``--version prints the line the GUI's About window copies, then Legibyl's copyright`` () =
     let original = Console.Out
     use writer = new StringWriter()
     Console.SetOut writer
@@ -372,7 +372,7 @@ let ``--version prints the line the GUI's About window copies`` () =
             Console.SetOut original
 
     code |> should equal 0
-    writer.ToString().Trim() |> should equal BuildInfo.versionLine
+    writer.ToString().Trim().Split(Environment.NewLine) |> should equal [| BuildInfo.versionLine; "Copyright © 2026 Ekon Benefits <opensource@ekonbenefits.com>" |]
     BuildInfo.versionLine |> should startWith $"legibyl {BuildInfo.version} (vendored veraPDF engine {VeraPdfValidator.EngineVersion})"
 
 [<Fact>]

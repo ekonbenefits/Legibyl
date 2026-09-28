@@ -1,4 +1,4 @@
-/// What this build is: its version, and the versions of what it's built on, as `legibyl --version`
+/// What this build is: its version and copyright, and the versions of what it's built on, as `legibyl --version`
 /// and the GUI's About window say them (both from Directory.Build.props, not typed in).
 module Legibyl.Validation.BuildInfo
 
@@ -10,6 +10,16 @@ let version = string (typeof<VeraPdfValidator>.Assembly.GetName().Version)
 /// The line `legibyl --version` prints, which a bug report quotes: "legibyl 1.28.1.0 (vendored
 /// veraPDF engine 1.28.1)".
 let versionLine = $"legibyl {version} (vendored veraPDF engine {VeraPdfValidator.EngineVersion})"
+
+/// Legibyl's own copyright, e.g. "Copyright © 2026 Ekon Benefits" (Copyright in
+/// Directory.Build.props).
+let copyright =
+    match typeof<VeraPdfValidator>.Assembly.GetCustomAttribute<AssemblyCopyrightAttribute>() with
+    | NonNull attribute -> attribute.Copyright
+    | Null -> ""
+
+/// Where to write to its copyright holder.
+let contact = "opensource@ekonbenefits.com"
 
 /// A library's version, from its assembly: the package version it was built as (without the
 /// commit some add), else its assembly version.

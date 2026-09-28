@@ -24,4 +24,13 @@
     <Version>$(VersionPrefix).$(VersionBuild)</Version>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
   </PropertyGroup>
+
+  <!-- Legibyl's own copyright, stamped into each assembly (and the macOS bundle's Info.plist);
+       About and the CLI's version say it from there. -->
+  <PropertyGroup>
+    <Authors>Ekon Benefits</Authors>
+    <Company>Ekon Benefits</Company>
+    <Product>Legibyl</Product>
+    <Copyright>Copyright © 2026 Ekon Benefits</Copyright>
+  </PropertyGroup>
 </Project>
