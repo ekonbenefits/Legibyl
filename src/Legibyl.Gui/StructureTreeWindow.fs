@@ -260,111 +260,6 @@ module private StructureView =
         | null -> None
         | geometry -> RegionEdits.find edits geometry.PageNumber node.Tag geometry
 
-    /// How a suggested region is read (Suggest Structure's Read as).
-    type Reading =
-        /// As a region of its own, with its tag.
-        | OwnRegion
-        /// As part of its neighbour: its text joins the nearest region kept (Exclude).
-        | PartOfNeighbour
-        /// Not at all: page furniture, tagged as an artifact.
-        | NotRead
-
-    /// How region is read, given its edit.
-    let readingOf (edit: RegionEdits.Edit option) (region: StructureNode) =
-        let tag = edit |> Option.bind _.Retag |> Option.defaultValue region.Tag
-        if tag = "Artifact" then NotRead
-        elif edit |> Option.exists _.Exclude then PartOfNeighbour
-        else OwnRegion
-
-    /// edits with region read as state. Leaving Not read gives back the tag it was suggested with
-    /// (a paragraph, for one suggested as an artifact); part of its neighbour keeps its tag.
-    let readAs (edits: RegionEdits.Edit list) (region: StructureNode) (box: StructureGeometry) (state: Reading) =
-        let page = box.PageNumber
-        let read edits =
-            match RegionEdits.find edits page region.Tag box |> Option.bind _.Retag |> Option.defaultValue region.Tag with
-            | "Artifact" -> RegionEdits.setRetag edits page region.Tag box (if region.Tag = "Artifact" then "P" else region.Tag)
-            | _ -> edits
-        match state with
-        | OwnRegion -> RegionEdits.setExcluded (read edits) page region.Tag box false
-        | PartOfNeighbour -> RegionEdits.setExcluded (read edits) page region.Tag box true
-        // An artifact isn't read, so it isn't part of a neighbour either.
-        | NotRead -> RegionEdits.setExcluded (RegionEdits.setRetag edits page region.Tag box "Artifact") page region.Tag box false
-
-    /// Read as's choices: the state, its label, and what it means.
-    let readings =
-        [ OwnRegion, "Its own region", "Read with its tag, as a region of its own."
-          PartOfNeighbour, "Part of its neighbour", "Its text joins the region next to it; its images and lines aren't read."
-          NotRead, "Not read", "Decoration: a running header, a page number, a rule." ]
-
-    /// The Read as picker: a radio button per reading, the shared one (of the regions selected)
-    /// chosen, or none and "Mixed" when they differ; pick makes the edit. One tab stop, and the
-    /// arrow keys move between them.
-    let readAsPicker (shared: Reading option) (pick: Reading -> unit) : IView =
-        let move (panel: StackPanel) (step: int) =
-            let buttons = panel.Children |> Seq.choose (function :? RadioButton as b -> Some b | _ -> None) |> List.ofSeq
-            let current = buttons |> List.tryFindIndex (fun b -> b.IsFocused) |> Option.defaultValue 0
-            let next = buttons[(current + step + buttons.Length) % buttons.Length]
-            next.IsChecked <- true
-            next.Focus() |> ignore
-        StackPanel.create [
-            StackPanel.margin (0.0, 0.0, 0.0, 8.0)
-            StackPanel.children [
-                StackPanel.create [
-                    StackPanel.orientation Orientation.Horizontal
-                    StackPanel.children [
-                        TextBlock.create [ TextBlock.text "Read as"; TextBlock.margin (0.0, 0.0, 8.0, 2.0) ]
-                        if shared.IsNone then
-                            TextBlock.create [
-                                TextBlock.text "Mixed"
-                                Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                            ]
-                    ]
-                ]
-                StackPanel.create [
-                    StackPanel.margin (8.0, 0.0, 0.0, 0.0)
-                    AttrBuilder<StackPanel>.CreateProperty<KeyboardNavigationMode>(
-                        KeyboardNavigation.TabNavigationProperty, KeyboardNavigationMode.Once, ValueNone)
-                    StackPanel.onKeyDown (fun e ->
-                        match e.Source, e.Key with
-                        | (:? RadioButton as b), (Key.Down | Key.Right) ->
-                            match b.Parent with
-                            | :? StackPanel as panel ->
-                                move panel 1
-                                e.Handled <- true
-                            | _ -> ()
-                        | (:? RadioButton as b), (Key.Up | Key.Left) ->
-                            match b.Parent with
-                            | :? StackPanel as panel ->
-                                move panel -1
-                                e.Handled <- true
-                            | _ -> ()
-                        | _ -> ())
-                    StackPanel.children [
-                        for state, label, meaning in readings ->
-                            let chosen = shared = Some state
-                            let tabStop = chosen || (shared.IsNone && state = OwnRegion)
-                            RadioButton.create [
-                                RadioButton.content label
-                                RadioButton.groupName "read-as"
-                                RadioButton.isChecked chosen
-                                // Only the chosen one is a tab stop, or the first when none is.
-                                RadioButton.isTabStop tabStop
-                                ToolTip.tip meaning
-                                AttrBuilder<RadioButton>.CreateProperty<string | null>(
-                                    Automation.AutomationProperties.HelpTextProperty, meaning, ValueNone)
-                                RadioButton.onIsCheckedChanged (
-                                    (fun e ->
-                                        match e.Source with
-                                        | :? RadioButton as b when b.IsChecked = Nullable true && shared <> Some state -> pick state
-                                        | _ -> ()),
-                                    SubPatchOptions.Always
-                                )
-                            ]
-                    ]
-                ]
-            ]
-        ]
-
     /// For a paragraph or figure: how it's in a merge the user chose, if it is (merges are only
     /// ever not in the PDF yet where they're still apart, as they are wherever a block shows them).
     let mergeLine (edits: RegionEdits.Edit list) (node: StructureNode) =
@@ -1108,10 +1003,11 @@ module private StructureView =
                         let title, prompt, current, placeholder =
                             match kind with
                             | AltText ->
-                                // Decoration isn't described but not read (Not Read): a suggested region, or
-                                // a tagged PDF's figure.
+                                // Decoration isn't described but not read: a suggested region tagged Artifact,
+                                // or a tagged PDF's figure made Not Read.
                                 let decoration =
-                                    if isSuggested || node.Tag = "Figure" then " If it's only decoration, close this and use Not Read (Artifact) instead."
+                                    if isSuggested then " If it's only decoration, close this and give it the tag Artifact instead."
+                                    elif node.Tag = "Figure" then " If it's only decoration, close this and use Not Read (Artifact) instead."
                                     else ""
                                 // A piece outside the tags is given alt text as the figure it's tagged as.
                                 let shownTag = if isUntagged node then "Figure" else node.Tag
@@ -1431,11 +1327,23 @@ module private StructureView =
                                 StackPanel.create [
                                   Grid.row 2
                                   StackPanel.children [
-                                match selected.Current with
-                                | [ single ] when canRetag isSuggested single ->
-                                    let box = nonNull single.Geometry
+                                // What the Tag picker tags: a tagged PDF's block of text; a suggested structure's
+                                // selected regions, several at once (Artifact for those not read).
+                                let tagging =
+                                    match selected.Current with
+                                    | _ when isSuggested -> regionsIn selected.Current |> List.filter (canRetag true)
+                                    | [ single ] when canRetag false single -> [ single ]
+                                    | _ -> []
+                                match tagging with
+                                | [] -> ()
+                                | targets ->
+                                    let tagOf (node: StructureNode) = editFor edits.Current node |> Option.bind _.Retag |> Option.defaultValue node.Tag
+                                    // Their tag, when they share one.
                                     let tag =
-                                        editFor edits.Current single |> Option.bind _.Retag |> Option.defaultValue single.Tag
+                                        match targets |> List.map tagOf |> List.distinct with
+                                        | [ tag ] -> Some tag
+                                        | _ -> None
+                                    let chosen = selected.Current
                                     let tags = if isSuggested then LayoutFile.tags else retagTags
                                     DockPanel.create [
                                         DockPanel.margin (0.0, 0.0, 0.0, 8.0)
@@ -1449,12 +1357,12 @@ module private StructureView =
                                             ComboBox.create [
                                                 ComboBox.minWidth 120.0
                                                 ComboBox.horizontalAlignment HorizontalAlignment.Left
-                                                // Not read is chosen under Read as; leaving it there gives the tag back.
-                                                ComboBox.isEnabled (not (isSuggested && tag = "Artifact"))
-                                                ComboBox.dataItems (if List.contains tag tags then tags else tag :: tags)
-                                                ComboBox.selectedItem tag
+                                                ComboBox.dataItems (match tag with Some tag when not (List.contains tag tags) -> tag :: tags | _ -> tags)
+                                                ComboBox.selectedItem (match tag with Some tag -> box tag | None -> null)
                                                 AttrBuilder<ComboBox>.CreateProperty<string | null>(
-                                                    Automation.AutomationProperties.NameProperty, $"Tag for this <{single.Tag}>", ValueNone)
+                                                    Automation.AutomationProperties.NameProperty,
+                                                    (match targets with [ single ] -> $"Tag for this <{single.Tag}>" | _ -> $"Tag for these {targets.Length} regions"),
+                                                    ValueNone)
                                                 ToolTip.tip (
                                                     if isSuggested then
                                                         "The tag to give it: H1 (the title), H (a heading, given the next level under the title when tagged, since one page can't tell), H2 to H6, P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
@@ -1467,16 +1375,18 @@ module private StructureView =
                                                 ComboBox.onSelectedItemChanged (
                                                     (fun item ->
                                                         match item with
-                                                        | :? string as picked when
-                                                            picked <> tag
-                                                            && (match selected.Current with [ now ] -> obj.ReferenceEquals(now, single) | _ -> false)
-                                                            ->
-                                                            let retagged = RegionEdits.setRetag edits.Current box.PageNumber single.Tag box picked
-                                                            // An artifact isn't read, so it isn't part of a neighbour either.
-                                                            let retagged =
-                                                                if isSuggested && picked = "Artifact" then RegionEdits.setExcluded retagged box.PageNumber single.Tag box false
-                                                                else retagged
-                                                            saveEdits retagged |> ignore
+                                                        | :? string as picked when Some picked <> tag && obj.ReferenceEquals(selected.Current, chosen) ->
+                                                            targets
+                                                            |> List.fold
+                                                                (fun edits (node: StructureNode) ->
+                                                                    let box = nonNull node.Geometry
+                                                                    let retagged = RegionEdits.setRetag edits box.PageNumber node.Tag box picked
+                                                                    // An artifact isn't read, so it isn't merged into a neighbour either.
+                                                                    if isSuggested && picked = "Artifact" then RegionEdits.setExcluded retagged box.PageNumber node.Tag box false
+                                                                    else retagged)
+                                                                edits.Current
+                                                            |> saveEdits
+                                                            |> ignore
                                                         | _ -> ()),
                                                     SubPatchOptions.Always
                                                 )
@@ -1484,22 +1394,33 @@ module private StructureView =
                                         ]
                                     ]
                                 | _ -> ()
-                                // How a suggested region is read: as its own region, as part of its neighbour
-                                // (its text joins it), or not at all (an artifact); several at once.
+                                // A suggested region can be merged into its neighbour (its text still read), and
+                                // kept again; several at once. (Not read is the Tag picker's Artifact.)
                                 match (if isSuggested then regionsIn selected.Current else []) with
                                 | [] -> ()
                                 | regions ->
-                                    let stateOf (r: StructureNode) = readingOf (editFor edits.Current r) r
-                                    let shared =
-                                        match regions |> List.map stateOf |> List.distinct with
-                                        | [ state ] -> Some state
-                                        | _ -> None
-                                    let pick (state: Reading) =
-                                        regions
-                                        |> List.fold (fun all r -> readAs all r (nonNull r.Geometry) state) edits.Current
-                                        |> saveEdits
-                                        |> ignore
-                                    readAsPicker shared pick
+                                    let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"
+                                    let merged = regions |> List.forall (fun r -> editFor edits.Current r |> Option.exists _.Exclude)
+                                    Button.create [
+                                        Button.content (if merged then $"Don't Merge{what}" else $"Merge into Neighbour{what}")
+                                        Button.margin (0.0, 0.0, 0.0, 8.0)
+                                        ToolTip.tip (
+                                            if merged then "Keep it as a region of its own."
+                                            else "Not a region of its own: its text joins the nearest region kept, so it's still read; its images and lines are decoration. To keep it from being read at all, give it the tag Artifact."
+                                        )
+                                        Button.onClick (
+                                            (fun _ ->
+                                                regions
+                                                |> List.fold
+                                                    (fun all r ->
+                                                        let box = nonNull r.Geometry
+                                                        RegionEdits.setExcluded all box.PageNumber r.Tag box (not merged))
+                                                    edits.Current
+                                                |> saveEdits
+                                                |> ignore),
+                                            SubPatchOptions.Always
+                                        )
+                                    ]
                                 // A tagged PDF's figures can be kept from being read (decoration: an artifact),
                                 // and back again; several at once.
                                 match (if isSuggested then [] else selected.Current |> List.filter (fun n -> n.Tag = "Figure" && not (isNull n.Geometry))) with

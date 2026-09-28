@@ -597,16 +597,13 @@ items (LI), in a list, by the same rules as the lists-from-paragraphs fix; a web
 link without a description is a `Link` inside the region it's in. Selecting a
 region gives a **Tag** picker for another tag (H1, H, H2 to H6, P, LI, Figure,
 Table, Caption, Note, Formula, Lbl, Artifact) — a heading the detector took for a
-paragraph, say — and a **Read as** picker showing how it's read: **Its own
-region**; **Part of its neighbour**, for a region that isn't one of its own (its
-text joins the nearest region kept, so it's still read; its images and lines
-aren't); or **Not read**, for page furniture a screen reader should skip, like a
-running header or a page number. Not read sets the Tag picker to Artifact and
-disables it; picking Artifact there selects Not read; leaving Not read gives the
-region back the tag it was suggested with (P, for one suggested as an artifact).
-Shift-click selects several (Read as says **Mixed** when they're read
-differently, and picking one applies to all), and selecting a list or the
-document applies to every region in it. The preview draws a region merged into its neighbour in
+paragraph, say, or **Artifact** for page furniture a screen reader should skip,
+like a running header or a page number (which also undoes a merge) — and **Merge
+into Neighbour** (or **Don't Merge**), for a region that isn't one of its own
+(its text joins the nearest region kept, so it's still read). Shift-click
+selects several, and selecting a list or the document applies to every region
+in it: the Tag picker then shows their tag when they share one, and gives the
+one picked to all of them. The preview draws a region merged into its neighbour in
 grey, and every region with its tag as edited.
 
 The layout itself is never changed: like a structure read from a
