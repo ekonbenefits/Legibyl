@@ -189,6 +189,24 @@ MSI behavior). The installer also bundles the `LICENSE`/`licenses/` files
 so the license texts and third-party attribution are available on the
 installed machine, not just in this source repository.
 
+## Icons
+
+The icon's source is `assets/icon_vector.af` (Affinity), exported as
+`assets/icon_vector.svg`. The app's icons are made from the SVG, every size
+drawn from the vector:
+
+- `Legibyl.icns` (macOS): the artwork on Apple's icon grid (824 of 1024 px,
+  with the template's shadow), 16 to 1024 px.
+- `Legibyl.ico` (Windows, the exe's and the installer's): the artwork to the
+  edge, 16 to 256 px.
+- `Legibyl.png`: the About window's, 256 px.
+
+After changing the SVG, remake them (it needs only .NET, on any OS):
+
+```sh
+dotnet fsi assets/make-icons.fsx
+```
+
 ## macOS app
 
 The GUI project builds a self-contained `Legibyl.app` with

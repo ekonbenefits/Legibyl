@@ -122,7 +122,7 @@ let showLicenses (owner: Window) : Task =
             ])
     shown.ShowDialog owner
 
-/// The app's icon, drawn from assets/logo_raw.png.
+/// The app's icon (assets/Legibyl.png, made from icon_vector.svg by assets/make-icons.fsx).
 let private icon =
     lazy
         (match assembly.GetManifestResourceStream "logo.png" with
