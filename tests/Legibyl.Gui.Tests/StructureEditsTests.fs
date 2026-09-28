@@ -530,3 +530,33 @@ let ``an element moves only among its siblings on its page`` () =
             // The next is on page 2.
             last |> should equal (true, false)
             order |> should equal [ "Masthead"; "Left column"; "Right column"; "Page two" ]))
+
+[<Fact>]
+let ``an element moves past a sibling that has no place on a page, which stays where it is`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let paragraph text geometry = { node "P" geometry [] with Content = text }
+            // A figure that draws nothing (no box) between the left column and the masthead.
+            let tree =
+                node "StructTreeRoot" null [
+                    node "Document" null [
+                        paragraph "Left column" (rect 72.0 400.0 290.0 680.0)
+                        { node "Figure" null [] with Content = "Empty figure" }
+                        paragraph "Masthead" (rect 72.0 700.0 540.0 740.0)
+                    ]
+                ]
+            let window = show tree pdf
+            let masthead = (paragraphs window)[1]
+            click masthead false
+            let enabled = (moveButton window "Move Up").IsEnabled
+            (moveButton window "Move Up").RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let order =
+                descendants<Border> window
+                |> List.choose (fun b -> match b.Tag with :? StructureNode as n when n.Tag <> "Document" -> Some(string n.Content) | _ -> None)
+            let edits = window.Review.Edits |> List.map (fun e -> e.Tag, e.Move)
+            window.Close()
+
+            enabled |> should be True
+            order |> should equal [ "Masthead"; "Left column"; "Empty figure" ]
+            edits |> should equal [ "P", Some First ]))

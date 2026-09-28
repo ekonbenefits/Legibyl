@@ -1426,20 +1426,27 @@ module private StructureView =
                         | true, parent when not (fixedOrder.Contains parent.Tag) ->
                             let order = orderedChildren edits.Current parent
                             let index = order |> List.findIndex (fun n -> obj.ReferenceEquals(n, single))
-                            let onPage (other: StructureNode) =
-                                match other.Geometry, single.Geometry with
-                                | NonNull g, NonNull own -> g.PageNumber = own.PageNumber
-                                | _ -> false
-                            Some(parent, order, index, index > 0 && onPage order[index - 1], index < order.Length - 1 && onPage order[index + 1])
+                            // The sibling it moves past: the nearest with a place on a page (one with none,
+                            // like a figure that draws nothing, stays where it is), if that's on its page.
+                            let page = (nonNull single.Geometry).PageNumber
+                            let past (indexes: int list) =
+                                indexes
+                                |> List.tryFind (fun i -> not (isNull order[i].Geometry))
+                                |> Option.filter (fun i -> (nonNull order[i].Geometry).PageNumber = page)
+                            Some(parent, order, index, past [ index - 1 .. -1 .. 0 ], past [ index + 1 .. order.Length - 1 ])
                         | _ -> None
                     | _ -> None
                 let move (up: bool) =
                     match moving with
-                    | Some(parent, order, index, canUp, canDown) when (if up then canUp else canDown) ->
-                        let other = if up then index - 1 else index + 1
-                        let swapped = order |> List.mapi (fun k n -> if k = index then order[other] elif k = other then order[index] else n)
-                        recordOrder edits.Current parent swapped |> saveEdits |> ignore
-                    | _ -> ()
+                    | Some(parent, order, index, before, after) ->
+                        match (if up then before else after) with
+                        | Some other ->
+                            // Taken out and put in front of (or after) that sibling: its index, either
+                            // way, once the moved one is out.
+                            let target = order |> List.removeAt index |> List.insertAt other order[index]
+                            recordOrder edits.Current parent target |> saveEdits |> ignore
+                        | None -> ()
+                    | None -> ()
                 let moved = page |> Option.map (fun page -> edits.Current |> List.filter (fun e -> e.Move.IsSome && e.Page = page)) |> Option.defaultValue []
                 let pageName = page |> Option.map string |> Option.defaultValue ""
                 WrapPanel.create [
@@ -1449,14 +1456,14 @@ module private StructureView =
                         Button.create [
                             Button.content "Move Up"
                             Button.margin (0.0, 0.0, 6.0, 4.0)
-                            Button.isEnabled (match moving with Some(_, _, _, canUp, _) -> canUp | None -> false)
+                            Button.isEnabled (match moving with Some(_, _, _, before, _) -> before.IsSome | None -> false)
                             ToolTip.tip "Read the selected element before the one above it: one place earlier in the reading order, among the elements in the same one, on its page."
                             Button.onClick ((fun _ -> move true), SubPatchOptions.Always)
                         ]
                         Button.create [
                             Button.content "Move Down"
                             Button.margin (0.0, 0.0, 16.0, 4.0)
-                            Button.isEnabled (match moving with Some(_, _, _, _, canDown) -> canDown | None -> false)
+                            Button.isEnabled (match moving with Some(_, _, _, _, after) -> after.IsSome | None -> false)
                             ToolTip.tip "Read the selected element after the one below it: one place later in the reading order, among the elements in the same one, on its page."
                             Button.onClick ((fun _ -> move false), SubPatchOptions.Always)
                         ]
