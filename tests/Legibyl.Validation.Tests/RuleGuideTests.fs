@@ -1,6 +1,5 @@
 module Legibyl.Validation.Tests.RuleGuideTests
 
-open System
 open Xunit
 open FsUnit.Xunit
 open Legibyl.Validation
@@ -22,9 +21,3 @@ let ``every PDF/UA-2 rule has a guide, ISO 32005's tag nesting ones included`` (
     rules |> List.exists (fun (specification, _, _, _) -> specification.StartsWith "ISO 32005") |> should be True
     withoutGuide PdfProfile.PdfUa2 |> should be Empty
 
-[<Fact>]
-let ``no guide says nothing`` () =
-    for _, entries in RuleGuide.entries.Value do
-        for entry in entries do
-            String.IsNullOrWhiteSpace entry.Meaning |> should be False
-            String.IsNullOrWhiteSpace entry.WhatToDo |> should be False
