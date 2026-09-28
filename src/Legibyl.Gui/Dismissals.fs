@@ -29,8 +29,8 @@ let AnyLocation = "*"
 let ruleKeyOf (violation: RuleViolation) =
     { keyOf violation with Location = AnyLocation }
 
-/// Whether the user ignores every warning of violation's rule.
-let isRuleIgnored (dismissed: Dismissed) (violation: RuleViolation) =
+/// Whether the user dismissed every warning of violation's rule.
+let isRuleDismissed (dismissed: Dismissed) (violation: RuleViolation) =
     canDismiss violation && dismissed.ContainsKey(ruleKeyOf violation)
 
 /// Whether violation is dismissed on its own or ignored with the rest of its rule.

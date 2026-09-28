@@ -49,7 +49,7 @@ let ``ignoring a warning's type dismisses every warning of its rule`` () =
     let dismissed = Map [ Dismissals.ruleKeyOf splitParagraph, splitParagraph.Message ]
     Dismissals.isDismissed dismissed splitParagraph |> should be True
     Dismissals.isDismissed dismissed { splitParagraph with LocationContext = "StructTreeRoot/K[1]" } |> should be True
-    Dismissals.isRuleIgnored dismissed splitParagraph |> should be True
+    Dismissals.isRuleDismissed dismissed splitParagraph |> should be True
     Dismissals.isDismissed dismissed emptyParagraph |> should be False
 
 [<Fact>]

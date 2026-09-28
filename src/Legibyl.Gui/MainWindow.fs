@@ -1309,12 +1309,12 @@ module private MainView =
                             MenuItem.create [ MenuItem.header "Nothing to dismiss: the PDF passes"; MenuItem.isEnabled false ]
                         // A rule's row: what applies to all of it.
                         | Some group, _ ->
-                            let canIgnore = Dismissals.canDismiss group.First.Violation
+                            let canDismissAll = Dismissals.canDismiss group.First.Violation
                             MenuItem.create [
                                 MenuItem.header (
-                                    if canIgnore then $"Ignore all {group.RuleId} warnings" else "Ignore this type of warning (only warnings can be dismissed)"
+                                    if canDismissAll then $"Dismiss all {group.RuleId} warnings" else "Dismiss all warnings of this type (only warnings can be dismissed)"
                                 )
-                                MenuItem.isEnabled canIgnore
+                                MenuItem.isEnabled canDismissAll
                                 ToolTip.tip "Hides every warning of this type in this PDF, wherever it is."
                                 MenuItem.onClick (fun _ -> setDismissed group.First Dismissals.ruleKeyOf true)
                             ]
@@ -1323,8 +1323,8 @@ module private MainView =
                                 MenuItem.create [ MenuItem.header header; MenuItem.onClick (fun _ -> setDismissed row key false) ]
                             if dismissed.Current.ContainsKey(Dismissals.keyOf row.Violation) then
                                 restore "Restore warning" Dismissals.keyOf
-                            if Dismissals.isRuleIgnored dismissed.Current row.Violation then
-                                restore $"Stop ignoring {row.Violation.RuleId} warnings" Dismissals.ruleKeyOf
+                            if Dismissals.isRuleDismissed dismissed.Current row.Violation then
+                                restore $"Restore all {row.Violation.RuleId} warnings" Dismissals.ruleKeyOf
                         | None, _ ->
                             MenuItem.create [
                                 MenuItem.header (if canDismiss || selected.IsNone then "Dismiss warning" else "Dismiss warning (only warnings can be dismissed)")
@@ -1334,8 +1334,8 @@ module private MainView =
                             MenuItem.create [
                                 MenuItem.header (
                                     match selected with
-                                    | Some row when canDismiss -> $"Ignore all {row.Violation.RuleId} warnings"
-                                    | _ -> "Ignore this type of warning"
+                                    | Some row when canDismiss -> $"Dismiss all {row.Violation.RuleId} warnings"
+                                    | _ -> "Dismiss all warnings of this type"
                                 )
                                 MenuItem.isEnabled canDismiss
                                 ToolTip.tip "Hides every warning of this type in this PDF, wherever it is."
