@@ -32,6 +32,8 @@
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
     <Compile Include="EmptyFiguresTests.fs" />
+    <Compile Include="LinkContentsTests.fs" />
+    <Compile Include="TitleFromFirstPageTests.fs" />
     <Compile Include="ValidatorNotesTests.fs" />
     <Compile Include="LayoutSuggestionsTests.fs" />
     <Compile Include="LayoutTaggingTests.fs" />

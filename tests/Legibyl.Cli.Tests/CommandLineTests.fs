@@ -419,3 +419,22 @@ let ``a result with nothing in it has empty lists, never null, on every command`
             (name, kind fixedResult.Value name) |> should equal (name, JsonValueKind.Null)
     finally
         Directory.Delete(folder, true)
+
+[<Fact>]
+let ``--fixes names each of the five, and says why when there was nothing for it to do`` () =
+    withTaggedPdf (fun pdf ->
+        for name in [ "link-contents"; "title-from-first-page"; "empty-toc-entries"; "qr-links"; "empty-figures" ] do
+            FixNames.parse name |> Result.isOk |> should be True
+        // Once fixed, the copy has nothing left for them.
+        let _, first = run [ "fix"; pdf; "--fixes"; "empty-toc-entries,empty-figures" ]
+        let copy = first.Value.GetProperty("outputPath").GetString() |> string
+        let code, result = run [ "fix"; (if copy = "" then pdf else copy); "--fixes"; "empty-toc-entries,empty-figures" ]
+
+        code |> should equal 1
+        result.Value.GetProperty("status").GetString() |> should equal "nothing-to-do"
+        strings result.Value "notApplied"
+        |> should
+            equal
+            [ "Remove empty table-of-contents entries: nothing in this PDF needed it."
+              "Remove figure tags that draw nothing: nothing in this PDF needed it." ])
+

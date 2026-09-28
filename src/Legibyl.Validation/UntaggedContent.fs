@@ -129,7 +129,7 @@ let private units (operations: List<Operation>) (drawn: Dictionary<int, List<Dra
             elif name = "sh" then
                 // A shading fills what's clipped, often the page.
                 add i Fill (Some pageBox)
-            elif name = "BI" || name = "Do" then
+            elif name = inlineImage || name = "Do" then
                 let pieces = boxOf i i
                 let kind =
                     if pieces |> List.exists (fun d -> d.Kind = ContentKind.Text) then Text
@@ -197,7 +197,7 @@ let private items (page: PdfPage) : IReadOnlyDictionary<int * int, Rectangle> =
             inRun <- false
         elif depth[i] = 0 then
             let isItem =
-                textShowing.Contains name || (pathPainting.Contains name && name <> "n") || name = "sh" || name = "BI" || name = "Do"
+                textShowing.Contains name || (pathPainting.Contains name && name <> "n") || name = "sh" || name = inlineImage || name = "Do"
             if isItem then
                 if not inRun then
                     chunk <- chunk + 1

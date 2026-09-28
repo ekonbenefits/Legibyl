@@ -30,10 +30,8 @@ let operationsOf (bytes: byte array) (resources: PdfResources) =
     let mutable start = 0L
     parser.Parse operands |> ignore
     while operands.Count > 0 do
+        // (An inline image, BI … ID … EI, comes as one operation: see inlineImage.)
         let name = string operands[operands.Count - 1]
-        if name = "BI" then
-            // The inline image's dictionary and data, through EI.
-            InlineImageParsingUtils.Parse(parser, resources.GetResource PdfName.ColorSpace) |> ignore
         operations.Add
             { Name = name
               Operands = [| for i in 0 .. operands.Count - 2 -> operands[i] |]
@@ -48,6 +46,11 @@ let pathConstruction = set [ "m"; "l"; "c"; "v"; "y"; "h"; "re"; "W"; "W*" ]
 
 /// Path painting (and "n", ending a path without painting it).
 let pathPainting = set [ "S"; "s"; "f"; "F"; "f*"; "B"; "B*"; "b"; "b*"; "n" ]
+
+/// An inline image (BI, its dictionary, ID, its data, EI): iText's parser reads it as one
+/// operation, by its last operator.
+[<Literal>]
+let inlineImage = "EI"
 
 /// Operators that show text.
 let textShowing = set [ "Tj"; "TJ"; "'"; "\"" ]

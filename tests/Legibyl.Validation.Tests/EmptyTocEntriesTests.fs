@@ -117,3 +117,44 @@ let ``removing empty paragraphs leaves empty table-of-contents entries alone`` (
     let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyParagraphs)
 
     result.WasFixed |> should be False
+
+[<Fact>]
+let ``once they're gone there's nothing to remove: no copy is written, and it says why`` () =
+    use input = new TempPdf()
+    use once = new TempPdf ".once"
+    use twice = new TempPdf ".twice"
+    createPdfWithToc input.Path
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, once.Path, PdfFixOptions.EmptyTocEntries) |> ignore
+
+    let result = VeraPdfValidator().Fix(once.Path, PdfProfile.PdfUa1, twice.Path, PdfFixOptions.EmptyTocEntries)
+
+    result.WasFixed |> should be False
+    System.IO.File.Exists twice.Path |> should be False
+    List.ofSeq result.NotApplied |> should equal [ "Remove empty table-of-contents entries: nothing in this PDF needed it." ]
+
+[<Fact>]
+let ``an untagged PDF has no entries to remove`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.AddNewPage() |> ignore
+
+    (VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyTocEntries)).WasFixed |> should be False
+
+[<Fact>]
+let ``with the safe fixes, the empty entries go and the others' changes are there too`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithToc input.Path
+
+    // Not parent-tree: this page's elements are direct objects, which iText won't give children.
+    let safe = FixNames.safe &&& ~~~PdfFixOptions.ParentTree
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, safe ||| PdfFixOptions.EmptyTocEntries)
+
+    result.AppliedFixes |> should contain "Removed 3 empty table-of-contents entr(ies) (TOCI)."
+    tocShape output.Path |> should equal [ "TOCI(Link)"; "TOCI(Link)" ]
+    emptyEntryWarnings output.Path |> should be Empty
+    // The tab order (a safe fix) is set on the page with the link annotation.
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetPage(1).GetPdfObject().GetAsName PdfName.Tabs |> should equal PdfName.S

@@ -425,11 +425,11 @@ let carriedChecklist (pdfPath: string) : SavedChecklist option =
     | _ -> None
 
 /// Writes pdfPath to outputPath unchanged, with review inside it (see EmbeddedReview) carrying
-/// checked: the steps a person checked of pdfPath, by its hash (a validation's), and its length.
-let checkedCopy (pdfPath: string) (outputPath: string) (review: SavedFile) (hash: string) (checked: Set<string>) (checkedAt: DateTime) =
+/// steps: the steps a person checked of pdfPath, by its hash (a validation's), and its length.
+let checkedCopy (pdfPath: string) (outputPath: string) (review: SavedFile) (hash: string) (steps: Set<string>) (checkedAt: DateTime) =
     let checklist =
         { Hash = hash
-          Checked = Array.ofSeq checked
+          Checked = Array.ofSeq steps
           CheckedAt = Nullable checkedAt
           Length = FileInfo(pdfPath).Length }
     EmbeddedReview.write pdfPath outputPath (toJson { review with Validation = null; Checklist = checklist })

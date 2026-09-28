@@ -11,7 +11,7 @@ open Legibyl.Validation.StructureTreeObjects
 /// Operators that put something on a page: text, a painted path, an image (inline or not), a
 /// form XObject, a shading.
 let private drawing =
-    Set.unionMany [ ContentOperations.textShowing; ContentOperations.pathPainting |> Set.remove "n"; set [ "Do"; "sh"; "BI" ] ]
+    Set.unionMany [ ContentOperations.textShowing; ContentOperations.pathPainting |> Set.remove "n"; set [ "Do"; "sh"; ContentOperations.inlineImage ] ]
 
 /// A page's marked content by MCID: those there, and those that draw something (inside it, or
 /// inside marked content inside it).

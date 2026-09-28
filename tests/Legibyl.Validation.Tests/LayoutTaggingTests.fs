@@ -562,3 +562,49 @@ let ``QR code links on a PDF 2.0 file are PDF/UA-2 compliant, with alt text a pe
                 .Fix(input.Path, PdfProfile.PdfUa2, output.Path, FixNames.safe ||| PdfFixOptions.TagFromLayout ||| PdfFixOptions.Language ||| PdfFixOptions.QrLinks)
         result.AppliedFixes |> should contain "Linked 1 QR code to the web address they encode"
         failedUa2Rules output.Path |> should be Empty
+
+/// Whether the tagged copy has a link around a figure, and where it goes.
+let private figureLink (path: string) =
+    let root = VeraPdfValidator().ReadStructureTree path |> notNull
+    flatten root
+    |> List.tryFind (fun node -> node.Tag = "Link" && node.Children |> Seq.exists (fun child -> child.Tag = "Figure"))
+    |> Option.map _.LinkUri
+
+[<Fact>]
+let ``QR code links leave a figure that isn't a QR code unlinked`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+
+    let result = tagWithQrLinks input.Path output.Path (FixedLayout regions)
+
+    result.AppliedFixes |> Seq.exists (fun line -> line.StartsWith "Linked") |> should be False
+    figureLink output.Path |> should equal None
+
+[<Fact>]
+let ``a QR code that isn't a web address is described, not linked`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let wifi = regions |> List.map (fun r -> if r.Tag = "Figure" then { r with QrText = "WIFI:S:Garden;T:WPA;P:tomatoes;;" } else r)
+
+    let result = tagWithQrLinks input.Path output.Path (FixedLayout wifi)
+
+    result.AppliedFixes |> Seq.exists (fun line -> line.StartsWith "Linked") |> should be False
+    figureLink output.Path |> should equal None
+    let figure = flatten (VeraPdfValidator().ReadStructureTree output.Path |> notNull) |> List.find (fun node -> node.Tag = "Figure")
+    figure.AlternateDescription |> should haveSubstring "WIFI:S:Garden"
+
+[<Fact>]
+let ``with the safe fixes, the QR code is still linked, and its link described`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged input.Path
+    let validator = VeraPdfValidator(LayoutSource = FixedLayout(withQrCode regions))
+
+    let result = validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout ||| PdfFixOptions.QrLinks ||| FixNames.safe)
+
+    result.AppliedFixes |> should contain "Linked 1 QR code to the web address they encode"
+    figureLink output.Path |> should equal (Some "https://example.com/apply")
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetPage(1).GetPdfObject().GetAsName PdfName.Tabs |> should equal PdfName.S

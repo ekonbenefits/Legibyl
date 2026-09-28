@@ -632,6 +632,8 @@ type VeraPdfValidator() =
         let mutable taggedRegions: TaggedRegion list = []
         let mutable changed = false
         let mutable status = RepairStatus.NoAction
+        // Legibyl's own fixes asked for that found nothing to change.
+        let mutable unneeded: PdfFixOptions list = []
 
         try
             try
@@ -674,7 +676,10 @@ type VeraPdfValidator() =
                     // Edits of elements (not regions, which tagging takes) that won't change anything, and why.
                     if options.HasFlag PdfFixOptions.ApplyEdits && not (options.HasFlag PdfFixOptions.TagFromLayout) then
                         notApplied.AddRange(ElementEdits.unapplied currentInput (List.ofSeq this.Edits))
-                    match StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) (Option.ofObj this.Title) with
+                    let structuralFixes, nothingToDo =
+                        StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) (Option.ofObj this.Title)
+                    unneeded <- nothingToDo
+                    match structuralFixes with
                     | [] ->
                         tryDeleteTemporary tempOutput
                         tempStructuralOutput <- null
@@ -721,6 +726,13 @@ type VeraPdfValidator() =
 
                 if not changed then
                     deleteIfExists outputPath
+                    // Nothing was written: say why for each fix asked for (veraPDF's metadata fix,
+                    // and edits, say so themselves).
+                    for option in unneeded do
+                        if option <> PdfFixOptions.Metadata && option <> PdfFixOptions.ApplyEdits then
+                            match PdfFixDescriptions.Describe option with
+                            | described :: _ -> notApplied.Add $"{described}: nothing in this PDF needed it."
+                            | [] -> ()
                     result
                 else
                     match this.Review with
