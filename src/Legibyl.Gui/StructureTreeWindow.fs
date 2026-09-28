@@ -909,9 +909,6 @@ module private StructureView =
             let edits = ctx.useState review.Edits
             // The edits as of the last move, which the blocks' order follows.
             let moves = ctx.useState review.Edits
-            // An order a page's layout suggests, to accept or not: the page, the parent whose
-            // children it orders, and their order.
-            let proposal = ctx.useState (None: (int * StructureNode * StructureNode list) option)
             /// Whether node is moved and isn't in that place in the PDF yet: its predecessor as read
             /// isn't the one its move names.
             let movePending (node: StructureNode) =
@@ -966,7 +963,6 @@ module private StructureView =
                     let version = previewVersion.Current
                     let tree = root.Current
                     let currentEdits = edits.Current
-                    let currentProposal = proposal.Current
                     previewImage.Set None
                     targetImage.Set None
                     targetNote.Set ""
@@ -1007,18 +1003,6 @@ module private StructureView =
                                     page
                                     |> Option.map (fun page ->
                                         let elements = pageElements (orderedChildren currentEdits) tree page
-                                        // With an order suggested for the page: where each would go, where that differs.
-                                        let proposedFor =
-                                            match currentProposal with
-                                            | Some(forPage, parent, order) when forPage = page ->
-                                                let children (node: StructureNode) = if obj.ReferenceEquals(node, parent) then order else orderedChildren currentEdits node
-                                                let proposed = pageElements children tree page
-                                                fun (element: StructureNode) ->
-                                                    let now = elements |> List.findIndex (fun e -> obj.ReferenceEquals(e, element))
-                                                    match proposed |> List.tryFindIndex (fun e -> obj.ReferenceEquals(e, element)) with
-                                                    | Some next when next <> now -> Some $"→ {next + 1}"
-                                                    | _ -> None
-                                            | _ -> fun _ -> None
                                         // As edited: given another tag, or merged into its neighbour.
                                         let outlined =
                                             [ for i, element in List.indexed elements ->
@@ -1032,14 +1016,13 @@ module private StructureView =
                                                     // Outside every tag (whatever's chosen for it): dashed.
                                                     Dashed = isUntagged element
                                                     Emphasised = within element
-                                                    Marker = markerFor element
-                                                    Proposed = proposedFor element } ]
+                                                    Marker = markerFor element } ]
                                         // A selection that isn't one of them (a span in a paragraph, say) is filled too.
                                         let extra =
                                             [ for node in nodes do
                                                   match node.Geometry with
                                                   | NonNull geometry when geometry.PageNumber = page && not (elements |> List.exists (fun e -> obj.ReferenceEquals(e, node))) ->
-                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true; Marker = markerFor node; Dashed = isUntagged node; Proposed = None }
+                                                      { Geometry = geometry; Label = node.Tag; Color = outlineColor node.Tag; Emphasised = true; Marker = markerFor node; Dashed = isUntagged node }
                                                   | _ -> () ]
                                         // Only the selection, when asked: the rest are still there to click.
                                         let drawn =
@@ -1124,10 +1107,7 @@ module private StructureView =
                 task {
                     review.Edits <- next
                     edits.Set next
-                    if movesIn next <> movesIn moves.Current then
-                        moves.Set next
-                        // A suggested order was from the order before.
-                        proposal.Set None
+                    if movesIn next <> movesIn moves.Current then moves.Set next
                     onEditsChanged ()
                     // The overview labels elements as edited.
                     showPage selected.Current
@@ -1391,7 +1371,7 @@ module private StructureView =
 
             // The synthetic StructTreeRoot node itself carries no semantic info, so show
             // its children (the actual document hierarchy) as the top level in both views.
-            // Order by Page Layout: finding the page's layout.
+            // Order Page N by Layout: finding the page's layout.
             let ordering = ctx.useState false
             /// The element whose children are the tagged PDF's top level (its Document), if there's one.
             let topLevel () =
@@ -1402,7 +1382,7 @@ module private StructureView =
             let orderByLayout (page: int) =
                 task {
                     match topLevel () with
-                    | None -> status.Set "Order by Page Layout orders a document's top-level elements; this PDF has no one element they're in."
+                    | None -> status.Set "Ordering a page by its layout orders a document's top-level elements; this PDF has no one element they're in."
                     | Some parent ->
                         ordering.Set true
                         try
@@ -1423,9 +1403,9 @@ module private StructureView =
                                 if List.forall2 (fun a b -> obj.ReferenceEquals(a, b)) now suggestion then
                                     status.Set $"Page {page}'s layout reads it in the order it's tagged already."
                                 else
+                                    // Put in that order at once, as moves; Restore Page N Original Order undoes them.
                                     status.Set ""
-                                    proposal.Set(Some(page, parent, suggestion))
-                                    showPage selected.Current
+                                    recordOrder edits.Current parent suggestion |> saveEdits |> ignore
                             with ex ->
                                 downloadProgress.Set None
                                 status.Set $"Couldn't find page {page}'s layout: {ex.Message}"
@@ -1433,6 +1413,85 @@ module private StructureView =
                             ordering.Set false
                 }
                 |> ignore
+
+            // Above a tagged PDF's blocks: the reading order. The selected element moves one place among
+            // its siblings (on its page: not past one on another page, nor out of its parent); the
+            // shown page is put in the order its layout reads, or back in the order it was tagged in.
+            let orderBar () : IView =
+                let page = shownPage.Current
+                let moving =
+                    match selected.Current with
+                    | [ single ] when not (isNull single.Geometry) && not (isUntagged single) ->
+                        match (parents ()).TryGetValue single with
+                        | true, parent when not (fixedOrder.Contains parent.Tag) ->
+                            let order = orderedChildren edits.Current parent
+                            let index = order |> List.findIndex (fun n -> obj.ReferenceEquals(n, single))
+                            let onPage (other: StructureNode) =
+                                match other.Geometry, single.Geometry with
+                                | NonNull g, NonNull own -> g.PageNumber = own.PageNumber
+                                | _ -> false
+                            Some(parent, order, index, index > 0 && onPage order[index - 1], index < order.Length - 1 && onPage order[index + 1])
+                        | _ -> None
+                    | _ -> None
+                let move (up: bool) =
+                    match moving with
+                    | Some(parent, order, index, canUp, canDown) when (if up then canUp else canDown) ->
+                        let other = if up then index - 1 else index + 1
+                        let swapped = order |> List.mapi (fun k n -> if k = index then order[other] elif k = other then order[index] else n)
+                        recordOrder edits.Current parent swapped |> saveEdits |> ignore
+                    | _ -> ()
+                let moved = page |> Option.map (fun page -> edits.Current |> List.filter (fun e -> e.Move.IsSome && e.Page = page)) |> Option.defaultValue []
+                let pageName = page |> Option.map string |> Option.defaultValue ""
+                WrapPanel.create [
+                    DockPanel.dock Dock.Top
+                    WrapPanel.margin (8.0, 0.0, 8.0, 6.0)
+                    WrapPanel.children [
+                        Button.create [
+                            Button.content "Move Up"
+                            Button.margin (0.0, 0.0, 6.0, 4.0)
+                            Button.isEnabled (match moving with Some(_, _, _, canUp, _) -> canUp | None -> false)
+                            ToolTip.tip "Read the selected element before the one above it: one place earlier in the reading order, among the elements in the same one, on its page."
+                            Button.onClick ((fun _ -> move true), SubPatchOptions.Always)
+                        ]
+                        Button.create [
+                            Button.content "Move Down"
+                            Button.margin (0.0, 0.0, 16.0, 4.0)
+                            Button.isEnabled (match moving with Some(_, _, _, _, canDown) -> canDown | None -> false)
+                            ToolTip.tip "Read the selected element after the one below it: one place later in the reading order, among the elements in the same one, on its page."
+                            Button.onClick ((fun _ -> move false), SubPatchOptions.Always)
+                        ]
+                        Button.create [
+                            Button.content (
+                                match ordering.Current, downloadProgress.Current with
+                                | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
+                                | true, None -> $"Finding page {pageName}'s layout…"
+                                | false, _ -> $"Order Page {pageName} by Layout"
+                            )
+                            Button.margin (0.0, 0.0, 6.0, 4.0)
+                            Button.isEnabled (page.IsSome && not ordering.Current && (topLevel ()).IsSome)
+                            ToolTip.tip (
+                                $"Put page {pageName} in the reading order its layout gives, found by a layout detector (several seconds; "
+                                + $"downloads its model, about {LayoutModel.DownloadSizeMegabytes} MB, the first time), as moves you can see in the Edits tab. "
+                                + "Never within a list or table, or across pages. Restore Page Original Order puts it back."
+                            )
+                            Button.onClick ((fun _ -> page |> Option.iter orderByLayout), SubPatchOptions.Always)
+                        ]
+                        if not moved.IsEmpty then
+                            Button.create [
+                                Button.content $"Restore Page {pageName} Original Order"
+                                Button.margin (0.0, 0.0, 0.0, 4.0)
+                                ToolTip.tip $"Drop every move on page {pageName}: its elements go back to the order they're tagged in."
+                                Button.onClick (
+                                    (fun _ ->
+                                        moved
+                                        |> List.fold (fun all e -> RegionEdits.setMove all e.Page e.Tag e.Box None) edits.Current
+                                        |> saveEdits
+                                        |> ignore),
+                                    SubPatchOptions.Always
+                                )
+                            ]
+                    ]
+                ]
 
             let layoutTab =
                 Grid.create [
@@ -1442,6 +1501,9 @@ module private StructureView =
                         ColumnDefinition(GridLength(2.0, GridUnitType.Star), MinWidth = 260.0)
                     ]
                     Grid.children [
+                        DockPanel.create [
+                          DockPanel.children [
+                        if not isSuggested then orderBar ()
                         // Its own component, so preview updates don't re-render (and re-diff) the layout.
                         Component.create("structure-layout", fun ctx ->
                         let root = ctx.usePassedRead root
@@ -1459,6 +1521,8 @@ module private StructureView =
                                 ]
                             )
                         ])
+                          ]
+                        ]
                         GridSplitter.create [
                             Grid.column 1
                             GridSplitter.width 6.0
@@ -1474,24 +1538,6 @@ module private StructureView =
                                 DockPanel.create [
                                     DockPanel.margin (0.0, 0.0, 0.0, 6.0)
                                     DockPanel.children [
-                                        CheckBox.create [
-                                            DockPanel.dock Dock.Right
-                                            CheckBox.content "Selection only"
-                                            CheckBox.isChecked selectionOnly.Current
-                                            ToolTip.tip "Draw only the selected element on the page, not every element's outline: for a busy page. Clicking the page still selects what's there."
-                                            CheckBox.onIsCheckedChanged (
-                                                (fun e ->
-                                                    match e.Source with
-                                                    | :? CheckBox as checkBox ->
-                                                        let only = checkBox.IsChecked.GetValueOrDefault()
-                                                        if only <> selectionOnly.Current then
-                                                            selectionOnly.Set only
-                                                            selectionOnlyThisSession <- only
-                                                            showPage selected.Current
-                                                    | _ -> ()),
-                                                SubPatchOptions.Always
-                                            )
-                                        ]
                                         TextBlock.create [
                                             TextBlock.text "Selected element"
                                             TextBlock.fontWeight FontWeight.SemiBold
@@ -1508,54 +1554,6 @@ module private StructureView =
                                         TextBlock.textWrapping TextWrapping.Wrap
                                         Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                     ]
-                                    // A tagged PDF's page can be put in the order its layout reads.
-                                    match (if isSuggested then None else shownPage.Current), proposal.Current with
-                                    | Some page, Some(forPage, parent, order) when forPage = page ->
-                                        TextBlock.create [
-                                            TextBlock.text $"Page {page}'s layout reads it in the order the purple numbers show. Use it, or keep the order it's tagged in."
-                                            TextBlock.textWrapping TextWrapping.Wrap
-                                            TextBlock.margin (0.0, 6.0, 0.0, 4.0)
-                                        ]
-                                        WrapPanel.create [
-                                            WrapPanel.children [
-                                                Button.create [
-                                                    Button.content "Use This Order"
-                                                    Button.margin (0.0, 0.0, 8.0, 0.0)
-                                                    ToolTip.tip "Record moves for the elements that move on this page, as if you'd moved them; the Edits tab lists them, and Export… writes them."
-                                                    Button.onClick (
-                                                        (fun _ -> recordOrder edits.Current parent order |> saveEdits |> ignore),
-                                                        SubPatchOptions.Always
-                                                    )
-                                                ]
-                                                Button.create [
-                                                    Button.content "Keep Current Order"
-                                                    Button.onClick (
-                                                        (fun _ ->
-                                                            proposal.Set None
-                                                            showPage selected.Current),
-                                                        SubPatchOptions.Always
-                                                    )
-                                                ]
-                                            ]
-                                        ]
-                                    | Some page, _ ->
-                                        Button.create [
-                                            Button.content (
-                                                match ordering.Current, downloadProgress.Current with
-                                                | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
-                                                | true, None -> $"Finding page {page}'s layout…"
-                                                | false, _ -> "Order by Page Layout"
-                                            )
-                                            Button.margin (0.0, 6.0, 0.0, 0.0)
-                                            Button.isEnabled (not ordering.Current && (topLevel ()).IsSome)
-                                            ToolTip.tip (
-                                                $"Suggest page {page}'s reading order from its layout, found by a layout detector (several seconds; "
-                                                + $"downloads its model, about {LayoutModel.DownloadSizeMegabytes} MB, the first time). "
-                                                + "Nothing changes unless you choose Use This Order. Never within a list or table, or across pages."
-                                            )
-                                            Button.onClick ((fun _ -> orderByLayout page), SubPatchOptions.Always)
-                                        ]
-                                    | None, _ -> ()
                                   ]
                                 ]
                                 // A block of text can be given another tag; paragraphs next to each
@@ -1640,43 +1638,6 @@ module private StructureView =
                                             ]
                                         ]
                                     ]
-                                | _ -> ()
-                                // A tagged PDF's element can move among its siblings in the reading order (on
-                                // its page: not past one on another page, nor out of its parent).
-                                match (if isSuggested then [] else selected.Current) with
-                                | [ single ] when not (isNull single.Geometry) && not (isUntagged single) ->
-                                    match (parents ()).TryGetValue single with
-                                    | true, parent when not (fixedOrder.Contains parent.Tag) ->
-                                        let order = orderedChildren edits.Current parent
-                                        let index = order |> List.findIndex (fun n -> obj.ReferenceEquals(n, single))
-                                        let page = (nonNull single.Geometry).PageNumber
-                                        let onPage (other: StructureNode) =
-                                            match other.Geometry with
-                                            | NonNull g -> g.PageNumber = page
-                                            | Null -> false
-                                        let canUp = index > 0 && onPage order[index - 1]
-                                        let canDown = index < order.Length - 1 && onPage order[index + 1]
-                                        let swapped i j = order |> List.mapi (fun k n -> if k = i then order[j] elif k = j then order[i] else n)
-                                        let moveTo (next: StructureNode list) = recordOrder edits.Current parent next |> saveEdits |> ignore
-                                        WrapPanel.create [
-                                            WrapPanel.margin (0.0, 0.0, 0.0, 8.0)
-                                            WrapPanel.children [
-                                                Button.create [
-                                                    Button.content "Move Up"
-                                                    Button.margin (0.0, 0.0, 8.0, 0.0)
-                                                    Button.isEnabled canUp
-                                                    ToolTip.tip "Read it before the element above it: one place earlier in the reading order, among the elements in the same one, on this page."
-                                                    Button.onClick ((fun _ -> if canUp then moveTo (swapped (index - 1) index)), SubPatchOptions.Always)
-                                                ]
-                                                Button.create [
-                                                    Button.content "Move Down"
-                                                    Button.isEnabled canDown
-                                                    ToolTip.tip "Read it after the element below it: one place later in the reading order, among the elements in the same one, on this page."
-                                                    Button.onClick ((fun _ -> if canDown then moveTo (swapped index (index + 1))), SubPatchOptions.Always)
-                                                ]
-                                            ]
-                                        ]
-                                    | _ -> ()
                                 | _ -> ()
                                 // A suggested region can be merged into its neighbour (its text still read), and
                                 // kept again; several at once. (Not read is the Tag picker's Artifact.)
@@ -1841,18 +1802,37 @@ module private StructureView =
                                     ]
                                 Grid.create [
                                     Grid.row 3
-                                    Grid.rowDefinitions (if targetImage.Current.IsSome then "*,Auto,*" else "*")
+                                    Grid.rowDefinitions (if targetImage.Current.IsSome then "*,Auto,Auto,*" else "*,Auto")
                                     Grid.children [
                                         imageBox 0 previewImage.Current true
+                                        CheckBox.create [
+                                            Grid.row 1
+                                            CheckBox.margin (0.0, 6.0, 0.0, 0.0)
+                                            CheckBox.content "Show selected block only"
+                                            CheckBox.isChecked selectionOnly.Current
+                                            ToolTip.tip "Outline only the selected block on the page above, not every block: for a busy page. Clicking the page still selects what's there."
+                                            CheckBox.onIsCheckedChanged (
+                                                (fun e ->
+                                                    match e.Source with
+                                                    | :? CheckBox as checkBox ->
+                                                        let only = checkBox.IsChecked.GetValueOrDefault()
+                                                        if only <> selectionOnly.Current then
+                                                            selectionOnly.Set only
+                                                            selectionOnlyThisSession <- only
+                                                            showPage selected.Current
+                                                    | _ -> ()),
+                                                SubPatchOptions.Always
+                                            )
+                                        ]
                                         if targetImage.Current.IsSome then
                                             TextBlock.create [
-                                                Grid.row 1
+                                                Grid.row 2
                                                 TextBlock.text targetNote.Current
                                                 TextBlock.textWrapping TextWrapping.Wrap
                                                 Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                                 TextBlock.margin (0.0, 8.0, 0.0, 8.0)
                                             ]
-                                            imageBox 2 targetImage.Current false
+                                            imageBox 3 targetImage.Current false
                                     ]
                                 ]
                             ]
@@ -2330,7 +2310,7 @@ type StructureTreeWindow
             let suggester = new LayoutSuggester(sourceFilePath)
             Some(suggester, LayoutPrefetcher(suggester, review.Pages))
         | Tagged _ -> None
-    // Where Order by Page Layout gets a page's regions: the layout detector, unless replaced.
+    // Where Order Page N by Layout gets a page's regions: the layout detector, unless replaced.
     let layoutRegions = ref None
     do
         let tagged = match source with Tagged root -> root | Suggested -> SuggestedTree.build []
@@ -2339,7 +2319,7 @@ type StructureTreeWindow
     /// The review its edits change.
     member _.Review = review
 
-    /// Where Order by Page Layout gets a page's regions, in reading order: None for the layout
+    /// Where Order Page N by Layout gets a page's regions, in reading order: None for the layout
     /// detector (downloading its model first, if need be).
     member _.LayoutRegions
         with get (): (int -> StructureGeometry list) option = layoutRegions.Value

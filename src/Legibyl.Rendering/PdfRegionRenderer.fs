@@ -36,10 +36,7 @@ type PageRegion =
       /// A marker at its top-right corner, e.g. for its failures: (0xRRGGBB, its text).
       Marker: (uint32 * string) option
       /// Outlined dashed, e.g. content outside every tag.
-      Dashed: bool
-      /// A second label, after Label on a tab of its own colour: e.g. the place it would have in
-      /// an order suggested for the page ("→ 1").
-      Proposed: string option }
+      Dashed: bool }
 
 type IPdfRegionRenderer =
     /// Renders the page containing location as a PNG, highlighting the failing object's
@@ -137,13 +134,6 @@ module private Rendering =
         use tab = new SKPaint(Color = color, Style = SKPaintStyle.Fill)
         canvas.DrawRect(SKRect(box.Left, tabTop, box.Left + width + 6f * scale, tabTop + tabHeight), tab)
         canvas.DrawText(region.Label, box.Left + 3f * scale, tabTop + font.Size, font, text)
-        match region.Proposed with
-        | Some proposed ->
-            let left = box.Left + width + 6f * scale
-            use proposedTab = new SKPaint(Color = SKColor(0x8Euy, 0x24uy, 0xAAuy), Style = SKPaintStyle.Fill)
-            canvas.DrawRect(SKRect(left, tabTop, left + font.MeasureText proposed + 6f * scale, tabTop + tabHeight), proposedTab)
-            canvas.DrawText(proposed, left + 3f * scale, tabTop + font.Size, font, text)
-        | None -> ()
         match region.Marker with
         | Some(markerColor, markerText) ->
             let radius = 8f * scale

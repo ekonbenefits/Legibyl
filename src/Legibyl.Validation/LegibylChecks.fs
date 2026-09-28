@@ -238,7 +238,7 @@ let private emptyFigureFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private ReadingJumpMessage =
-    "A page's tags aren't in the order the page reads: something that spans the page (a masthead, a heading over two columns) is read after content below it. In Structure…, Order by Page Layout suggests the page's order; Move Up and Move Down change it by hand."
+    "A page's tags aren't in the order the page reads: something that spans the page (a masthead, a heading over two columns) is read after content below it. In Structure…, select a block on the page and choose Order Page N by Layout to put it in its layout's order, or Move Up and Move Down to change it by hand."
 
 /// The document's top-level elements: those in its one Document (or Part, Art, Sect, Div), else
 /// the structure tree's own.

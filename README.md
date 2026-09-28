@@ -525,8 +525,8 @@ content as an artifact (its `/Tag <</MCID n>> BDC` becomes `/Artifact BMC`), so
 it's still drawn but not read, and takes it out of the tags; the preview draws
 it grey until then.
 
-The reading order can be changed by hand: **Move Up** and **Move Down** move the
-selected element one place among its siblings (not out of its parent, not past a
+The reading order can be changed by hand: **Move Up** and **Move Down**, above the
+blocks, move the selected element one place among its siblings (not out of its parent, not past a
 sibling on another page, and not inside a table or a table of contents). The
 blocks and the preview's numbers follow at once, and the block says it's moved,
 not in the PDF yet. Each is recorded as the fewest moves that give the order,
@@ -536,26 +536,26 @@ and Remove puts one back. Export reorders the parent's `/K` last, once nothing
 else will change what's where; what each element holds doesn't change, so the
 parent tree needs nothing.
 
-**Order by Page Layout**, under the page preview, suggests the page's reading
-order from its layout (the layout detector's regions come in reading order;
-downloaded the first time, as for Suggest Structure): each of the document's
-top-level elements with content on the page takes the place of the first region
-it holds (a list or table moves as one, by its own box), one that holds none
-stays after the element it follows now, and elements on other pages keep their
-places (`LayoutOrder.fs`). The preview shows where each would go, a second
-number on a purple tab. **Use This Order** records the moves that give it, as if
-made by hand (the fewest: what's already in order stays); **Keep Current Order**
-drops it. It's a suggestion to accept page by page, looking at the page: a
-detector errs exactly where order matters (sidebars, captions, a table beside
-text), and a PDF passes PDF/UA whatever its order, so nothing is reordered on its
-own.
+**Order Page N by Layout**, above the blocks (N being the page of the selected
+block, or the first), puts that page in the reading order its layout gives (the
+layout detector's regions come in reading order; downloaded the first time, as
+for Suggest Structure): each of the document's top-level elements with content
+on the page takes the place of the first region it holds (a list or table moves
+as one, by its own box), one that holds none stays after the element it follows
+now, and elements on other pages keep their places (`LayoutOrder.fs`). The
+blocks and the preview's numbers follow at once, recorded as the moves that give
+it, as if made by hand (the fewest: what's already in order stays), in the Edits
+tab. **Restore Page N Original Order** drops every move on the page, putting it
+back in the order it's tagged in. Look at the page before exporting: a detector
+errs exactly where order matters (sidebars, captions, a table beside text), and
+a PDF passes PDF/UA whatever its order.
 
 Legibyl warns about a big jump only (Structure-12, `LegibylChecks.fs`, no model
 needed): on a page where something spanning columns (across two elements side by
 side, above them, like a masthead) is read after content below it and under it.
 Reading the right column after the left isn't one, and running headers and
 footers (short, in the top or bottom tenth of the page) don't count either way.
-It points to Order by Page Layout and Move Up / Move Down; there's no auto fix.
+It points to Order Page N by Layout and Move Up / Move Down; there's no auto fix.
 
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
