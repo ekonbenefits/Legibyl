@@ -129,7 +129,17 @@ type SavedChecklist =
     { [<JsonPropertyName "hash">] Hash: string
       /// The steps ticked, by name: "title", "language", "alt-text", "headings",
       /// "reading-order", "tables", "links", "colour".
-      [<JsonPropertyName "checked">] Checked: string array | null }
+      [<JsonPropertyName "checked">] Checked: string array | null
+      /// When a step was last ticked.
+      [<JsonPropertyName "checkedAt">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      CheckedAt: Nullable<DateTime>
+      /// In a copy's review (see checkedCopy): how long the file checked was, in bytes. A copy
+      /// Legibyl writes adds to the file's bytes without changing them, so its first Length bytes
+      /// are what was checked (Hash); 0 next to a PDF, where the hash is its own.
+      [<JsonPropertyName "length">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
+      Length: int64 }
 
 /// The review: remembered dismissals and edits, either of which may be missing (null).
 [<CLIMutable>]
@@ -382,3 +392,44 @@ type ReviewedRegions(inner: IPageLayoutSource, saved: SavedFile) =
             match saved.Title with
             | NonNull title -> title
             | Null -> inner.DocumentTitle
+
+// ---- A checked copy ----
+
+/// The SHA-256 of pdfPath's first length bytes, in lowercase hex (as SavedResults.hashOf is).
+let private hashOfStart (pdfPath: string) (length: int64) =
+    use stream = File.OpenRead pdfPath
+    use hash = Security.Cryptography.IncrementalHash.CreateHash Security.Cryptography.HashAlgorithmName.SHA256
+    let buffer = Array.zeroCreate<byte> 81920
+    let mutable left = length
+    let mutable reading = true
+    while reading && left > 0L do
+        let read = stream.Read(buffer, 0, int (min left (int64 buffer.Length)))
+        if read = 0 then reading <- false
+        else
+            hash.AppendData(buffer, 0, read)
+            left <- left - int64 read
+    Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant()
+
+/// The checklist the review inside pdfPath carries (a copy Legibyl wrote for steps a person
+/// checked), if its content is still the file that was checked: its first Length bytes hash as
+/// the file checked did. None for one that's been changed since (or has none).
+let carriedChecklist (pdfPath: string) : SavedChecklist option =
+    match EmbeddedReview.read pdfPath |> Option.bind parse with
+    | Some { Checklist = NonNull checklist } when checklist.Length > 0L && not (isNull checklist.Checked) ->
+        try
+            if FileInfo(pdfPath).Length >= checklist.Length && hashOfStart pdfPath checklist.Length = checklist.Hash then Some checklist
+            else None
+        with
+        | :? IOException
+        | :? UnauthorizedAccessException -> None
+    | _ -> None
+
+/// Writes pdfPath to outputPath unchanged, with review inside it (see EmbeddedReview) carrying
+/// checked: the steps a person checked of pdfPath, by its hash (a validation's), and its length.
+let checkedCopy (pdfPath: string) (outputPath: string) (review: SavedFile) (hash: string) (checked: Set<string>) (checkedAt: DateTime) =
+    let checklist =
+        { Hash = hash
+          Checked = Array.ofSeq checked
+          CheckedAt = Nullable checkedAt
+          Length = FileInfo(pdfPath).Length }
+    EmbeddedReview.write pdfPath outputPath (toJson { review with Validation = null; Checklist = checklist })

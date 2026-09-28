@@ -361,3 +361,19 @@ let ``--version prints the line the GUI's About window copies`` () =
     code |> should equal 0
     writer.ToString().Trim() |> should equal BuildInfo.versionLine
     BuildInfo.versionLine |> should startWith $"legibyl {BuildInfo.version} (vendored veraPDF engine {VeraPdfValidator.EngineVersion})"
+
+[<Fact>]
+let ``validate reports the steps a person checked, carried in a copy Legibyl wrote, and none for the original`` () =
+    withTaggedPdf (fun pdf ->
+        let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
+        let review: ReviewFile.SavedFile =
+            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+        ReviewFile.checkedCopy pdf copy review (SavedResults.hashOf pdf) (set [ "title"; "headings" ]) (DateTime(2026, 9, 27))
+
+        let _, original = run [ "validate"; pdf ]
+        let _, copied = run [ "validate"; copy ]
+
+        original.Value.GetProperty("checkedByPerson").ValueKind |> should equal JsonValueKind.Null
+        let checkedBy = copied.Value.GetProperty "checkedByPerson"
+        [ for step in checkedBy.GetProperty("steps").EnumerateArray() -> string (step.GetString()) ] |> List.sort |> should equal [ "headings"; "title" ]
+        checkedBy.GetProperty("checkedAt").GetDateTime() |> should equal (DateTime(2026, 9, 27)))

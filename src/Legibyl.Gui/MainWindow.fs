@@ -535,8 +535,19 @@ module private MainView =
                 | Some report, Some facts, Some path when report.IsCompliant ->
                     let review = layoutReviews.For path
                     let ticked = review.Validation |> Option.map (fun v -> review.CheckedFor v.Hash) |> Option.defaultValue Set.empty
-                    Some(Checklist.steps facts, ticked)
+                    // With those checked in the copy it is, if it's one.
+                    Some(Checklist.steps facts, Set.union ticked review.CarriedChecked)
                 | _ -> None
+            /// The steps ticked for this file that aren't in it yet (not carried inside it): what
+            /// Export writes into a copy, when that's all it writes.
+            let ticksToCarry () =
+                match report, selectedFile.Current with
+                | Some report, Some path when report.IsCompliant ->
+                    let review = layoutReviews.For path
+                    match review.Validation with
+                    | Some validation -> Set.difference (review.CheckedFor validation.Hash) review.CarriedChecked
+                    | None -> Set.empty
+                | _ -> Set.empty
             let profileName = report |> Option.map (fun r -> PdfUaTarget.displayName r.Profile) |> Option.defaultValue "PDF/UA"
             let passProgress =
                 match report, checklist () with
@@ -550,12 +561,14 @@ module private MainView =
                 | Some path ->
                     let review = layoutReviews.For path
                     match review.Validation with
-                    | Some validation ->
+                    // Those checked in the copy it is stay checked.
+                    | Some validation when not (review.CarriedChecked.Contains id) ->
                         let ticked = review.CheckedFor validation.Hash
                         review.Checklist <- Some(validation.Hash, (if ticked.Contains id then ticked.Remove id else ticked.Add id))
+                        review.ChecklistAt <- Some DateTime.Now
                         edited.Set review.IsEdited
                         checklistTicks.Set(checklistTicks.Current + 1)
-                    | None -> ()
+                    | _ -> ()
                 | None -> ()
             /// Whether it's worth offering fixes right now. The current fixers target known
             /// validation failures, so hide them once the file is already compliant.
@@ -958,6 +971,39 @@ module private MainView =
             let export _ =
                 task {
                     match selectedFile.Current with
+                    // Only steps a person checked: a copy of the PDF as it is, carrying them.
+                    | Some sourcePath when saveOptions () = PdfFixOptions.None && not (ticksToCarry ()).IsEmpty ->
+                        let review = layoutReviews.For sourcePath
+                        let! outputPath =
+                            Dialogs.pickSavePath
+                                window
+                                (FilePickerSaveOptions(
+                                    Title = "Export a copy carrying the steps checked",
+                                    SuggestedFileName = CopyNames.nextVersion sourcePath,
+                                    DefaultExtension = "pdf",
+                                    FileTypeChoices = [ pdfFileType; FilePickerFileTypes.All ]
+                                ))
+                                sourcePath
+                        match outputPath, review.Validation with
+                        | Some outputPath, Some validation ->
+                            isBusy.Set true
+                            let! written =
+                                task {
+                                    try
+                                        try
+                                            do! Task.Run(fun () -> review.WriteCheckedCopy(sourcePath, outputPath, validation.Hash))
+                                            return Ok()
+                                        with
+                                        | :? IOException
+                                        | :? UnauthorizedAccessException as ex -> return Error ex.Message
+                                        | :? iText.Commons.Exceptions.ITextException as ex -> return Error ex.Message
+                                    finally
+                                        isBusy.Set false
+                                }
+                            match written with
+                            | Ok() -> do! openElsewhere outputPath true :> Task
+                            | Error message -> do! Dialogs.showMessage window $"The copy couldn't be written: {message}" "Export"
+                        | _ -> ()
                     | Some sourcePath when saveOptions () <> PdfFixOptions.None ->
                         let options = saveOptions ()
                         let review = layoutReviews.For sourcePath
@@ -1859,6 +1905,10 @@ module private MainView =
                                                                     DockPanel.dock Dock.Right
                                                                     CheckBox.content "Checked"
                                                                     CheckBox.isChecked (ticked.Contains step.Id)
+                                                                    // Checked in the copy it is: read-only.
+                                                                    CheckBox.isEnabled (
+                                                                        not (selectedFile.Current |> Option.exists (fun path -> (layoutReviews.For path).CarriedChecked.Contains step.Id))
+                                                                    )
                                                                     AttrBuilder<CheckBox>.CreateProperty<string | null>(
                                                                         Automation.AutomationProperties.NameProperty, $"{step.Title}: checked", ValueNone)
                                                                     CheckBox.onIsCheckedChanged (
@@ -1892,6 +1942,23 @@ module private MainView =
                                                 ]
                                             )
                                         ]
+                                    // What's checked in the copy it is, and what Export does with the rest.
+                                    let review = selectedFile.Current |> Option.map layoutReviews.For
+                                    match review |> Option.bind _.CarriedChecklist with
+                                    | Some carried ->
+                                        let count = review.Value.CarriedChecked.Count
+                                        let what = if count = 1 then "1 step" else $"{count} steps"
+                                        let date =
+                                            carried.CheckedAt
+                                            |> Option.ofNullable
+                                            |> Option.map (fun at -> " on " + at.ToString("d MMM yyyy", Globalization.CultureInfo.InvariantCulture))
+                                            |> Option.defaultValue ""
+                                        secondary $"{what} checked by a person{date}, in this copy."
+                                    | None -> ()
+                                    if not (ticksToCarry ()).IsEmpty && ticked.Count < steps.Length then
+                                        secondary $"{ticked.Count} of {steps.Length} steps checked. Export… writes a copy that carries them."
+                                    elif not (ticksToCarry ()).IsEmpty then
+                                        secondary "Checked by a person. Export… writes a copy that carries it."
                             ]
                         ]
                     )
@@ -1986,7 +2053,7 @@ module private MainView =
             match menuItems.Current with
             | Some(save, exportItem) ->
                 save.IsEnabled <- not busy && edited.Current
-                exportItem.IsEnabled <- not busy && selectedFile.Current.IsSome && saveOptions () <> PdfFixOptions.None
+                exportItem.IsEnabled <- not busy && selectedFile.Current.IsSome && (saveOptions () <> PdfFixOptions.None || not (ticksToCarry ()).IsEmpty)
             | None -> ()
 
             DockPanel.create [
@@ -2140,13 +2207,27 @@ module private MainView =
                                         "Choose the repairs Export applies, like the document's language, title and metadata; it lists the ones this PDF needs. Disabled when it passes with no warnings, since there's nothing left to fix."
                                     Button.onClick chooseAutoFixes
                                 ]
+                                // Badged with the steps a person checked that the copy will carry: the one
+                                // thing no other button counts.
+                                let ticks = (ticksToCarry ()).Count
+                                let steps = if ticks = 1 then "1 step" else $"{ticks} steps"
                                 Button.create [
-                                    Button.content "Export…"
+                                    Button.content (badged None "Export…" ticks)
+                                    AttrBuilder<Button>.CreateProperty<string | null>(
+                                        Automation.AutomationProperties.NameProperty,
+                                        (if ticks > 0 then $"Export…, {steps} checked to go into the copy" else "Export…"),
+                                        ValueNone)
                                     Button.padding (12.0, 4.0)
                                     Button.margin (0.0, 0.0, 8.0, 0.0)
-                                    Button.isEnabled (not busy && selectedFile.Current.IsSome && saveOptions () <> PdfFixOptions.None)
-                                    ToolTip.tip
-                                        "Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and opens it. The original isn't changed."
+                                    Button.isEnabled (not busy && selectedFile.Current.IsSome && (saveOptions () <> PdfFixOptions.None || ticks > 0))
+                                    ToolTip.tip (
+                                        if ticks > 0 && saveOptions () = PdfFixOptions.None then
+                                            $"{steps} checked, to go into the copy: writes the next version of the PDF (flyer.v2.pdf), unchanged, carrying them, and opens it. The original isn't changed."
+                                        elif ticks > 0 then
+                                            $"Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and opens it. The {steps} checked don't go into it: its content changes, and they were checks of this one."
+                                        else
+                                            "Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and opens it. The original isn't changed."
+                                    )
                                     Button.onClick export
                                 ]
                             ]

@@ -293,6 +293,19 @@ ticked, "Checked by a person", as the banner does too. Copy Summary and Save
 Report lead with the checklist and its state. The PASS row can't be dismissed,
 and isn't counted with the failures and warnings.
 
+Any tick enables **Export…**, badged with the steps checked that aren't in the
+PDF yet (edits and auto fixes are counted on Structure… and Auto Fixes…
+instead). With only ticks to write, Export writes the PDF unchanged, carrying its
+review inside it with the checklist: the steps checked, when, and the hash and
+length of the file they were checked on (a copy Legibyl writes only adds to the
+file's bytes, so its first *length* bytes hash as the original did). Opened, the
+copy shows those steps ticked and read-only ("2 steps checked by a person on 27
+Sep 2026, in this copy"); more ticks start from them. A copy changed since
+(its first bytes differ) carries none, and an export with edits or auto fixes
+leaves the ticks out, since its content changes and they were checks of the
+original. It isn't a PDF/UA claim (that's the XMP identifier), nor signed: it's
+the review a person did, kept with the file it was done on.
+
 The results list is a row per rule, in the order each is first found by page
 (unlocated failures — those with no `pages[N]` in their context, such as
 document-level metadata checks — come last), with its findings under it. A rule's
@@ -856,7 +869,7 @@ every file against `--ua 1` or `--ua 2`. `--format json|text`, and `--output
 against (`standard`, `flavourId`), the file's `pdfVersion`, and why
 (`standardFrom`: `file`, or `--ua`); `fix` and `layout apply` choose the same way,
 and say the same. `--structure` also includes each file's structure tree, as
-`structure` gives it. `validatorNotes` lists what veraPDF logged while it read the
+`structure` gives it. `checkedByPerson` gives the steps a person checked (`steps`, `checkedAt`) when the file is a copy Legibyl wrote carrying them and its content is still what was checked; `null` otherwise. `validatorNotes` lists what veraPDF logged while it read the
 file, counted (e.g. `{ "level": "WARNING", "logger": "OperatorParser", "message":
 "Content stream (object 16 0 obj): Nested MCID", "count": 13 }`); the text format
 lists them after the findings, and `--verbose` (on `validate` and `fix`) prints
