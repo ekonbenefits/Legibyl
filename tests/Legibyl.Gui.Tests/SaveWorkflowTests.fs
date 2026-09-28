@@ -131,7 +131,7 @@ let ``the auto fixes chosen are part of the review: Save keeps them for next tim
             let chosen = name (button window "Auto Fixes…")
             // File › Save (or ⌘S): there's no Save button.
             let canSave = Reviews.chooseFromFileMenu window "Save"
-            waitFor (fun () -> not (window.Title.Contains "Edited"))
+            waitFor (fun () -> not ((string window.Title).Contains "Edited"))
             window.Close()
 
             let reopened = openPdf pdf

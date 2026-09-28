@@ -9,7 +9,7 @@ open Legibyl.Validation
 let private rect left bottom right top : StructureGeometry =
     { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
 
-let internal node (tag: string) (content: string) (geometry: StructureGeometry | null) (children: StructureNode list) =
+let internal node (tag: string) (content: string | null) (geometry: StructureGeometry | null) (children: StructureNode list) =
     { Tag = tag
       Role = null
       AlternateDescription = null
@@ -58,7 +58,7 @@ let internal regions =
       rect 310.0 100.0 550.0 560.0
       rect 290.0 30.0 320.0 42.0 ]
 
-let private contents (nodes: StructureNode list) = nodes |> List.map (fun n -> if isNull n.Content then n.Tag else n.Content)
+let private contents (nodes: StructureNode list) = nodes |> List.map (fun n -> match n.Content with NonNull content -> content | Null -> n.Tag)
 
 [<Fact>]
 let ``the page's layout puts the masthead first and the columns in order; the list moves as one`` () =
@@ -113,7 +113,7 @@ let private shown (window: Window) =
     descendants<Border> window
     |> List.choose (fun b ->
         match b.Tag with
-        | :? StructureNode as n when List.exists (fun c -> obj.ReferenceEquals(c, n)) children -> Some(if isNull n.Content then n.Tag else n.Content)
+        | :? StructureNode as n when List.exists (fun c -> obj.ReferenceEquals(c, n)) children -> Some(match n.Content with NonNull content -> content | Null -> n.Tag)
         | _ -> None)
 
 [<Fact>]

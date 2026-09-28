@@ -69,7 +69,7 @@ let private show (pdf: string) =
 let private pieceBlocks (window: Window) =
     descendants<Border> window |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "Untagged" | _ -> false)
 
-let private nodeOf (block: Border) = block.Tag :?> StructureNode
+let private nodeOf (block: Border) = nonNull block.Tag :?> StructureNode
 
 let private click (block: Border) (extend: bool) =
     let modifiers = if extend then Input.KeyModifiers.Shift else Input.KeyModifiers.None

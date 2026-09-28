@@ -363,7 +363,7 @@ type StructureNode =
     override this.ToString() =
         let said =
             [ this.Content; this.ActualText; this.AlternateDescription; this.LinkDescription ]
-            |> List.tryPick (fun text -> if String.IsNullOrWhiteSpace text then None else Some(text.Trim()))
+            |> List.tryPick (fun text -> match text with NonNull text when not (String.IsNullOrWhiteSpace text) -> Some(text.Trim()) | _ -> None)
             |> Option.map (fun text -> if text.Length > 80 then " \"" + text.Substring(0, 80) + "…\"" else " \"" + text + "\"")
             |> Option.defaultValue ""
         let page = if this.PageNumber.HasValue then $", page {this.PageNumber.Value}" else ""

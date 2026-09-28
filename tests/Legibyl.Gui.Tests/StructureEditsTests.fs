@@ -312,7 +312,7 @@ let ``the tag picker retags the block selected now, not one selected before`` ()
             click blocks[0] false
             window.Close()
 
-            let second = nonNull (blocks[1].Tag :?> StructureNode).Geometry
+            let second = nonNull (nonNull blocks[1].Tag :?> StructureNode).Geometry
             window.Review.Edits |> List.map (fun e -> e.Box, e.Retag) |> should equal [ second, Some "Caption" ]))
 
 [<Fact>]
@@ -476,7 +476,7 @@ let private columns =
 
 /// The paragraphs' text, in the order the layout shows them.
 let private shownOrder (window: Window) =
-    paragraphs window |> List.map (fun b -> (b.Tag :?> StructureNode).Content |> string)
+    paragraphs window |> List.map (fun b -> (nonNull b.Tag :?> StructureNode).Content |> string)
 
 let private moveButton (window: Window) (label: string) =
     descendants<Button> window |> List.find (fun b -> string b.Content = label)
