@@ -9,6 +9,8 @@
     <SummaryInformation Comments="Version ($(var.FullVersion))" />
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="LegibylIcon" SourceFile="$(var.RepoRoot)assets\Legibyl.ico" />
+    <!-- Advertised shortcuts take their icon from here; ICE50 requires its extension to match the key file's (.exe). -->
+    <Icon Id="LegibylShortcut.exe" SourceFile="$(var.GuiPublishDir)\Legibyl.Gui.exe" />
     <!-- Shown in Settings > Apps (Add/Remove Programs). -->
     <Property Id="ARPPRODUCTICON" Value="LegibylIcon" />
     <MajorUpgrade DowngradeErrorMessage="!(loc.DowngradeError)" />
