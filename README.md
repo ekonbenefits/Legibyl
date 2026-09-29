@@ -324,6 +324,16 @@ leaves the ticks out, since its content changes and they were checks of the
 original. It isn't a PDF/UA claim (that's the XMP identifier), nor signed: it's
 the review a person did, kept with the file it was done on.
 
+A PDF that fails opens on a **NEXT STEP** row at the top of the list (an "i", in
+the primary colour), whose details say what to do next and why, from its
+failures and what's been done in its review: with no tags, **Suggest Structure…**
+(once suggested or edited, **Export…** to tag a copy); else, with failures an
+auto fix not chosen yet fixes, **Auto Fixes…** then Export…; with those chosen,
+or edits not in the PDF yet, Export… to check again; else, fixing by hand, the
+rules with the most failures first. Where failures have no auto fix, it lists
+the three rules broken the most, and in how many places. Like the PASS row, it
+can't be dismissed and isn't counted with the failures and warnings.
+
 The results list is a row per rule, in the order each is first found by page
 (unlocated failures — those with no `pages[N]` in their context, such as
 document-level metadata checks — come last), with its findings under it. A rule's

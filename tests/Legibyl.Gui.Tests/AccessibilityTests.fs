@@ -214,7 +214,8 @@ let ``the results list's rows, and the structure tree's items, are said as a sen
             structure.Close()
 
             rows |> should not' (be Empty)
-            rows.Head |> should startWith "Failure 7.1-1: Content marked as Artifact should not be present inside tagged content. 1 place"
+            rows.Head |> should equal "Next step: Fix the rules with the most failures"
+            rows[1] |> should startWith "Failure 7.1-1: Content marked as Artifact should not be present inside tagged content. 1 place"
             items |> should not' (be Empty)
             // No record's insides ("{ Tag = …"), and short.
             for name in rows @ items do

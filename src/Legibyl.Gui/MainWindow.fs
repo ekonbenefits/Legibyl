@@ -171,6 +171,8 @@ module private MainView =
             // For a PDF that passes: whether its Pass row is what's selected, what its checklist
             // shows of it (read once it passes), and a tick's change, to show it.
             let passSelected = ctx.useState false
+            // For a PDF that fails: whether its Next step row is what's selected.
+            let nextSelected = ctx.useState false
             let passFacts = ctx.useState (None: DocumentFacts.Facts option)
             let checklistTicks = ctx.useState 0
             let preview = ctx.useState noPreview
@@ -254,6 +256,7 @@ module private MainView =
                 ruleExpanded.Set Map.empty
                 checkedAt.Set None
                 passSelected.Set false
+                nextSelected.Set false
                 passFacts.Set None
                 preview.Set noPreview
                 previewVersion.Set(previewVersion.Current + 1)
@@ -266,6 +269,7 @@ module private MainView =
                     let version = previewVersion.Current
                     selectedRule.Set asRule
                     passSelected.Set false
+                    nextSelected.Set false
                     match row, asRule with
                     | Some row, None -> ruleExpanded.Set(Map.add $"{row.Violation.RuleId}: {row.Message}" true ruleExpanded.Current)
                     | _ -> ()
@@ -309,12 +313,21 @@ module private MainView =
                 passSelected.Set true
                 selecting
 
-            /// Selects what the list starts with: for a PDF that passes, the Pass row; else the first
-            /// rule's first finding, or the rule's row if it starts collapsed.
+            /// Selects the Next step row, whose details are what to do next.
+            let selectNext () =
+                let selecting = selectFinding None None
+                nextSelected.Set true
+                selecting
+
+            /// Selects what the list starts with: for a PDF that passes, the Pass row; for one that
+            /// fails, the Next step row; else the first rule's first finding, or the rule's row if it
+            /// starts collapsed.
             let selectFirst (rows: RuleViolationRow list) =
                 let passes = match outcome.Current with Validated(report, _) -> report.IsCompliant | _ -> false
                 if passes then
                     selectPass ()
+                elif rows |> List.exists (fun row -> row.Violation.Severity = FindingSeverity.Failure) then
+                    selectNext ()
                 else
                     match RuleGroup.OfRows(rows |> List.filter (fun row -> showDismissed.Current || not row.Dismissed)) with
                     | group :: _ when not group.ExpandedAtFirst -> selectFinding (Some group.First) (Some group)
@@ -986,6 +999,17 @@ module private MainView =
             // Dismissed warnings are hidden unless the user asks to see them.
             let rows = if showDismissed.Current then allRows else allRows |> List.filter (not << _.Dismissed)
 
+            // For a PDF that fails: what to do next, from its findings and what's been done in its review.
+            let nextStep =
+                match report with
+                | Some report when not report.IsCompliant ->
+                    NextStep.decide
+                        allRows
+                        { StructureSuggested = pending.Current.TagsFromReview
+                          EditsPending = pending.Current.Changes
+                          AutoFixesChosen = autoFixes.Current }
+                | _ -> None
+
             /// Right-click menu for the selected finding (the grid selects a row when it's right-clicked).
             let findingMenu =
                 let selected = selectedRow.Current
@@ -996,6 +1020,9 @@ module private MainView =
                         // The pass: nothing to dismiss.
                         | _ when passSelected.Current ->
                             MenuItem.create [ MenuItem.header "Nothing to dismiss: the PDF passes"; MenuItem.isEnabled false ]
+                        // The next step: advice, not a finding.
+                        | _ when nextSelected.Current ->
+                            MenuItem.create [ MenuItem.header "Nothing to dismiss: this is the next step"; MenuItem.isEnabled false ]
                         // A rule's row: what applies to all of it.
                         | Some group, _ ->
                             let canDismissAll = Dismissals.canDismiss group.First.Violation
@@ -1047,22 +1074,28 @@ module private MainView =
                     let groups = RuleGroup.OfRows rows
                     groupsCache.Set(Some(rows, groups))
                     groups
-            let itemsCache = ctx.useState ((None: (RuleGroup list * Set<string> * string option * ResultItem list) option), false)
+            let itemsCache = ctx.useState ((None: (RuleGroup list * Set<string> * string option * NextStep option * ResultItem list) option), false)
             let items =
                 let opened = groups |> List.filter isExpanded |> List.map _.Key |> Set.ofList
                 match itemsCache.Current with
-                | Some(cached, cachedOpened, cachedPass, items) when obj.ReferenceEquals(cached, groups) && cachedOpened = opened && cachedPass = passProgress -> items
+                | Some(cached, cachedOpened, cachedPass, cachedNext, items) when
+                    obj.ReferenceEquals(cached, groups) && cachedOpened = opened && cachedPass = passProgress && cachedNext = nextStep
+                    ->
+                    items
                 | _ ->
                     let items =
                         [ match passProgress with
                           | Some progress -> yield PassItem progress
+                          | None -> ()
+                          match nextStep with
+                          | Some step -> yield NextStepItem step
                           | None -> ()
                           for group in groups do
                               let expanded = opened.Contains group.Key
                               yield RuleItem(group, expanded)
                               if expanded then
                                   yield! [ for row in group.Findings -> FindingItem row ] ]
-                    itemsCache.Set(Some(groups, opened, passProgress, items))
+                    itemsCache.Set(Some(groups, opened, passProgress, nextStep, items))
                     items
             let toggle (group: RuleGroup) = ruleExpanded.Set(Map.add group.Key (not (isExpanded group)) ruleExpanded.Current)
 
@@ -1229,9 +1262,39 @@ module private MainView =
                     )
                 ]
 
+            /// The Next step row, first for a PDF that fails: an "i", and what to do next.
+            let nextStepRow (step: NextStep) : IView =
+                Border.create [
+                    Border.borderThickness (4.0, 0.0, 0.0, 0.0)
+                    Border.padding (26.0, 4.0, 6.0, 4.0)
+                    Border.tag "next-step-row"
+                    Theme.resources [ Border.BorderBrushProperty, Theme.Tokens.Primary ]
+                    Border.child (
+                        StackPanel.create [
+                            StackPanel.orientation Orientation.Horizontal
+                            StackPanel.spacing 6.0
+                            StackPanel.children [
+                                gridIcon Icons.info Theme.Tokens.Primary "Next step"
+                                TextBlock.create [
+                                    TextBlock.text "NEXT STEP"
+                                    TextBlock.fontSize gridFontSize
+                                    TextBlock.fontWeight FontWeight.SemiBold
+                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                ]
+                                TextBlock.create [
+                                    TextBlock.text step.Title
+                                    TextBlock.fontSize gridFontSize
+                                    TextBlock.verticalAlignment VerticalAlignment.Center
+                                ]
+                            ]
+                        ]
+                    )
+                ]
+
             let selectedItem =
-                match passProgress with
-                | Some progress when passSelected.Current -> Some(PassItem progress)
+                match passProgress, nextStep with
+                | Some progress, _ when passSelected.Current -> Some(PassItem progress)
+                | _, Some step when nextSelected.Current -> Some(NextStepItem step)
                 | _ ->
                 match selectedRule.Current, selectedRow.Current with
                 | Some group, _ ->
@@ -1252,7 +1315,8 @@ module private MainView =
                             match item with
                             | RuleItem(group, expanded) -> ruleRow group expanded
                             | FindingItem row -> findingRow row
-                            | PassItem progress -> passRow progress)
+                            | PassItem progress -> passRow progress
+                            | NextStepItem step -> nextStepRow step)
                     )
                     ListBox.onSelectedItemChanged (
                         (fun item ->
@@ -1260,6 +1324,7 @@ module private MainView =
                             | :? ResultItem as RuleItem(group, _) when selectedRule.Current <> Some group ->
                                 selectFinding (Some group.First) (Some group) |> ignore
                             | :? ResultItem as PassItem _ when not passSelected.Current -> selectPass () |> ignore
+                            | :? ResultItem as NextStepItem _ when not nextSelected.Current -> selectNext () |> ignore
                             | :? ResultItem as FindingItem row when
                                 selectedRule.Current.IsSome || not (selectedRow.Current |> Option.exists (fun current -> obj.ReferenceEquals(current, row)))
                                 ->
@@ -1535,6 +1600,57 @@ module private MainView =
                     )
                 ]
 
+            /// The Next step row's details: what to do next and why; and, where failures need fixing
+            /// by hand, the rules with the most of them.
+            let nextStepDetails (step: NextStep) : IView =
+                let paragraph (text: string) =
+                    TextBlock.create [ TextBlock.text text; TextBlock.textWrapping TextWrapping.Wrap ] :> IView
+                ScrollViewer.create [
+                    Grid.column 2
+                    ScrollViewer.margin (12.0, 0.0, 0.0, 0.0)
+                    ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
+                    ScrollViewer.content (
+                        StackPanel.create [
+                            StackPanel.maxWidth 560.0
+                            StackPanel.horizontalAlignment HorizontalAlignment.Left
+                            StackPanel.spacing 8.0
+                            StackPanel.children [
+                                withIcon
+                                    (decorativeIcon Icons.info Theme.Tokens.Primary 18.0)
+                                    (TextBlock.create [
+                                        TextBlock.text $"Next step: {step.Title}"
+                                        TextBlock.fontSize 16.0
+                                        TextBlock.fontWeight FontWeight.SemiBold
+                                        TextBlock.textWrapping TextWrapping.Wrap
+                                    ])
+                                for text in step.Details do
+                                    paragraph text
+                                for group in step.TopRules do
+                                    let places = if group.Findings.Length = 1 then "1 place" else $"{group.Findings.Length} places"
+                                    Border.create [
+                                        Border.padding (10.0, 8.0)
+                                        Border.cornerRadius 4.0
+                                        Border.borderThickness 1.0
+                                        Border.tag $"next-rule-{group.RuleId}"
+                                        Theme.resources [ Border.BorderBrushProperty, Theme.Tokens.Border ]
+                                        Border.child (
+                                            StackPanel.create [
+                                                StackPanel.spacing 4.0
+                                                StackPanel.children [
+                                                    TextBlock.create [
+                                                        TextBlock.text $"{group.RuleId} — {places}"
+                                                        TextBlock.fontWeight FontWeight.SemiBold
+                                                    ]
+                                                    paragraph group.Message
+                                                ]
+                                            ]
+                                        )
+                                    ]
+                            ]
+                        ]
+                    )
+                ]
+
             let findingDetails (row: RuleViolationRow) =
                 withPreview (
                         Grid.create [
@@ -1731,6 +1847,7 @@ module private MainView =
                                 ]
                                 match selectedRule.Current, selectedRow.Current, guidance () with
                                 | _ when passSelected.Current && passProgress.IsSome -> passDetails ()
+                                | _ when nextSelected.Current && nextStep.IsSome -> nextStepDetails nextStep.Value
                                 | Some group, _, _ -> ruleDetails (groups |> List.tryFind ((=) group) |> Option.defaultValue group)
                                 | None, Some row, _ -> findingDetails row
                                 | None, None, Some panel -> panel

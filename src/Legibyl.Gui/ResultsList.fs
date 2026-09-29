@@ -111,12 +111,103 @@ type RuleGroup =
     /// Whether its findings start shown: a rule found more than three times starts collapsed.
     member group.ExpandedAtFirst = group.Findings.Length <= 3
 
+/// What to do next with a PDF that fails, as the Next step row (first in the list) says it.
+type NextStep =
+    { /// What to do: "Suggest the structure".
+      Title: string
+      /// Why, and how.
+      Details: string list
+      /// The rules with the most failures no auto fix fixes, the most first (three at most).
+      TopRules: RuleGroup list }
+
+module NextStep =
+    /// What's been done in the review that the next step depends on.
+    type Progress =
+        { /// For an untagged PDF: its structure's been suggested (or edited), so Export… tags from it.
+          StructureSuggested: bool
+          /// Edits not in the PDF yet, which Export… writes.
+          EditsPending: int
+          /// The auto fixes chosen for Export…; None before any are.
+          AutoFixesChosen: PdfFixOptions option }
+
+    let private plural (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
+
+    /// The rules with the most of these failures, the most first (three at most).
+    let private topRules (failures: RuleViolationRow list) =
+        RuleGroup.OfRows failures |> List.sortByDescending _.Findings.Length |> List.truncate 3
+
+    /// The next step for a PDF with these findings, given what's been done: suggest its structure
+    /// if it has no tags (then Export… to tag a copy); else choose the auto fixes its failures have
+    /// (then Export… to check again); else fix the rest by hand, the rules with the most failures
+    /// first. None when nothing fails.
+    let decide (rows: RuleViolationRow list) (progress: Progress) : NextStep option =
+        let failures = rows |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Failure)
+        let byTagging = failures |> List.filter (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout)
+        let untagged = rows |> List.exists (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout)
+        let chosen = progress.AutoFixesChosen |> Option.defaultValue PdfFixOptions.None
+        let autoFixable = failures |> List.filter (fun r -> r.Violation.IsFixable)
+        let unchosen = autoFixable |> List.filter (fun r -> r.Violation.FixOptions &&& chosen = PdfFixOptions.None)
+        let byHand = failures |> List.filter (fun r -> not r.Violation.IsFixable)
+        let have (n: int) = if n = 1 then "has" else "have"
+        let failuresText = plural failures.Length "failure"
+        let edits = plural progress.EditsPending "edit"
+        let afterThat =
+            if byHand.IsEmpty then []
+            else
+                let byHandText = plural byHand.Length "failure"
+                [ $"{byHandText} {have byHand.Length} no auto fix: fix them in Structure…, or where the PDF was made. The rules with the most:" ]
+        match failures with
+        | [] -> None
+        | _ when untagged && not progress.StructureSuggested ->
+            Some
+                { Title = "Suggest the structure"
+                  Details =
+                    [ $"This PDF has no tags, which a screen reader needs to read it. Tagging it fixes {byTagging.Length} of its {failuresText}."
+                      "Suggest Structure… finds each page's headings, paragraphs, figures and reading order. Check them and edit what's wrong; Export… then tags a copy from them and checks it again." ]
+                  TopRules = [] }
+        | _ when untagged ->
+            Some
+                { Title = "Export to tag a copy"
+                  Details =
+                    [ (if progress.EditsPending > 0 then $"The structure's been suggested, with {edits} on it." else "The structure's been suggested.")
+                      "Export… tags a copy of this PDF from it and opens the copy, checked, to see what's left. Suggest Structure… again to check more of it first." ]
+                  TopRules = [] }
+        | _ when not unchosen.IsEmpty ->
+            Some
+                { Title = "Choose auto fixes"
+                  Details =
+                    [ $"{unchosen.Length} of its {failuresText} {have unchosen.Length} an auto fix not chosen yet."
+                      "Auto Fixes… chooses them; Export… then writes a fixed copy and opens it, checked. The PDF you opened isn't changed." ]
+                    @ afterThat
+                  TopRules = topRules byHand }
+        | _ when not autoFixable.IsEmpty || progress.EditsPending > 0 ->
+            let fixedText = plural autoFixable.Length "failure"
+            let isAre = if progress.EditsPending = 1 then "is" else "are"
+            let what =
+                match autoFixable.Length, progress.EditsPending with
+                | 0, _ -> $"{edits} {isAre} not in the PDF yet."
+                | _, 0 -> $"The auto fixes chosen fix {fixedText}."
+                | _ -> $"The auto fixes chosen fix {fixedText}, and {edits} {isAre} not in the PDF yet."
+            Some
+                { Title = "Export and check again"
+                  Details = [ what; "Export… writes a copy with them and opens it, checked, to see what's left." ] @ afterThat
+                  TopRules = topRules byHand }
+        | _ ->
+            Some
+                { Title = "Fix the rules with the most failures"
+                  Details =
+                    [ $"{failuresText} left, none with an auto fix. Fixing a rule fixes each place it's broken, so start with those broken the most."
+                      "Select a rule below to see what it means and what to do: in Structure…, or where the PDF was made." ]
+                  TopRules = topRules byHand }
+
 /// An item of the results list: a rule (and whether its findings are shown), or a finding; or,
-/// for a PDF that passes, the pass, first (and how far a person has checked it).
+/// for a PDF that passes, the pass, first (and how far a person has checked it); or, for one that
+/// fails, the next step, first.
 type ResultItem =
     | RuleItem of RuleGroup * expanded: bool
     | FindingItem of RuleViolationRow
     | PassItem of progress: string
+    | NextStepItem of NextStep
 
     /// The item as a screen reader says it (a list item's name is its item's text): a rule's
     /// severity, rule, message, how many places, how it's fixed and whether it's open; a finding's
@@ -136,3 +227,4 @@ type ResultItem =
             let dismissed = if row.Dismissed then ", dismissed" else ""
             $"{row.Severity}, {row.PageDisplay}: {row.FriendlyLocation}{dismissed}"
         | PassItem progress -> progress
+        | NextStepItem step -> $"Next step: {step.Title}"

@@ -23,6 +23,10 @@ let failure =
     Geometry.Parse
         "F0 M8,0.5 A7.5,7.5 0 1 1 7.99,0.5 Z M4.9,5.9 L5.9,4.9 L8,7 L10.1,4.9 L11.1,5.9 L9,8 L11.1,10.1 L10.1,11.1 L8,9 L5.9,11.1 L4.9,10.1 L7,8 Z"
 
+/// Information: a circle with "i", for the Next step row.
+let info =
+    Geometry.Parse "F0 M8,0.5 A7.5,7.5 0 1 1 7.99,0.5 Z M7.1,3.4 L8.9,3.4 L8.9,5.2 L7.1,5.2 Z M7.2,6.6 L8.8,6.6 L8.8,12.6 L7.2,12.6 Z"
+
 /// A wrench, for an auto fix: a single outline (head, notch, handle) rotated 45°.
 let wrench =
     Geometry.Parse

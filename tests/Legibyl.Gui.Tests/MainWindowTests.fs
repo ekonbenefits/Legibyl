@@ -55,6 +55,8 @@ let private iconNames (row: Visual) = descendants<Path> row |> List.map (Automat
 let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
     onUiThread (fun () ->
         let window = openSample "libreoffice-empty-paragraph.pdf"
+        // It opens on the Next step row: its first finding, selected.
+        HeadlessWindow.selectRow window 0
         // The rule's row says what it is and how it's fixed; the finding under it, its page.
         let ruleRow = firstRuleContainer window
         let icons = descendants<Path> ruleRow
@@ -85,6 +87,7 @@ let ``empty paragraph warning shows its icons, page, fix, and preview`` () =
 let ``findings that can't be fixed show no fix icon or details`` () =
     onUiThread (fun () ->
         let window = openSample "pdfua1-fail.pdf"
+        HeadlessWindow.selectRow window 0
         // The first rule is content marked both as an artifact and tagged, which no fix addresses.
         let icons = iconNames (firstRuleContainer window)
         let detailHeadings = descendants<TextBlock> window |> List.map _.Text
@@ -137,7 +140,7 @@ let ``a PDF that passes opens on its Pass row: the steps a person checks, for th
         shown |> List.exists (fun t -> t.EndsWith " failures" || t = "1 failure") |> should be False)
 
 [<Fact>]
-let ``a PDF that fails has no Pass row, and opens on its first finding`` () =
+let ``a PDF that fails has no Pass row, and opens on its Next step row`` () =
     onUiThread (fun () ->
         let window = openSample "pdfua1-fail.pdf"
         let items = HeadlessWindow.resultItems window
@@ -170,7 +173,7 @@ let ``each rule's row shows its type, how it's fixed and how many, even collapse
                   let texts = descendants<TextBlock> row |> List.map (fun t -> string t.Text)
                   group, expanded, iconNames row, texts ]
         let findingRows = items |> List.filter (function FindingItem _ -> true | _ -> false) |> List.length
-        // The first rule is found many times, so it's its row that's selected to begin with.
+        // It opens on the Next step row, first.
         let selectedAtFirst = (HeadlessWindow.resultsList window).SelectedIndex
         window.Close()
 
