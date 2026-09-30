@@ -48,12 +48,21 @@ let safe =
 let ofOptions (options: PdfFixOptions) =
     [ for name, option in names do if options.HasFlag option then name ]
 
-/// Whether the metadata fix is worth choosing, given what fixes each failure: veraPDF only writes
-/// the PDF/UA identifier when the document would then conform, so only when a safe fix (the
-/// metadata fix among them) fixes every failure. Otherwise it waits for them: fixes that guess,
-/// tagging an untagged PDF, or fixing by hand.
-let metadataReady (failureFixes: PdfFixOptions seq) =
-    failureFixes |> Seq.forall (fun fixes -> fixes &&& safe <> PdfFixOptions.None)
+/// PDF/UA's title rules: no dc:title in the metadata, and the file name shown in the title's
+/// place. A title typed in Structure… fixes them (Export… writes it before the auto fixes).
+let isTitleRule (finding: RuleViolation) =
+    match PdfUaTarget.ofSpecification finding.Specification with
+    | Some PdfProfile.PdfUa1 -> finding.RuleId = "7.1-9" || finding.RuleId = "7.1-10"
+    | Some PdfProfile.PdfUa2 -> finding.RuleId = "8.11.1-1" || finding.RuleId = "8.11.2-1"
+    | _ -> false
+
+/// Whether the metadata fix is worth choosing, given these failures and whether a title's been
+/// typed for the document: veraPDF only writes the PDF/UA identifier when the document would then
+/// conform, so only when a safe fix (the metadata fix among them), or the title typed, fixes every
+/// failure. Otherwise it waits for them: fixes that guess, tagging an untagged PDF, or fixing by
+/// hand. Export… writes a title typed before the fixes, so they're done in the same pass.
+let metadataReady (titleGiven: bool) (failures: RuleViolation seq) =
+    failures |> Seq.forall (fun f -> f.FixOptions &&& safe <> PdfFixOptions.None || (titleGiven && isTitleRule f))
 
 /// The fixes named (any case); names it doesn't know are left out.
 let toOptions (named: string seq) =

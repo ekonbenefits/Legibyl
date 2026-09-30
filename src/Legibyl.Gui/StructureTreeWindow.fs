@@ -844,14 +844,7 @@ module private StructureView =
             // PDF/UA's title failures (no title in the metadata; the file name shown in its place),
             // marked on the title's row.
             let titleFindings =
-                let titleRules = set [ PdfProfile.PdfUa1, "7.1-9"; PdfProfile.PdfUa1, "7.1-10"; PdfProfile.PdfUa2, "8.11.1-1"; PdfProfile.PdfUa2, "8.11.2-1" ]
-                if isSuggested then []
-                else
-                    findings.Items
-                    |> List.filter (fun f ->
-                        match PdfUaTarget.ofSpecification f.Specification with
-                        | Some standard -> titleRules.Contains((standard, f.RuleId))
-                        | None -> false)
+                if isSuggested then [] else findings.Items |> List.filter FixNames.isTitleRule
 
             let titleRow (review: DocumentReview) =
                 let tidy (text: string) = Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim()

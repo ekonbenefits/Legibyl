@@ -332,7 +332,7 @@ module internal VeraPdf =
                                             TestNumber = testNumber
                                             Message = ruleDescription standard assertion.Specification clause testNumber |> Option.defaultValue "The metadata shall contain a dc:title entry."
                                             ErrorMessage =
-                                                "The document has no title (in its Info dictionary or XMP metadata). veraPDF can't check dc:title until there's metadata, so this fails once the metadata fix writes it, and then the PDF/UA identifier isn't added. Give the document a title first."
+                                                "The document has no title (in its Info dictionary or XMP metadata). veraPDF can't check dc:title until there's metadata, so this would fail once the metadata fix writes it, and then the PDF/UA identifier isn't added. Give it a title (Structure…'s Document title field, or a review's title with fix --edits): that's written before the metadata fix, in the same pass."
                                             FixOptions = PdfFixOptions.Title }
                             | _ -> None)
                         |> Option.toList

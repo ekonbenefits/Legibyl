@@ -59,9 +59,9 @@ let private rowText (dialog: Window) (title: string) =
 
 /// Opens the dialog for these findings (with what was chosen before, if anything), runs test
 /// on it, then closes it with Cancel unless the test already closed it; returns the dialog's result.
-let private withDialogChosen (chosen: PdfFixOptions option) (tagNote: string option) (findings: RuleViolation list) (test: Window -> unit) =
+let private withDialogTitled (titleGiven: bool) (chosen: PdfFixOptions option) (tagNote: string option) (findings: RuleViolation list) (test: Window -> unit) =
     let owner = HeadlessWindow.show 800.0 600.0
-    let pending = Dialogs.chooseFixOptions owner (report findings) tagNote chosen
+    let pending = Dialogs.chooseFixOptions owner (report findings) tagNote titleGiven chosen
     HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
     let dialog = owner.OwnedWindows |> Seq.exactlyOne
     test dialog
@@ -69,6 +69,8 @@ let private withDialogChosen (chosen: PdfFixOptions option) (tagNote: string opt
     HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> pending.IsCompleted) |> ignore
     owner.Close()
     pending.Result
+
+let private withDialogChosen chosen tagNote findings test = withDialogTitled false chosen tagNote findings test
 
 let private withDialogNoted tagNote findings test = withDialogChosen None tagNote findings test
 
@@ -168,6 +170,23 @@ let ``metadata starts ticked when the fixes ticked at first fix every failure`` 
         |> ignore
 
         shown["Fix XMP metadata"] |> should equal (true, "2 found"))
+
+[<Fact>]
+let ``with no title, metadata waits for one; a title typed in Structure ticks it, for the same pass`` () =
+    onUiThread (fun () ->
+        let findings = [ finding PdfFixOptions.Tabs; finding PdfFixOptions.Metadata; { finding PdfFixOptions.None with TestNumber = 9 } ]
+        let mutable untitled = Map.empty
+        let mutable text = ""
+        withDialog findings (fun dialog ->
+            untitled <- options dialog
+            text <- rowText dialog "Fix XMP metadata")
+        |> ignore
+        let mutable titled = Map.empty
+        withDialogTitled true None None findings (fun dialog -> titled <- options dialog) |> ignore
+
+        fst untitled["Fix XMP metadata"] |> should be False
+        text |> should haveSubstring "the document has no title for the metadata. Type one in Structure…'s Document title field"
+        fst titled["Fix XMP metadata"] |> should be True)
 
 [<Fact>]
 let ``continuing applies the ticked fixes`` () =

@@ -129,7 +129,9 @@ module NextStep =
           /// Edits not in the PDF yet, which Export… writes.
           EditsPending: int
           /// The auto fixes chosen for Export…; None before any are.
-          AutoFixesChosen: PdfFixOptions option }
+          AutoFixesChosen: PdfFixOptions option
+          /// A title's been typed in Structure…, which Export… writes before the auto fixes.
+          TitleGiven: bool }
 
     let private plural (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
 
@@ -143,7 +145,8 @@ module NextStep =
 
     /// The next step for a PDF with these findings (dismissed warnings flagged), given what's been
     /// done: suggest its structure if it has no tags (then Export… to tag a copy); else choose the
-    /// safe auto fixes its failures have; else Export… what's chosen or edited, to check again;
+    /// safe auto fixes its failures have; else, with no title anywhere, type one in Structure…;
+    /// else Export… what's chosen or edited, to check again;
     /// else check in Structure… what only a guessing auto fix fixes; else fix the rest by hand, the
     /// rules with the most failures first. With no failures, review the warnings not dismissed.
     /// None when there's neither.
@@ -153,12 +156,14 @@ module NextStep =
         let byTagging = failures |> List.filter (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout)
         let untagged = rows |> List.exists (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout)
         let chosen = progress.AutoFixesChosen |> Option.defaultValue PdfFixOptions.None
-        let autoFixable = failures |> List.filter (fun r -> r.Violation.IsFixable)
+        // The title typed fixes the title failures (Export… writes it before the auto fixes).
+        let byTitle (row: RuleViolationRow) = progress.TitleGiven && FixNames.isTitleRule row.Violation
+        let autoFixable = failures |> List.filter (fun r -> r.Violation.IsFixable && not (byTitle r))
         let unchosen = autoFixable |> List.filter (fun r -> r.Violation.FixOptions &&& chosen = PdfFixOptions.None)
         // The metadata fix only works once every other failure's fixed, so until the safe fixes fix
         // them all, it's not one to choose yet: what only it fixes waits.
         let safeNow =
-            if FixNames.metadataReady (failures |> List.map _.Violation.FixOptions) then FixNames.safe
+            if FixNames.metadataReady progress.TitleGiven (failures |> List.map _.Violation) then FixNames.safe
             else FixNames.safe &&& ~~~PdfFixOptions.Metadata
         let isSafeNow (row: RuleViolationRow) = row.Violation.FixOptions &&& safeNow <> PdfFixOptions.None
         let guesses (row: RuleViolationRow) = row.Violation.FixOptions &&& ~~~FixNames.safe <> PdfFixOptions.None
@@ -166,7 +171,10 @@ module NextStep =
         let guessing = unchosen |> List.filter (fun r -> not (isSafeNow r) && guesses r)
         let waiting = unchosen |> List.filter (fun r -> not (isSafeNow r) && not (guesses r))
         let fixedByChosen = autoFixable.Length - unchosen.Length
-        let byHand = failures |> List.filter (fun r -> not r.Violation.IsFixable)
+        let byHand = failures |> List.filter (fun r -> not r.Violation.IsFixable && not (byTitle r))
+        // No title anywhere: one typed in Structure… is the only way to give it one.
+        let untitled = byHand |> List.filter (fun r -> FixNames.isTitleRule r.Violation)
+        let onlyTitleMissing = FixNames.metadataReady true (failures |> List.map _.Violation)
         let have (n: int) = if n = 1 then "has" else "have"
         let failuresText = plural failures.Length "failure"
         let edits = plural progress.EditsPending "edit"
@@ -226,6 +234,23 @@ module NextStep =
                       "Auto Fixes… chooses them; Export… then writes a fixed copy and opens it, checked. The PDF you opened isn't changed." ]
                     @ guessingText @ byHandText @ waitingText @ rulesHeading leftOver
                   TopRules = leftOver }
+        | _ when not untitled.IsEmpty ->
+            let others = byHand.Length - untitled.Length
+            let byHandText =
+                if others = 0 then []
+                else
+                    let text = plural others "other failure"
+                    [ $"{text} {have others} no auto fix: fix them in Structure…, or where the PDF was made." ]
+            Some
+                { Title = "Give it a title"
+                  Details =
+                    [ "The document has no title (in its properties or its XMP metadata), so a screen reader names it by its file name, and the XMP metadata fix has none to write."
+                      if onlyTitleMissing then
+                          "Type one in Structure…'s Document title field. Export… writes it before the auto fixes, so Fix XMP metadata can be chosen for the same pass."
+                      else
+                          "Type one in Structure…'s Document title field. Export… writes it before the auto fixes." ]
+                    @ guessingText @ byHandText @ (if onlyTitleMissing then [] else waitingText)
+                  TopRules = [] }
         | _ when fixedByChosen > 0 || progress.EditsPending > 0 ->
             let fixedText = plural fixedByChosen "failure"
             let isAre = if progress.EditsPending = 1 then "is" else "are"

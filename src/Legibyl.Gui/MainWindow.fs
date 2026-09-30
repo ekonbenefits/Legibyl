@@ -617,6 +617,9 @@ module private MainView =
                 }
                 |> ignore
 
+            /// Whether a title's been typed for the file in Structure…: Export… writes it before the auto fixes.
+            let titleGiven path = (layoutReviews.For path).Title |> Option.exists (String.IsNullOrWhiteSpace >> not)
+
             /// Chooses the fixes Export applies (it doesn't export).
             let chooseAutoFixes _ =
                 task {
@@ -629,7 +632,7 @@ module private MainView =
                                 Some "This PDF has no tags: Export… tags a copy from its suggested structure (Suggest Structure…), with your edits on it."
                             else
                                 None
-                        match! Dialogs.chooseFixOptions window report reviewNote autoFixes.Current with
+                        match! Dialogs.chooseFixOptions window report reviewNote (titleGiven sourcePath) autoFixes.Current with
                         | Some options ->
                             // Part of the review: Save keeps them.
                             review.AutoFixes <- Some options
@@ -1008,7 +1011,8 @@ module private MainView =
                         allRows
                         { StructureSuggested = pending.Current.TagsFromReview
                           EditsPending = pending.Current.Changes
-                          AutoFixesChosen = autoFixes.Current }
+                          AutoFixesChosen = autoFixes.Current
+                          TitleGiven = selectedFile.Current |> Option.exists titleGiven }
                 | _ -> None
 
             /// Right-click menu for the selected finding (the grid selects a row when it's right-clicked).

@@ -292,13 +292,14 @@ let private fixChoices =
 /// one addresses. Lists only the fixes this PDF needs, unless asked for all of them.
 /// Returns None if the user cancelled.
 /// tagNote, if any, says how an untagged PDF is tagged (from its suggested structure), shown
-/// above the fixes.
+/// above the fixes. titleGiven says a title's been typed in Structure…, which Export writes first.
 /// chosen is what was chosen before, if anything; the first time, the safe fixes this PDF
 /// needs start ticked. Export writes the chosen fixes (and the user's edits) to a copy.
 let chooseFixOptions
     (owner: Window)
     (report: ValidationReport)
     (tagNote: string option)
+    (titleGiven: bool)
     (chosen: PdfFixOptions option)
     : Task<PdfFixOptions option> =
     let window = dialogWindow "Auto Fixes" 560.0
@@ -327,13 +328,13 @@ let chooseFixOptions
         (choice.Option = PdfFixOptions.QrLinks || choice.Option = PdfFixOptions.LinkTitlesFromWeb)
         && found PdfFixOptions.TagFromLayout > 0
     let applies (choice: FixChoice) = found choice.Option > 0 || withTagging choice
+    let failures = report.Findings |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure) |> List.ofSeq
     // veraPDF only fixes metadata (adding the PDF/UA identifier) when the document would then
-    // conform, so it's only worth ticking when the safe fixes fix every failure.
-    let everyFailureFixable =
-        report.Findings
-        |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure)
-        |> Seq.map _.FixOptions
-        |> FixNames.metadataReady
+    // conform, so it's only worth ticking when the safe fixes, or the title typed in Structure…
+    // (which Export… writes first), fix every failure.
+    let everyFailureFixable = FixNames.metadataReady titleGiven failures
+    // Only the document's title stands in its way.
+    let onlyTitleMissing = not everyFailureFixable && FixNames.metadataReady true failures
     let tickedAtFirst (choice: FixChoice) =
         applies choice && not choice.OptIn && (choice.Option <> PdfFixOptions.Metadata || everyFailureFixable)
     window.Content <-
@@ -355,7 +356,9 @@ let chooseFixOptions
                     | 0 -> "none found"
                     | n -> $"{n} found"
                 let detail =
-                    if choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
+                    if choice.Option = PdfFixOptions.Metadata && applies choice && onlyTitleMissing then
+                        $"{choice.Detail} Unticked: the document has no title for the metadata. Type one in Structure…'s Document title field: Export… writes it first, then this fix, in the same pass."
+                    elif choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
                         $"{choice.Detail} Unticked: veraPDF only writes it once every other failure is fixed, and some here need more than the fixes ticked at first (a fix that guesses, tagging, or fixing by hand)."
                     else
                         choice.Detail

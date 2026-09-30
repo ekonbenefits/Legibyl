@@ -30,7 +30,7 @@ let private finding (clause: string) (test: int) (severity: FindingSeverity) (fi
 let private failure clause test fixes = finding clause test FindingSeverity.Failure fixes
 let private times n row = List.replicate n row
 
-let private nothingDone: NextStep.Progress = { StructureSuggested = false; EditsPending = 0; AutoFixesChosen = None }
+let private nothingDone: NextStep.Progress = { StructureSuggested = false; EditsPending = 0; AutoFixesChosen = None; TitleGiven = false }
 
 let private decide rows progress = NextStep.decide rows progress |> Option.get
 
@@ -95,6 +95,24 @@ let ``the metadata fix isn't suggested until the safe fixes fix every other fail
     let step = decide ready tabsChosen
     step.Title |> should equal "Choose auto fixes"
     step.Details.Head |> should equal "1 of its 2 failures has a safe auto fix (no guesswork) not chosen yet."
+
+[<Fact>]
+let ``with no title anywhere, it asks for one, then suggests the metadata fix for the same pass`` () =
+    let rows = [ failure "7.1" 10 PdfFixOptions.Tabs; failure "7.1" 8 PdfFixOptions.Metadata; failure "7.1" 9 PdfFixOptions.None ]
+    let tabsChosen = { nothingDone with AutoFixesChosen = Some PdfFixOptions.Tabs }
+
+    let step = decide rows tabsChosen
+    step.Title |> should equal "Give it a title"
+    step.Details |> List.last |> should haveSubstring "so Fix XMP metadata can be chosen for the same pass"
+    step.Details |> List.exists (fun d -> d.Contains "leave it until then") |> should be False
+
+    // Typed (an edit not in the PDF yet): the title failure's fixed by it, so the metadata fix is next.
+    let step = decide rows { tabsChosen with TitleGiven = true; EditsPending = 1 }
+    step.Title |> should equal "Choose auto fixes"
+    step.Details.Head |> should equal "1 of its 3 failures has a safe auto fix (no guesswork) not chosen yet."
+
+    let step = decide rows { tabsChosen with TitleGiven = true; EditsPending = 1; AutoFixesChosen = Some(PdfFixOptions.Tabs ||| PdfFixOptions.Metadata) }
+    step.Title |> should equal "Export and check again"
 
 [<Fact>]
 let ``only guessing auto fixes left: check the structure, not another auto fix pass`` () =

@@ -58,7 +58,11 @@ let ``an untitled document with no XMP metadata fails dc:title now, not once the
     found |> List.filter (fun f -> f.RuleId = "7.1-9") |> should haveLength 1
     (found |> List.find (fun f -> f.RuleId = "7.1-8")).FixOptions |> should equal PdfFixOptions.Metadata
     // So the metadata fix waits for the title.
-    FixNames.metadataReady (found |> List.map _.FixOptions) |> should be False
+    FixNames.metadataReady false found |> should be False
+    // Unless a title's been typed, which Export… writes before the metadata fix.
+    let metadataAndTitle = found |> List.filter (fun f -> f.RuleId = "7.1-8" || f.RuleId = "7.1-9")
+    FixNames.metadataReady false metadataAndTitle |> should be False
+    FixNames.metadataReady true metadataAndTitle |> should be True
 
 [<Fact>]
 let ``an untitled document with a title page can be titled from it`` () =
