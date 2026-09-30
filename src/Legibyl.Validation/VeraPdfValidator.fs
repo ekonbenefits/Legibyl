@@ -58,6 +58,23 @@ module internal VeraPdf =
         | PdfProfile.PdfUa2 -> PDFAFlavour.PDFUA_2
         | _ -> raise (ArgumentOutOfRangeException(nameof profile, profile, "Unsupported PDF profile"))
 
+    /// What a rule of profile's says, by its specification, clause and test; None for a rule it
+    /// doesn't have.
+    let ruleDescription (profile: PdfProfile) (specification: string) (clause: string) (testNumber: int) =
+        ensureInitialised ()
+        let table =
+            ruleDescriptions.GetOrAdd(
+                profile,
+                fun profile ->
+                    let validationProfile = Profiles.getVeraProfileDirectory().getValidationProfileByFlavour (toJavaFlavour profile)
+                    [ for item in javaSeq (validationProfile.getRules ()) do
+                          let rule = item :?> Rule
+                          let id = rule.getRuleId ()
+                          yield (id.getSpecification().ToString(), id.getClause (), id.getTestNumber ()), rule.getDescription () ]
+                    |> Map.ofList
+            )
+        table |> Map.tryFind (specification, clause, testNumber)
+
     let private repairStatuses =
         [ MetadataFixerResult.RepairStatus.SUCCESS, RepairStatus.Success
           MetadataFixerResult.RepairStatus.FIX_ERROR, RepairStatus.FixError
@@ -107,6 +124,17 @@ module internal VeraPdf =
               // CIDToGIDMap on embedded Type 2 CIDFonts.
               ua1 "7.21.3.2-1" PdfFixOptions.FontGlyphs
               ua2 "8.4.5.3.2-1" PdfFixOptions.FontGlyphs ]
+
+    /// The rules for a missing metadata stream, and (by standard) the clause and test of the rule
+    /// for its dc:title, which veraPDF can only check once there's metadata.
+    let private noMetadataRules = set [ PdfProfile.PdfUa1, "7.1-8"; PdfProfile.PdfUa2, "8.11.1-2" ]
+
+    let private dcTitleRule standard = if standard = PdfProfile.PdfUa2 then "8.11.1", 1 else "7.1", 9
+
+    let private isDcTitleRule (assertion: RuleViolation) =
+        match PdfUaTarget.ofSpecification assertion.Specification with
+        | Some standard -> dcTitleRule standard = (assertion.Clause, assertion.TestNumber)
+        | None -> false
 
     let private determineFixOptions (assertion: RuleViolation) =
         match PdfUaTarget.ofSpecification assertion.Specification with
@@ -212,6 +240,9 @@ module internal VeraPdf =
                                            | reference -> yield reference.GetObjNumber() ]
                          | _ -> Set.empty)
                 let languageUndeclared = not (DocumentLanguage.isDeclared document)
+                // No title in Info or XMP: the fixes that copy one across have none to copy.
+                let untitled =
+                    String.IsNullOrWhiteSpace(document.GetDocumentInfo().GetTitle()) && (StructureFixes.xmpTitle document).IsNone
                 let fixOptionsFor (assertion: RuleViolation) =
                     let isIn (numbers: Lazy<Set<int>>) =
                         match assertion.Location with
@@ -270,12 +301,43 @@ module internal VeraPdf =
                             | _ -> options
                         | _ -> options
                     // Every "natural language ... shall be determined" rule falls back on /Lang.
-                    if languageUndeclared && assertion.Message.Contains("Natural language", StringComparison.OrdinalIgnoreCase) then
-                        options ||| PdfFixOptions.Language
+                    let options =
+                        if languageUndeclared && assertion.Message.Contains("Natural language", StringComparison.OrdinalIgnoreCase) then
+                            options ||| PdfFixOptions.Language
+                        else
+                            options
+                    // Without a title to copy, only titling from the first page (or by hand) gives
+                    // the metadata its dc:title.
+                    if untitled && isDcTitleRule assertion then
+                        options &&& ~~~(PdfFixOptions.Metadata ||| PdfFixOptions.Title)
                     else
                         options
+                // With no metadata stream, veraPDF can't check its dc:title, so an untitled
+                // document only fails that once the metadata fix has written one (and then veraPDF
+                // won't add the PDF/UA identifier). Report it now, so it's fixed first.
+                let missingTitle =
+                    if not untitled then []
+                    else
+                        assertions
+                        |> List.tryPick (fun assertion ->
+                            match PdfUaTarget.ofSpecification assertion.Specification with
+                            | Some standard when not assertion.Passed && noMetadataRules.Contains((standard, assertion.RuleId)) ->
+                                let clause, testNumber = dcTitleRule standard
+                                if assertions |> List.exists (fun a -> a.Specification = assertion.Specification && a.Clause = clause && a.TestNumber = testNumber && not a.Passed) then
+                                    None
+                                else
+                                    Some
+                                        { assertion with
+                                            Clause = clause
+                                            TestNumber = testNumber
+                                            Message = ruleDescription standard assertion.Specification clause testNumber |> Option.defaultValue "The metadata shall contain a dc:title entry."
+                                            ErrorMessage =
+                                                "The document has no title (in its Info dictionary or XMP metadata). veraPDF can't check dc:title until there's metadata, so this fails once the metadata fix writes it, and then the PDF/UA identifier isn't added. Give the document a title first."
+                                            FixOptions = PdfFixOptions.Title }
+                            | _ -> None)
+                        |> Option.toList
                 let located =
-                    assertions
+                    assertions @ missingTitle
                     |> List.map (fun assertion ->
                         if assertion.Passed then
                             assertion
@@ -791,19 +853,7 @@ type VeraPdfValidator() =
     /// What a rule of profile's says (its description, as a failure's message has it), by its
     /// specification ("ISO 14289-1:2014"), clause and test; None for a rule it doesn't have.
     static member RuleDescription(profile: PdfProfile, specification: string, clause: string, testNumber: int) : string option =
-        ensureInitialised ()
-        let table =
-            ruleDescriptions.GetOrAdd(
-                profile,
-                fun profile ->
-                    let validationProfile = Profiles.getVeraProfileDirectory().getValidationProfileByFlavour (toJavaFlavour profile)
-                    [ for item in javaSeq (validationProfile.getRules ()) do
-                          let rule = item :?> Rule
-                          let id = rule.getRuleId ()
-                          yield (id.getSpecification().ToString(), id.getClause (), id.getTestNumber ()), rule.getDescription () ]
-                    |> Map.ofList
-            )
-        table |> Map.tryFind (specification, clause, testNumber)
+        ruleDescription profile specification clause testNumber
 
     /// Every rule of profile's: its specification ("ISO 14289-1:2014"), clause and test, and what
     /// it says.

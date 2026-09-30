@@ -37,6 +37,51 @@ let ``a document with no XMP metadata gets a stream from its Info dictionary, wh
     // it won't claim a conformance the document doesn't have.)
     failedRules output.Path |> should not' (contain "7.1-8")
 
+let private failures (path: string) =
+    VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Findings
+    |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure)
+    |> List.ofSeq
+
+[<Fact>]
+let ``an untitled document with no XMP metadata fails dc:title now, not once the metadata's written`` () =
+    use input = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.AddNewPage() |> ignore
+
+    let found = failures input.Path
+    let title = found |> List.find (fun f -> f.RuleId = "7.1-9")
+    title.ErrorMessage |> should haveSubstring "The document has no title"
+    title.Message |> should haveSubstring "dc:title"
+    // Neither the metadata fix nor the title fix has a title to give it.
+    title.FixOptions |> should equal PdfFixOptions.None
+    found |> List.filter (fun f -> f.RuleId = "7.1-9") |> should haveLength 1
+    (found |> List.find (fun f -> f.RuleId = "7.1-8")).FixOptions |> should equal PdfFixOptions.Metadata
+    // So the metadata fix waits for the title.
+    FixNames.metadataReady (found |> List.map _.FixOptions) |> should be False
+
+[<Fact>]
+let ``an untitled document with a title page can be titled from it`` () =
+    use input = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        use layout = new iText.Layout.Document(document)
+        layout.Add(iText.Layout.Element.Paragraph "The Garden in Spring") |> ignore
+        layout.Add(iText.Layout.Element.AreaBreak()) |> ignore
+        layout.Add(iText.Layout.Element.Paragraph "What grows first.") |> ignore
+
+    (failures input.Path |> List.find (fun f -> f.RuleId = "7.1-9")).FixOptions |> should equal PdfFixOptions.TitleFromFirstPage
+
+[<Fact>]
+let ``a titled document with no XMP metadata isn't reported for dc:title: the metadata fix copies it`` () =
+    use input = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.AddNewPage() |> ignore
+        document.GetDocumentInfo().SetTitle "Cub Scout Pack 721" |> ignore
+
+    failures input.Path |> List.map _.RuleId |> should not' (contain "7.1-9")
+
 [<Fact>]
 let ``a document's own XMP metadata is left for veraPDF to fix`` () =
     use output = new TempPdf()

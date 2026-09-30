@@ -300,8 +300,9 @@ let ``a title given for a tagged PDF is written to it, shown in place of the fil
     use input = new TempPdf()
     use output = new TempPdf()
     createTagged input.Path
-    // No metadata at all (7.1-8), so no title in it either; and the file name shown.
-    titleRules input.Path PdfProfile.PdfUa1 |> should equal (set [ "7.1-10" ])
+    // No metadata at all (7.1-8), so no title in it either (7.1-9, which veraPDF can't check
+    // without metadata, so Legibyl reports it); and the file name shown.
+    titleRules input.Path PdfProfile.PdfUa1 |> should equal (set [ "7.1-9"; "7.1-10" ])
     ElementEdits.titlePending input.Path "The Garden in Spring" |> should be True
 
     let result =

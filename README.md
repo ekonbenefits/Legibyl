@@ -1091,7 +1091,12 @@ at all. A file with no title anywhere therefore still reports the `dc:title`
 failure, rather than being quietly given a made-up one — unless you name
 `title-from-first-page`: then a document with no title in Info or XMP is titled
 from the text of its first page, as long as more pages follow and that page is
-short enough to be a title page (at most 30 words and 200 characters). The
+short enough to be a title page (at most 30 words and 200 characters). Since
+veraPDF checks `dc:title` in the metadata, it can't report a missing one while
+there's no metadata stream at all; Legibyl reports that failure for an untitled
+file (7.1-9, PDF/UA-2's 8.11.1-1) straight away, so the metadata fix, which
+would otherwise write metadata without a title and leave the PDF/UA identifier
+out, waits for a title first. The
 GUI's Auto Fixes dialog lists the same fixes, in the order they run.
 
 Structural fixes run before the veraPDF metadata fixer so metadata is fixed

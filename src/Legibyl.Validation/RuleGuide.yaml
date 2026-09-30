@@ -18,7 +18,7 @@ rules:
 
   - clause: "5"
     meaning: "The PDF doesn't say in its metadata that it follows PDF/UA, so tools that look for accessible PDFs won't treat it as one."
-    whatToDo: "Choose Repair XMP metadata in Auto Fixes… (veraPDF only adds it once every other failure is fixed)."
+    whatToDo: "Choose Fix XMP metadata in Auto Fixes… (veraPDF only adds it once every other failure is fixed)."
 
   - clause: "6.2"
     tests: [1]
@@ -58,12 +58,12 @@ rules:
   - clause: "7.1"
     tests: [8]
     meaning: "The PDF has no metadata (XMP) for its title, language and PDF/UA claim to go in."
-    whatToDo: "Choose Repair XMP metadata in Auto Fixes…."
+    whatToDo: "Choose Fix XMP metadata in Auto Fixes… once the document has a title (the metadata needs one), and the PDF/UA claim is added once every other failure is fixed."
 
   - clause: "7.1"
     tests: [9]
     meaning: "The PDF has no title in its metadata, so a screen reader and the reader's title bar name it by its file name."
-    whatToDo: "Choose Document title in Auto Fixes… if it has a title elsewhere, or Title from the first page; or set the title in the tool that made it."
+    whatToDo: "Type one in Structure…'s Document title field, then Export…; or choose Document title in Auto Fixes… if it has a title elsewhere, or Title from the first page."
 
   - clause: "7.1"
     tests: [10]
@@ -231,7 +231,7 @@ pdfUa2Rules:
 
   - clause: "5"
     meaning: "The PDF doesn't say in its metadata that it follows PDF/UA-2, so tools that look for accessible PDFs won't treat it as one."
-    whatToDo: "Choose Repair XMP metadata in Auto Fixes… (veraPDF only adds it once every other failure is fixed)."
+    whatToDo: "Choose Fix XMP metadata in Auto Fixes… (veraPDF only adds it once every other failure is fixed)."
 
   - clause: "6.2"
     tests: [1]
@@ -376,12 +376,12 @@ pdfUa2Rules:
   - clause: "8.11.1"
     tests: [1]
     meaning: "The PDF has no title in its metadata, so a screen reader and the reader's title bar name it by its file name."
-    whatToDo: "Choose Document title in Auto Fixes… if it has a title elsewhere, or Title from the first page; or set the title in the tool that made it."
+    whatToDo: "Type one in Structure…'s Document title field, then Export…; or choose Document title in Auto Fixes… if it has a title elsewhere, or Title from the first page."
 
   - clause: "8.11.1"
     tests: [2]
     meaning: "The PDF has no metadata (XMP) for its title, language and PDF/UA claim to go in."
-    whatToDo: "Choose Repair XMP metadata in Auto Fixes…."
+    whatToDo: "Choose Fix XMP metadata in Auto Fixes… once the document has a title (the metadata needs one), and the PDF/UA claim is added once every other failure is fixed."
 
   - clause: "8.11.2"
     meaning: "The reader shows the file name in its title bar instead of the document's title."

@@ -100,7 +100,8 @@ let ``Validate reports progress, ending with the final counts`` () =
     reports |> should not' (be Empty)
     let last = Seq.last reports
     last.Checks |> should equal report.TotalAssertions
-    last.FailedRules |> should equal (report.FailedAssertions |> Seq.distinctBy _.RuleId |> Seq.length)
+    // veraPDF's count: not the dc:title failure Legibyl reports for its untitled, metadata-less file.
+    last.FailedRules |> should equal (report.FailedAssertions |> Seq.filter (fun f -> f.RuleId <> "7.1-9") |> Seq.distinctBy _.RuleId |> Seq.length)
     last.ProcessedObjects |> should be (greaterThan 0)
     last.QueuedObjects |> should equal 0
     last.Stage |> should equal ValidationStage.Finishing
@@ -263,7 +264,8 @@ let ``PDF/UA-2 failures map to the fixes that fix them, by rule`` () =
         report.FailedAssertions |> Seq.filter (fun f -> f.Specification.StartsWith "ISO 14289-2" && f.RuleId = rule) |> Seq.map _.FixOptions |> Seq.head
 
     fixesFor "5-1" |> should equal PdfFixOptions.Metadata
-    fixesFor "8.11.1-1" |> should equal (PdfFixOptions.Metadata ||| PdfFixOptions.Title)
+    // Untitled, with no title page: no fix has a title to give it.
+    fixesFor "8.11.1-1" |> should equal PdfFixOptions.None
     fixesFor "8.11.2-1" |> should equal PdfFixOptions.Title
     fixesFor "8.9.3.3-1" |> should equal (PdfFixOptions.Tabs ||| PdfFixOptions.TagFromLayout)
     // Untagged: tagging it from its layout (Suggest Structure…) fixes these.
