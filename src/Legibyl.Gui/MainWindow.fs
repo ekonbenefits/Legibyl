@@ -193,6 +193,9 @@ module private MainView =
             // The last count of edits not in a tagged PDF: (path, its last write, edits, count).
             // Counting reads the PDF, so it's only done again when one of those changes.
             let pendingCount = ctx.useStateLazy(fun () -> ref (None: (string * DateTime * ElementEdit list * string option * int) option)).Current
+            // The Structure window open for each PDF, and those being read or opened.
+            let structureWindows = ctx.useStateLazy(fun () -> Collections.Generic.Dictionary<string, Window>()).Current
+            let structureOpening = ctx.useStateLazy(fun () -> Collections.Generic.HashSet<string>()).Current
 
 
             let report =
@@ -580,6 +583,22 @@ module private MainView =
 
             let viewStructure _ =
                 task {
+                    // One Structure window per PDF: asked again, the open one's brought forward. (A
+                    // second click while it's still being read or opened does nothing.)
+                    let focusOpen filePath =
+                        match structureWindows.TryGetValue filePath with
+                        | true, (open': Window) ->
+                            if open'.WindowState = WindowState.Minimized then open'.WindowState <- WindowState.Normal
+                            open'.Activate()
+                            true
+                        | _ -> false
+                    let open' (filePath: string) (structureWindow: Window) =
+                        structureWindows[filePath] <- structureWindow
+                        structureWindow.Closed.Add(fun _ ->
+                            match structureWindows.TryGetValue filePath with
+                            | true, w when obj.ReferenceEquals(w, structureWindow) -> structureWindows.Remove filePath |> ignore
+                            | _ -> ())
+                        structureWindow.Show window
                     let show (structure: StructureNode | null) (filePath: string) =
                         task {
                             match structure with
@@ -588,31 +607,36 @@ module private MainView =
                                 let review = layoutReviews.For filePath
                                 // Offer to read the titles of pages links go to, before the window opens.
                                 do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
-                                StructureTreeWindow(Suggested, filePath, review, refreshPending).Show window
+                                open' filePath (StructureTreeWindow(Suggested, filePath, review, refreshPending))
                             | structure ->
-                                StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending, findingsToMark ()).Show window
+                                open' filePath (StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending, findingsToMark ()))
                         }
 
                     match selectedFile.Current with
+                    | Some filePath when focusOpen filePath || structureOpening.Contains filePath -> ()
                     | Some filePath ->
-                        match structureCache.TryFind filePath with
-                        | Some structure -> do! show structure filePath
-                        | None ->
-                            isBusy.Set true
-                            busyProgress.Set None
-                            // Created on the UI thread, so its reports arrive there too.
-                            let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
-                            let stamp = structureCache.Stamp filePath
-                            try
+                        structureOpening.Add filePath |> ignore
+                        try
+                            match structureCache.TryFind filePath with
+                            | Some structure -> do! show structure filePath
+                            | None ->
+                                isBusy.Set true
+                                busyProgress.Set None
+                                // Created on the UI thread, so its reports arrive there too.
+                                let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
+                                let stamp = structureCache.Stamp filePath
                                 try
-                                    let! structure = Task.Run(fun () -> validator.ReadStructureTree(filePath, progress))
-                                    structureCache.Remember(stamp, structure)
+                                    try
+                                        let! structure = Task.Run(fun () -> validator.ReadStructureTree(filePath, progress))
+                                        structureCache.Remember(stamp, structure)
+                                        isBusy.Set false
+                                        do! show structure filePath
+                                    with :? VeraPdfValidationException as ex ->
+                                        do! Dialogs.showMessage window ex.Message "Could not read structure"
+                                finally
                                     isBusy.Set false
-                                    do! show structure filePath
-                                with :? VeraPdfValidationException as ex ->
-                                    do! Dialogs.showMessage window ex.Message "Could not read structure"
-                            finally
-                                isBusy.Set false
+                        finally
+                            structureOpening.Remove filePath |> ignore
                     | None -> ()
                 }
                 |> ignore

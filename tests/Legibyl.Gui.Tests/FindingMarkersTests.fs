@@ -190,6 +190,34 @@ let ``a tagged PDF's Structure window marks the blocks with failures, and a mark
             chosen |> should equal (Some("7.3", 1))))
 
 [<Fact>]
+let ``clicking Structure again brings its window forward rather than opening another`` () =
+    withTaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let structureButton () = descendants<Button> window |> List.find (fun b -> (string (AutomationProperties.GetName b)).StartsWith "Structure…")
+            let structures () = window.OwnedWindows |> Seq.filter (fun w -> w :? StructureTreeWindow) |> List.ofSeq
+            // Twice while it's still being read, then once it's open.
+            click (structureButton ())
+            click (structureButton ())
+            waitFor (fun () -> not (structures ()).IsEmpty)
+            pump ()
+            click (structureButton ())
+            pump ()
+            let whileOpen = structures () |> List.length
+            // Closed, it opens again.
+            (structures () |> List.exactlyOne).Close()
+            pump ()
+            click (structureButton ())
+            waitFor (fun () -> not (structures ()).IsEmpty)
+            let reopened = structures () |> List.length
+            for w in structures () do w.Close()
+            window.Close()
+
+            whileOpen |> should equal 1
+            reopened |> should equal 1))
+
+[<Fact>]
 let ``markers stay until the file is validated again: an edit doesn't clear them`` () =
     withTaggedPdf (fun pdf ->
         onUiThread (fun () ->
