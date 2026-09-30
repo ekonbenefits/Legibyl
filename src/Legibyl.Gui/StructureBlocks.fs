@@ -362,24 +362,7 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
     let children: IView list =
         if node.Children.Count = 0 then []
         elif childLevels <= 0 then [ collapsedChildren selection node ]
-        else
-            match node.Tag with
-            | "TOC" -> [ tocGrid selection node ]
-            | "Table" -> [ tableGrid selection node ]
-            | tag when fixedOrder.Contains tag ->
-                [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child ]
-            | _ ->
-                // In the order the moves give them; its own component, so a move re-renders just these.
-                // Keyed by the node: a component keeps the node it was made for (a suggested
-                // structure's is made again as pages are found).
-                [ Component.create($"ordered-children-{Runtime.CompilerServices.RuntimeHelpers.GetHashCode node}", fun ctx ->
-                      let moves = ctx.usePassedRead selection.Moves
-                      StackPanel.create [
-                          StackPanel.children [
-                              for child in orderedChildren moves.Current node ->
-                                  element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child
-                          ]
-                      ]) ]
+        else childViews selection childLevels node
 
     let inner =
         StackPanel.create [
@@ -443,21 +426,34 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
           Border.child inner ]
         (geometryTip node "node" "structure node")
 
+/// A node's children, childLevels levels deep: a TOC's and a table's in their grids, the rest
+/// stacked (in the order the moves give them, unless their order is fixed).
+and childViews (selection: Selection) (childLevels: int) (node: StructureNode) : IView list =
+    match node.Tag with
+    | "TOC" -> [ tocGrid selection node ]
+    | "Table" -> [ tableGrid selection node ]
+    | tag when fixedOrder.Contains tag ->
+        [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child ]
+    | _ ->
+        // Its own component, so a move re-renders just these. Keyed by the node: a component
+        // keeps the node it was made for (a suggested structure's is made again as pages are found).
+        [ Component.create($"ordered-children-{Runtime.CompilerServices.RuntimeHelpers.GetHashCode node}", fun ctx ->
+              let moves = ctx.usePassedRead selection.Moves
+              StackPanel.create [
+                  StackPanel.children [
+                      for child in orderedChildren moves.Current node ->
+                          element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child
+                  ]
+              ]) ]
+
 /// A node's children, drawn only once asked for: "▸ 31 child elements (824 in all)".
 /// Its own component, so expanding re-renders just this block, not the whole layout.
 and collapsedChildren (selection: Selection) (node: StructureNode) : IView =
     Component.create("collapsed-children", fun ctx ->
         let expanded = ctx.useState false
         let opened = ctx.usePassedRead selection.Expanded
-        let moves = ctx.usePassedRead selection.Moves
         if expanded.Current || opened.Current |> List.exists (fun n -> obj.ReferenceEquals(n, node)) then
-            let levels = levelsWithinBudget node.Children
-            let children = if fixedOrder.Contains node.Tag then List.ofSeq node.Children else orderedChildren moves.Current node
-            StackPanel.create [
-                StackPanel.children [
-                    for child in children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (levels - 1) child
-                ]
-            ]
+            StackPanel.create [ StackPanel.children (childViews selection (levelsWithinBudget node.Children) node) ]
         else
             let count = node.Children.Count
             let total = descendantCount node

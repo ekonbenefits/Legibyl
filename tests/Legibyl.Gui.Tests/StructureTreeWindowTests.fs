@@ -87,6 +87,27 @@ let ``large structures start collapsed and expand on click`` () =
         shownAfterExpanding |> should equal (51 + 200))
 
 [<Fact>]
+let ``an expanded table still lays its cells out left to right`` () =
+    onUiThread (fun () ->
+        // 50 tables of 100 rows of two cells: too many to show at first, so each starts collapsed.
+        let table = node "Table" [ for _ in 1 .. 100 -> node "TR" [ node "TH" []; node "TD" [] ] ]
+        let window = show (node "StructTreeRoot" [ node "Document" [ for _ in 1 .. 50 -> table ] ])
+        (expandButtons window).Head.RaiseEvent(Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent))
+        HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+        let left tag =
+            blocks window
+            |> List.filter (fun border -> match border.Tag with :? StructureNode as n -> n.Tag = tag | _ -> false)
+            |> List.map (fun border -> (border.TranslatePoint(Point(0.0, 0.0), window)).Value.X)
+        let headers, cells = left "TH", left "TD"
+        let rowBlocks = left "TR"
+        window.Close()
+        headers |> should haveLength 100
+        cells |> should haveLength 100
+        // The rows aren't drawn as blocks of their own: each cell sits in its column.
+        rowBlocks |> should be Empty
+        List.forall2 (fun header cell -> cell > header) headers cells |> should be True)
+
+[<Fact>]
 let ``selecting a link also shows the page it goes to`` () =
     onUiThread (fun () ->
         let pdf = Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "libreoffice-empty-paragraph.pdf")
