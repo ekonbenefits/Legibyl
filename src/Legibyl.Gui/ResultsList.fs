@@ -117,7 +117,8 @@ type NextStep =
       Title: string
       /// Why, and how.
       Details: string list
-      /// The rules with the most failures no auto fix fixes, the most first (three at most).
+      /// The rules left to look at, the most places first (three at most): failures no safe auto
+      /// fix fixes, or, for a PDF that passes, its warnings.
       TopRules: RuleGroup list }
 
 module NextStep =
@@ -136,28 +137,73 @@ module NextStep =
     let private topRules (failures: RuleViolationRow list) =
         RuleGroup.OfRows failures |> List.sortByDescending _.Findings.Length |> List.truncate 3
 
-    /// The next step for a PDF with these findings, given what's been done: suggest its structure
-    /// if it has no tags (then Export… to tag a copy); else choose the auto fixes its failures have
-    /// (then Export… to check again); else fix the rest by hand, the rules with the most failures
-    /// first. None when nothing fails.
+    /// Whether an auto fix that fixes it needs no guesswork (FixNames.safe); the others guess
+    /// at what the document means, so what they'd do is better checked in Structure… first.
+    let isSafeFix (row: RuleViolationRow) = row.Violation.FixOptions &&& FixNames.safe <> PdfFixOptions.None
+
+    /// The next step for a PDF with these findings (dismissed warnings flagged), given what's been
+    /// done: suggest its structure if it has no tags (then Export… to tag a copy); else choose the
+    /// safe auto fixes its failures have; else Export… what's chosen or edited, to check again;
+    /// else check in Structure… what only a guessing auto fix fixes; else fix the rest by hand, the
+    /// rules with the most failures first. With no failures, review the warnings not dismissed.
+    /// None when there's neither.
     let decide (rows: RuleViolationRow list) (progress: Progress) : NextStep option =
         let failures = rows |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Failure)
+        let warnings = rows |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Warning && not r.Dismissed)
         let byTagging = failures |> List.filter (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout)
         let untagged = rows |> List.exists (fun r -> r.Violation.FixOptions.HasFlag PdfFixOptions.TagFromLayout)
         let chosen = progress.AutoFixesChosen |> Option.defaultValue PdfFixOptions.None
         let autoFixable = failures |> List.filter (fun r -> r.Violation.IsFixable)
         let unchosen = autoFixable |> List.filter (fun r -> r.Violation.FixOptions &&& chosen = PdfFixOptions.None)
+        // The metadata fix only works once every other failure's fixed, so until the safe fixes fix
+        // them all, it's not one to choose yet: what only it fixes waits.
+        let safeNow =
+            if FixNames.metadataReady (failures |> List.map _.Violation.FixOptions) then FixNames.safe
+            else FixNames.safe &&& ~~~PdfFixOptions.Metadata
+        let isSafeNow (row: RuleViolationRow) = row.Violation.FixOptions &&& safeNow <> PdfFixOptions.None
+        let guesses (row: RuleViolationRow) = row.Violation.FixOptions &&& ~~~FixNames.safe <> PdfFixOptions.None
+        let safeUnchosen = unchosen |> List.filter isSafeNow
+        let guessing = unchosen |> List.filter (fun r -> not (isSafeNow r) && guesses r)
+        let waiting = unchosen |> List.filter (fun r -> not (isSafeNow r) && not (guesses r))
+        let fixedByChosen = autoFixable.Length - unchosen.Length
         let byHand = failures |> List.filter (fun r -> not r.Violation.IsFixable)
         let have (n: int) = if n = 1 then "has" else "have"
         let failuresText = plural failures.Length "failure"
         let edits = plural progress.EditsPending "edit"
-        let afterThat =
+        // What's left once this step's done, and what to do about it.
+        let waitingText =
+            if waiting.IsEmpty then []
+            else
+                let text = plural waiting.Length "failure"
+                [ $"{text} {have waiting.Length} only the XMP metadata fix, which veraPDF only writes once every other failure is fixed: leave it until then." ]
+        let guessingText =
+            if guessing.IsEmpty then []
+            else
+                let text = plural guessing.Length "failure"
+                [ $"{text} {have guessing.Length} an auto fix that guesses at what the document means: check those in Structure… rather than running another auto fix, and choose the fix only if what it would do is right." ]
+        let byHandText =
             if byHand.IsEmpty then []
             else
-                let byHandText = plural byHand.Length "failure"
-                [ $"{byHandText} {have byHand.Length} no auto fix: fix them in Structure…, or where the PDF was made. The rules with the most:" ]
+                let text = plural byHand.Length "failure"
+                [ $"{text} {have byHand.Length} no auto fix: fix them in Structure…, or where the PDF was made." ]
+        let rulesHeading rules = if List.isEmpty rules then [] else [ "The rules with the most:" ]
+        let leftOver = topRules (guessing @ byHand)
         match failures with
-        | [] -> None
+        | [] when warnings.IsEmpty -> None
+        | [] ->
+            let warningsText = plural warnings.Length "warning"
+            let fixable = warnings |> List.filter (fun r -> r.Violation.IsFixable)
+            Some
+                { Title = "Review the warnings"
+                  Details =
+                    [ $"It passes the automated checks, with {warningsText}: what Legibyl noticed that PDF/UA doesn't require."
+                      "Select each to see what it means. Where one is inaccurate, right-click it › Dismiss, so it isn't counted again (Save keeps it with the review)."
+                      if not fixable.IsEmpty then
+                          let text = plural fixable.Length "warning"
+                          $"{text} {have fixable.Length} an auto fix: choose it in Auto Fixes… if what it would do is right."
+                      "Then work through the PASS row's checklist."
+                      "The warnings with the most places:" ]
+                  TopRules = topRules warnings }
         | _ when untagged && not progress.StructureSuggested ->
             Some
                 { Title = "Suggest the structure"
@@ -172,34 +218,44 @@ module NextStep =
                     [ (if progress.EditsPending > 0 then $"The structure's been suggested, with {edits} on it." else "The structure's been suggested.")
                       "Export… tags a copy of this PDF from it and opens the copy, checked, to see what's left. Suggest Structure… again to check more of it first." ]
                   TopRules = [] }
-        | _ when not unchosen.IsEmpty ->
+        | _ when not safeUnchosen.IsEmpty ->
             Some
                 { Title = "Choose auto fixes"
                   Details =
-                    [ $"{unchosen.Length} of its {failuresText} {have unchosen.Length} an auto fix not chosen yet."
+                    [ $"{safeUnchosen.Length} of its {failuresText} {have safeUnchosen.Length} a safe auto fix (no guesswork) not chosen yet."
                       "Auto Fixes… chooses them; Export… then writes a fixed copy and opens it, checked. The PDF you opened isn't changed." ]
-                    @ afterThat
-                  TopRules = topRules byHand }
-        | _ when not autoFixable.IsEmpty || progress.EditsPending > 0 ->
-            let fixedText = plural autoFixable.Length "failure"
+                    @ guessingText @ byHandText @ waitingText @ rulesHeading leftOver
+                  TopRules = leftOver }
+        | _ when fixedByChosen > 0 || progress.EditsPending > 0 ->
+            let fixedText = plural fixedByChosen "failure"
             let isAre = if progress.EditsPending = 1 then "is" else "are"
             let what =
-                match autoFixable.Length, progress.EditsPending with
+                match fixedByChosen, progress.EditsPending with
                 | 0, _ -> $"{edits} {isAre} not in the PDF yet."
                 | _, 0 -> $"The auto fixes chosen fix {fixedText}."
                 | _ -> $"The auto fixes chosen fix {fixedText}, and {edits} {isAre} not in the PDF yet."
             Some
                 { Title = "Export and check again"
-                  Details = [ what; "Export… writes a copy with them and opens it, checked, to see what's left." ] @ afterThat
-                  TopRules = topRules byHand }
+                  Details =
+                    [ what; "Export… writes a copy with them and opens it, checked, to see what's left." ]
+                    @ guessingText @ byHandText @ waitingText @ rulesHeading leftOver
+                  TopRules = leftOver }
+        | _ when not guessing.IsEmpty ->
+            Some
+                { Title = "Check the structure"
+                  Details =
+                    [ $"{guessing.Length} of its {failuresText} {have guessing.Length} only an auto fix that guesses at what the document means (like which paragraphs are a list, or a heading's level)."
+                      "Rather than another auto fix pass, open Structure… and look at what they point to: fix what's wrong there, and choose the auto fix only if what it would do is right." ]
+                    @ byHandText @ waitingText @ rulesHeading leftOver
+                  TopRules = leftOver }
         | _ ->
             Some
                 { Title = "Fix the rules with the most failures"
                   Details =
-                    [ $"{failuresText} left, none with an auto fix. Fixing a rule fixes each place it's broken, so start with those broken the most."
+                    [ $"{failuresText} left, none with an auto fix to choose yet. Fixing a rule fixes each place it's broken, so start with those broken the most."
                       "Select a rule below to see what it means and what to do: in Structure…, or where the PDF was made." ]
-                  TopRules = topRules byHand }
-
+                    @ waitingText
+                  TopRules = leftOver }
 /// An item of the results list: a rule (and whether its findings are shown), or a finding; or,
 /// for a PDF that passes, the pass, first (and how far a person has checked it); or, for one that
 /// fails, the next step, first.

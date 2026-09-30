@@ -35,8 +35,25 @@ let private nothingDone: NextStep.Progress = { StructureSuggested = false; Edits
 let private decide rows progress = NextStep.decide rows progress |> Option.get
 
 [<Fact>]
-let ``nothing failing, no next step`` () =
-    NextStep.decide [ finding "7.1" 1 FindingSeverity.Warning PdfFixOptions.None ] nothingDone |> should equal None
+let ``nothing failing and no warnings, or only dismissed ones: no next step`` () =
+    let dismissed = { finding "7.5" 1 FindingSeverity.Warning PdfFixOptions.None with Dismissed = true }
+    NextStep.decide [] nothingDone |> should equal None
+    NextStep.decide [ dismissed ] nothingDone |> should equal None
+
+[<Fact>]
+let ``passing with warnings: review them, and dismiss those that are inaccurate`` () =
+    let rows =
+        [ yield! times 2 (finding "Structure" 7 FindingSeverity.Warning PdfFixOptions.Bookmarks)
+          finding "Structure" 3 FindingSeverity.Warning PdfFixOptions.None
+          // Dismissed already: not counted.
+          { finding "Structure" 5 FindingSeverity.Warning PdfFixOptions.None with Dismissed = true } ]
+    let step = decide rows nothingDone
+
+    step.Title |> should equal "Review the warnings"
+    step.Details.Head |> should haveSubstring "with 3 warnings"
+    step.Details |> List.exists (fun d -> d.Contains "right-click it › Dismiss") |> should be True
+    step.Details |> should contain "2 warnings have an auto fix: choose it in Auto Fixes… if what it would do is right."
+    step.TopRules |> List.map (fun g -> g.RuleId, g.Findings.Length) |> should equal [ "Structure-7", 2; "Structure-3", 1 ]
 
 [<Fact>]
 let ``an untagged PDF suggests its structure, then exporting a tagged copy`` () =
@@ -50,45 +67,56 @@ let ``an untagged PDF suggests its structure, then exporting a tagged copy`` () 
     suggested.Details.Head |> should equal "The structure's been suggested, with 2 edits on it."
 
 [<Fact>]
-let ``a tagged PDF with auto fixes not chosen suggests choosing them, and says what's left by hand`` () =
+let ``safe auto fixes not chosen come first; guessing ones are left to check in Structure`` () =
     let rows =
-        [ yield! times 3 (failure "7.1" 8 PdfFixOptions.Bookmarks)
-          failure "7.2" 1 PdfFixOptions.Title
+        [ yield! times 2 (failure "7.1" 10 PdfFixOptions.Tabs)
+          yield! times 3 (failure "7.1" 8 PdfFixOptions.Bookmarks)
+          failure "7.2" 1 PdfFixOptions.Metadata
           yield! times 2 (failure "7.1" 1 PdfFixOptions.None) ]
-    let step = decide rows { nothingDone with AutoFixesChosen = Some PdfFixOptions.Title }
+    let step = decide rows { nothingDone with AutoFixesChosen = Some PdfFixOptions.Metadata }
 
     step.Title |> should equal "Choose auto fixes"
-    step.Details.Head |> should equal "3 of its 6 failures have an auto fix not chosen yet."
-    step.Details |> should contain "2 failures have no auto fix: fix them in Structure…, or where the PDF was made. The rules with the most:"
-    step.TopRules |> List.map _.RuleId |> should equal [ "7.1-1" ]
+    step.Details.Head |> should equal "2 of its 8 failures have a safe auto fix (no guesswork) not chosen yet."
+    step.Details |> List.exists (fun d -> d.StartsWith "3 failures have an auto fix that guesses" && d.Contains "in Structure… rather than running another auto fix") |> should be True
+    step.Details |> should contain "2 failures have no auto fix: fix them in Structure…, or where the PDF was made."
+    step.TopRules |> List.map _.RuleId |> should equal [ "7.1-8"; "7.1-1" ]
 
 [<Fact>]
-let ``with every auto fix chosen, or edits not in the PDF yet, it's Export and check again`` () =
+let ``the metadata fix isn't suggested until the safe fixes fix every other failure`` () =
+    let waiting = [ failure "7.1" 10 PdfFixOptions.Tabs; failure "5" 1 PdfFixOptions.Metadata; failure "7.1" 1 PdfFixOptions.None ]
+    let ready = [ failure "7.1" 10 PdfFixOptions.Tabs; failure "5" 1 PdfFixOptions.Metadata ]
+    let tabsChosen = { nothingDone with AutoFixesChosen = Some PdfFixOptions.Tabs }
+
+    let step = decide waiting tabsChosen
+    step.Title |> should equal "Export and check again"
+    step.Details |> should contain "1 failure has only the XMP metadata fix, which veraPDF only writes once every other failure is fixed: leave it until then."
+    step.TopRules |> List.map _.RuleId |> should equal [ "7.1-1" ]
+
+    let step = decide ready tabsChosen
+    step.Title |> should equal "Choose auto fixes"
+    step.Details.Head |> should equal "1 of its 2 failures has a safe auto fix (no guesswork) not chosen yet."
+
+[<Fact>]
+let ``only guessing auto fixes left: check the structure, not another auto fix pass`` () =
+    let rows = [ yield! times 3 (failure "7.1" 8 PdfFixOptions.Lists); failure "7.1" 1 PdfFixOptions.None ]
+    let step = decide rows nothingDone
+
+    step.Title |> should equal "Check the structure"
+    step.Details.Head |> should haveSubstring "3 of its 4 failures have only an auto fix that guesses"
+    step.Details |> List.exists (fun d -> d.StartsWith "Rather than another auto fix pass, open Structure…") |> should be True
+    step.TopRules |> List.map _.RuleId |> should equal [ "7.1-8"; "7.1-1" ]
+
+[<Fact>]
+let ``with auto fixes chosen, or edits not in the PDF yet, it's Export and check again`` () =
     let rows = [ failure "7.1" 8 PdfFixOptions.Bookmarks; failure "7.1" 1 PdfFixOptions.None ]
     let chosen = decide rows { nothingDone with AutoFixesChosen = Some PdfFixOptions.Bookmarks }
     let edited = decide [ failure "7.1" 1 PdfFixOptions.None ] { nothingDone with EditsPending = 1 }
 
     chosen.Title |> should equal "Export and check again"
     chosen.Details.Head |> should equal "The auto fixes chosen fix 1 failure."
-    chosen.Details |> should contain "1 failure has no auto fix: fix them in Structure…, or where the PDF was made. The rules with the most:"
+    chosen.Details |> should contain "1 failure has no auto fix: fix them in Structure…, or where the PDF was made."
     edited.Title |> should equal "Export and check again"
     edited.Details.Head |> should equal "1 edit is not in the PDF yet."
-
-[<Fact>]
-let ``only failures by hand: the three rules broken the most, the most first`` () =
-    let rows =
-        [ failure "7.1" 1 PdfFixOptions.None
-          yield! times 5 (failure "7.18" 5 PdfFixOptions.None)
-          yield! times 2 (failure "7.3" 1 PdfFixOptions.None)
-          yield! times 3 (failure "7.2" 34 PdfFixOptions.None)
-          // Warnings aren't what it counts.
-          yield! times 9 (finding "7.5" 1 FindingSeverity.Warning PdfFixOptions.None) ]
-    let step = decide rows nothingDone
-
-    step.Title |> should equal "Fix the rules with the most failures"
-    step.Details.Head |> should haveSubstring "11 failures left, none with an auto fix."
-    step.TopRules |> List.map (fun g -> g.RuleId, g.Findings.Length) |> should equal [ "7.18-5", 5; "7.2-34", 3; "7.3-1", 2 ]
-
 let private texts (window: Window) =
     window.GetVisualDescendants() |> Seq.choose (function :? TextBlock as t -> Some(string t.Text) | _ -> None) |> List.ofSeq
 

@@ -327,12 +327,20 @@ the review a person did, kept with the file it was done on.
 A PDF that fails opens on a **NEXT STEP** row at the top of the list (an "i", in
 the primary colour), whose details say what to do next and why, from its
 failures and what's been done in its review: with no tags, **Suggest Structure…**
-(once suggested or edited, **Export…** to tag a copy); else, with failures an
-auto fix not chosen yet fixes, **Auto Fixes…** then Export…; with those chosen,
-or edits not in the PDF yet, Export… to check again; else, fixing by hand, the
-rules with the most failures first. Where failures have no auto fix, it lists
-the three rules broken the most, and in how many places. Like the PASS row, it
-can't be dismissed and isn't counted with the failures and warnings.
+(once suggested or edited, **Export…** to tag a copy); else, with failures a
+safe auto fix (one of the fixes that need no guesswork, as Auto Fixes… starts
+with ticked) not chosen yet fixes, **Auto Fixes…** then Export…; with fixes
+chosen, or edits not in the PDF yet, Export… to check again; else, where only an
+auto fix that guesses (like lists, or headings from the table of contents) fixes
+them, to look at them in **Structure…** rather than run another auto fix pass
+(failures only the XMP metadata fix fixes wait, as the metadata fix does, until
+the safe fixes would fix every other failure);
+else, fixing by hand, the rules with the most failures first. It lists the three
+rules left with the most failures, and in how many places, naming a guessing
+auto fix where one applies. A PDF that passes with warnings not dismissed has
+one too, under its PASS row (which it still opens on): review the warnings, and
+dismiss those that are inaccurate. Like the PASS row, it can't be dismissed and
+isn't counted with the failures and warnings.
 
 The results list is a row per rule, in the order each is first found by page
 (unlocated failures — those with no `pages[N]` in their context, such as
@@ -505,7 +513,9 @@ the changes are written to a new copy. Three buttons under the details, and
   structure. The fixes are part of the review, so **Save** keeps them (as `fixes`, by the names `--fixes` takes)
   and they're chosen again when the PDF is reopened. Until some are chosen, the
   first time the dialog opens the safe fixes the PDF needs start ticked (the
-  same ones as the CLI's `safe`); after
+  same ones as the CLI's `safe`), except **Fix XMP metadata** while the safe
+  fixes wouldn't fix every other failure (veraPDF only writes the PDF/UA
+  identifier once the document would conform); after
   that it shows what was chosen. Its badge counts the chosen ones.
 - **File › Save** (⌘S / Ctrl+S; there's no button, since closing asks) keeps your review (dismissed warnings, edits, the
   title, the auto fixes chosen) in `<name>.pdf.legibyl.json` next to the PDF, to pick up where you left

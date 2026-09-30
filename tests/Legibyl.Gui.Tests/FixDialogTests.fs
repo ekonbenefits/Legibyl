@@ -106,8 +106,8 @@ let ``the fix dialog lists what this PDF needs, in the order fixes run, ticking 
               // Opt-in: it visits the web.
               "Describe web links from their pages", (false, "with tagging")
               "Document title", (true, "1 found")
-              // Every failure here is fixable, so veraPDF can fix the metadata.
-              "Fix XMP metadata", (true, "1 found") ])
+              // Lists, and tagging, aren't ticked, so veraPDF can't fix the metadata yet.
+              "Fix XMP metadata", (false, "1 found") ])
 
 [<Fact>]
 let ``showing all fixes lists the ones this PDF doesn't need too, still in order`` () =
@@ -154,7 +154,20 @@ let ``metadata starts unticked when some failure can't be fixed, and says why`` 
         |> ignore
 
         shown["Fix XMP metadata"] |> should equal (false, "2 found")
-        text |> should haveSubstring "veraPDF only fixes metadata once every other failure is fixed")
+        text |> should haveSubstring "veraPDF only writes it once every other failure is fixed")
+
+[<Fact>]
+let ``metadata starts ticked when the fixes ticked at first fix every failure`` () =
+    onUiThread (fun () ->
+        let mutable shown = Map.empty
+        withDialog
+            [ finding PdfFixOptions.Tabs
+              finding (PdfFixOptions.Metadata ||| PdfFixOptions.Title)
+              finding PdfFixOptions.Metadata ]
+            (fun dialog -> shown <- options dialog)
+        |> ignore
+
+        shown["Fix XMP metadata"] |> should equal (true, "2 found"))
 
 [<Fact>]
 let ``continuing applies the ticked fixes`` () =
@@ -172,7 +185,6 @@ let ``continuing applies the ticked fixes`` () =
                 PdfFixOptions.Tabs
                 ||| PdfFixOptions.FontGlyphs
                 ||| PdfFixOptions.Title
-                ||| PdfFixOptions.Metadata
             )))
 
 [<Fact>]

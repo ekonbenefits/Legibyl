@@ -87,7 +87,7 @@ let ``a PDF that passes with a warning opens on its Pass row, the warning below 
             let menu = (HeadlessWindow.resultsList window).ContextMenu |> nonNull |> _.Items |> Seq.cast<MenuItem> |> List.ofSeq
             closeWithoutSaving window
 
-            (match items with PassItem _ :: RuleItem(group, _) :: _ -> group.RuleId = "Structure-7" | _ -> false) |> should be True
+            (match items with PassItem _ :: NextStepItem step :: RuleItem(group, _) :: _ -> step.Title = "Review the warnings" && group.RuleId = "Structure-7" | _ -> false) |> should be True
             (match selected with :? ResultItem as PassItem _ -> true | _ -> false) |> should be True
             shown |> should contain "1 warning below is worth a look: what Legibyl noticed that PDF/UA doesn't require."
             shown |> should contain "Title: The Community Garden"

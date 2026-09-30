@@ -328,9 +328,12 @@ let chooseFixOptions
         && found PdfFixOptions.TagFromLayout > 0
     let applies (choice: FixChoice) = found choice.Option > 0 || withTagging choice
     // veraPDF only fixes metadata (adding the PDF/UA identifier) when the document would then
-    // conform, so it's only worth ticking when every failure can be fixed here.
+    // conform, so it's only worth ticking when the safe fixes fix every failure.
     let everyFailureFixable =
-        report.Findings |> Seq.forall (fun f -> f.Passed || f.Severity <> FindingSeverity.Failure || f.IsFixable)
+        report.Findings
+        |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure)
+        |> Seq.map _.FixOptions
+        |> FixNames.metadataReady
     let tickedAtFirst (choice: FixChoice) =
         applies choice && not choice.OptIn && (choice.Option <> PdfFixOptions.Metadata || everyFailureFixable)
     window.Content <-
@@ -353,7 +356,7 @@ let chooseFixOptions
                     | n -> $"{n} found"
                 let detail =
                     if choice.Option = PdfFixOptions.Metadata && applies choice && not everyFailureFixable then
-                        $"{choice.Detail} Unticked: veraPDF only fixes metadata once every other failure is fixed, and some here can't be fixed automatically."
+                        $"{choice.Detail} Unticked: veraPDF only writes it once every other failure is fixed, and some here need more than the fixes ticked at first (a fix that guesses, tagging, or fixing by hand)."
                     else
                         choice.Detail
                 CheckBox.create [

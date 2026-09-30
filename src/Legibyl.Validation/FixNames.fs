@@ -48,6 +48,13 @@ let safe =
 let ofOptions (options: PdfFixOptions) =
     [ for name, option in names do if options.HasFlag option then name ]
 
+/// Whether the metadata fix is worth choosing, given what fixes each failure: veraPDF only writes
+/// the PDF/UA identifier when the document would then conform, so only when a safe fix (the
+/// metadata fix among them) fixes every failure. Otherwise it waits for them: fixes that guess,
+/// tagging an untagged PDF, or fixing by hand.
+let metadataReady (failureFixes: PdfFixOptions seq) =
+    failureFixes |> Seq.forall (fun fixes -> fixes &&& safe <> PdfFixOptions.None)
+
 /// The fixes named (any case); names it doesn't know are left out.
 let toOptions (named: string seq) =
     named

@@ -999,10 +999,11 @@ module private MainView =
             // Dismissed warnings are hidden unless the user asks to see them.
             let rows = if showDismissed.Current then allRows else allRows |> List.filter (not << _.Dismissed)
 
-            // For a PDF that fails: what to do next, from its findings and what's been done in its review.
+            // What to do next, from its findings and what's been done in its review: for a PDF that
+            // fails, and for one that passes with warnings not dismissed.
             let nextStep =
                 match report with
-                | Some report when not report.IsCompliant ->
+                | Some _ ->
                     NextStep.decide
                         allRows
                         { StructureSuggested = pending.Current.TagsFromReview
@@ -1642,6 +1643,14 @@ module private MainView =
                                                         TextBlock.fontWeight FontWeight.SemiBold
                                                     ]
                                                     paragraph group.Message
+                                                    match group.Fixable with
+                                                    | first :: _ when not (NextStep.isSafeFix first) ->
+                                                        TextBlock.create [
+                                                            TextBlock.text $"Auto fix (guesses): {first.Fixable}"
+                                                            TextBlock.textWrapping TextWrapping.Wrap
+                                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                                        ]
+                                                    | _ -> ()
                                                 ]
                                             ]
                                         )
