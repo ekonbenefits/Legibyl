@@ -26,6 +26,8 @@ let private tree () =
       Language = null
       PageNumber = Nullable()
       ContentLeafCount = 0
+      ColSpan = 1
+      RowSpan = 1
       Children = [||] }
 
 /// A temporary file standing in for a PDF (the cache only looks at its path and timestamp).

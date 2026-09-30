@@ -27,6 +27,7 @@
     <Compile Include="FindingMarkers.fs" />
     <Compile Include="LayoutOrder.fs" />
     <Compile Include="StructureColors.fs" />
+    <Compile Include="TableLayout.fs" />
     <Compile Include="StructurePreview.fs" />
     <Compile Include="StructureActions.fs" />
     <Compile Include="StructureBlocks.fs" />

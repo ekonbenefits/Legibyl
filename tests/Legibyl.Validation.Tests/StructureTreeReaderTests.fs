@@ -223,3 +223,35 @@ let ``attributes followed by revision numbers are read, as Canva writes them`` (
     let geometry = figure.Geometry |> notNull
     (geometry.Left, geometry.Bottom, geometry.Right, geometry.Top) |> should equal (100.0, 200.0, 300.0, 400.0)
     root.Children[1].Geometry |> should be Null
+
+[<Fact>]
+let ``a table cell's column and row spans are read from its attributes`` () =
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(output.Path))
+        let page = document.AddNewPage()
+        let tableAttributes (entries: (string * PdfObject) list) =
+            let attributes = PdfDictionary()
+            attributes.Put(PdfName.O, PdfName.Table) |> ignore
+            for key, value in entries do
+                attributes.Put(PdfName key, value) |> ignore
+            attributes
+        let cell (tag: PdfName) (attributes: PdfObject option) =
+            let element = structElem tag page
+            attributes |> Option.iter (fun a -> element.Put(PdfName.A, a) |> ignore)
+            element
+        // Spanning two columns (in an array with a revision number), two rows, and neither.
+        let wide = cell PdfName.TH (Some(arrayOf [ tableAttributes [ "Scope", PdfName.Column; "ColSpan", PdfNumber 2 ]; PdfNumber 0 ]))
+        let tall = cell PdfName.TD (Some(tableAttributes [ "RowSpan", PdfNumber 3 ]))
+        let plain = cell PdfName.TD None
+        let row = structElem PdfName.TR page
+        row.Put(PdfName.K, arrayOf [ wide; tall; plain ]) |> ignore
+        let table = structElem PdfName.Table page
+        table.Put(PdfName.K, arrayOf [ row ]) |> ignore
+        setStructTreeRoot document (arrayOf [ table ])
+
+    let root = reader.ReadStructureTree output.Path |> notNull
+
+    let cells = root.Children[0].Children[0].Children
+    [ for c in cells -> c.Tag, c.ColSpan, c.RowSpan ] |> should equal [ "TH", 2, 1; "TD", 1, 3; "TD", 1, 1 ]
+    (root.Children[0].ColSpan, root.Children[0].RowSpan) |> should equal (1, 1)

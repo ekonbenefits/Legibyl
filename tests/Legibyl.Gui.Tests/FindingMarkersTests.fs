@@ -40,6 +40,8 @@ let private node (tag: string) (geometry: StructureGeometry | null) (children: S
       Language = null
       PageNumber = (match geometry with NonNull g -> Nullable g.PageNumber | Null -> Nullable())
       ContentLeafCount = 1
+      ColSpan = 1
+      RowSpan = 1
       Children = List.toArray children }
 
 let private finding (severity: FindingSeverity) (clause: string) (geometry: StructureGeometry | null) (element: string | null) =

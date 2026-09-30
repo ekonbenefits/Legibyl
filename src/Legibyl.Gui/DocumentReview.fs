@@ -347,6 +347,8 @@ module SuggestedTree =
           Language = null
           PageNumber = (match geometry with NonNull g -> Nullable g.PageNumber | Null -> Nullable())
           ContentLeafCount = (if isNull geometry then 0 else 1)
+          ColSpan = 1
+          RowSpan = 1
           Children = children }
 
     /// How much of inner is inside outer, 0-1.

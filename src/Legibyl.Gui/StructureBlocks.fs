@@ -536,7 +536,9 @@ and tocGrid (selection: Selection) (toc: StructureNode) : IView =
 /// Renders semantic PDF tables as a visual grid instead of a vertical stack:
 /// Table -> TR elements become rows, and TH/TD children become cells. This keeps
 /// the exported/tree semantics unchanged while making the layout tab much closer
-/// to how an HTML table with visible borders would look.
+/// to how an HTML table with visible borders would look. Cells are placed as HTML places
+/// them: each in the first column the cells before it (and those spanning down from rows
+/// above) leave free, across its ColSpan columns and down its RowSpan rows.
 and tableGrid (selection: Selection) (table: StructureNode) : IView =
     let tableCells (row: StructureNode) =
         match row.Children |> Seq.filter (fun child -> child.Tag = "TH" || child.Tag = "TD") |> List.ofSeq with
@@ -547,7 +549,8 @@ and tableGrid (selection: Selection) (table: StructureNode) : IView =
     if rows.IsEmpty then
         fallbackStack selection table
     else
-        let columnCount = max 1 (rows |> List.map (tableCells >> List.length) |> List.max)
+        let placed = TableLayout.place (rows |> List.map (tableCells >> List.map (fun cell -> cell, cell.ColSpan, cell.RowSpan)))
+        let columnCount = max 1 (placed |> List.map (fun p -> p.Column + p.ColumnSpan) |> List.fold max 0)
         Grid.create [
             Grid.margin (0.0, 4.0, 0.0, 0.0)
             Theme.resources [ Grid.BackgroundProperty, Theme.Tokens.Fill ]
@@ -555,19 +558,19 @@ and tableGrid (selection: Selection) (table: StructureNode) : IView =
             Grid.rowDefinitions (String.Join(",", List.replicate rows.Length "Auto"))
             Grid.children [
                 for rowIndex, row in List.indexed rows do
-                    match tableCells row with
-                    | [] ->
+                    if (tableCells row).IsEmpty then
                         ContentControl.create [
                             Grid.row rowIndex
                             Grid.columnSpan columnCount
                             ContentControl.content (element selection (Thickness(0.0, 0.0, 0.0, 6.0)) Int32.MaxValue row)
                         ]
-                    | cells ->
-                        for columnIndex, cell in List.indexed cells do
-                            ContentControl.create [
-                                Grid.row rowIndex
-                                Grid.column columnIndex
-                                ContentControl.content (element selection (Thickness 1.0) Int32.MaxValue cell)
-                            ]
+                for p in placed do
+                    ContentControl.create [
+                        Grid.row p.Row
+                        Grid.column p.Column
+                        Grid.columnSpan p.ColumnSpan
+                        Grid.rowSpan p.RowSpan
+                        ContentControl.content (element selection (Thickness 1.0) Int32.MaxValue p.Cell)
+                    ]
             ]
         ]

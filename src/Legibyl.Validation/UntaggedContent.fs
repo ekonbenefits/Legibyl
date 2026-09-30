@@ -251,6 +251,8 @@ let private node (tag: string) (content: string | null) (geometry: StructureGeom
       Language = null
       PageNumber = Nullable page
       ContentLeafCount = (if children.IsEmpty then 1 else 0)
+      ColSpan = 1
+      RowSpan = 1
       Children = List.toArray children }
 
 /// A piece as a person reads it: "a fill, 612 × 792 pt (the whole page)", or its text.

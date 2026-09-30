@@ -343,6 +343,10 @@ type StructureNode =
       /// Number of marked-content/annotation references directly under this element (i.e.
       /// actual tagged page content it owns), not counting nested structure elements.
       ContentLeafCount: int
+      /// For a table cell (TH, TD), how many columns and rows it spans (its /ColSpan and
+      /// /RowSpan attributes); 1 otherwise, or when it doesn't say.
+      ColSpan: int
+      RowSpan: int
       /// Child structure elements, in document (reading) order.
       Children: Collections.Generic.IReadOnlyList<StructureNode> }
 

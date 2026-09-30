@@ -33,6 +33,8 @@ let private node (tag: string) (children: StructureNode list) =
       Language = null
       PageNumber = Nullable()
       ContentLeafCount = 0
+      ColSpan = 1
+      RowSpan = 1
       Children = List.toArray children }
 
 /// Document > chapters > verses > one span each.
@@ -121,7 +123,9 @@ let ``the preview shows the page with every element outlined, and the selection 
             { node "P" [] with
                 Geometry = { PageNumber = 1; Left = 72.0; Bottom = top - 14.0; Right = 300.0; Top = top }
                 PageNumber = Nullable 1
-                ContentLeafCount = 1 }
+                ContentLeafCount = 1
+                ColSpan = 1
+                RowSpan = 1 }
         let window = StructureTreeWindow(node "StructTreeRoot" [ node "Document" [ paragraph 700.0; paragraph 680.0; paragraph 660.0 ] ], pdf)
         window.Show()
         let note () = descendants<TextBlock> window |> List.map (fun t -> string t.Text) |> List.tryFind (fun t -> t.StartsWith "Page 1:")

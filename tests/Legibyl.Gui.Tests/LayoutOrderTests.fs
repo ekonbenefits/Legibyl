@@ -28,6 +28,8 @@ let internal node (tag: string) (content: string | null) (geometry: StructureGeo
       Language = null
       PageNumber = (match geometry with NonNull g -> Nullable g.PageNumber | Null -> Nullable())
       ContentLeafCount = (if children.IsEmpty then 1 else 0)
+      ColSpan = 1
+      RowSpan = 1
       Children = List.toArray children }
 
 // A two-column page, as a newsletter template exports it: its running header and footer first,

@@ -129,6 +129,29 @@ let rec private bboxFromAttributes (attributes: COSObject | null) pageNumber =
 let private layoutBBoxGeometry (elem: PDStructElem) (pageNumber: int option) =
     pageNumber |> Option.bind (bboxFromAttributes (elem.getKey(atom "A")))
 
+/// An integer attribute (a table cell's /ColSpan or /RowSpan) from the first of an element's
+/// /A dictionaries that has it (see bboxFromAttributes for how /A is written).
+let rec private integerAttribute (key: string) (attributes: COSObject | null) =
+    match attributes with
+    | null -> None
+    | attributes when attributes.getType () = COSObjType.COS_DICT ->
+        match attributes.knownKey (atom key) with
+        | NonNull known when known.booleanValue () ->
+            match attributes.getKey (atom key) with
+            | null -> None
+            | value -> value.getInteger () |> Option.ofObj |> Option.map (fun n -> int (n.longValue ()))
+        | _ -> None
+    | attributes when attributes.getType () = COSObjType.COS_ARRAY ->
+        seq { 0 .. cosSize attributes - 1 } |> Seq.tryPick (fun i -> integerAttribute key (attributes.at i))
+    | _ -> None
+
+/// How many columns or rows a table cell spans: at least 1 (a missing or nonsense span is 1).
+let private cellSpan (key: string) (tag: string) (elem: PDStructElem) =
+    if tag = "TH" || tag = "TD" then
+        integerAttribute key (elem.getKey (atom "A")) |> Option.filter (fun n -> n > 1) |> Option.defaultValue 1
+    else
+        1
+
 // ---- Structure element children ----
 
 /// The widget annotation referenced by an object reference, if it is one.
@@ -467,6 +490,8 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
       Language = nullIfEmpty (elem.getLang () |?> _.toString())
       PageNumber = Option.toNullable displayPage
       ContentLeafCount = leaves.Length
+      ColSpan = cellSpan "ColSpan" tag elem
+      RowSpan = cellSpan "RowSpan" tag elem
       Children = children }
 
 /// Reports reading progress to an optional sink: stage changes always, updates within a
@@ -545,6 +570,8 @@ let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) :
               Language = null
               PageNumber = Nullable()
               ContentLeafCount = 0
+              ColSpan = 1
+              RowSpan = 1
               Children = children }
     finally
         doc.close ()
