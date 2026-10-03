@@ -1,7 +1,7 @@
 # Legibyl
 
 Legibyl checks PDFs for accessibility (PDF/UA-1 and PDF/UA-2) and helps fix them:
-a desktop app (Avalonia, on Windows, macOS and Linux), and a command-line tool
+a desktop app (Avalonia, on Windows, Linux and Apple-silicon Macs), and a command-line tool
 for scripts and AI agents. It explains each failure in plain language, fixes
 what it safely can, lets you check and edit the tags a screen reader uses (alt
 text, headings, link descriptions), and tags untagged PDFs from what their pages
@@ -158,7 +158,11 @@ are shown; by default it's the first. Screenshots are 1× scale.
 dotnet publish src/Legibyl.Gui/Legibyl.Gui.fsproj -c Release -r win-x64 --self-contained true -o publish/gui
 ```
 
-Use `-r osx-arm64`, `-r osx-x64`, or `-r linux-x64` for other platforms.
+Use `-r win-arm64`, `-r linux-x64`, `-r linux-arm64` or `-r osx-arm64` for the
+other platforms Legibyl supports: Windows and Linux (x64 and Arm64), and Macs
+with Apple silicon. **Intel Macs (`osx-x64`) aren't supported:** Tesseract's OCR
+has no native library for them (and nor has ONNX Runtime, planned for tables in
+#224), so the app would be missing parts, and nothing builds or tests it there.
 
 The published output bundles IKVM's translated JRE (`IKVM.Java.dll`), so
 the app runs standalone with no external Java installation.
@@ -221,8 +225,8 @@ bundle is built. Run it on a Mac:
 dotnet msbuild src/Legibyl.Gui/Legibyl.Gui.fsproj -t:BundleApp -restore -p:Configuration=Release -p:RuntimeIdentifier=osx-arm64 -p:SelfContained=true -p:PublishDir=../../artifacts/macos/osx-arm64/
 ```
 
-The app is written to `artifacts/macos/osx-arm64/Legibyl.app`; use
-`osx-x64` for Intel Macs. It isn't signed or notarized yet, so macOS blocks
+The app is written to `artifacts/macos/osx-arm64/Legibyl.app` (Apple silicon
+only; Intel Macs aren't supported). It isn't signed or notarized yet, so macOS blocks
 the first launch of a downloaded copy: allow it under System Settings >
 Privacy & Security > **Open Anyway**, or run
 `xattr -dr com.apple.quarantine Legibyl.app`. To share it as a disk image:
@@ -762,8 +766,8 @@ text region, full width and a line tall, that none of its words cover (a badge's
 "5th grade" drawn as outlines under its name written as text) is read too, and
 what OCR finds there joins the region's text in order down the page, when it
 reads as words rather than decoration. The preview marks that text **OCR:**. Tesseract
-has native libraries for Windows, Linux and Apple Silicon Macs; elsewhere (Intel
-Macs) OCR is skipped and those regions show no text.
+has native libraries for every platform Legibyl supports (Windows, Linux and
+Apple-silicon Macs).
 
 Tagging from the layout (Export… for an untagged PDF in the GUI, and
 `tag-from-layout`, or `layout apply`, in the CLI; only for a document with no

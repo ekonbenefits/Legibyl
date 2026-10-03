@@ -221,8 +221,6 @@ module LayoutSuggestions =
             pixels[i * 3 + 2] <- source[i * 4 + 2]
         RgbImage.Wrap(pixels, bitmap.Width, bitmap.Height)
 
-/// Reads text drawn as outlines or pixels, with Tesseract and its English model (shipped in
-/// the app's tessdata folder). Unavailable where Tesseract has no native library (Intel Macs).
     // ---- As a layout file (see LayoutFile) ----
 
     let private boxOf (geometry: StructureGeometry) =
@@ -301,6 +299,9 @@ module LayoutSuggestions =
             |> List.tryFind (fun block -> block.Tag = "H1" && not (String.IsNullOrWhiteSpace block.Text))
             |> Option.map _.Text.Trim()
 
+/// Reads text drawn as outlines or pixels, with Tesseract and its English model (shipped in
+/// the app's tessdata folder). Unavailable where Tesseract has no native library: none of the
+/// platforms Legibyl supports (Intel Macs, which it doesn't, have none).
 module TextRecognition =
     open Tesseract
 
