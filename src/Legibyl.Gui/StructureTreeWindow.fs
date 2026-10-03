@@ -646,9 +646,9 @@ module private StructureView =
                 }
                 |> ignore
 
-            // Above a tagged PDF's blocks: the reading order (see StructureActions.orderBar).
-            let orderBar () : IView =
-                StructureActions.orderBar
+            // A tagged PDF's reading order: the selected element's place, and the shown page's
+            // (see StructureActions.moveButtons and pageOrderButtons).
+            let orderNeeds () : StructureActions.OrderBarNeeds =
                     { Page = shownPage.Current
                       Selected = selected.Current
                       Parents = parents ()
@@ -721,13 +721,15 @@ module private StructureView =
 
             // Below the blocks (away from Move Up and Down): going to a page, and to the blocks
             // with findings, each with arrows for the one before and after.
-            let navigationBar () : IView =
+            let navigationBar (pages: int list) : IView =
                 let arrow (up: bool) (name: string) (key: KeyGesture) (enabled: bool) (go: unit -> unit) =
                     Button.create [
                         Button.content (Icons.iconPath (if up then Icons.chevronUp else Icons.chevronDown) Theme.Tokens.Primary 12.0 [])
                         Button.padding (7.0, 6.0)
-                        Button.margin (2.0, 0.0, 0.0, 4.0)
+                        Button.margin (2.0, 0.0, 0.0, 0.0)
                         Button.isEnabled enabled
+                        // Going somewhere, not editing: no border, on the shaded strip.
+                        Theme.resources [ Button.ThemeProperty, "BorderlessButton" ]
                         AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, key, ValueNone)
                         AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, name, ValueNone)
                         ToolTip.tip $"{name} ({key})"
@@ -737,9 +739,8 @@ module private StructureView =
                     TextBlock.create [
                         TextBlock.text text
                         TextBlock.verticalAlignment VerticalAlignment.Center
-                        TextBlock.margin (left, 0.0, 6.0, 4.0)
+                        TextBlock.margin (left, 0.0, 6.0, 0.0)
                     ]
-                let pages = blockPages ()
                 let page = shownPage.Current
                 let before = pages |> List.filter (fun p -> page |> Option.exists (fun page -> p < page)) |> List.tryLast
                 let after = pages |> List.tryFind (fun p -> match page with Some page -> p > page | None -> true)
@@ -750,9 +751,15 @@ module private StructureView =
                     [ if failing > 0 then $"{blocks failing} with failures"
                       if warning > 0 then $"{blocks warning} with warnings" ]
                     |> String.concat ", "
-                WrapPanel.create [
+                Border.create [
                     DockPanel.dock Dock.Bottom
-                    WrapPanel.margin (8.0, 6.0, 8.0, 0.0)
+                    Border.margin (0.0, 6.0, 0.0, 0.0)
+                    Border.padding (8.0, 4.0)
+                    Border.cornerRadius 4.0
+                    Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Fill ]
+                    AttrBuilder<Border>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Go to", ValueNone)
+                    Border.child (
+                  WrapPanel.create [
                     WrapPanel.children [
                         if pages.Length > 1 then
                             label "Page" 0.0
@@ -760,7 +767,6 @@ module private StructureView =
                                 ComboBox.dataItems pages
                                 ComboBox.selectedIndex (match page with Some page -> pages |> List.tryFindIndex ((=) page) |> Option.defaultValue -1 | None -> -1)
                                 ComboBox.minWidth 64.0
-                                ComboBox.margin (0.0, 0.0, 0.0, 4.0)
                                 AttrBuilder<ComboBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Go to page", ValueNone)
                                 ToolTip.tip "Go to a page's first block."
                                 ComboBox.onSelectedItemChanged (
@@ -779,7 +785,7 @@ module private StructureView =
                             StackPanel.create [
                                 StackPanel.orientation Orientation.Horizontal
                                 StackPanel.verticalAlignment VerticalAlignment.Center
-                                StackPanel.margin ((if pages.Length > 1 then 20.0 else 0.0), 0.0, 6.0, 4.0)
+                                StackPanel.margin ((if pages.Length > 1 then 20.0 else 0.0), 0.0, 6.0, 0.0)
                                 StackPanel.spacing 4.0
                                 ToolTip.tip summary
                                 AttrBuilder<StackPanel>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, summary, ValueNone)
@@ -795,6 +801,8 @@ module private StructureView =
                             arrow true "Previous block with failures or warnings" (KeyGesture(Key.F8, KeyModifiers.Shift)) true (fun () -> nextFinding false)
                             arrow false "Next block with failures or warnings" (KeyGesture(Key.F8)) true (fun () -> nextFinding true)
                     ]
+                  ]
+                    )
                 ]
 
             let layoutTab =
@@ -807,8 +815,9 @@ module private StructureView =
                     Grid.children [
                         DockPanel.create [
                           DockPanel.children [
-                        if not isSuggested then orderBar ()
-                        navigationBar ()
+                        // Getting around the blocks; editing is on the right.
+                        let pages = blockPages ()
+                        if pages.Length > 1 || not findingMarks.IsEmpty then navigationBar pages
                         if not findingMarks.IsEmpty then
                             ContentControl.create [
                                 DockPanel.dock Dock.Right
@@ -856,27 +865,48 @@ module private StructureView =
                                             TextBlock.text "Selected element"
                                             TextBlock.fontWeight FontWeight.SemiBold
                                             TextBlock.verticalAlignment VerticalAlignment.Center
+                                            AttrBuilder<TextBlock>.CreateProperty<int>(Automation.AutomationProperties.HeadingLevelProperty, 2, ValueNone)
                                         ]
                                     ]
                                 ]
+                                // What the selection's edits are: its place in the reading order, its tag, merging.
                                 StackPanel.create [
                                   Grid.row 1
-                                  StackPanel.margin (0.0, 0.0, 0.0, 8.0)
                                   StackPanel.children [
+                                    if not isSuggested then StructureActions.moveButtons (orderNeeds ())
+                                    StructureActions.selectionActions
+                                        { Selected = selected
+                                          Edits = edits
+                                          Suggested = isSuggested
+                                          SaveEdits = saveEdits
+                                          MarkAllLike = markAllLike
+                                          EditNode = editNode }
+                                  ]
+                                ]
+                                // The page it's on: its reading order, and the page itself below.
+                                StackPanel.create [
+                                  Grid.row 2
+                                  StackPanel.children [
+                                    Border.create [
+                                        Border.height 1.0
+                                        Border.margin (0.0, 4.0, 0.0, 8.0)
+                                        Theme.resources [ Border.BackgroundProperty, Theme.Tokens.Border ]
+                                    ]
+                                    TextBlock.create [
+                                        TextBlock.text (match shownPage.Current with Some page -> $"Page {page}" | None -> "Page")
+                                        TextBlock.fontWeight FontWeight.SemiBold
+                                        TextBlock.margin (0.0, 0.0, 0.0, 6.0)
+                                        AttrBuilder<TextBlock>.CreateProperty<int>(Automation.AutomationProperties.HeadingLevelProperty, 2, ValueNone)
+                                    ]
+                                    if not isSuggested then StructureActions.pageOrderButtons (orderNeeds ())
                                     TextBlock.create [
                                         TextBlock.text previewNote.Current
                                         TextBlock.textWrapping TextWrapping.Wrap
+                                        TextBlock.margin (0.0, 0.0, 0.0, 8.0)
                                         Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                     ]
                                   ]
                                 ]
-                                StructureActions.selectionActions
-                                    { Selected = selected
-                                      Edits = edits
-                                      Suggested = isSuggested
-                                      SaveEdits = saveEdits
-                                      MarkAllLike = markAllLike
-                                      EditNode = editNode }
                                 // The selected block's page, and for a link, the page it goes to below it.
                                 // Clicking an element on the page selects it (shift-click extends).
                                 let imageBox (row: int) (image: Bitmap option) (clickable: bool) =
@@ -1195,30 +1225,42 @@ module private StructureView =
                             ]
                         ]
                     ]
-                    StackPanel.create [
+                    DockPanel.create [
                         Grid.row 2
-                        StackPanel.orientation Orientation.Horizontal
-                        StackPanel.horizontalAlignment HorizontalAlignment.Right
-                        StackPanel.margin (0.0, 8.0, 0.0, 0.0)
-                        StackPanel.children [
+                        DockPanel.margin (0.0, 8.0, 0.0, 0.0)
+                        DockPanel.children [
+                            // Not part of checking and editing: tools for other PDFs and other programs,
+                            // out of the way.
                             Button.create [
-                                Button.content "Import Edits…"
+                                DockPanel.dock Dock.Left
+                                Button.content "More ▾"
                                 Button.padding (12.0, 4.0)
-                                Button.margin (0.0, 0.0, 8.0, 0.0)
-                                ToolTip.tip
-                                    "Use the edits made for another PDF, such as an earlier version of this one: pick that PDF (its edits saved next to it, or inside a copy Legibyl saved), or the .legibyl.json file saved for it."
-                                Button.onClick importEdits
+                                AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "More", ValueNone)
+                                ToolTip.tip "Import edits made for another PDF, or export the structure as JSON."
+                                Button.flyout (
+                                    MenuFlyout.create [
+                                        MenuFlyout.placement PlacementMode.TopEdgeAlignedLeft
+                                        MenuFlyout.viewItems [
+                                            MenuItem.create [
+                                                MenuItem.header "Import Edits…"
+                                                ToolTip.tip
+                                                    "Use the edits made for another PDF, such as an earlier version of this one: pick that PDF (its edits saved next to it, or inside a copy Legibyl saved), or the .legibyl.json file saved for it."
+                                                MenuItem.onClick importEdits
+                                            ]
+                                            MenuItem.create [
+                                                MenuItem.header "Export Structure as JSON…"
+                                                ToolTip.tip "Save this hierarchy as JSON, for an AI agent or other tooling. The PDF isn't changed."
+                                                MenuItem.onClick exportJson
+                                            ]
+                                        ]
+                                    ]
+                                )
                             ]
                             Button.create [
-                                Button.content "Export JSON…"
-                                Button.padding (12.0, 4.0)
-                                Button.margin (0.0, 0.0, 8.0, 0.0)
-                                ToolTip.tip "Save this hierarchy as JSON — useful for feeding to an AI agent or other tooling."
-                                Button.onClick exportJson
-                            ]
-                            Button.create [
+                                DockPanel.dock Dock.Right
                                 Button.content "Close"
                                 Button.padding (12.0, 4.0)
+                                Button.horizontalAlignment HorizontalAlignment.Right
                                 Button.isCancel true
                                 Button.onClick (fun _ -> window.Close())
                             ]

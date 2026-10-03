@@ -6,6 +6,12 @@ open FsUnit.Xunit
 open Legibyl.Gui
 open Legibyl.Validation
 
+/// What a button says: its screen-reader name (an edit button's label, after its pencil), else its text.
+let private buttonText (b: Avalonia.Controls.Button) =
+    match Avalonia.Automation.AutomationProperties.GetName b with
+    | null | "" -> string b.Content
+    | name -> name
+
 let private rect left bottom right top : StructureGeometry =
     { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
 
@@ -104,7 +110,7 @@ let private descendants<'T when 'T :> Visual> (root: Visual) : 'T list =
 let private pump () = HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
 
 let private button (window: Window) (label: string) =
-    descendants<Button> window |> List.tryFind (fun b -> string b.Content = label)
+    descendants<Button> window |> List.tryFind (fun b -> buttonText b = label)
 
 let private press (window: Window) (label: string) =
     (button window label).Value.RaiseEvent(RoutedEventArgs Button.ClickEvent)

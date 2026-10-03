@@ -37,6 +37,10 @@ let wand =
     Geometry.Parse
         "F1 M1.5,13.4 L9.9,5 L11,6.1 L2.6,14.5 Z M12.5,0.5 L13.3,2.7 L15.5,3.5 L13.3,4.3 L12.5,6.5 L11.7,4.3 L9.5,3.5 L11.7,2.7 Z M5,1.5 L5.5,2.5 L6.5,3 L5.5,3.5 L5,4.5 L4.5,3.5 L3.5,3 L4.5,2.5 Z"
 
+/// A pencil: for what edits (an edit not in the PDF yet, as the Edits tab marks them).
+let pencil =
+    Geometry.Parse "F1 M11,1.6 A1.3,1.3 0 0 1 12.8,1.6 L14.4,3.2 A1.3,1.3 0 0 1 14.4,5 L5.6,13.8 L1.4,14.6 L2.2,10.4 Z"
+
 /// Chevrons, up and down: for going to the one before and after.
 let chevronUp = Geometry.Parse "F1 M1.5,11 L8,4.5 L14.5,11 L13.1,12.4 L8,7.3 L2.9,12.4 Z"
 let chevronDown = Geometry.Parse "F1 M1.5,5 L8,11.5 L14.5,5 L13.1,3.6 L8,8.7 L2.9,3.6 Z"

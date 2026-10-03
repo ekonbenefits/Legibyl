@@ -16,6 +16,13 @@ open Legibyl.Validation
 open Legibyl.Screenshots
 open Legibyl.Gui.Tests.HeadlessSession
 
+
+/// What a button says: its screen-reader name (an edit button's label, after its pencil), else its text.
+let private buttonText (b: Button) =
+    match Automation.AutomationProperties.GetName b with
+    | null | "" -> string b.Content
+    | name -> name
+
 let private descendants<'T when 'T :> Visual> (root: Visual) : 'T list =
     root.GetVisualDescendants() |> Seq.choose (fun v -> match box v with :? 'T as c -> Some c | _ -> None) |> List.ofSeq
 
@@ -52,7 +59,7 @@ let private withFailing (test: Window -> unit) =
     try test window finally window.Close()
 
 let private button (root: Visual) (name: string) =
-    descendants<Button> root |> List.find (fun b -> (string (Automation.AutomationProperties.GetName b)).StartsWith name || string b.Content = name)
+    descendants<Button> root |> List.find (fun b -> (string (Automation.AutomationProperties.GetName b)).StartsWith name || buttonText b = name)
 
 let private openOwned (window: Window) (name: string) =
     (button window name).RaiseEvent(RoutedEventArgs Button.ClickEvent)
@@ -188,7 +195,7 @@ let ``a block can be reached, selected and left with the keyboard, and Move Up a
             pump ()
             let note = descendants<TextBlock> structure |> List.exists (fun t -> (string t.Text).StartsWith "Page ")
             let named = string (Automation.AutomationProperties.GetName second)
-            let moveUp = descendants<Button> structure |> List.find (fun b -> string b.Content = "Move Up")
+            let moveUp = descendants<Button> structure |> List.find (fun b -> buttonText b = "Move Up")
             // (Read before closing, which takes a button's shortcut off it.)
             let shortcut = moveUp.HotKey |> Option.ofObj |> Option.map (fun g -> g.Key, g.KeyModifiers)
             structure.Close()
