@@ -1287,5 +1287,11 @@ of every component, its version and licence, and the file with its source. What
 isn't part of the work is listed, not fetched: the .NET runtime's own libraries
 (system libraries), packages only used to build, and submodules that are build
 tooling (compilers, depot_tools, code generators, test suites); `--all` fetches
-them too. It's several GB (iText's repository alone is about 900 MB). Keep the folder with the release
-(or put it next to the downloads): it's what to give anyone who asks.
+them too. It's several GB (iText's repository alone is about 900 MB).
+
+Then it packs them for a GitHub release, where each file must be under 2 GiB,
+into `artifacts/source/release/`: `legibyl-<version>-source.tar` (Legibyl's
+own source and the manifest), `legibyl-<version>-dependencies-source.tar` in
+parts under 1.9 GiB (`.part01`, `.part02`...), `SHA256SUMS`, and a
+`SOURCE-README.md` saying how to join the parts. Attach those to the release
+next to the app's downloads: they're what to give anyone who asks.

@@ -10,6 +10,11 @@
 //   dotnet fsi tools/source-bundle.fsx --out <folder>
 //   dotnet fsi tools/source-bundle.fsx --only itext,verapdf   just those (any part of a name), and Legibyl
 //
+// Then it packs them for a GitHub release (each file there must be under 2 GiB), into release/
+// beside the folder: legibyl-<version>-source.tar (Legibyl's own, and the manifest), and
+// legibyl-<version>-dependencies-source.tar, the rest, in parts under 1.9 GiB (.part01...), with
+// SHA256SUMS and how to join them. (Not for --dry-run or --only.)
+//
 // What's fetched, and from where, is in the folder's MANIFEST.md, a line for each component: its
 // version, its licence, and the source (or why there's none). It fetches:
 //
@@ -31,12 +36,16 @@
 // file already fetched isn't fetched again.
 // Set GITHUB_TOKEN (or be signed in to `gh`) to resolve submodules past GitHub's anonymous limit.
 
+#r "System.Formats.Tar"
+
 open System
 open System.Diagnostics
 open System.IO
 open System.IO.Compression
 open System.Net
 open System.Net.Http
+open System.Formats.Tar
+open System.Security.Cryptography
 open System.Text.Json
 open System.Text.RegularExpressions
 
@@ -130,7 +139,7 @@ let fetch (url: string) (file: string) : Result<string, string> =
 
 /// Where some repositories really are, when what refers to them names an old mirror.
 let private moved =
-    Map.ofList [ "https://github.com/Mesa3D/mesa", "https://gitlab.freedesktop.org/mesa/mesa.git" ]
+    Map.ofList [ ("https://github.com/Mesa3D/mesa", "https://gitlab.freedesktop.org/mesa/mesa.git") ]
 
 /// A git repository not on GitHub, at a commit or branch, as a tarball: fetched shallowly with git
 /// and archived (servers like googlesource won't archive a large tree over HTTP).
@@ -204,8 +213,10 @@ entries.Add
 /// A GitHub repository's owner and name, from a repository URL.
 let github (url: string) =
     let url = if url.Contains "go.microsoft.com/fwlink/?linkid=868515" then "https://github.com/mono/SkiaSharp" else url
-    let m = Regex.Match(url, @"github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?/?$")
-    if m.Success then Some(m.Groups[1].Value, m.Groups[2].Value) else None
+    // GitHub itself, not a mirror whose path names it (chromium.googlesource.com/external/github.com/...).
+    let m = Regex.Match(url, @"^(?:https?://|git://|git@)(?:www\.)?github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?/?$")
+    // GitHub's names aren't case-sensitive (one package says Microsoft/onnxruntime, another microsoft/).
+    if m.Success then Some(m.Groups[1].Value.ToLowerInvariant(), m.Groups[2].Value.ToLowerInvariant()) else None
 
 let fetched = Collections.Generic.Dictionary<string, Result<string, string>>()
 
@@ -217,7 +228,7 @@ let isTooling (path: string) =
     Regex.IsMatch(path, @"(^|/)(build|buildtools|testing|tools|test|tests)(/|$)")
     || Regex.IsMatch(
         path,
-        @"(^|/)(depot_tools|clang|rust|jinja2|markupsafe|python-markdown|six|nasm|catapult|googletest|benchmark|android_[^/]*|llvm-build|gn|ninja|[^/]*conform[^/]*|[^/]*_cts)(/|$)"
+        @"(^|/)(depot_tools|clang|rust|jinja2|markupsafe|python-markdown|six|nasm|catapult|googletest|benchmark|android_[^/]*|llvm-build|gn|ninja|buildutils[^/]*|[^/]*conform[^/]*|[^/]*_cts)(/|$)"
     )
 
 /// A repository at a commit (or tag), as a tarball, and its submodules at the commits it has them
@@ -240,6 +251,15 @@ let rec fetchGithub (owner: string) (repo: string) (reference: string) (depth: i
             | Some modules ->
                 for m in Regex.Matches(modules, @"path\s*=\s*(\S+)") do
                     let path = m.Groups[1].Value
+                    // Build tooling is listed without asking GitHub's API about it (it has a limit).
+                    if not everything && isTooling path then
+                        entries.Add
+                            { Component = $"  submodule {path} of {owner}/{repo}"
+                              Version = ""
+                              Licence = "see its repository"
+                              Source = $"https://github.com/{owner}/{repo}/tree/{reference}/{path}"
+                              Fetched = Error "build tooling, not part of what's built (--all fetches it)" }
+                    else
                     match text $"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={reference}" with
                     | Some json ->
                         use document = JsonDocument.Parse json
@@ -471,3 +491,120 @@ for e in missing do
     match e.Fetched with
     | Error why -> printfn $"  {e.Component.Trim()} {e.Version}: {why}"
     | Ok _ -> ()
+
+// ---- Packing for a release ----
+
+/// Writes to files named base.part01, base.part02..., each at most size bytes.
+type private Parts(path: string, size: int64) =
+    inherit Stream()
+    let written = ResizeArray<string>()
+    let mutable current: FileStream | null = null
+    let mutable inCurrent = 0L
+    let next () =
+        match current with
+        | NonNull file -> file.Dispose()
+        | Null -> ()
+        let name = $"{path}.part{written.Count + 1:D2}"
+        written.Add name
+        current <- File.Create name
+        inCurrent <- 0L
+    member _.Files = List.ofSeq written
+    override _.CanRead = false
+    override _.CanSeek = false
+    override _.CanWrite = true
+    override _.Length = raise (NotSupportedException())
+    override _.Position
+        with get () = raise (NotSupportedException())
+        and set _ = raise (NotSupportedException())
+    override _.Flush() = match current with NonNull file -> file.Flush() | Null -> ()
+    override _.Read(_, _, _) = raise (NotSupportedException())
+    override _.Seek(_, _) = raise (NotSupportedException())
+    override _.SetLength _ = raise (NotSupportedException())
+    override _.Write(buffer: byte array, offset: int, count: int) =
+        let mutable offset = offset
+        let mutable count = count
+        while count > 0 do
+            if isNull current || inCurrent = size then next ()
+            let n = int (min (int64 count) (size - inCurrent))
+            (nonNull current).Write(buffer, offset, n)
+            inCurrent <- inCurrent + int64 n
+            offset <- offset + n
+            count <- count - n
+    override _.Dispose(disposing: bool) =
+        if disposing then
+            match current with
+            | NonNull file -> file.Dispose()
+            | Null -> ()
+        base.Dispose disposing
+
+if not dryRun && only.IsEmpty then
+    let release = Path.Combine(Path.GetDirectoryName out |> string, "release")
+    Directory.CreateDirectory release |> ignore
+    let name = $"legibyl-{version}"
+    // What the manifest lists, once each: not whatever an earlier run left in the folder.
+    let listed =
+        entries
+        |> Seq.choose (fun e -> match e.Fetched with Ok file -> Some((file.Split " (").[0]) | Error _ -> None)
+        |> Seq.distinct
+        |> Seq.map (fun file -> Path.Combine(out, file))
+        |> Seq.filter File.Exists
+        |> Seq.sort
+        |> List.ofSeq
+    let files (folder: string) =
+        let prefix = Path.Combine(out, folder) + string Path.DirectorySeparatorChar
+        listed |> List.filter (fun file -> file.StartsWith prefix)
+    let add (writer: TarWriter) (file: string) =
+        let relative = Path.GetRelativePath(out, file).Replace(Path.DirectorySeparatorChar, '/')
+        writer.WriteEntry(file, $"{name}-source/{relative}")
+    // Legibyl's own, with the manifest: small, one file.
+    let own = Path.Combine(release, $"{name}-source.tar")
+    do
+        use stream = File.Create own
+        use writer = new TarWriter(stream, TarEntryFormat.Pax, false)
+        for file in Path.Combine(out, "MANIFEST.md") :: files "legibyl" do add writer file
+    // The rest, in parts under 1.9 GiB.
+    let partSize = 1900L * 1024L * 1024L
+    let dependencies = Path.Combine(release, $"{name}-dependencies-source.tar")
+    for old in Directory.GetFiles(release, $"{name}-dependencies-source.tar.part*") do File.Delete old
+    let parts = new Parts(dependencies, partSize)
+    do
+        use writer = new TarWriter(parts, TarEntryFormat.Pax, true)
+        for file in Path.Combine(out, "MANIFEST.md") :: (List.concat [ files "github"; files "git"; files "maven"; files "pdfium" ]) do add writer file
+    parts.Flush()
+    let partFiles = parts.Files
+    parts.Dispose()
+    let all = own :: partFiles
+    let sums =
+        [ for file in all ->
+              use stream = File.OpenRead file
+              $"{Convert.ToHexString(SHA256.HashData stream).ToLowerInvariant()}  {Path.GetFileName file}" ]
+    File.WriteAllLines(Path.Combine(release, "SHA256SUMS"), sums)
+    let partNames = partFiles |> List.map Path.GetFileName |> String.concat " "
+    let windowsParts = partFiles |> List.map Path.GetFileName |> String.concat "+"
+    File.WriteAllLines(
+        Path.Combine(release, "SOURCE-README.md"),
+        [ $"# Source for Legibyl {version}"
+          ""
+          $"The corresponding source for Legibyl {version} (commit `{commit}`) and everything it's built with."
+          ""
+          $"- `{name}-source.tar`: Legibyl's own source, and `MANIFEST.md`, which lists every component: its version, licence, and where its source is in these files."
+          $"- `{name}-dependencies-source.tar.part*`: every dependency's source, one tar in {partFiles.Length} parts (each under 2 GiB, for GitHub). Join them, then unpack:"
+          ""
+          "```sh"
+          $"cat {partNames} > {name}-dependencies-source.tar"
+          $"tar xf {name}-dependencies-source.tar"
+          "```"
+          ""
+          $"(On Windows: `copy /b {windowsParts} {name}-dependencies-source.tar`.) `SHA256SUMS` has each file's checksum." ])
+    let total = all |> List.sumBy (fun f -> FileInfo(f).Length)
+    let gib (bytes: int64) = float bytes / 1073741824.0
+    printfn ""
+    printfn $"Packed for a release in {release}: {all.Length} files, {gib total:F2} GiB in all"
+    for file in all do printfn $"  {Path.GetFileName file}: {gib (FileInfo(file).Length):F2} GiB"
+    let largest =
+        listed
+        |> List.map (fun f -> f, FileInfo(f).Length)
+        |> List.sortByDescending snd
+        |> List.truncate 8
+    printfn "Largest sources:"
+    for file, size in largest do printfn $"  {Path.GetRelativePath(out, file)}: {float size / 1048576.0:F0} MB"
