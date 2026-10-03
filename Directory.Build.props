@@ -16,6 +16,17 @@
          build like the veraPDF jar and copied to the output under tessdata/. -->
     <TessdataVersion>4.1.0</TessdataVersion>
     <TessdataEngSha256>7D4322BD2A7749724879683FC3912CB542F19906C83BCC1A52132556427170B2</TessdataEngSha256>
+    <!-- The models Suggest Structure runs, bundled with the app and the CLI (fetched by
+         Legibyl.Layout's build like tessdata, and copied to the output under models/): the layout
+         detector (PP-DocLayoutV3, Apache-2.0, PaddlePaddle's own files on Hugging Face) and the
+         table-structure model (Table Transformer v1.0, MIT, Xenova's 8-bit ONNX export), each at a
+         fixed revision, each file pinned by its SHA-256. -->
+    <LayoutModelRevision>241f8bdfc77a7c7bee915a5057aaee58c235a8d3</LayoutModelRevision>
+    <LayoutModelJsonSha256>2B68367C5B312A03DE5A6E1642C597C8F95165A7E40CD59C6700CF4A5042F4FD</LayoutModelJsonSha256>
+    <LayoutModelParamsSha256>70BD316B0582769EC968829FD1FEB1A6A58B7C941B938327E551B6B12B45C137</LayoutModelParamsSha256>
+    <LayoutModelYmlSha256>506FCFAC13B3B546AE40D7886B44126420F392ADB694E3F8BB6A6286A1F90FDC</LayoutModelYmlSha256>
+    <TableModelRevision>5387550de655512721e1b88e4e42117001ba4813</TableModelRevision>
+    <TableModelSha256>C11F4033DA75E9C4D41C403EF356E89CAA0A37A7D111B55461E7D5BA856BB6B6</TableModelSha256>
   </PropertyGroup>
 
   <PropertyGroup>

@@ -2,8 +2,8 @@
 /// structure-recognition model, MIT; Xenova's 8-bit ONNX export of v1.0), run with ONNX Runtime:
 /// rows, columns, the column header, and cells spanning several, as boxes. Those become the
 /// table's grid: a cell for each row and column, a spanning cell for those it covers, header cells
-/// in the header's rows. Its model (about 30 MB) is downloaded on first use, beside the layout
-/// detector's (see LayoutModel).
+/// in the header's rows. Its model (about 30 MB) is bundled with the app by the build (models/); a
+/// build without it downloads it on first use, with the layout detector's (see LayoutModel).
 namespace Legibyl.Layout
 
 open System
@@ -29,8 +29,8 @@ module TableModel =
     let private sha256 = "c11f4033da75e9c4d41c403ef356e89caa0a37a7d111b55461e7d5ba856bb6b6"
     let private size = 30158413L
 
-    /// Where it's kept: with Legibyl's own files.
-    let path () =
+    /// Where it's downloaded to, with Legibyl's own files, when it isn't bundled.
+    let private downloaded () =
         Path.Combine(
             Environment.GetFolderPath Environment.SpecialFolder.LocalApplicationData,
             "Legibyl",
@@ -39,9 +39,18 @@ module TableModel =
             "model_quantized.onnx"
         )
 
-    let isDownloaded () =
-        let file = FileInfo(path ())
+    /// Where the build bundles it, with the app (see Legibyl.Layout.fsproj).
+    let private bundled () =
+        Path.Combine(AppContext.BaseDirectory, "models", "table-transformer-structure-recognition", "model_quantized.onnx")
+
+    let private complete (path: string) =
+        let file = FileInfo path
         file.Exists && file.Length = size
+
+    /// Where it is: bundled with the app, else where it's downloaded to.
+    let path () = if complete (bundled ()) then bundled () else downloaded ()
+
+    let isDownloaded () = complete (path ())
 
     /// Saves what's at address to target, reporting the fraction done (0-1).
     let private fetch (target: string) (progress: IProgress<float>) (cancellation: CancellationToken) : Task =
@@ -69,7 +78,7 @@ module TableModel =
     let download (progress: IProgress<float>) (cancellation: CancellationToken) : Task =
         task {
             if not (isDownloaded ()) then
-                let target = path ()
+                let target = downloaded ()
                 Directory.CreateDirectory(Path.GetDirectoryName target |> string) |> ignore
                 let partial = target + ".partial"
                 do! fetch partial progress cancellation
