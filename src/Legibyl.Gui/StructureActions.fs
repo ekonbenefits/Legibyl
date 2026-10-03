@@ -219,16 +219,16 @@ type OrderBarNeeds =
       OrderByLayout: int -> unit
       SaveEdits: RegionEdits.Edit list -> unit }
 
-/// A button that edits the structure (the edit goes into the PDF on Export): a pencil before its
-/// label, as the Edits tab marks edits, so it's told from the buttons that only go somewhere.
-/// Named for a screen reader by its label.
-let editButton (label: string) (attrs: IAttr<Button> list) : IView =
+/// A button that edits the structure (the edit goes into the PDF on Export), its icon before its
+/// label, so it's told from the buttons that only go somewhere. Named for a screen reader by its
+/// label.
+let private editButtonWith (icon: Geometry) (label: string) (attrs: IAttr<Button> list) : IView =
     Button.create [
         Button.content (
             StackPanel.create [
                 StackPanel.orientation Orientation.Horizontal
                 StackPanel.children [
-                    Icons.decorativeIcon Icons.pencil Theme.Tokens.Primary 12.0
+                    Icons.decorativeIcon icon Theme.Tokens.Primary 12.0
                     TextBlock.create [ TextBlock.text label; TextBlock.verticalAlignment VerticalAlignment.Center ]
                 ]
             ]
@@ -236,6 +236,13 @@ let editButton (label: string) (attrs: IAttr<Button> list) : IView =
         AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, label, ValueNone)
         yield! attrs
     ]
+
+/// An edit a person makes: a pencil, as the Edits tab marks edits.
+let editButton = editButtonWith Icons.pencil
+
+/// An edit suggested from the page's layout, by the layout detector: the wand, as Suggest
+/// Structure has.
+let suggestButton = editButtonWith Icons.wand
 
 /// The selected element's place among its siblings (on its page: not past one on another page,
 /// nor out of its parent): its parent, their order, its index, and the index of the sibling it
@@ -299,7 +306,7 @@ let pageOrderButtons (needs: OrderBarNeeds) : IView =
         let pageName = page |> Option.map string |> Option.defaultValue ""
         WrapPanel.create [
             WrapPanel.children [
-                editButton
+                suggestButton
                     (match needs.Ordering, needs.Download with
                      | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
                      | true, None -> $"Finding page {pageName}'s layout…"
