@@ -659,28 +659,27 @@ module private StructureView =
                       OrderByLayout = orderByLayout
                       SaveEdits = fun next -> saveEdits next |> ignore }
 
-            // The blocks with failures or warnings, in the order they're shown (moves included):
-            // marked beside the blocks (see FindingRuler), and gone to with Previous and Next.
+            /// Every block in the order shown (moves included), depth first.
+            let shownOrder () =
+                let rec under (node: StructureNode) : StructureNode list =
+                    [ for child in orderedChildren edits.Current node do
+                          yield child
+                          yield! under child ]
+                under root.Current
+            // The blocks with failures or warnings, in that order, each with its place in it:
+            // marked beside the blocks (see FindingRuler), and gone to with the arrows below them.
             let findingMarks =
                 if isSuggested || placed.Count = 0 then []
                 else
-                    let rec shownOrder (node: StructureNode) : StructureNode list =
-                        [ for child in orderedChildren edits.Current node do
-                              yield child
-                              yield! shownOrder child ]
-                    let order = shownOrder root.Current
+                    let order = shownOrder ()
                     FindingRuler.marks order placed |> List.map (fun mark -> mark, order |> List.findIndex (fun n -> obj.ReferenceEquals(n, mark.Node)))
             /// Selects node's block and moves the focus to it, so it's said.
-            let goToFinding (node: StructureNode) = selectNodeThen node false (fun border -> border.Focus() |> ignore)
+            let goToBlock (node: StructureNode) = selectNodeThen node false (fun border -> border.Focus() |> ignore)
             /// The next (or previous) marked block after the selected one, round to the first (or last).
             let nextFinding (forward: bool) =
-                let rec shownOrder (node: StructureNode) : StructureNode list =
-                    [ for child in orderedChildren edits.Current node do
-                          yield child
-                          yield! shownOrder child ]
                 let here =
                     match selected.Current with
-                    | first :: _ -> shownOrder root.Current |> List.tryFindIndex (fun n -> obj.ReferenceEquals(n, first))
+                    | first :: _ -> shownOrder () |> List.tryFindIndex (fun n -> obj.ReferenceEquals(n, first))
                     | [] -> None
                 let candidates = if forward then findingMarks else List.rev findingMarks
                 let after (index: int) =
@@ -690,17 +689,60 @@ module private StructureView =
                 candidates
                 |> List.tryFind (fun (_, index) -> after index)
                 |> Option.orElse (List.tryHead candidates)
-                |> Option.iter (fun (mark, _) -> goToFinding mark.Node)
+                |> Option.iter (fun (mark, _) -> goToBlock mark.Node)
+            /// The pages with blocks on, in order.
+            let blockPages () =
+                shownOrder ()
+                |> List.choose (fun n -> n.Geometry |> Option.ofObj |> Option.map _.PageNumber)
+                |> List.distinct
+                |> List.sort
+            /// Goes to page's first block, scrolled to the top so the page's blocks follow it.
+            let goToPage (page: int) =
+                let toTop (border: Border) =
+                    match border.FindAncestorOfType<ScrollViewer>() with
+                    | NonNull scroll ->
+                        match scroll.Content with
+                        | :? Visual as content ->
+                            match border.TranslatePoint(Point(0.0, 0.0), content) |> Option.ofNullable with
+                            | Some top -> scroll.Offset <- Vector(scroll.Offset.X, max 0.0 (top.Y - 8.0))
+                            | None -> ()
+                        | _ -> ()
+                    | Null -> ()
+                    border.Focus() |> ignore
+                shownOrder ()
+                |> List.tryFind (fun n -> match n.Geometry with NonNull g -> g.PageNumber = page | Null -> false)
+                |> Option.iter (fun node -> selectNodeThen node false toTop)
             let ruler = ctx.useStateLazy((fun () -> FindingRuler.Ruler()), false).Current
             ruler.Marks <- List.map fst findingMarks
             ruler.ParentOf <- fun node -> match (parents ()).TryGetValue node with | true, parent -> Some parent | _ -> None
-            ruler.Go <- goToFinding
+            ruler.Go <- goToBlock
             ruler.Describe <- StructureBlocks.blockName
             ruler.Refresh()
 
-            // Below the blocks, with any (away from Move Up and Down): how many have failures and
-            // warnings, and Previous and Next.
-            let findingsBar () : IView =
+            // Below the blocks (away from Move Up and Down): going to a page, and to the blocks
+            // with findings, each with arrows for the one before and after.
+            let navigationBar () : IView =
+                let arrow (up: bool) (name: string) (key: KeyGesture) (enabled: bool) (go: unit -> unit) =
+                    Button.create [
+                        Button.content (Icons.iconPath (if up then Icons.chevronUp else Icons.chevronDown) Theme.Tokens.Primary 12.0 [])
+                        Button.padding (7.0, 6.0)
+                        Button.margin (2.0, 0.0, 0.0, 4.0)
+                        Button.isEnabled enabled
+                        AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, key, ValueNone)
+                        AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, name, ValueNone)
+                        ToolTip.tip $"{name} ({key})"
+                        Button.onClick ((fun _ -> go ()), SubPatchOptions.Always)
+                    ]
+                let label (text: string) (left: float) =
+                    TextBlock.create [
+                        TextBlock.text text
+                        TextBlock.verticalAlignment VerticalAlignment.Center
+                        TextBlock.margin (left, 0.0, 6.0, 4.0)
+                    ]
+                let pages = blockPages ()
+                let page = shownPage.Current
+                let before = pages |> List.filter (fun p -> page |> Option.exists (fun page -> p < page)) |> List.tryLast
+                let after = pages |> List.tryFind (fun p -> match page with Some page -> p > page | None -> true)
                 let failing = findingMarks |> List.filter (fun (mark, _) -> mark.Failure) |> List.length
                 let warning = findingMarks.Length - failing
                 let blocks (n: int) = if n = 1 then "1 block" else $"{n} blocks"
@@ -712,28 +754,46 @@ module private StructureView =
                     DockPanel.dock Dock.Bottom
                     WrapPanel.margin (8.0, 6.0, 8.0, 0.0)
                     WrapPanel.children [
-                        TextBlock.create [
-                            TextBlock.text summary
-                            TextBlock.verticalAlignment VerticalAlignment.Center
-                            TextBlock.margin (0.0, 0.0, 8.0, 4.0)
-                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
-                        ]
-                        Button.create [
-                            Button.content "Previous"
-                            AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.F8, KeyModifiers.Shift), ValueNone)
-                            AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Previous block with failures or warnings", ValueNone)
-                            Button.margin (0.0, 0.0, 6.0, 4.0)
-                            ToolTip.tip "Go to the block with failures or warnings before the selected one (Shift+F8)."
-                            Button.onClick ((fun _ -> nextFinding false), SubPatchOptions.Always)
-                        ]
-                        Button.create [
-                            Button.content "Next"
-                            AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.F8), ValueNone)
-                            AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Next block with failures or warnings", ValueNone)
-                            Button.margin (0.0, 0.0, 6.0, 4.0)
-                            ToolTip.tip "Go to the block with failures or warnings after the selected one (F8)."
-                            Button.onClick ((fun _ -> nextFinding true), SubPatchOptions.Always)
-                        ]
+                        if pages.Length > 1 then
+                            label "Page" 0.0
+                            ComboBox.create [
+                                ComboBox.dataItems pages
+                                ComboBox.selectedIndex (match page with Some page -> pages |> List.tryFindIndex ((=) page) |> Option.defaultValue -1 | None -> -1)
+                                ComboBox.minWidth 64.0
+                                ComboBox.margin (0.0, 0.0, 0.0, 4.0)
+                                AttrBuilder<ComboBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Go to page", ValueNone)
+                                ToolTip.tip "Go to a page's first block."
+                                ComboBox.onSelectedItemChanged (
+                                    (fun item ->
+                                        match item with
+                                        | :? int as picked when Some picked <> shownPage.Current -> goToPage picked
+                                        | _ -> ()),
+                                    SubPatchOptions.Always
+                                )
+                            ]
+                            label $"of {List.last pages}" 6.0
+                            arrow true "Previous page" (KeyGesture(Key.PageUp, KeyModifiers.Alt)) before.IsSome (fun () -> before |> Option.iter goToPage)
+                            arrow false "Next page" (KeyGesture(Key.PageDown, KeyModifiers.Alt)) after.IsSome (fun () -> after |> Option.iter goToPage)
+                        if not findingMarks.IsEmpty then
+                            // The counts as the blocks' markers show them; said in full.
+                            StackPanel.create [
+                                StackPanel.orientation Orientation.Horizontal
+                                StackPanel.verticalAlignment VerticalAlignment.Center
+                                StackPanel.margin ((if pages.Length > 1 then 20.0 else 0.0), 0.0, 6.0, 4.0)
+                                StackPanel.spacing 4.0
+                                ToolTip.tip summary
+                                AttrBuilder<StackPanel>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, summary, ValueNone)
+                                StackPanel.children [
+                                    if failing > 0 then
+                                        Icons.iconPath Icons.failure Theme.Tokens.Danger 14.0 []
+                                        TextBlock.create [ TextBlock.text (string failing); TextBlock.verticalAlignment VerticalAlignment.Center; TextBlock.margin (0.0, 0.0, 6.0, 0.0) ]
+                                    if warning > 0 then
+                                        Icons.iconPath Icons.warning Theme.Tokens.Warning 14.0 []
+                                        TextBlock.create [ TextBlock.text (string warning); TextBlock.verticalAlignment VerticalAlignment.Center ]
+                                ]
+                            ]
+                            arrow true "Previous block with failures or warnings" (KeyGesture(Key.F8, KeyModifiers.Shift)) true (fun () -> nextFinding false)
+                            arrow false "Next block with failures or warnings" (KeyGesture(Key.F8)) true (fun () -> nextFinding true)
                     ]
                 ]
 
@@ -748,8 +808,8 @@ module private StructureView =
                         DockPanel.create [
                           DockPanel.children [
                         if not isSuggested then orderBar ()
+                        navigationBar ()
                         if not findingMarks.IsEmpty then
-                            findingsBar ()
                             ContentControl.create [
                                 DockPanel.dock Dock.Right
                                 ContentControl.content ruler
