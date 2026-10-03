@@ -1,7 +1,8 @@
 /// Suggests a structure for untagged pages from how they look, using PaddleOCR's layout detector
 /// (PP-DocLayoutV3): the regions of a page, what kind each is (title, text, table, figure...) and
 /// their reading order. Suggestions only: nothing here changes a PDF. The detector's model (about
-/// 130 MB) is downloaded on first use into PaddleOCR's cache (~/.cache/paddleocr-sharp).
+/// 130 MB) is bundled with the app by the build (models/); a build without it downloads it on
+/// first use into PaddleOCR's cache (~/.cache/paddleocr-sharp).
 namespace Legibyl.Layout
 
 open System
@@ -413,10 +414,20 @@ module LayoutModel =
 
     let private downloader () = new ModelDownloader()
 
-    /// Where the model is (or will be) kept.
+    /// Where the build bundles the layout detector's, with the app (see Legibyl.Layout.fsproj).
+    let private bundled () = Path.Combine(AppContext.BaseDirectory, "models", "pp-doclayoutv3")
+
+    let private isBundled () =
+        [ "inference.json"; "inference.pdiparams"; "inference.yml" ] |> List.forall (fun file -> File.Exists(Path.Combine(bundled (), file)))
+
+    /// Where the layout detector's model is: bundled with the app, else where it's (or will be)
+    /// downloaded to.
     let directory () =
-        use downloader = downloader ()
-        downloader.DirectoryFor ModelCatalog.PpDocLayoutV3
+        if isBundled () then
+            bundled ()
+        else
+            use downloader = downloader ()
+            downloader.DirectoryFor ModelCatalog.PpDocLayoutV3
 
     /// Where it's downloaded from.
     let source () =
@@ -424,8 +435,9 @@ module LayoutModel =
         downloader.Endpoint
 
     let private layoutDownloaded () =
-        use downloader = downloader ()
-        downloader.IsComplete ModelCatalog.PpDocLayoutV3
+        isBundled ()
+        || (use downloader = downloader ()
+            downloader.IsComplete ModelCatalog.PpDocLayoutV3)
 
     let isDownloaded () = layoutDownloaded () && TableModel.isDownloaded ()
 

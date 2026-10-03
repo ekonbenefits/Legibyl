@@ -759,12 +759,15 @@ run with ONNX Runtime; `TableStructure.fs`) from a picture of the table: they
 become its cells, `TH` in the header's rows and `TD` otherwise, each with the
 page's words in it (or, for a table with no text as text, what OCR reads there),
 so tagging writes the table with rows and cells. The models (about 130 MB for
-the layout detector, 30 MB for the table model) are downloaded once, when
-asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`) and Legibyl's own
-folder, and run locally; each page takes several seconds on the CPU, so pages are
+the layout detector, 30 MB for the table model) are bundled with the app and the
+CLI: the build fetches them, each file pinned to a revision by its SHA-256 in
+`Directory.Build.props` (`LayoutModelRevision`, `TableModelRevision`), into the
+output's `models` folder. (A build without them downloads them once, when
+asked, into PaddleOCR's cache, `~/.cache/paddleocr-sharp`, and Legibyl's own
+folder.) They run locally; each page takes several seconds on the CPU, so pages are
 found in the background, in order, and added to the structure as they are. A page without a text layer (a scan) is flagged, since
-tagging it would need OCR first. The detector test is skipped unless the model
-has been downloaded, and the table model's tests unless it has.
+tagging it would need OCR first. The model tests run on the bundled models (a
+build without them skips them).
 
 Some PDFs draw text as outlines (or pixels) rather than as text, so there's
 nothing for a screen reader to read. A text region with no text of its own is
@@ -1028,8 +1031,9 @@ validates the copy. `--fixes` names the fixes, comma-separated: `safe` (the
 default), `all` (every fix but `link-titles-from-web`, which visits web
 pages and has to be named), `none` (only edits), or names from `legibyl list
 fixes`, e.g. `--fixes safe,lists,headings-from-toc`. `tag-from-layout` (with
-`qr-links`) and `join-split-paragraphs` use the layout models, downloading them
-(about 160 MB) the first time, with progress on stderr. `--report <path>` writes
+`qr-links`) and `join-split-paragraphs` use the layout models, bundled with the
+CLI (a build without them downloads them, about 160 MB, the first time, with
+progress on stderr). `--report <path>` writes
 the report to a file.
 
 Every fix, in the order they run (`legibyl list fixes` gives the same; a test
@@ -1038,7 +1042,7 @@ keeps this table in step with it):
 <!-- fixes:start -->
 | Fix | Does | Notes |
 |---|---|---|
-| `tag-from-layout` | Tag an untagged document from each page's layout | downloads the layout model |
+| `tag-from-layout` | Tag an untagged document from each page's layout | uses the layout models |
 | `qr-links` | Link QR codes to the web addresses they encode | with tag-from-layout |
 | `parent-tree` | Rebuild the parent tree, so the tags are found for the content they hold | safe |
 | `language` | Declare the document's language, detected from its text |  |
@@ -1046,7 +1050,7 @@ keeps this table in step with it):
 | `empty-paragraphs` | Remove empty paragraph tags |  |
 | `empty-toc-entries` | Remove empty table-of-contents entries |  |
 | `empty-figures` | Remove figure tags that draw nothing |  |
-| `join-split-paragraphs` | Join paragraphs tagged line by line where the page layout shows one block of text | downloads the layout model |
+| `join-split-paragraphs` | Join paragraphs tagged line by line where the page layout shows one block of text | uses the layout models |
 | `lists` | Tag paragraphs that start with list markers as a list |  |
 | `bookmarks` | Add bookmarks for the H1 and H2 headings |  |
 | `link-targets` | Point links and bookmarks within a PDF 2.0 document at the tags they go to |  |
@@ -1170,8 +1174,7 @@ and a `title` — to stdout, or with `--output <path>` to a file (stdout then
 gets a summary). Each figure also gets `textBefore` and `textAfter`, the text of
 the regions just before and after it (a caption, the paragraph about it), since
 good alt text says why a figure is there. It's what the Structure window shows for an untagged PDF.
-Downloads the layout model the first time; several seconds a page, with
-progress on stderr.
+Uses the bundled layout models; several seconds a page, with progress on stderr.
 
 `--figure-images` (with `--output`) also writes a PNG of each figure (its region
 with a little margin, at 144 dpi, at most 1024 pixels a side) into a folder

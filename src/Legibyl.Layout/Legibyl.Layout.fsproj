@@ -52,4 +52,29 @@
     <Move SourceFiles="$(TessdataEng).download" DestinationFiles="$(TessdataEng)" />
   </Target>
 
+  <!-- Suggest Structure's models, pinned in Directory.Build.props, cached under obj/ and copied
+       to the output's models/ (see LayoutModel and TableModel, which look there first). -->
+  <PropertyGroup>
+    <BundledModelsDir>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)models/</BundledModelsDir>
+    <LayoutModelUrl>https://huggingface.co/PaddlePaddle/PP-DocLayoutV3/resolve/$(LayoutModelRevision)</LayoutModelUrl>
+    <TableModelUrl>https://huggingface.co/Xenova/table-transformer-structure-recognition/resolve/$(TableModelRevision)/onnx</TableModelUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <BundledModel Include="pp-doclayoutv3/inference.json" Folder="pp-doclayoutv3" Url="$(LayoutModelUrl)/inference.json" Sha256="$(LayoutModelJsonSha256)" />
+    <BundledModel Include="pp-doclayoutv3/inference.pdiparams" Folder="pp-doclayoutv3" Url="$(LayoutModelUrl)/inference.pdiparams" Sha256="$(LayoutModelParamsSha256)" />
+    <BundledModel Include="pp-doclayoutv3/inference.yml" Folder="pp-doclayoutv3" Url="$(LayoutModelUrl)/inference.yml" Sha256="$(LayoutModelYmlSha256)" />
+    <BundledModel Include="table-transformer-structure-recognition/model_quantized.onnx" Folder="table-transformer-structure-recognition" Url="$(TableModelUrl)/model_quantized.onnx" Sha256="$(TableModelSha256)" />
+    <None Include="$(BundledModelsDir)pp-doclayoutv3/inference.json" Link="models/pp-doclayoutv3/inference.json" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(BundledModelsDir)pp-doclayoutv3/inference.pdiparams" Link="models/pp-doclayoutv3/inference.pdiparams" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(BundledModelsDir)pp-doclayoutv3/inference.yml" Link="models/pp-doclayoutv3/inference.yml" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(BundledModelsDir)table-transformer-structure-recognition/model_quantized.onnx" Link="models/table-transformer-structure-recognition/model_quantized.onnx" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="FetchBundledModels" BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems">
+    <DownloadFile SourceUrl="%(BundledModel.Url)" DestinationFolder="$(BundledModelsDir)%(BundledModel.Folder)" DestinationFileName="%(BundledModel.Filename)%(BundledModel.Extension).download" Retries="3" Condition="!Exists('$(BundledModelsDir)%(BundledModel.Identity)')" />
+    <VerifyFileHash File="$(BundledModelsDir)%(BundledModel.Identity).download" Hash="%(BundledModel.Sha256)" Algorithm="SHA256" Condition="!Exists('$(BundledModelsDir)%(BundledModel.Identity)')" />
+    <Move SourceFiles="$(BundledModelsDir)%(BundledModel.Identity).download" DestinationFiles="$(BundledModelsDir)%(BundledModel.Identity)" Condition="!Exists('$(BundledModelsDir)%(BundledModel.Identity)')" />
+  </Target>
+
 </Project>

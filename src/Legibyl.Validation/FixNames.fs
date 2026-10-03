@@ -108,7 +108,7 @@ let fixes () =
           let tags =
               [ if safe.HasFlag option then "safe"
                 if not (all.HasFlag option) then "not in all: it visits web pages"
-                if usesLayout option then "downloads the layout model"
+                if usesLayout option then "uses the layout models"
                 if option = PdfFixOptions.QrLinks then "with tag-from-layout" ]
           name, described, String.Join(", ", tags) ]
 
