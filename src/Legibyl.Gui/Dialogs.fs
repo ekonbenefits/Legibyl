@@ -253,7 +253,10 @@ let private fixChoices =
         Title = "Join split paragraphs"
         Detail =
           "Paragraphs the split-paragraph warning flags become one where a layout detector confirms they're one block of text; the page looks the same. "
-          + $"Several seconds a page; downloads the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB) the first time." }
+          + "Several seconds a page"
+          + (match Legibyl.Layout.LayoutModel.downloadMegabytes () with
+             | 0 -> "."
+             | size -> $"; downloads the layout models (about {size} MB) the first time.") }
       { Option = PdfFixOptions.Lists
         Title = "Tag lists"
         Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become a list, so a screen reader announces it and its number of items; the page looks the same." }

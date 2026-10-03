@@ -55,10 +55,11 @@ let private write (path: string option) (rendered: string) =
 /// The worst of several exit codes (a tool error over a document problem over success).
 let private worst (codes: int seq) = if Seq.isEmpty codes then ExitCodes.Success else Seq.max codes
 
-/// Downloads the layout model if it isn't yet, saying how it's going on stderr.
+/// Downloads the layout models (the layout detector's, and the table-structure model) if they
+/// aren't yet, saying how it's going on stderr.
 let private ensureLayoutModel () =
     if not (Legibyl.Layout.LayoutModel.isDownloaded ()) then
-        eprintfn $"Downloading the layout model (about {Legibyl.Layout.LayoutModel.DownloadSizeMegabytes} MB), once…"
+        eprintfn $"Downloading the layout models (about {Legibyl.Layout.LayoutModel.downloadMegabytes ()} MB), once…"
         let mutable shown = -1
         let progress =
             { new IProgress<float> with

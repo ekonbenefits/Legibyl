@@ -749,12 +749,18 @@ as found (`layout`, in the same format as the CLI's `layout suggest`, see
 found so far at once, without the detector, with your edits on them. Each
 recorded page has a fingerprint of its size and text, so a page that's changed
 since (a regenerated PDF) is found again instead; edits, matched by box, still
-apply to it. The model (about 130 MB) is
-downloaded once, when asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`)
-and runs locally; each page takes several seconds on the CPU, so pages are
+apply to it. A **Table** region's rows, columns, header and spanning cells are
+found by a second model, Microsoft's Table Transformer (its 8-bit ONNX export,
+run with ONNX Runtime; `TableStructure.fs`) from a picture of the table: they
+become its cells, `TH` in the header's rows and `TD` otherwise, each with the
+page's words in it (or, for a table with no text as text, what OCR reads there),
+so tagging writes the table with rows and cells. The models (about 130 MB for
+the layout detector, 30 MB for the table model) are downloaded once, when
+asked, into PaddleOCR's cache (`~/.cache/paddleocr-sharp`) and Legibyl's own
+folder, and run locally; each page takes several seconds on the CPU, so pages are
 found in the background, in order, and added to the structure as they are. A page without a text layer (a scan) is flagged, since
 tagging it would need OCR first. The detector test is skipped unless the model
-has been downloaded.
+has been downloaded, and the table model's tests unless it has.
 
 Some PDFs draw text as outlines (or pixels) rather than as text, so there's
 nothing for a screen reader to read. A text region with no text of its own is
@@ -1018,8 +1024,8 @@ validates the copy. `--fixes` names the fixes, comma-separated: `safe` (the
 default), `all` (every fix but `link-titles-from-web`, which visits web
 pages and has to be named), `none` (only edits), or names from `legibyl list
 fixes`, e.g. `--fixes safe,lists,headings-from-toc`. `tag-from-layout` (with
-`qr-links`) and `join-split-paragraphs` use the layout model, downloading it
-(about 130 MB) the first time, with progress on stderr. `--report <path>` writes
+`qr-links`) and `join-split-paragraphs` use the layout models, downloading them
+(about 160 MB) the first time, with progress on stderr. `--report <path>` writes
 the report to a file.
 
 Every fix, in the order they run (`legibyl list fixes` gives the same; a test
