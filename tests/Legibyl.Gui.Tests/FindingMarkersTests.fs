@@ -264,9 +264,11 @@ let ``a suggested structure has no markers: its findings are the untagged file's
             window.Show()
             pump ()
             let shownMarkers = markers window
+            let rulers = descendants<FindingRuler.Ruler> window
             window.Close()
 
             shownMarkers |> should be Empty
+            rulers |> should be Empty
         finally
             Directory.Delete(folder, true))
 
@@ -323,3 +325,46 @@ let ``a tagged PDF with a title of its own shows it`` () =
             window.Close()
 
             text |> should equal "The Community Garden"))
+
+/// The block focused in window, if one is.
+let private focusedBlock (window: Window) =
+    window.FocusManager
+    |> Option.ofObj
+    |> Option.bind (fun f -> match f.GetFocusedElement() with :? Border as b -> Some b | _ -> None)
+    |> Option.bind (fun b -> match b.Tag with :? StructureNode as n -> Some n.Tag | _ -> None)
+
+[<Fact>]
+let ``the blocks with findings are ticked beside the blocks, and Next and Previous (F8) go to them in turn`` () =
+    withTaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let structureWindow = openStructure window
+            let ruler = descendants<FindingRuler.Ruler> structureWindow |> List.exactlyOne
+            waitFor (fun () -> ruler.Ticks.Length = 2)
+            let ticks = ruler.Ticks
+            let summary = descendants<TextBlock> structureWindow |> List.map (fun t -> string t.Text) |> List.find (fun t -> t.Contains "with failures")
+            let button name = descendants<Button> structureWindow |> List.find (fun b -> string b.Content = name)
+            let next, previous = button "Next", button "Previous"
+            let go (b: Button) =
+                click b
+                waitFor (fun () -> (focusedBlock structureWindow).IsSome)
+                focusedBlock structureWindow
+            let visited = [ go next; go next; go next; go previous ]
+            // Clicking a tick goes to its block.
+            ruler.Go (snd ticks[1]).Node
+            pump ()
+            let clicked = focusedBlock structureWindow
+            let keys = next.HotKey, previous.HotKey
+            structureWindow.Close()
+            window.Close()
+
+            summary |> should equal "2 blocks with failures"
+            // In the blocks' order, down the strip.
+            ticks |> List.map (fun (_, mark) -> mark.Node.Tag) |> should equal [ "P"; "Figure" ]
+            ticks |> List.map fst |> List.pairwise |> List.forall (fun (a, b) -> a < b && a >= 0.0 && b <= 1.0) |> should be True
+            ticks |> List.forall (fun (_, mark) -> mark.Failure) |> should be True
+            // Round from the last to the first, and back.
+            visited |> should equal [ Some "P"; Some "Figure"; Some "P"; Some "Figure" ]
+            clicked |> should equal (Some "Figure")
+            keys |> should equal (Input.KeyGesture(Input.Key.F8), Input.KeyGesture(Input.Key.F8, Input.KeyModifiers.Shift))))

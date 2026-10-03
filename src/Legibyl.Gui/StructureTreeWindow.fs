@@ -392,9 +392,9 @@ module private StructureView =
                     |> ignore
 
             /// Selects the block for node, as clicking it does, opening collapsed blocks above it if
-            /// it's in one, and scrolls it into view. A node without a block of its own (a table's
-            /// row, say) selects the nearest one above it that has.
-            let selectNode (node: StructureNode) (extend: bool) =
+            /// it's in one, and scrolls it into view; then does after with its block. A node without
+            /// a block of its own (a table's row, say) selects the nearest one above it that has.
+            let selectNodeThen (node: StructureNode) (extend: bool) (after: Border -> unit) =
                 let borderFor (node: StructureNode) =
                     window.GetVisualDescendants()
                     |> Seq.tryPick (fun v ->
@@ -410,6 +410,7 @@ module private StructureView =
                     | Some(shown, border) ->
                         select shown border extend
                         border.BringIntoView() |> ignore
+                        after border
                     | None -> ()
                 match borderFor node with
                 | Some _ -> finish ()
@@ -417,6 +418,8 @@ module private StructureView =
                     expanded.Set(ancestors node [] @ expanded.Current)
                     // Once the opened blocks are laid out.
                     Avalonia.Threading.Dispatcher.UIThread.Post(finish, Avalonia.Threading.DispatcherPriority.Background)
+
+            let selectNode (node: StructureNode) (extend: bool) = selectNodeThen node extend ignore
 
             /// The page preview's element under the pointer, if any.
             let previewNodeAt (e: PointerEventArgs) =
@@ -656,6 +659,83 @@ module private StructureView =
                       OrderByLayout = orderByLayout
                       SaveEdits = fun next -> saveEdits next |> ignore }
 
+            // The blocks with failures or warnings, in the order they're shown (moves included):
+            // marked beside the blocks (see FindingRuler), and gone to with Previous and Next.
+            let findingMarks =
+                if isSuggested || placed.Count = 0 then []
+                else
+                    let rec shownOrder (node: StructureNode) : StructureNode list =
+                        [ for child in orderedChildren edits.Current node do
+                              yield child
+                              yield! shownOrder child ]
+                    let order = shownOrder root.Current
+                    FindingRuler.marks order placed |> List.map (fun mark -> mark, order |> List.findIndex (fun n -> obj.ReferenceEquals(n, mark.Node)))
+            /// Selects node's block and moves the focus to it, so it's said.
+            let goToFinding (node: StructureNode) = selectNodeThen node false (fun border -> border.Focus() |> ignore)
+            /// The next (or previous) marked block after the selected one, round to the first (or last).
+            let nextFinding (forward: bool) =
+                let rec shownOrder (node: StructureNode) : StructureNode list =
+                    [ for child in orderedChildren edits.Current node do
+                          yield child
+                          yield! shownOrder child ]
+                let here =
+                    match selected.Current with
+                    | first :: _ -> shownOrder root.Current |> List.tryFindIndex (fun n -> obj.ReferenceEquals(n, first))
+                    | [] -> None
+                let candidates = if forward then findingMarks else List.rev findingMarks
+                let after (index: int) =
+                    match here with
+                    | Some here -> if forward then index > here else index < here
+                    | None -> true
+                candidates
+                |> List.tryFind (fun (_, index) -> after index)
+                |> Option.orElse (List.tryHead candidates)
+                |> Option.iter (fun (mark, _) -> goToFinding mark.Node)
+            let ruler = ctx.useStateLazy((fun () -> FindingRuler.Ruler()), false).Current
+            ruler.Marks <- List.map fst findingMarks
+            ruler.ParentOf <- fun node -> match (parents ()).TryGetValue node with | true, parent -> Some parent | _ -> None
+            ruler.Go <- goToFinding
+            ruler.Describe <- StructureBlocks.blockName
+            ruler.Refresh()
+
+            // Above the blocks, with any: how many have failures and warnings, and Previous and Next.
+            let findingsBar () : IView =
+                let failing = findingMarks |> List.filter (fun (mark, _) -> mark.Failure) |> List.length
+                let warning = findingMarks.Length - failing
+                let blocks (n: int) = if n = 1 then "1 block" else $"{n} blocks"
+                let summary =
+                    [ if failing > 0 then $"{blocks failing} with failures"
+                      if warning > 0 then $"{blocks warning} with warnings" ]
+                    |> String.concat ", "
+                WrapPanel.create [
+                    DockPanel.dock Dock.Top
+                    WrapPanel.margin (8.0, 0.0, 8.0, 6.0)
+                    WrapPanel.children [
+                        TextBlock.create [
+                            TextBlock.text summary
+                            TextBlock.verticalAlignment VerticalAlignment.Center
+                            TextBlock.margin (0.0, 0.0, 8.0, 4.0)
+                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                        ]
+                        Button.create [
+                            Button.content "Previous"
+                            AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.F8, KeyModifiers.Shift), ValueNone)
+                            AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Previous block with failures or warnings", ValueNone)
+                            Button.margin (0.0, 0.0, 6.0, 4.0)
+                            ToolTip.tip "Go to the block with failures or warnings before the selected one (Shift+F8)."
+                            Button.onClick ((fun _ -> nextFinding false), SubPatchOptions.Always)
+                        ]
+                        Button.create [
+                            Button.content "Next"
+                            AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.F8), ValueNone)
+                            AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Next block with failures or warnings", ValueNone)
+                            Button.margin (0.0, 0.0, 6.0, 4.0)
+                            ToolTip.tip "Go to the block with failures or warnings after the selected one (F8)."
+                            Button.onClick ((fun _ -> nextFinding true), SubPatchOptions.Always)
+                        ]
+                    ]
+                ]
+
             let layoutTab =
                 Grid.create [
                     Grid.columnDefinitions [
@@ -667,10 +747,17 @@ module private StructureView =
                         DockPanel.create [
                           DockPanel.children [
                         if not isSuggested then orderBar ()
+                        if not findingMarks.IsEmpty then
+                            findingsBar ()
+                            ContentControl.create [
+                                DockPanel.dock Dock.Right
+                                ContentControl.content ruler
+                            ]
                         // Its own component, so preview updates don't re-render (and re-diff) the layout.
                         Component.create("structure-layout", fun ctx ->
                         let root = ctx.usePassedRead root
                         ScrollViewer.create [
+                            ScrollViewer.name FindingRuler.blocksName
                             ScrollViewer.verticalScrollBarVisibility Primitives.ScrollBarVisibility.Auto
                             ScrollViewer.horizontalScrollBarVisibility Primitives.ScrollBarVisibility.Disabled
                             Theme.resources [ ScrollViewer.BackgroundProperty, Theme.Tokens.Background ]
