@@ -452,7 +452,7 @@ let ``the arrows below the blocks go to the page before and after, and the picke
             findingArrows |> should be Empty))
 
 [<Fact>]
-let ``editing is on the right with a pencil, going places on the left without one, and More holds Import and Export`` () =
+let ``editing is on the right with a pencil (ordering by layout with the wand), going places on the left without one, and More holds Import and Export`` () =
     withThreePages (fun pdf ->
         onUiThread (fun () ->
             let source = StructureSource.Tagged(VeraPdfValidator().ReadStructureTree pdf |> nonNull)
@@ -463,9 +463,13 @@ let ``editing is on the right with a pencil, going places on the left without on
             let splitter = descendants<GridSplitter> window |> List.exactlyOne
             let x (b: Button) = (b.TranslatePoint(Point(0.0, 0.0), window) |> Option.ofNullable |> Option.get).X
             let line = (splitter.TranslatePoint(Point(0.0, 0.0), window) |> Option.ofNullable |> Option.get).X
-            let pencilled (b: Button) =
-                descendants<Avalonia.Controls.Shapes.Path> b |> List.exists (fun p -> obj.ReferenceEquals(p.Data, Icons.pencil))
-            let edits = [ named "Move Up"; named "Move Down"; named "Order Page 1 by Layout" ]
+            let has icon (b: Button) =
+                descendants<Avalonia.Controls.Shapes.Path> b |> List.exists (fun p -> obj.ReferenceEquals(p.Data, icon))
+            let pencilled = has Icons.pencil
+            let edits = [ named "Move Up"; named "Move Down" ]
+            // Suggested from the layout: the wand, as Suggest Structure has.
+            let order = named "Order Page 1 by Layout"
+            let orderRight = x order > (splitter.TranslatePoint(Point(0.0, 0.0), window) |> Option.ofNullable |> Option.get).X && has Icons.wand order && not (pencilled order)
             let goes = [ named "Previous page"; named "Next page" ]
             let editsRight = edits |> List.forall (fun b -> x b > line && pencilled b)
             let goesLeft = goes |> List.forall (fun b -> x b < line && not (pencilled b) && not (isNull b.Theme))
@@ -478,6 +482,7 @@ let ``editing is on the right with a pencil, going places on the left without on
             window.Close()
 
             editsRight |> should be True
+            orderRight |> should be True
             goesLeft |> should be True
             items |> should equal [ "Import Edits…"; "Export Structure as JSON…" ]
             footer |> should be Empty))
