@@ -30,6 +30,7 @@
     <Compile Include="LinkTargets.fs" />
     <Compile Include="LinkTitles.fs" />
     <Compile Include="ContentOperations.fs" />
+    <Compile Include="TableGrid.fs" />
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="UntaggedContent.fs" />
     <Compile Include="EmptyFigures.fs" />

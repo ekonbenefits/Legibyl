@@ -4,7 +4,9 @@
 /// content, or as an artifact (page furniture, decoration). The content stream is rewritten
 /// by copying every original operator's bytes unchanged and inserting only the marked-content
 /// operators (BDC/BMC/EMC) between them, so what the page draws doesn't change. Then the
-/// structure tree is built: a Document of the regions' elements, page by page.
+/// structure tree is built: a Document of the regions' elements, page by page. A Table region
+/// with cell regions (TH, TD) inside it is written as a table: its cells in rows (see TableGrid),
+/// each cell's content its own; without cells, a table is written as a paragraph.
 module internal Legibyl.Validation.LayoutTagging
 
 open System
@@ -58,8 +60,10 @@ let private isTextRegion (tag: string) = tag <> "Artifact" && tag <> "Figure"
 
 /// The owner of one piece of content: the smallest region it's centred in. Text outside
 /// every region still reads as content, in the nearest text region; images and drawings
-/// outside every region are decoration.
-let private ownerOf (regions: (LayoutRegion * Rectangle) array) (drawn: Drawn) =
+/// outside every region are decoration. In a table with cells (cellsOf, by its region), what's
+/// drawn between them goes to the nearest cell, and its lines and fills are decoration (a
+/// table's rules).
+let private ownerOf (regions: (LayoutRegion * Rectangle) array) (cellsOf: int -> int list) (drawn: Drawn) =
     let point = centre drawn.Box
     let inside =
         regions
@@ -68,6 +72,9 @@ let private ownerOf (regions: (LayoutRegion * Rectangle) array) (drawn: Drawn) =
         |> Array.sortBy (fun (_, (_, r)) -> area r)
         |> Array.tryHead
     match drawn.Kind, inside with
+    | Path, Some(index, (region, _)) when region.Tag = "Table" && not (cellsOf index).IsEmpty -> Artifact
+    | _, Some(index, (region, _)) when region.Tag = "Table" && not (cellsOf index).IsEmpty ->
+        cellsOf index |> List.minBy (fun cell -> distance (snd regions[cell]) point) |> Region
     | Text, Some(index, (region, _))
     | Image, Some(index, (region, _)) -> if region.Tag = "Artifact" then Artifact else Region index
     // Lines and fills are decoration, except in a figure or table (a chart, a table's rules),
@@ -86,10 +93,10 @@ let private ownerOf (regions: (LayoutRegion * Rectangle) array) (drawn: Drawn) =
         |> Option.defaultValue (Region LeftoverText)
 
 /// The owner of an operator's content: the owner most of its pieces have.
-let private operatorOwner regions pageHasText (drawn: List<Drawn>) =
+let private operatorOwner regions cellsOf pageHasText (drawn: List<Drawn>) =
     drawn
     |> Seq.map (fun piece ->
-        match piece.Kind, ownerOf regions piece with
+        match piece.Kind, ownerOf regions cellsOf piece with
         | Image, Region _ when not pageHasText -> Region PageFigure
         | _, owner -> owner)
     |> Seq.countBy id
@@ -136,7 +143,9 @@ type private Tally =
       /// Figures given alt text a person wrote.
       mutable WrittenAlt: int
       /// Links without a description given one by the source.
-      mutable LinksDescribed: int }
+      mutable LinksDescribed: int
+      /// Tables written with their rows and cells (those without cells count in Tables).
+      mutable TablesWithCells: int }
 
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
@@ -195,7 +204,7 @@ let tag
 
         let parentTree = PdfArray()
         let tally =
-            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0; WrittenAlt = 0; LinksDescribed = 0 }
+            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0; WrittenAlt = 0; LinksDescribed = 0; TablesWithCells = 0 }
         let pageCount = document.GetNumberOfPages()
         let regionsByPage =
             [| for page in 1 .. pageCount ->
@@ -228,6 +237,19 @@ let tag
             let resources = page.GetResources()
             let bytes = page.GetContentBytes()
             let regions = [| for region in regionsByPage[pageNumber - 1] -> region, rectangleOf region.Geometry |]
+            // Each cell's table: the smallest Table region its centre is in. A cell in none is
+            // written as a paragraph.
+            let tableOf = Dictionary<int, int>()
+            for i, (region, box) in Array.indexed regions do
+                if TableGrid.isCell region.Tag then
+                    regions
+                    |> Array.indexed
+                    |> Array.filter (fun (_, (table, tableBox)) -> table.Tag = "Table" && containsPoint tableBox (centre box))
+                    |> Array.sortBy (fun (_, (_, tableBox)) -> area tableBox)
+                    |> Array.tryHead
+                    |> Option.iter (fun (table, _) -> tableOf[i] <- table)
+            let cellsOf (table: int) =
+                [ for KeyValue(cell, owner) in tableOf do if owner = table then cell ] |> List.sort
             let drawn = drawnByOperator bytes resources
             let operations, length = operationsOf bytes resources
 
@@ -236,7 +258,7 @@ let tag
             let owners = Array.create operations.Count None
             for i in 0 .. operations.Count - 1 do
                 match drawn.TryGetValue i with
-                | true, pieces when operations[i].Name <> "n" -> owners[i] <- Some(operatorOwner regions pageHasText pieces)
+                | true, pieces when operations[i].Name <> "n" -> owners[i] <- Some(operatorOwner regions cellsOf pageHasText pieces)
                 | _ when operations[i].Name = "sh" -> owners[i] <- Some Artifact
                 | _ -> ()
             let mutable painter = None
@@ -258,9 +280,47 @@ let tag
                 | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
                 | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
                 | index -> fst regions[index]
+            let markRecognized (element: Element) (region: LayoutRegion) =
+                match region.ActualText with
+                | NonNull text ->
+                    element.Dictionary.Put(PdfName.ActualText, PdfString(text, PdfEncodings.UNICODE_BIG)) |> ignore
+                    // OCR reads with its English model, so the text it gives is English.
+                    element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
+                    tally.Recognized <- tally.Recognized + 1
+                | Null -> ()
+            // A table with cells, all at once, when its first content turns up: a TR for each row,
+            // and in each its cells (TH or TD, with their spans), each cell's content its own.
+            let tableElement (table: int) =
+                match elements.TryGetValue table with
+                | true, element -> element
+                | _ ->
+                    let element = newElement document "Table" documentElement.Dictionary (Some page)
+                    elements[table] <- element
+                    tally.TablesWithCells <- tally.TablesWithCells + 1
+                    let cells = cellsOf table
+                    let places = TableGrid.place [ for cell in cells -> (fst regions[cell]).Geometry ]
+                    let rowCount = places |> List.map (fun p -> p.Row + p.RowSpan) |> List.max
+                    let rows = [| for _ in 1..rowCount -> newElement document "TR" element.Dictionary (Some page) |]
+                    for row in rows do element.Kids.Add row.Dictionary
+                    for cell, place in List.zip cells places |> List.sortBy (fun (_, p) -> p.Row, p.Column) do
+                        let region = fst regions[cell]
+                        let row = rows[place.Row]
+                        let cellElement = newElement document region.Tag row.Dictionary (Some page)
+                        let attributes = PdfDictionary()
+                        attributes.Put(PdfName.O, PdfName.Table) |> ignore
+                        if region.Tag = "TH" then attributes.Put(PdfName.Scope, PdfName.Column) |> ignore
+                        if place.RowSpan > 1 then attributes.Put(PdfName.RowSpan, PdfNumber place.RowSpan) |> ignore
+                        if place.ColSpan > 1 then attributes.Put(PdfName.ColSpan, PdfNumber place.ColSpan) |> ignore
+                        cellElement.Dictionary.Put(PdfName.A, attributes) |> ignore
+                        row.Kids.Add cellElement.Dictionary
+                        markRecognized cellElement region
+                        elements[cell] <- cellElement
+                    element
             let elementFor (index: int) =
                 match elements.TryGetValue index with
                 | true, element -> element
+                | _ when tableOf.ContainsKey index -> tableElement tableOf[index] |> ignore; elements[index]
+                | _ when index >= 0 && not (cellsOf index).IsEmpty -> tableElement index
                 | _ ->
                     let region = regionAt index
                     let element =
@@ -332,13 +392,7 @@ let tag
                                 if region.Tag = "Table" then tally.Tables <- tally.Tables + 1
                                 tally.Paragraphs <- tally.Paragraphs + 1
                             element
-                    match region.ActualText with
-                    | NonNull text ->
-                        element.Dictionary.Put(PdfName.ActualText, PdfString(text, PdfEncodings.UNICODE_BIG)) |> ignore
-                        // OCR reads with its English model, so the text it gives is English.
-                        element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
-                        tally.Recognized <- tally.Recognized + 1
-                    | Null -> ()
+                    markRecognized element region
                     elements[index] <- element
                     element
 
@@ -458,7 +512,8 @@ let tag
             // The page's elements in reading order (leftover text last), consecutive list
             // items with the same numbering in one list.
             let mutable currentList: (Element * string) option = None
-            for index in elements.Keys |> Seq.sortBy (fun i -> if i < 0 then Int32.MaxValue else i) |> List.ofSeq do
+            // (A table's cells are in its rows already.)
+            for index in elements.Keys |> Seq.filter (not << tableOf.ContainsKey) |> Seq.sortBy (fun i -> if i < 0 then Int32.MaxValue else i) |> List.ofSeq do
                 match listItems.TryGetValue index with
                 | true, (item, numbering) ->
                     let list =
@@ -628,6 +683,9 @@ let tag
               if tally.Figures > tally.QrCodes + tally.WrittenAlt then
                   let need = plural (tally.Figures - tally.QrCodes - tally.WrittenAlt) "figure needs" "figures need"
                   yield $"{need} alt text, written by a person"
+              if tally.TablesWithCells > 0 then
+                  let tables = plural tally.TablesWithCells "table" "tables"
+                  yield $"Tagged {tables} with rows and cells, from their layout: to check, the header row above all"
               if tally.Tables > 0 then
                   let were = plural tally.Tables "table was" "tables were"
                   yield $"{were} tagged as text: rows and cells need tagging by hand"
