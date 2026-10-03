@@ -233,7 +233,7 @@ let ``markers stay until the file is validated again: an edit doesn't clear them
             // Give the figure alt text.
             let figureBlock =
                 descendants<Border> structureWindow |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "Figure" | _ -> false)
-            let item = (nonNull figureBlock.ContextMenu).Items |> Seq.cast<MenuItem> |> Seq.find (fun i -> string i.Header = "Edit Alt Text…")
+            let item = blockMenu figureBlock |> List.find (fun i -> string i.Header = "Edit Alt Text…")
             item.RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
             pump ()
             let prompt = structureWindow.OwnedWindows |> Seq.exactlyOne

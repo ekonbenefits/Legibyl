@@ -53,6 +53,13 @@ let editKinds (node: StructureNode) =
           elif node.Tag = "Figure" || node.Tag = "Formula" || not (isNull node.AlternateDescription) then AltText
           if not (isNull node.ActualText) then ReplacementText ]
 
+/// What editing it is called: on the selected element's buttons, and its block's right-click menu.
+let editKindLabel (kind: EditKind) =
+    match kind with
+    | AltText -> "Edit Alt Text…"
+    | ReplacementText -> "Edit Replacement Text…"
+    | LinkDescription -> "Edit Link Description…"
+
 /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
 let retagTags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
 
@@ -219,6 +226,21 @@ type OrderBarNeeds =
       OrderByLayout: int -> unit
       SaveEdits: RegionEdits.Edit list -> unit }
 
+/// One thing that can be done to the selection: drawn as a button under Selected element, and as
+/// an item on a block's right-click menu, so the two offer the same.
+type Action =
+    { Label: string
+      /// The pencil for an edit a person makes; the wand for one the layout detector suggests.
+      Icon: Geometry
+      Tip: string
+      Enabled: bool
+      /// Its keys, if it has any (a button's shortcut; shown on the menu).
+      Keys: KeyGesture option
+      Run: unit -> unit }
+
+let private action (label: string) (tip: string) (run: unit -> unit) =
+    { Label = label; Icon = Icons.pencil; Tip = tip; Enabled = true; Keys = None; Run = run }
+
 /// A button that edits the structure (the edit goes into the PDF on Export), its icon before its
 /// label, so it's told from the buttons that only go somewhere. Named for a screen reader by its
 /// label.
@@ -244,6 +266,26 @@ let editButton = editButtonWith Icons.pencil
 /// Structure has.
 let suggestButton = editButtonWith Icons.wand
 
+/// An action as a button (its keys its shortcut).
+let private actionButton (margin: Thickness) (a: Action) : IView =
+    editButtonWith a.Icon a.Label [
+        Button.margin margin
+        Button.isEnabled a.Enabled
+        ToolTip.tip a.Tip
+        match a.Keys with
+        | Some keys -> AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, keys, ValueNone)
+        | None -> ()
+        Button.onClick ((fun _ -> a.Run()), SubPatchOptions.Always)
+    ]
+
+/// An action as a menu item (its keys shown, not taken: the button has them).
+let private actionItem (a: Action) =
+    let item = MenuItem(Header = a.Label, IsEnabled = a.Enabled)
+    a.Keys |> Option.iter (fun keys -> item.InputGesture <- keys)
+    ToolTip.SetTip(item, a.Tip)
+    item.Click.Add(fun _ -> a.Run())
+    item
+
 /// The selected element's place among its siblings (on its page: not past one on another page,
 /// nor out of its parent): its parent, their order, its index, and the index of the sibling it
 /// would move past going up and going down, if it can.
@@ -265,38 +307,32 @@ let private moving (needs: OrderBarNeeds) =
         | _ -> None
     | _ -> None
 
-// For a tagged PDF's selected element: one place earlier or later in the reading order.
-let moveButtons (needs: OrderBarNeeds) : IView =
-        let moving = moving needs
-        let move (up: bool) =
-            match moving with
-            | Some(parent, order, index, before, after) ->
-                match (if up then before else after) with
-                | Some other ->
-                    // Taken out and put in front of (or after) that sibling: its index, either
-                    // way, once the moved one is out.
-                    let target = order |> List.removeAt index |> List.insertAt other order[index]
-                    recordOrder needs.Edits parent target |> needs.SaveEdits
-                | None -> ()
+/// For a tagged PDF's selected element: one place earlier or later in the reading order.
+let moveActions (needs: OrderBarNeeds) : Action list =
+    let moving = moving needs
+    let move (up: bool) =
+        match moving with
+        | Some(parent, order, index, before, after) ->
+            match (if up then before else after) with
+            | Some other ->
+                // Taken out and put in front of (or after) that sibling: its index, either
+                // way, once the moved one is out.
+                let target = order |> List.removeAt index |> List.insertAt other order[index]
+                recordOrder needs.Edits parent target |> needs.SaveEdits
             | None -> ()
-        WrapPanel.create [
-            WrapPanel.children [
-                editButton "Move Up" [
-                    AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.Up, KeyModifiers.Alt), ValueNone)
-                    Button.margin (0.0, 0.0, 6.0, 8.0)
-                    Button.isEnabled (match moving with Some(_, _, _, before, _) -> before.IsSome | None -> false)
-                    ToolTip.tip "Read the selected element before the one above it (Alt+Up): one place earlier in the reading order, among the elements in the same one, on its page."
-                    Button.onClick ((fun _ -> move true), SubPatchOptions.Always)
-                ]
-                editButton "Move Down" [
-                    AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.Down, KeyModifiers.Alt), ValueNone)
-                    Button.margin (0.0, 0.0, 6.0, 8.0)
-                    Button.isEnabled (match moving with Some(_, _, _, _, after) -> after.IsSome | None -> false)
-                    ToolTip.tip "Read the selected element after the one below it (Alt+Down): one place later in the reading order, among the elements in the same one, on its page."
-                    Button.onClick ((fun _ -> move false), SubPatchOptions.Always)
-                ]
-            ]
-        ]
+        | None -> ()
+    [ { action
+            "Move Up"
+            "Read the selected element before the one above it (Alt+Up): one place earlier in the reading order, among the elements in the same one, on its page."
+            (fun () -> move true) with
+          Enabled = (match moving with Some(_, _, _, before, _) -> before.IsSome | None -> false)
+          Keys = Some(KeyGesture(Key.Up, KeyModifiers.Alt)) }
+      { action
+            "Move Down"
+            "Read the selected element after the one below it (Alt+Down): one place later in the reading order, among the elements in the same one, on its page."
+            (fun () -> move false) with
+          Enabled = (match moving with Some(_, _, _, _, after) -> after.IsSome | None -> false)
+          Keys = Some(KeyGesture(Key.Down, KeyModifiers.Alt)) } ]
 
 // For a tagged PDF's shown page: put in the order its layout reads, or back in the order it was
 // tagged in.
@@ -348,16 +384,43 @@ type SelectionNeeds =
       /// Opens the prompt for an element's alt text, replacement text or link description.
       EditNode: StructureNode -> EditKind -> unit }
 
-/// Under Selected element: what can be done to the selection (its tag; merging; and for what's
-/// drawn outside the tags, not read or tagged).
-let selectionActions (needs: SelectionNeeds) : IView =
-    // A block of text can be given another tag; paragraphs next to each
-    // other can be merged into one.
-    StackPanel.create [
-      StackPanel.children [
-    // What the Tag picker tags: a tagged PDF's block of text, or its figures (Figure,
-    // or Artifact for decoration not read), several at once; a suggested
-    // structure's selected regions, several at once (Artifact for those not read).
+/// What a screen reader says for the selected element (alt text, replacement text, a link's
+/// description): only those it has, for one element at a time. (F2 on its block opens the first.)
+let textActions (needs: SelectionNeeds) : Action list =
+    match needs.Selected.Current with
+    | [ single ] ->
+        [ for kind in editKinds single ->
+              let inPdf =
+                  match kind with
+                  | AltText -> single.AlternateDescription
+                  | ReplacementText -> single.ActualText
+                  | LinkDescription -> single.LinkDescription
+              let yours =
+                  editFor needs.Edits.Current single
+                  |> Option.bind (fun e -> match kind with ReplacementText -> e.Text | AltText | LinkDescription -> e.Alt)
+              action
+                  (editKindLabel kind)
+                  (match yours, inPdf with
+                   | Some text, _ -> $"What a screen reader says for it (F2). Your edit, not in the PDF yet: \"{text}\""
+                   | None, NonNull text when not (String.IsNullOrWhiteSpace text) -> $"What a screen reader says for it (F2). In the PDF now: \"{text}\""
+                   | None, _ -> "What a screen reader says for it (F2). It has none in the PDF now.")
+                  (fun () -> needs.EditNode single kind) ]
+    | _ -> []
+
+/// What the Tag picker offers for the selection: what it tags, the tags, the one they share (if
+/// they do), what it's called, and giving them a tag.
+type TagChoice =
+    { Targets: StructureNode list
+      Tags: string list
+      Current: string option
+      Name: string
+      Tip: string
+      Pick: string -> unit }
+
+/// What the Tag picker tags: a tagged PDF's block of text, or its figures (Figure, or Artifact for
+/// decoration not read), several at once; a suggested structure's selected regions, several at
+/// once (Artifact for those not read).
+let tagChoice (needs: SelectionNeeds) : TagChoice option =
     let figures = needs.Selected.Current |> List.filter (fun n -> n.Tag = "Figure" && not (isNull n.Geometry))
     let tagging =
         match needs.Selected.Current with
@@ -366,7 +429,7 @@ let selectionActions (needs: SelectionNeeds) : IView =
         | chosen when not figures.IsEmpty && figures.Length = chosen.Length -> figures
         | _ -> []
     match tagging with
-    | [] -> ()
+    | [] -> None
     | targets ->
         let tagOf (node: StructureNode) = editFor needs.Edits.Current node |> Option.bind _.Retag |> Option.defaultValue node.Tag
         // Their tag, when they share one.
@@ -374,174 +437,169 @@ let selectionActions (needs: SelectionNeeds) : IView =
             match targets |> List.map tagOf |> List.distinct with
             | [ tag ] -> Some tag
             | _ -> None
-        let chosen = needs.Selected.Current
         let tags =
             if needs.Suggested then LayoutFile.tags
             elif targets |> List.forall (fun n -> n.Tag = "Figure") then [ "Figure"; "Artifact" ]
             else retagTags
-        let items = match tag with Some tag when not (List.contains tag tags) -> tag :: tags | _ -> tags
-        DockPanel.create [
-            DockPanel.margin (0.0, 0.0, 0.0, 8.0)
-            DockPanel.children [
-                TextBlock.create [
-                    DockPanel.dock Dock.Left
-                    TextBlock.text "Tag"
-                    TextBlock.verticalAlignment VerticalAlignment.Center
-                    TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+        Some
+            { Targets = targets
+              Tags = (match tag with Some tag when not (List.contains tag tags) -> tag :: tags | _ -> tags)
+              Current = tag
+              Name =
+                (match targets with
+                 | [ single ] -> $"Tag for this <{single.Tag}>"
+                 | _ when needs.Suggested -> $"Tag for these {targets.Length} regions"
+                 | _ -> $"Tag for these {targets.Length} elements")
+              Tip =
+                (if needs.Suggested then
+                     "The tag to give it: H1 (the title), H (a heading, given the next level under the title when tagged, since one page can't tell), H2 to H6, P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
+                 elif targets |> List.forall (fun n -> n.Tag = "Figure") then
+                     "Figure, or Artifact for decoration a screen reader should skip, like a rule, a background or a border: on export, it's still drawn but marked as an artifact, and leaves the tags."
+                 else
+                     "Give this element another tag, e.g. a heading tagged as a paragraph.")
+              Pick =
+                fun picked ->
+                    if Some picked <> tag then
+                        targets
+                        |> List.fold
+                            (fun edits (node: StructureNode) ->
+                                let box = nonNull node.Geometry
+                                let retagged = RegionEdits.setRetag edits box.PageNumber node.Tag box picked
+                                // An artifact isn't read, so it isn't merged into a neighbour either.
+                                if needs.Suggested && picked = "Artifact" then RegionEdits.setExcluded retagged box.PageNumber node.Tag box false
+                                else retagged)
+                            needs.Edits.Current
+                        |> needs.SaveEdits
+                        |> ignore }
+
+/// The rest: a suggested region merged into its neighbour (its text still read) or kept again;
+/// what's drawn outside every tag made decoration, or tagged as a figure or a paragraph; a tagged
+/// PDF's paragraphs, or a figure drawn in pieces, merged into one, or kept apart again.
+let otherActions (needs: SelectionNeeds) : Action list =
+    [ match (if needs.Suggested then regionsIn needs.Selected.Current else []) with
+      | [] -> ()
+      | regions ->
+          let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"
+          let merged = regions |> List.forall (fun r -> editFor needs.Edits.Current r |> Option.exists _.Exclude)
+          action
+              (if merged then $"Don't Merge{what}" else $"Merge into Neighbour{what}")
+              (if merged then "Keep it as a region of its own."
+               else "Not a region of its own: its text joins the nearest region kept, so it's still read; its images and lines are decoration. To keep it from being read at all, give it the tag Artifact.")
+              (fun () ->
+                  regions
+                  |> List.fold
+                      (fun all r ->
+                          let box = nonNull r.Geometry
+                          RegionEdits.setExcluded all box.PageNumber r.Tag box (not merged))
+                      needs.Edits.Current
+                  |> needs.SaveEdits
+                  |> ignore)
+      match (if needs.Suggested then [] else needs.Selected.Current |> List.filter (fun n -> isUntagged n && not (isNull n.Geometry))) with
+      | [] -> ()
+      | pieces ->
+          let chosenFor (n: StructureNode) = editFor needs.Edits.Current n |> Option.bind _.Retag
+          let text = pieces |> List.filter isUntaggedText
+          let what = if pieces.Length = 1 then "" else $" {pieces.Length} Pieces"
+          let setAll (retag: string) () =
+              pieces
+              |> List.fold (fun all n -> let box = nonNull n.Geometry in RegionEdits.setRetag all box.PageNumber n.Tag box retag) needs.Edits.Current
+              |> needs.SaveEdits
+              |> ignore
+          if text.IsEmpty then
+              action
+                  $"Not Read (Artifact){what}"
+                  "Decoration a screen reader should skip, like a background, a rule or a border: on export it's still drawn, but marked as an artifact."
+                  (setAll "Artifact")
+              action
+                  $"Tag as Figure{what}"
+                  "It's content, like a chart or a diagram: on export it's tagged as a figure, which then needs alt text."
+                  (setAll "Figure")
+          elif text.Length = pieces.Length then
+              action $"Tag as Paragraph{what}" "Text should be read: on export it's tagged as a paragraph, in reading order after what's tagged before it." (setAll "P")
+          if pieces |> List.exists (fun n -> (chosenFor n).IsSome) then
+              action "Keep Untagged" "Drop what was chosen for it: it stays outside the tags." (setAll "Untagged")
+          match pieces with
+          | [ single ] when chosenFor single = Some "Figure" ->
+              action "Edit Alt Text…" "What a screen reader says for it: what it's for here, in a sentence." (fun () -> needs.EditNode single AltText)
+          | [ single ] when not (isUntaggedText single) ->
+              action
+                  "Mark All Like This…"
+                  "Every piece like this one (the same kind, about the same size, on any page) as decoration, once you've seen the list."
+                  (fun () -> needs.MarkAllLike single)
+          | _ -> ()
+      // Merging is for a tagged PDF's paragraphs, and figures drawn in pieces.
+      let mergeable nodes = if needs.Suggested then None else mergeable nodes
+      let pendingMerge =
+          match mergeable needs.Selected.Current with
+          | Some(first :: rest) ->
+              let box = nonNull first.Geometry
+              RegionEdits.findMerge needs.Edits.Current box.PageNumber box
+              |> Option.filter (fun m -> m.MergeWith.Length = rest.Length)
+          | _ -> None
+      match mergeable needs.Selected.Current, pendingMerge with
+      | Some _, Some merge ->
+          action "Don't Merge These" "Drop this merge: they stay separate." (fun () ->
+              needs.SaveEdits (needs.Edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore)
+      | Some nodes, None ->
+          let figures = nodes.Head.Tag = "Figure"
+          action
+              (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs")
+              (if figures then "Make these one figure: a picture drawn in pieces. Then give the first alt text, or the tag Artifact, for all of them."
+               else "Make these paragraphs one.")
+              (fun () ->
+                  let boxes = nodes |> List.map (fun p -> nonNull p.Geometry)
+                  needs.SaveEdits (RegionEdits.mergeElements needs.Edits.Current boxes.Head.PageNumber nodes.Head.Tag boxes) |> ignore)
+      | None, _ -> () ]
+
+/// Under Selected element: what can be done to the selection (what a screen reader says for it;
+/// its place in the reading order, moves; its tag; merging; and for what's drawn outside the tags,
+/// not read or tagged), in the order its right-click menu has them.
+let selectionActions (needs: SelectionNeeds) (moves: Action list) : IView =
+    let row (actions: Action list) : IView list =
+        match actions with
+        | [] -> []
+        | actions -> [ WrapPanel.create [ WrapPanel.children [ for a in actions -> actionButton (Thickness(0.0, 0.0, 6.0, 8.0)) a ] ] ]
+    StackPanel.create [
+      StackPanel.children [
+        yield! row (textActions needs)
+        yield! row moves
+        match tagChoice needs with
+        | None -> ()
+        | Some choice ->
+            let chosen = needs.Selected.Current
+            DockPanel.create [
+                DockPanel.margin (0.0, 0.0, 0.0, 8.0)
+                DockPanel.children [
+                    TextBlock.create [
+                        DockPanel.dock Dock.Left
+                        TextBlock.text "Tag"
+                        TextBlock.verticalAlignment VerticalAlignment.Center
+                        TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+                    ]
+                    ComboBox.create [
+                        ComboBox.minWidth 120.0
+                        ComboBox.horizontalAlignment HorizontalAlignment.Left
+                        ComboBox.dataItems choice.Tags
+                        // Nothing chosen when they don't share a tag.
+                        ComboBox.selectedIndex (match choice.Current with Some tag -> List.findIndex ((=) tag) choice.Tags | None -> -1)
+                        AttrBuilder<ComboBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, choice.Name, ValueNone)
+                        ToolTip.tip choice.Tip
+                        // Each render's handler, for the element selected now; and
+                        // only while it is (moving the selection sets the picker to
+                        // the next element's tag before its handler replaces this).
+                        ComboBox.onSelectedItemChanged (
+                            (fun item ->
+                                match item with
+                                | :? string as picked when obj.ReferenceEquals(needs.Selected.Current, chosen) -> choice.Pick picked
+                                | _ -> ()),
+                            SubPatchOptions.Always
+                        )
+                    ]
                 ]
-                ComboBox.create [
-                    ComboBox.minWidth 120.0
-                    ComboBox.horizontalAlignment HorizontalAlignment.Left
-                    ComboBox.dataItems items
-                    // Nothing chosen when they don't share a tag.
-                    ComboBox.selectedIndex (match tag with Some tag -> List.findIndex ((=) tag) items | None -> -1)
-                    AttrBuilder<ComboBox>.CreateProperty<string | null>(
-                        Automation.AutomationProperties.NameProperty,
-                        (match targets with
-                         | [ single ] -> $"Tag for this <{single.Tag}>"
-                         | _ when needs.Suggested -> $"Tag for these {targets.Length} regions"
-                         | _ -> $"Tag for these {targets.Length} elements"),
-                        ValueNone)
-                    ToolTip.tip (
-                        if needs.Suggested then
-                            "The tag to give it: H1 (the title), H (a heading, given the next level under the title when tagged, since one page can't tell), H2 to H6, P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
-                        elif targets |> List.forall (fun n -> n.Tag = "Figure") then
-                            "Figure, or Artifact for decoration a screen reader should skip, like a rule, a background or a border: on export, it's still drawn but marked as an artifact, and leaves the tags."
-                        else
-                            "Give this element another tag, e.g. a heading tagged as a paragraph."
-                    )
-                    // Each render's handler, for the element selected now; and
-                    // only while it is (moving the selection sets the picker to
-                    // the next element's tag before its handler replaces this).
-                    ComboBox.onSelectedItemChanged (
-                        (fun item ->
-                            match item with
-                            | :? string as picked when Some picked <> tag && obj.ReferenceEquals(needs.Selected.Current, chosen) ->
-                                targets
-                                |> List.fold
-                                    (fun edits (node: StructureNode) ->
-                                        let box = nonNull node.Geometry
-                                        let retagged = RegionEdits.setRetag edits box.PageNumber node.Tag box picked
-                                        // An artifact isn't read, so it isn't merged into a neighbour either.
-                                        if needs.Suggested && picked = "Artifact" then RegionEdits.setExcluded retagged box.PageNumber node.Tag box false
-                                        else retagged)
-                                    needs.Edits.Current
-                                |> needs.SaveEdits
-                                |> ignore
-                            | _ -> ()),
-                        SubPatchOptions.Always
-                    )
-                ]
             ]
-        ]
-    // A suggested region can be merged into its neighbour (its text still read), and
-    // kept again; several at once. (Not read is the Tag picker's Artifact.)
-    match (if needs.Suggested then regionsIn needs.Selected.Current else []) with
-    | [] -> ()
-    | regions ->
-        let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"
-        let merged = regions |> List.forall (fun r -> editFor needs.Edits.Current r |> Option.exists _.Exclude)
-        editButton (if merged then $"Don't Merge{what}" else $"Merge into Neighbour{what}") [
-            Button.margin (0.0, 0.0, 0.0, 8.0)
-            ToolTip.tip (
-                if merged then "Keep it as a region of its own."
-                else "Not a region of its own: its text joins the nearest region kept, so it's still read; its images and lines are decoration. To keep it from being read at all, give it the tag Artifact."
-            )
-            Button.onClick (
-                (fun _ ->
-                    regions
-                    |> List.fold
-                        (fun all r ->
-                            let box = nonNull r.Geometry
-                            RegionEdits.setExcluded all box.PageNumber r.Tag box (not merged))
-                        needs.Edits.Current
-                    |> needs.SaveEdits
-                    |> ignore),
-                SubPatchOptions.Always
-            )
-        ]
-    // What's drawn outside every tag: made decoration (never text), or tagged as a
-    // figure or a paragraph, as a person chooses; several at once.
-    match (if needs.Suggested then [] else needs.Selected.Current |> List.filter (fun n -> isUntagged n && not (isNull n.Geometry))) with
-    | [] -> ()
-    | pieces ->
-        let chosenFor (n: StructureNode) = editFor needs.Edits.Current n |> Option.bind _.Retag
-        let text = pieces |> List.filter isUntaggedText
-        let what = if pieces.Length = 1 then "" else $" {pieces.Length} Pieces"
-        let setAll (retag: string) =
-            pieces
-            |> List.fold (fun all n -> let box = nonNull n.Geometry in RegionEdits.setRetag all box.PageNumber n.Tag box retag) needs.Edits.Current
-            |> needs.SaveEdits
-            |> ignore
-        let action (label: string) (tip: string) (onClick: unit -> unit) =
-            editButton label [
-                Button.margin (0.0, 0.0, 8.0, 8.0)
-                ToolTip.tip tip
-                Button.onClick ((fun _ -> onClick ()), SubPatchOptions.Always)
-            ]
-        WrapPanel.create [
-            WrapPanel.children [
-                if text.IsEmpty then
-                    action
-                        $"Not Read (Artifact){what}"
-                        "Decoration a screen reader should skip, like a background, a rule or a border: on export it's still drawn, but marked as an artifact."
-                        (fun () -> setAll "Artifact")
-                    action
-                        $"Tag as Figure{what}"
-                        "It's content, like a chart or a diagram: on export it's tagged as a figure, which then needs alt text."
-                        (fun () -> setAll "Figure")
-                elif text.Length = pieces.Length then
-                    action $"Tag as Paragraph{what}" "Text should be read: on export it's tagged as a paragraph, in reading order after what's tagged before it." (fun () -> setAll "P")
-                if pieces |> List.exists (fun n -> (chosenFor n).IsSome) then
-                    action "Keep Untagged" "Drop what was chosen for it: it stays outside the tags." (fun () -> setAll "Untagged")
-                match pieces with
-                | [ single ] when chosenFor single = Some "Figure" ->
-                    action "Edit Alt Text…" "What a screen reader says for it: what it's for here, in a sentence." (fun () -> needs.EditNode single AltText)
-                | [ single ] when not (isUntaggedText single) ->
-                    action
-                        "Mark All Like This…"
-                        "Every piece like this one (the same kind, about the same size, on any page) as decoration, once you've seen the list."
-                        (fun () -> needs.MarkAllLike single)
-                | _ -> ()
-            ]
-        ]
-    // Merging is for a tagged PDF's paragraphs, and figures drawn in pieces.
-    let mergeable nodes = if needs.Suggested then None else mergeable nodes
-    let pendingMerge =
-        match mergeable needs.Selected.Current with
-        | Some(first :: rest) ->
-            let box = nonNull first.Geometry
-            RegionEdits.findMerge needs.Edits.Current box.PageNumber box
-            |> Option.filter (fun m -> m.MergeWith.Length = rest.Length)
-        | _ -> None
-    match mergeable needs.Selected.Current, pendingMerge with
-    | Some _, Some merge ->
-        editButton "Don't Merge These" [
-            Button.margin (0.0, 0.0, 0.0, 8.0)
-            ToolTip.tip "Drop this merge: they stay separate."
-            Button.onClick (
-                (fun _ -> needs.SaveEdits (needs.Edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore),
-                SubPatchOptions.Always
-            )
-        ]
-    | Some nodes, None ->
-        let figures = nodes.Head.Tag = "Figure"
-        editButton (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs") [
-            Button.margin (0.0, 0.0, 0.0, 8.0)
-            ToolTip.tip (
-                if figures then "Make these one figure: a picture drawn in pieces. Then give the first alt text, or the tag Artifact, for all of them."
-                else "Make these paragraphs one."
-            )
-            Button.onClick (
-                (fun _ ->
-                    let boxes = nodes |> List.map (fun p -> nonNull p.Geometry)
-                    needs.SaveEdits (RegionEdits.mergeElements needs.Edits.Current boxes.Head.PageNumber nodes.Head.Tag boxes) |> ignore),
-                SubPatchOptions.Always
-            )
-        ]
-    | None, _ ->
+        yield! row (otherActions needs)
         match needs.Selected.Current with
-        | [ single ] when single.Tag = "P" && not needs.Suggested ->
+        | [ single ] when single.Tag = "P" && not needs.Suggested && (otherActions needs).IsEmpty ->
             TextBlock.create [
                 TextBlock.text "Shift-click the paragraphs after it to merge them into one."
                 TextBlock.textWrapping TextWrapping.Wrap
@@ -552,3 +610,27 @@ let selectionActions (needs: SelectionNeeds) : IView =
         | _ -> ()
       ]
     ]
+
+/// The selection's right-click menu: what Selected element offers, the same (its Tag as a submenu,
+/// a tick by the one it has), in groups.
+let selectionMenu (needs: SelectionNeeds) (moves: Action list) : Control list =
+    let groups =
+        [ [ for a in textActions needs -> actionItem a :> Control ]
+          [ for a in moves -> actionItem a :> Control ]
+          [ match tagChoice needs with
+            | Some choice ->
+                let tag = MenuItem(Header = "Tag")
+                ToolTip.SetTip(tag, choice.Tip)
+                for name in choice.Tags do
+                    let item = MenuItem(Header = name, ToggleType = MenuItemToggleType.Radio, IsChecked = (choice.Current = Some name))
+                    item.Click.Add(fun _ -> choice.Pick name)
+                    tag.Items.Add item |> ignore
+                tag :> Control
+            | None -> () ]
+          [ for a in otherActions needs -> actionItem a :> Control ] ]
+        |> List.filter (List.isEmpty >> not)
+    groups
+    |> List.mapi (fun i group ->
+        [ if i > 0 then Separator() :> Control
+          yield! group ])
+    |> List.concat

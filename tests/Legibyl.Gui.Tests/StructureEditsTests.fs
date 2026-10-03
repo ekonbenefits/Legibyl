@@ -68,9 +68,7 @@ let private blockFor (window: Window) (tag: string) =
     descendants<Border> window |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = tag && not (isNull n.Geometry) | _ -> false)
 
 let private menuItems (border: Border) =
-    match border.ContextMenu with
-    | null -> []
-    | menu -> menu.Items |> Seq.cast<MenuItem> |> Seq.map (fun item -> string item.Header, item) |> List.ofSeq
+    blockMenu border |> List.map (fun item -> string item.Header, item)
 
 let private texts (root: Visual) =
     descendants<TextBlock> root |> List.map (fun t -> string t.Text)
@@ -107,15 +105,96 @@ let ``figures offer alt text, and replacement text only where there is some`` ()
     onUiThread (fun () ->
         withPdf (fun pdf ->
             let window = show (structure null) pdf
-            let figure = menuItems (blockFor window "Figure") |> List.map fst
+            let edits (border: Border) = menuItems border |> List.map fst |> List.filter (fun t -> t.StartsWith "Edit ")
+            let figure = edits (blockFor window "Figure")
             let paragraphs =
                 descendants<Border> window
                 |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "P" | _ -> false)
-                |> List.map (menuItems >> List.map fst)
+                |> List.map edits
             window.Close()
 
             figure |> should equal [ "Edit Alt Text…" ]
             paragraphs |> should equal [ [ "Edit Replacement Text…" ]; [] ]))
+
+/// The selected element's edit buttons, by what they say.
+let private editButtons (window: Window) =
+    descendants<Button> window |> List.map buttonText |> List.filter (fun t -> t.StartsWith "Edit ")
+
+/// Selects tag's block, as clicking it does.
+let private selectBlock (window: Window) (tag: string) =
+    let block = blockFor window tag
+    block.Focus() |> ignore
+    block.RaiseEvent(Input.KeyEventArgs(RoutedEvent = Input.InputElement.KeyDownEvent, Key = Input.Key.Enter, Source = block))
+    pump ()
+
+[<Fact>]
+let ``the selected element offers its edits beside its tag, only those it has, and F2 opens the first`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show (structure null) pdf
+            let before = editButtons window
+            selectBlock window "Figure"
+            let figure = editButtons window
+            // Its button opens the prompt.
+            (descendants<Button> window |> List.find (fun b -> buttonText b = "Edit Alt Text…")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let fromButton = window.OwnedWindows |> Seq.map (fun w -> string w.Title) |> List.ofSeq
+            for prompt in List.ofSeq window.OwnedWindows do prompt.Close()
+            pump ()
+            // F2 on the focused block does too.
+            let block = blockFor window "Figure"
+            block.RaiseEvent(Input.KeyEventArgs(RoutedEvent = Input.InputElement.KeyDownEvent, Key = Input.Key.F2, Source = block))
+            pump ()
+            let fromKey = window.OwnedWindows.Count
+            for prompt in List.ofSeq window.OwnedWindows do prompt.Close()
+            pump ()
+            let plain =
+                descendants<Border> window
+                |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "P" && isNull n.ActualText | _ -> false)
+            plain.Focus() |> ignore
+            plain.RaiseEvent(Input.KeyEventArgs(RoutedEvent = Input.InputElement.KeyDownEvent, Key = Input.Key.Enter, Source = plain))
+            pump ()
+            let paragraph = editButtons window
+            window.Close()
+
+            before |> should be Empty
+            figure |> should equal [ "Edit Alt Text…" ]
+            fromButton |> should haveLength 1
+            fromKey |> should equal 1
+            // A paragraph with nothing to say instead: nothing to edit.
+            paragraph |> should be Empty))
+
+[<Fact>]
+let ``a block's right-click menu offers what Selected element does for it, and selects it`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show (structure null) pdf
+            let figure = blockFor window "Figure"
+            let menu = blockMenu figure
+            pump ()
+            let selectedThen = editButtons window
+            // The right pane's buttons for it (its edits, Move Up and Down), then its Tag picker.
+            let pane =
+                descendants<Button> window
+                |> List.map buttonText
+                |> List.filter (fun t -> t.StartsWith "Edit " || t = "Move Up" || t = "Move Down")
+            let picker = descendants<ComboBox> window |> List.exists (fun c -> (string (Automation.AutomationProperties.GetName c)).StartsWith "Tag for")
+            let tag = menu |> List.find (fun i -> string i.Header = "Tag")
+            let tags = tag.Items |> Seq.cast<MenuItem> |> Seq.map (fun i -> string i.Header, i.IsChecked) |> List.ofSeq
+            // Choosing one from the menu tags it, as the picker does.
+            (tag.Items |> Seq.cast<MenuItem> |> Seq.find (fun i -> string i.Header = "Artifact")).RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
+            pump ()
+            let retagged = window.Review.Edits |> List.choose _.Retag
+            let moveUp = menu |> List.find (fun i -> string i.Header = "Move Up")
+            let shownKeys = moveUp.InputGesture
+            window.Close()
+
+            menu |> List.map (fun i -> string i.Header) |> should equal (pane @ [ "Tag" ])
+            selectedThen |> should equal [ "Edit Alt Text…" ]
+            picker |> should be True
+            tags |> should equal [ "Figure", true; "Artifact", false ]
+            retagged |> should equal [ "Artifact" ]
+            shownKeys |> should equal (Input.KeyGesture(Input.Key.Up, Input.KeyModifiers.Alt))))
 
 [<Fact>]
 let ``the alt text prompt says what good alt text is`` () =
@@ -355,7 +434,7 @@ let ``a link's description can be edited, starting from the one it has`` () =
                     LinkDescription = "click here"
                     Content = "Visit the site" }
             let window = show (node "StructTreeRoot" null [ node "Document" null [ link ] ]) pdf
-            let items = menuItems (blockFor window "Link") |> List.map fst
+            let items = menuItems (blockFor window "Link") |> List.map fst |> List.filter (fun t -> t.StartsWith "Edit ")
             (menuItems (blockFor window "Link") |> List.find (fst >> (=) "Edit Link Description…") |> snd).RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
             pump ()
             let prompt = window.OwnedWindows |> Seq.exactlyOne

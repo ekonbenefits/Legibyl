@@ -470,6 +470,45 @@ module private StructureView =
                 }
                 |> ignore
 
+            // The blocks' right-click menu: selects the block clicked (unless it's in the selection
+            // already), then offers what Selected element does for it. Filled as it opens, by this
+            // render's fill, set below.
+            let menuFill = ctx.useStateLazy((fun () -> ref (fun (_: StructureNode) (_: Border) -> ([]: Control list))), false).Current
+            let menu =
+                ctx.useStateLazy(
+                    (fun () ->
+                        let menu = ContextMenu()
+                        // The block it's asked for on (a right-click, the menu key, Shift+F10): seen
+                        // on its way down to it, before the menu opens.
+                        let mutable target: (StructureNode * Border) option = None
+                        window.AddHandler(
+                            Control.ContextRequestedEvent,
+                            (fun _ (e: ContextRequestedEventArgs) ->
+                                target <-
+                                    match e.Source with
+                                    | :? Visual as source ->
+                                        source.GetSelfAndVisualAncestors()
+                                        |> Seq.tryPick (function
+                                            | :? Border as border when obj.ReferenceEquals(border.ContextMenu, menu) ->
+                                                match border.Tag with
+                                                | :? StructureNode as node -> Some(node, border)
+                                                | _ -> None
+                                            | _ -> None)
+                                    | _ -> None),
+                            Interactivity.RoutingStrategies.Tunnel
+                        )
+                        menu.Opening.Add(fun e ->
+                            match target with
+                            | Some(node, border) ->
+                                let items = menuFill.Value node border
+                                menu.Items.Clear()
+                                for item in items do menu.Items.Add item |> ignore
+                                if items.IsEmpty then e.Cancel <- true
+                            | None -> e.Cancel <- true)
+                        menu),
+                    false
+                ).Current
+
             let selection =
                 { Select = select
                   Edits = edits
@@ -479,7 +518,8 @@ module private StructureView =
                   Findings = placed
                   ShowFinding = findings.Show
                   Moves = moves
-                  MovePending = movePending }
+                  MovePending = movePending
+                  Menu = menu }
 
             // For a suggested layout: how many pages are found, and the titles of the pages its QR
             // codes link to, read as they're found (if the offer before the window allowed it).
@@ -658,6 +698,21 @@ module private StructureView =
                       CanOrderByLayout = (topLevel ()).IsSome
                       OrderByLayout = orderByLayout
                       SaveEdits = fun next -> saveEdits next |> ignore }
+
+            /// What the selection's actions work on (see StructureActions.selectionActions).
+            let selectionNeeds () : StructureActions.SelectionNeeds =
+                { Selected = selected
+                  Edits = edits
+                  Suggested = isSuggested
+                  SaveEdits = saveEdits
+                  MarkAllLike = markAllLike
+                  EditNode = editNode }
+            /// A tagged PDF's selected element's moves in the reading order.
+            let moves () = if isSuggested then [] else StructureActions.moveActions (orderNeeds ())
+            menuFill.Value <-
+                fun node border ->
+                    if not (selected.Current |> List.exists (fun n -> obj.ReferenceEquals(n, node))) then select node border false
+                    StructureActions.selectionMenu (selectionNeeds ()) (moves ())
 
             /// Every block in the order shown (moves included), depth first.
             let shownOrder () =
@@ -873,14 +928,7 @@ module private StructureView =
                                 StackPanel.create [
                                   Grid.row 1
                                   StackPanel.children [
-                                    if not isSuggested then StructureActions.moveButtons (orderNeeds ())
-                                    StructureActions.selectionActions
-                                        { Selected = selected
-                                          Edits = edits
-                                          Suggested = isSuggested
-                                          SaveEdits = saveEdits
-                                          MarkAllLike = markAllLike
-                                          EditNode = editNode }
+                                    StructureActions.selectionActions (selectionNeeds ()) (moves ())
                                   ]
                                 ]
                                 // The page it's on: its reading order, and the page itself below.

@@ -49,7 +49,10 @@ type Selection =
       /// children follow it, so other edits don't re-render them.
       Moves: IReadable<RegionEdits.Edit list>
       /// Whether a moved element isn't in that place in the PDF yet.
-      MovePending: StructureNode -> bool }
+      MovePending: StructureNode -> bool
+      /// Every block's right-click menu: one, filled as it opens with what Selected element offers
+      /// for the block clicked (see StructureActions.selectionMenu).
+      Menu: ContextMenu }
 
 /// A finding as a marker's tooltip lists it: "Failure: ISO 14289-1 7.3, test 1: Figure …",
 /// and what it means, where that's known.
@@ -170,7 +173,8 @@ let private focusOutline: ITemplate<Control> | null =
         Shapes.Rectangle(Stroke = Brushes.DodgerBlue, StrokeThickness = 2.0, StrokeDashArray = Collections.AvaloniaList<float>([ 2.0; 2.0 ])) :> Control)
 
 /// A focused block's keys: Enter or Space selects it (with Shift, extends the selection to it, as
-/// shift-click does); Up and Down move to the block before or after it.
+/// shift-click does); Up and Down move to the block before or after it; F2 edits what a screen
+/// reader says for it (its alt text, replacement text or link description, the first it has).
 let private blockKeys (selection: Selection) (node: StructureNode) (e: KeyEventArgs) =
     match e.Source with
     // Only the focused block's own handler (the event also bubbles to the blocks around it).
@@ -180,6 +184,12 @@ let private blockKeys (selection: Selection) (node: StructureNode) (e: KeyEventA
         | Key.Space ->
             e.Handled <- true
             selection.Select node border (e.KeyModifiers.HasFlag KeyModifiers.Shift)
+        | Key.F2 ->
+            match editKinds node with
+            | kind :: _ ->
+                e.Handled <- true
+                selection.Edit node kind
+            | [] -> ()
         | Key.Up
         | Key.Down when e.KeyModifiers = KeyModifiers.None ->
             let blocks =
@@ -222,25 +232,7 @@ let selectableBorder
         AttrBuilder<Border>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, blockName node, ValueNone)
         AttrBuilder<Border>.CreateProperty<ITemplate<Control> | null>(Control.FocusAdornerProperty, focusOutline, ValueNone)
         Border.onKeyDown (blockKeys selection node)
-        match editKinds node with
-        | [] -> ()
-        | kinds ->
-            Border.contextMenu (
-                ContextMenu.create [
-                    ContextMenu.viewItems [
-                        for kind in kinds ->
-                            MenuItem.create [
-                                MenuItem.header (
-                                    match kind with
-                                    | AltText -> "Edit Alt Text…"
-                                    | ReplacementText -> "Edit Replacement Text…"
-                                    | LinkDescription -> "Edit Link Description…"
-                                )
-                                MenuItem.onClick (fun _ -> selection.Edit node kind)
-                            ]
-                    ]
-                ]
-            )
+        AttrBuilder<Border>.CreateProperty<ContextMenu | null>(Control.ContextMenuProperty, selection.Menu, ValueNone)
         Border.onPointerPressed (fun e ->
             match e.Source with
             // FuncUI also subscribes to the tunnel phase, where the outermost block would
