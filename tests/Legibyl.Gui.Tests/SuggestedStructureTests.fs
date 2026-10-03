@@ -250,7 +250,7 @@ let ``a web link's description is an edit, which tagging writes`` () =
             let review = reviewOf pdf
             let window = show pdf review
             let link = blockFor window "Link"
-            let item = link.ContextMenu |> nonNull |> _.Items |> Seq.cast<MenuItem> |> Seq.exactlyOne
+            let item = blockMenu link |> List.find (fun i -> string i.Header = "Edit Link Description…")
             item.RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
             pump ()
             let prompt = window.OwnedWindows |> Seq.exactlyOne
