@@ -343,9 +343,12 @@ let ``the blocks with findings are ticked beside the blocks, and Next and Previo
             let ruler = descendants<FindingRuler.Ruler> structureWindow |> List.exactlyOne
             waitFor (fun () -> ruler.Ticks.Length = 2)
             let ticks = ruler.Ticks
-            let summary = descendants<TextBlock> structureWindow |> List.map (fun t -> string t.Text) |> List.find (fun t -> t.Contains "with failures")
-            let button name = descendants<Button> structureWindow |> List.find (fun b -> string b.Content = name)
-            let next, previous = button "Next", button "Previous"
+            let summary =
+                descendants<StackPanel> structureWindow
+                |> List.map (fun p -> string (AutomationProperties.GetName p))
+                |> List.find (fun t -> t.Contains "with failures")
+            let button name = descendants<Button> structureWindow |> List.find (fun b -> string (AutomationProperties.GetName b) = name)
+            let next, previous = button "Next block with failures or warnings", button "Previous block with failures or warnings"
             let go (b: Button) =
                 click b
                 waitFor (fun () -> (focusedBlock structureWindow).IsSome)
@@ -368,3 +371,84 @@ let ``the blocks with findings are ticked beside the blocks, and Next and Previo
             visited |> should equal [ Some "P"; Some "Figure"; Some "P"; Some "Figure" ]
             clicked |> should equal (Some "Figure")
             keys |> should equal (Input.KeyGesture(Input.Key.F8), Input.KeyGesture(Input.Key.F8, Input.KeyModifiers.Shift))))
+
+/// A tagged PDF of three pages, a heading and two paragraphs on each, in a fresh folder.
+let private withThreePages (test: string -> unit) =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let untagged = Path.Combine(folder, "garden-untagged.pdf")
+    let pdf = Path.Combine(folder, "garden.pdf")
+    try
+        do
+            use document = new PdfDocument(new PdfWriter(untagged))
+            for page in 1 .. 3 do
+                let canvas = PdfCanvas(document.AddNewPage())
+                for i, text in List.indexed [ $"Page {page}"; "Tulips go in before the frost."; "Water them once a week." ] do
+                    canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 12f).MoveText(72.0, 720.0 - float i * 30.0).ShowText(text).EndText()
+                    |> ignore
+        let region tag bounds : LayoutRegion =
+            { Tag = tag; Geometry = rect bounds; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
+        let layout = FixedLayout [ for i in 0 .. 2 -> region (if i = 0 then "H1" else "P") (70.0, 715.0 - float i * 30.0, 300.0, 735.0 - float i * 30.0) ]
+        VeraPdfValidator(LayoutSource = layout).Fix(untagged, PdfProfile.PdfUa1, pdf, PdfFixOptions.TagFromLayout) |> ignore
+        test pdf
+    finally
+        Directory.Delete(folder, true)
+
+/// The page of the block focused in window, if one is.
+let private focusedPage (window: Window) =
+    window.FocusManager
+    |> Option.ofObj
+    |> Option.bind (fun f -> match f.GetFocusedElement() with :? Border as b -> Some b | _ -> None)
+    |> Option.bind (fun b -> match b.Tag with :? StructureNode as n -> Option.ofObj n.Geometry | _ -> None)
+    |> Option.map _.PageNumber
+
+[<Fact>]
+let ``the arrows below the blocks go to the page before and after, and the picker to any page`` () =
+    withThreePages (fun pdf ->
+        onUiThread (fun () ->
+            let source = StructureSource.Tagged(VeraPdfValidator().ReadStructureTree pdf |> nonNull)
+            let window = StructureTreeWindow(source, pdf, DocumentReviews().For pdf, ignore, FindingMarkers.none)
+            window.Show()
+            pump ()
+            let button name = descendants<Button> window |> List.find (fun b -> string (AutomationProperties.GetName b) = name)
+            let picker () = descendants<ComboBox> window |> List.find (fun c -> string (AutomationProperties.GetName c) = "Go to page")
+            let go (name: string) =
+                click (button name)
+                waitFor (fun () -> (focusedPage window).IsSome)
+                pump ()
+                focusedPage window
+            let pages = (picker ()).Items |> Seq.map unbox<int> |> List.ofSeq
+            // The first page is shown to begin with.
+            let atFirst = (button "Previous page").IsEnabled
+            let first = go "Next page"
+            // The page's first block at the top of the blocks, its page after it.
+            let atTop =
+                window.FocusManager
+                |> Option.ofObj
+                |> Option.bind (fun f -> match f.GetFocusedElement() with :? Border as b -> Some b | _ -> None)
+                |> Option.bind (fun b ->
+                    let scroll = descendants<ScrollViewer> window |> List.find (fun s -> s.Name = FindingRuler.blocksName)
+                    b.TranslatePoint(Point(0.0, 0.0), scroll) |> Option.ofNullable)
+                |> Option.map (fun p -> p.Y)
+            let visited = [ first; go "Next page" ]
+            let atLast = (button "Next page").IsEnabled
+            let back = go "Previous page"
+            let shown = (picker ()).SelectedItem
+            (picker ()).SelectedItem <- box 3
+            waitFor (fun () -> focusedPage window = Some 3)
+            let picked = focusedPage window
+            let keys = (button "Previous page").HotKey, (button "Next page").HotKey
+            // No findings, so no arrows for them.
+            let findingArrows = descendants<Button> window |> List.filter (fun b -> (string (AutomationProperties.GetName b)).Contains "failures or warnings")
+            window.Close()
+
+            pages |> should equal [ 1; 2; 3 ]
+            atFirst |> should be False
+            visited |> should equal [ Some 2; Some 3 ]
+            atTop.Value |> should be (lessThanOrEqualTo 20.0)
+            atLast |> should be False
+            back |> should equal (Some 2)
+            shown |> should equal (box 2)
+            picked |> should equal (Some 3)
+            keys |> should equal (Input.KeyGesture(Input.Key.PageUp, Input.KeyModifiers.Alt), Input.KeyGesture(Input.Key.PageDown, Input.KeyModifiers.Alt))
+            findingArrows |> should be Empty))
