@@ -154,7 +154,8 @@ let ``an untagged PDF's edits on its suggested structure count on Structure, and
             let canExport = (button window "Export…").IsEnabled
             window.Close()
 
-            structure |> should equal "Suggest Structure…, 1 edit not in the PDF yet"
+            // The suggested structure they're on counts too: Export tags from it.
+            structure |> should equal "Suggest Structure…, suggested structure and 1 edit not in the PDF yet"
             canExport |> should be True))
 
 [<Fact>]
@@ -182,6 +183,60 @@ let ``an untagged PDF waits for Suggest Structure… before it can be exported, 
             prominent |> should be True
             before |> should be False
             after |> should be True))
+
+/// The count badged on a button, if there's one.
+let private badge (b: Button) =
+    descendants<TextBlock> b |> List.map (fun t -> string t.Text) |> List.tryFind (fun t -> fst (Int32.TryParse t))
+
+[<Fact>]
+let ``an untagged PDF's suggested structure counts on Suggest Structure… as a change, and its edits after it`` () =
+    onUiThread (fun () ->
+        withPdf false (fun pdf ->
+            let window = openPdf pdf
+            let before = name (button window "Suggest Structure…"), badge (button window "Suggest Structure…")
+            // Its first page's layout found, as opening Suggest Structure… does; closed with nothing changed.
+            let review = DocumentShell.Shared.Reviews.For pdf
+            review.Pages[1] <-
+                { PageNumber = 1
+                  Blocks =
+                    [ { Order = 1; Label = "text"; Tag = "P"; Score = 0.9; Geometry = rect (70.0, 695.0, 300.0, 715.0); Text = "The garden in spring."
+                        ListNumbering = None; Recognized = false; QrText = None } ]
+                  HasText = true
+                  Rotated = false }
+            // Counted again, as it is when the window's back in front (here, validating it again).
+            HeadlessWindow.openPdf window pdf
+            waitFor (fun () -> (badge (button window "Suggest Structure…")).IsSome)
+            let suggest = button window "Suggest Structure…"
+            let suggested = name suggest, badge suggest, string (ToolTip.GetTip suggest)
+            // Then an edit on it.
+            review.Edits <- RegionEdits.setAlt [] 1 "P" (rect (70.0, 695.0, 300.0, 715.0)) "The garden in spring"
+            HeadlessWindow.openPdf window pdf
+            waitFor (fun () -> badge (button window "Suggest Structure…") = Some "2")
+            let edited = name (button window "Suggest Structure…"), badge (button window "Suggest Structure…")
+            window.Close()
+
+            before |> should equal ("Suggest Structure…", (None: string option))
+            let suggestedName, suggestedBadge, tip = suggested
+            suggestedName |> should equal "Suggest Structure…, suggested structure not in the PDF yet"
+            suggestedBadge |> should equal (Some "1")
+            tip |> should haveSubstring "The suggested structure goes into the copy on Export…"
+            edited |> should equal ("Suggest Structure…, suggested structure and 1 edit not in the PDF yet", Some "2")))
+
+[<Fact>]
+let ``a tagged PDF, a copy tagged from a suggestion, has no badge on Structure… after opening it and changing nothing`` () =
+    onUiThread (fun () ->
+        withPdf true (fun pdf ->
+            let window = openPdf pdf
+            (button window "Structure…").RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            waitFor (fun () -> window.OwnedWindows.Count = 1)
+            (window.OwnedWindows |> Seq.exactlyOne).Close()
+            waitFor (fun () -> window.OwnedWindows.Count = 0)
+            HeadlessWindow.openPdf window pdf
+            let structure = button window "Structure…"
+            let shown = name structure, badge structure
+            window.Close()
+
+            shown |> should equal ("Structure…", (None: string option))))
 
 [<Fact>]
 let ``an untagged PDF's findings point to Suggest Structure…`` () =
