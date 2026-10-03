@@ -1277,13 +1277,15 @@ dotnet fsi tools/source-bundle.fsx            # into artifacts/source/legibyl-<v
 dotnet fsi tools/source-bundle.fsx --dry-run  # checks every source can be found
 ```
 
-It writes Legibyl's own source (`git archive` of the commit), each NuGet
-package's source from the repository and commit its package records (or a tag
-for its version), with the git submodules of copyleft code (IKVM's OpenJDK
-among them), veraPDF's source and a sources jar from Maven Central for each
-library in its jar, and PDFium's, with a `MANIFEST.md` of every component, its
-version and licence, and the file with its source (or why there isn't one).
-Permissively licensed submodules, the .NET runtime's own libraries and packages
-only used to build are listed, not fetched; `--all` fetches them too. It's a few
-GB (iText's repository alone is about 900 MB). Keep the folder with the release
+It writes Legibyl's own source (`git archive` of the commit); each NuGet
+package's source, permissively licensed ones too (they're part of the work as
+shipped), from the repository and commit its package records (or a tag for its
+version), with the git submodules built into it (IKVM's OpenJDK, SkiaSharp's
+Skia, ANGLE's third-party libraries); veraPDF's source and a sources jar from
+Maven Central for each library in its jar; and PDFium's; with a `MANIFEST.md`
+of every component, its version and licence, and the file with its source. What
+isn't part of the work is listed, not fetched: the .NET runtime's own libraries
+(system libraries), packages only used to build, and submodules that are build
+tooling (compilers, depot_tools, code generators, test suites); `--all` fetches
+them too. It's several GB (iText's repository alone is about 900 MB). Keep the folder with the release
 (or put it next to the downloads): it's what to give anyone who asks.
