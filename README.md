@@ -1263,3 +1263,27 @@ It bundles the veraPDF `greenfield-apps` jar, which is separately
 dual-licensed by the veraPDF Consortium under GPLv3+ / MPLv2+ (see
 `licenses/LICENSE.GPL` and `licenses/LICENSE.MPL`), and uses IKVM.NET
 (Apache 2.0). See `licenses/NOTICE.md` for full third-party attribution.
+
+### Source for a release
+
+Legibyl is AGPL-3.0-or-later and uses iText (AGPL-3.0) and veraPDF (GPLv3+ /
+MPLv2+), so whoever receives a build can ask for its corresponding source: the
+source of Legibyl and of what it's built with, at the versions it's built with.
+When building a release, at the commit it's built from (after `dotnet build`, so
+the packages are restored), gather it:
+
+```sh
+dotnet fsi tools/source-bundle.fsx            # into artifacts/source/legibyl-<version>/
+dotnet fsi tools/source-bundle.fsx --dry-run  # checks every source can be found
+```
+
+It writes Legibyl's own source (`git archive` of the commit), each NuGet
+package's source from the repository and commit its package records (or a tag
+for its version), with the git submodules of copyleft code (IKVM's OpenJDK
+among them), veraPDF's source and a sources jar from Maven Central for each
+library in its jar, and PDFium's, with a `MANIFEST.md` of every component, its
+version and licence, and the file with its source (or why there isn't one).
+Permissively licensed submodules, the .NET runtime's own libraries and packages
+only used to build are listed, not fetched; `--all` fetches them too. It's a few
+GB (iText's repository alone is about 900 MB). Keep the folder with the release
+(or put it next to the downloads): it's what to give anyone who asks.
