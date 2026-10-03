@@ -15,17 +15,20 @@
 //
 //   - Legibyl's own source: `git archive` of HEAD (warning if the working tree has changes);
 //   - each NuGet package the app and the CLI restore to (their obj/project.assets.json), from the
-//     repository and commit its package records (else a tag for its version), once for packages
-//     from the same commit, with the git submodules it has at that commit (IKVM's OpenJDK,
-//     SkiaSharp's Skia...);
+//     repository and commit its package records (else a tag for its version, or what's known for
+//     the few that record neither), once for packages from the same commit, with the git
+//     submodules it has at that commit (IKVM's OpenJDK, SkiaSharp's Skia, ANGLE's third-party
+//     libraries...): permissively licensed code too, since it's part of the work as shipped;
 //   - veraPDF's apps at the jar's version, and a sources jar from Maven Central for each library
 //     bundled in it (its META-INF/maven pom.properties);
 //   - PDFium at the version the bblanchon.PDFium packages are built from;
 //   - the models' and tessdata's pinned files are listed (they're data, already pinned, not built).
 //
 // Left out unless --all (but listed): the .NET runtime and base libraries (dotnet/runtime,
-// dotnet/dotnet: system libraries, several GB) and packages only used to build (Dotnet.Bundle,
-// IKVM's MSBuild tools, Avalonia's build services). A file already fetched isn't fetched again.
+// dotnet/dotnet: system libraries, several GB), packages only used to build (Dotnet.Bundle,
+// IKVM's MSBuild tools, Avalonia's build services), and submodules that are build tooling, not
+// part of what's built (compilers, depot_tools, code generators, test suites: see isTooling). A
+// file already fetched isn't fetched again.
 // Set GITHUB_TOKEN (or be signed in to `gh`) to resolve submodules past GitHub's anonymous limit.
 
 open System
@@ -125,9 +128,14 @@ let fetch (url: string) (file: string) : Result<string, string> =
                 Ok file
         with ex -> Error $"{ex.Message} ({url})"
 
+/// Where some repositories really are, when what refers to them names an old mirror.
+let private moved =
+    Map.ofList [ "https://github.com/Mesa3D/mesa", "https://gitlab.freedesktop.org/mesa/mesa.git" ]
+
 /// A git repository not on GitHub, at a commit or branch, as a tarball: fetched shallowly with git
 /// and archived (servers like googlesource won't archive a large tree over HTTP).
 let fetchGit (url: string) (reference: string) (file: string) : Result<string, string> =
+    let url = Map.tryFind (url.TrimEnd('/')) moved |> Option.defaultValue url
     let path = Path.Combine(out, file)
     if File.Exists path then
         Ok file
@@ -201,15 +209,31 @@ let github (url: string) =
 
 let fetched = Collections.Generic.Dictionary<string, Result<string, string>>()
 
+/// Whether a submodule's path is build tooling rather than code built into what ships: build
+/// scripts, toolchains, code generators' Python libraries, test suites (ANGLE's and Skia's have
+/// many).
+let isTooling (path: string) =
+    let path = path.ToLowerInvariant()
+    Regex.IsMatch(path, @"(^|/)(build|buildtools|testing|tools|test|tests)(/|$)")
+    || Regex.IsMatch(
+        path,
+        @"(^|/)(depot_tools|clang|rust|jinja2|markupsafe|python-markdown|six|nasm|catapult|googletest|benchmark|android_[^/]*|llvm-build|gn|ninja|[^/]*conform[^/]*|[^/]*_cts)(/|$)"
+    )
+
 /// A repository at a commit (or tag), as a tarball, and its submodules at the commits it has them
-/// at (depth deep): fetched when follow, else listed.
-let rec fetchGithub (owner: string) (repo: string) (reference: string) (depth: int) (follow: bool) : Result<string, string> =
+/// at (depth deep), but for build tooling.
+let rec fetchGithub (owner: string) (repo: string) (reference: string) (depth: int) : Result<string, string> =
     let key = $"{owner}/{repo}@{reference}"
     match fetched.TryGetValue key with
     | true, result -> result
     | _ ->
         let safe = Regex.Replace(reference, "[^A-Za-z0-9._-]", "_")
-        let result = fetch $"https://codeload.github.com/{owner}/{repo}/tar.gz/{reference}" $"github/{owner}-{repo}-{safe}.tar.gz"
+        let file = $"github/{owner}-{repo}-{safe}.tar.gz"
+        // A commit GitHub won't archive (a mirror without it, say) is fetched with git instead.
+        let result =
+            match fetch $"https://codeload.github.com/{owner}/{repo}/tar.gz/{reference}" file with
+            | Ok file -> Ok file
+            | Error _ -> fetchGit $"https://github.com/{owner}/{repo}" reference file
         fetched[key] <- result
         if depth > 0 && Result.isOk result then
             match text $"https://raw.githubusercontent.com/{owner}/{repo}/{reference}/.gitmodules" with
@@ -228,15 +252,16 @@ let rec fetchGithub (owner: string) (repo: string) (reference: string) (depth: i
                             let sha = element.GetProperty("sha").GetString() |> string
                             let remote = string (url.GetString())
                             let safe = Regex.Replace(path, "[^A-Za-z0-9._-]", "_")
+                            let skip = not everything && isTooling path
                             let sub, source =
                                 match github remote with
                                 | Some(o, r) ->
-                                    (if follow then fetchGithub o r sha (depth - 1) follow
-                                     else Error "a permissively licensed package's submodule: listed, not fetched (--all fetches it)"),
+                                    (if skip then Error "build tooling, not part of what's built (--all fetches it)"
+                                     else fetchGithub o r sha (depth - 1)),
                                     $"https://github.com/{o}/{r}/tree/{sha}"
                                 | None ->
-                                    (if follow then fetchGit remote sha $"git/{owner}-{repo}-{safe}-{sha.Substring(0, 12)}.tar.gz"
-                                     else Error "a permissively licensed package's submodule: listed, not fetched (--all fetches it)"),
+                                    (if skip then Error "build tooling, not part of what's built (--all fetches it)"
+                                     else fetchGit remote sha $"git/{owner}-{repo}-{safe}-{sha.Substring(0, 12)}.tar.gz"),
                                     $"{remote} at {sha}"
                             entries.Add
                                 { Component = $"  submodule {path} of {owner}/{repo}"
@@ -305,6 +330,16 @@ let packages =
             || nuspec.Contains "<developmentDependency>true</developmentDependency>" })
     |> List.sortBy _.Id
 
+/// Where to find the source of the few packages that record no commit and have no tag for their
+/// version: (repository, commit or tag), by package and version, with how it's known.
+let knownCommits =
+    Map.ofList
+        [ // Published 2018-02-01; its language profiles have 3-letter (ISO 639-3) codes, the change in
+          // this commit, the repository's last (it has no tag for 1.3.1).
+          ("LanguageDetection.NETStandard", "1.3.1"), ("https://github.com/TechnikEmpire/language-detection", "d10b91a41c2f31c7da82ffea3124f4472f2b8f46")
+          // From .NET Core's host repository, tagged for its release.
+          ("Microsoft.DotNet.PlatformAbstractions", "1.1.0"), ("https://github.com/dotnet/core-setup", "refs/tags/v1.1.0") ]
+
 /// The .NET runtime's and base libraries' repositories: system libraries, and huge.
 let isSystem (owner: string, repo: string) =
     owner = "dotnet" && (repo = "runtime" || repo = "dotnet" || repo = "corefx" || repo = "extensions")
@@ -312,7 +347,12 @@ let isSystem (owner: string, repo: string) =
 printfn $"{packages.Length} NuGet packages"
 for package in packages |> List.filter (fun p -> wanted p.Id) do
     let at = entries.Count
-    let place = package.Repository |> Option.orElse package.Project |> Option.bind github
+    let place =
+        Map.tryFind (package.Id, package.Version) knownCommits
+        |> Option.map fst
+        |> Option.orElse package.Repository
+        |> Option.orElse package.Project
+        |> Option.bind github
     // iText's .NET packages say only https://itextpdf.com/ (itext.commons) or an old name.
     let place =
         if package.Id.StartsWith "itext" then Some("itext", "itext-dotnet") else place
@@ -321,18 +361,14 @@ for package in packages |> List.filter (fun p -> wanted p.Id) do
         | _ when package.BuildOnly && not everything -> Error "used only to build, not shipped (--all fetches it)"
         | Some place when isSystem place && not everything -> Error ".NET's own libraries, part of the platform (--all fetches them)"
         | Some(owner, repo) ->
-            // Submodules are fetched for copyleft code (and IKVM's, which hold OpenJDK's class
-            // library, GPL with the Classpath Exception); a permissive package's are listed.
-            let licence = package.Licence.ToLowerInvariant()
-            let follow = everything || licence.Contains "gpl" || licence.Contains "mpl" || package.Id.StartsWith "IKVM"
-            match package.Commit with
-            | Some commit -> fetchGithub owner repo commit 2 follow
+            match package.Commit |> Option.orElse (Map.tryFind (package.Id, package.Version) knownCommits |> Option.map snd) with
+            | Some commit -> fetchGithub owner repo commit 2
             | None ->
                 // A tag for its version: these are the ways projects name them.
                 let candidates =
                     [ package.Version; $"v{package.Version}"; $"v{package.Version}.0"; $"{package.Version}.0"; $"release-{package.Version}"; $"{repo}-{package.Version}" ]
                 match candidates |> List.tryFind (fun tag -> exists $"https://codeload.github.com/{owner}/{repo}/tar.gz/refs/tags/{tag}") with
-                | Some tag -> fetchGithub owner repo $"refs/tags/{tag}" 2 follow
+                | Some tag -> fetchGithub owner repo $"refs/tags/{tag}" 2
                 | None -> Error $"no commit recorded, and no tag for {package.Version} in {owner}/{repo}: find its source there"
         | None -> Error "no repository recorded: see its project page"
     entries.Insert(
@@ -341,8 +377,10 @@ for package in packages |> List.filter (fun p -> wanted p.Id) do
           Version = package.Version
           Licence = package.Licence
           Source =
-            match place, package.Commit with
-            | Some(owner, repo), Some commit -> $"https://github.com/{owner}/{repo}/tree/{commit}"
+            match place, package.Commit |> Option.orElse (Map.tryFind (package.Id, package.Version) knownCommits |> Option.map snd) with
+            | Some(owner, repo), Some commit ->
+                let at = commit.Replace("refs/tags/", "")
+                $"https://github.com/{owner}/{repo}/tree/{at}"
             | Some(owner, repo), None -> $"https://github.com/{owner}/{repo}"
             | None, _ -> package.Repository |> Option.orElse package.Project |> Option.defaultValue ""
           Fetched = fetched })
@@ -353,7 +391,7 @@ let veraPdf = property "Directory.Build.props" "VeraPdfVersion"
 let jar = Path.Combine(root, "src", "Legibyl.Validation", "obj", "verapdf", $"greenfield-apps-{veraPdf}.jar")
 if wanted "verapdf" then
     let at = entries.Count
-    let apps = fetchGithub "veraPDF" "veraPDF-apps" $"refs/tags/v{veraPdf}" 1 true
+    let apps = fetchGithub "veraPDF" "veraPDF-apps" $"refs/tags/v{veraPdf}" 1
     entries.Insert(
         at,
         { Component = "veraPDF apps (greenfield-apps jar)"
