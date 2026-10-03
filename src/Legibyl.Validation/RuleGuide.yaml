@@ -23,7 +23,7 @@ rules:
   - clause: "6.2"
     tests: [1]
     meaning: "The PDF isn't marked as tagged, so assistive technology may ignore its tags."
-    whatToDo: "Tagging it sets this. For a PDF with tags already, export it again from the tool that made it with tags turned on."
+    whatToDo: "Suggest Structure…, then Export…, sets it when it tags a copy. For a PDF with tags already, export it again from the tool that made it with tags turned on."
 
   - clause: "7.1"
     tests: [1]
@@ -38,7 +38,7 @@ rules:
   - clause: "7.1"
     tests: [3]
     meaning: "Some of the page (text, images or lines) is neither tagged nor marked as decoration, so a screen reader can't tell whether to read it."
-    whatToDo: "The tool that made the PDF left this out of its tags: fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\"), or in a PDF editor's tags panel."
+    whatToDo: "In Structure…, it's listed under Not in the tags: select a piece and choose Not Read (Artifact) for decoration (a background, a rule, a border), or Tag as Figure or Tag as Paragraph for content; Mark All Like This… does every piece like it. Or fix it where the PDF was made, and export it again with tags (in Word, say, \"Document structure tags for accessibility\")."
 
   - clause: "7.1"
     tests: [4]
@@ -236,7 +236,7 @@ pdfUa2Rules:
   - clause: "6.2"
     tests: [1]
     meaning: "The PDF isn't marked as tagged, so assistive technology may ignore its tags."
-    whatToDo: "Tagging it sets this. For a PDF with tags already, export it again from the tool that made it with tags turned on."
+    whatToDo: "Suggest Structure…, then Export…, sets it when it tags a copy. For a PDF with tags already, export it again from the tool that made it with tags turned on."
 
   - clause: "8.2.1"
     tests: [1]
@@ -250,7 +250,7 @@ pdfUa2Rules:
 
   - clause: "8.2.2"
     meaning: "Some of the page (text, images or lines) is neither tagged nor marked as decoration, so a screen reader can't tell whether to read it."
-    whatToDo: "The tool that made the PDF left this out of its tags: fix it where the PDF was made, and export it again with tags, or in a PDF editor's tags panel."
+    whatToDo: "In Structure…, it's listed under Not in the tags: select a piece and choose Not Read (Artifact) for decoration (a background, a rule, a border), or Tag as Figure or Tag as Paragraph for content; Mark All Like This… does every piece like it. Or fix it where the PDF was made, and export it again with tags."
 
   - clause: "8.2.4"
     tests: [1, 4]

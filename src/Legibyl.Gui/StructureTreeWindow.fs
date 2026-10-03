@@ -1210,7 +1210,8 @@ module private StructureView =
                                 secondary (
                                     "This PDF has no tags, so this is the structure a layout detector suggests from what each page looks like: "
                                     + "its regions, the tag each suggests, and their reading order (the numbers on the page). "
-                                    + "What you change is kept as edits on top: Save in the main window keeps them, and Export… tags a copy with them."
+                                    + "What you change is kept as edits on top: Save in the main window keeps them, and Export… tags a copy with them. "
+                                    + "A table's cells are shown in its rows: a cell's Tag picker makes it a header (TH) or data (TD) cell, and giving the table the tag P tags it as text instead."
                                 )
                                 secondary (String.Join(" ", progress))
                                 if not modelReady.Current then
@@ -1256,7 +1257,8 @@ module private StructureView =
                                     TextBlock.textWrapping TextWrapping.Wrap
                                     Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                                     TextBlock.text
-                                        "This is the tagged logical structure tree — the semantic heading/paragraph/list/table/link hierarchy that determines what content and reading order a screen reader presents to a user. Only elements that directly own page content show a page number."
+                                        ("This is the tagged logical structure tree — the semantic heading/paragraph/list/table/link hierarchy that determines what content and reading order a screen reader presents to a user. Only elements that directly own page content show a page number. "
+                                         + "Blocks with failures or warnings are marked: the ticks beside the scroll bar, and the arrows below the blocks (Shift+F8, F8), go to them; Page and its arrows (Alt+Page Up, Alt+Page Down) go page by page.")
                                 ]
                                 titleRow review
                         ]

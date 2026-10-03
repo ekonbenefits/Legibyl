@@ -600,7 +600,7 @@ tag and box like the edits on a suggested structure, and the block shows it as n
 in the PDF yet. Paragraphs can be merged too: shift-click extends the selection
 over a block's siblings (the page preview outlines and numbers each one), and
 when a single block of text (a paragraph, heading, caption, note or block
-quote) is selected, a **Tag** picker beside the preview gives it another tag —
+quote) is selected, a **Tag** picker under **Selected element** gives it another tag —
 a heading tagged as a paragraph, say — as a `retag` edit; and when two or more
 neighbouring paragraphs on one page are selected (none with alt
 text or replacement text), **Merge N Paragraphs** records the merge as an edit,
@@ -620,8 +620,8 @@ content as an artifact (its `/Tag <</MCID n>> BDC` becomes `/Artifact BMC`), so
 it's still drawn but not read, and takes it out of the tags; the preview draws
 it grey until then.
 
-The reading order can be changed by hand: **Move Up** and **Move Down**, above the
-blocks, move the selected element one place among its siblings (not out of its parent, not past a
+The reading order can be changed by hand: **Move Up** and **Move Down** (Alt+Up,
+Alt+Down), under **Selected element**, move the selected element one place among its siblings (not out of its parent, not past a
 sibling on another page, and not inside a table or a table of contents). The
 blocks and the preview's numbers follow at once, and the block says it's moved,
 not in the PDF yet. Each is recorded as the fewest moves that give the order,
@@ -631,10 +631,10 @@ and Remove puts one back. Export reorders the parent's `/K` last, once nothing
 else will change what's where; what each element holds doesn't change, so the
 parent tree needs nothing.
 
-**Order Page N by Layout**, above the blocks (N being the page of the selected
-block, or the first), puts that page in the reading order its layout gives (the
-layout detector's regions come in reading order; downloaded the first time, as
-for Suggest Structure): each of the document's top-level elements with content
+**Order Page N by Layout**, under **Page N** in the right pane (N being the page of
+the selected block, or the first), puts that page in the reading order its layout
+gives (the layout detector's regions come in reading order; its model is bundled
+with the app, as for Suggest Structure): each of the document's top-level elements with content
 on the page takes the place of the first region it holds (a list or table moves
 as one, by its own box), one that holds none stays after the element it follows
 now, and elements on other pages keep their places (`LayoutOrder.fs`). The
@@ -691,8 +691,8 @@ destination only to the underlying link annotation, so Legibyl follows tagged
 annotation references and uses a conservative same-page geometry fallback
 when needed. Table-of-contents entries (`TOCI`) render as row-like layout
 items and inherit the first descendant link target when the PDF stores the
-click target on a separate child link fragment. The **Tree** tab keeps the compact outline view. **Export JSON…** saves the
-whole hierarchy — each node's `content` text, geometry, link targets and form
+click target on a separate child link fragment. The **Tree** tab keeps the compact outline view. **More ▾ › Export Structure as
+JSON…**, at the bottom left, saves the whole hierarchy — each node's `content` text, geometry, link targets and form
 field metadata — as JSON, the same shape as the CLI's `structure` command, for
 AI agents or other tooling that need to know what's under each tag, not only
 the PDF/UA failures. So large documents open
@@ -840,7 +840,7 @@ correction is recorded only if it differs from what OCR read. So they're filled
 in again whenever the layout is suggested again, even for a regenerated PDF, as
 long as the region is in about the same place (same page and tag, boxes
 overlapping at least 60%). The file is read automatically when it's named after
-the PDF; **Import Edits…** (in the Structure window, tagged or not) takes one with another name, such as the one saved
+the PDF; **More ▾ › Import Edits…** (in the Structure window, tagged or not) takes one with another name, such as the one saved
 for an earlier version, or another PDF: the edits saved for it, or inside it (a
 copy Legibyl saved, like the tagged copy of an earlier version).
 

@@ -55,7 +55,7 @@ let ``small figures side by side are warned about once, pointing to merging them
     // One run: the photographs are too big to be pieces.
     warnings |> List.length |> should equal 1
     warnings.Head.ErrorMessage |> should equal "12 figures side by side on page 1."
-    warnings.Head.Message |> should haveSubstring "In Structure…, shift-click them and Merge them"
+    warnings.Head.Message |> should haveSubstring "In Structure…, shift-click them and Merge N Figures"
     // Which pieces make one picture is a person's call: no auto fix does it.
     warnings.Head.FixOptions |> should equal PdfFixOptions.None
     figuresWithoutAlt input.Path |> should equal 14
