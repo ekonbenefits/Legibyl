@@ -367,3 +367,46 @@ let ``the reviewed layout leaves out discarded suggestions`` () =
     let reviewed = ReviewedLayout(prefetcher, review) :> Legibyl.Validation.IPageLayoutSource
     let regions = reviewed.PageRegions("unused.pdf", 1)
     regions.Count |> should equal (all.Length - 1)
+
+[<Fact>]
+let ``a suggested table shows its cells in rows, with their spans, and a cell's tag can be changed`` () =
+    withUntaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let review = DocumentReview(File.GetLastWriteTimeUtc pdf)
+            // "Bed" over both header rows, "Garden" over two columns, then a row of data.
+            review.Pages[1] <-
+                { PageNumber = 1
+                  Blocks =
+                    [ block 1 "Table" (68.0, 653.0, 462.0, 717.0) "Bed Garden Sow Plant North Peas Kale"
+                      block 2 "TH" (70.0, 675.0, 195.0, 715.0) "Bed"
+                      block 3 "TH" (195.0, 695.0, 460.0, 715.0) "Garden"
+                      block 4 "TH" (195.0, 675.0, 325.0, 695.0) "Sow"
+                      block 5 "TH" (325.0, 675.0, 460.0, 695.0) "Plant"
+                      block 6 "TD" (70.0, 655.0, 195.0, 675.0) "North"
+                      block 7 "TD" (195.0, 655.0, 325.0, 675.0) "Peas"
+                      block 8 "TD" (325.0, 655.0, 460.0, 675.0) "Kale" ]
+                  HasText = true
+                  Rotated = false }
+            let window = show pdf review
+            let table = nonNull (blockFor window "Table").Tag :?> StructureNode
+            let rows = [ for row in table.Children -> row.Tag, [ for cell in row.Children -> cell.Tag, cell.Content, cell.RowSpan, cell.ColSpan ] ]
+            // A data cell is really a header: retag it.
+            select (descendants<Border> window |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Content = "North" | _ -> false))
+            // Only a header or data cell: anything else would leave a hole in the table.
+            let choices = (descendants<ComboBox> window |> List.find (fun c -> (string (Automation.AutomationProperties.GetName c)).StartsWith "Tag for")).Items |> Seq.map string |> List.ofSeq
+            let merge = descendants<Button> window |> List.exists (fun b -> (buttonText b).StartsWith "Merge")
+            pickTag window "TH"
+            let retagged = review.Edits |> List.map (fun e -> e.Tag, e.Retag)
+            window.Close()
+
+            table.Tag |> should equal "Table"
+            table.Content |> should be Null
+            rows
+            |> should
+                equal
+                [ "TR", [ "TH", "Bed", 2, 1; "TH", "Garden", 1, 2 ]
+                  "TR", [ "TH", "Sow", 1, 1; "TH", "Plant", 1, 1 ]
+                  "TR", [ "TD", "North", 1, 1; "TD", "Peas", 1, 1; "TD", "Kale", 1, 1 ] ]
+            choices |> should equal [ "TH"; "TD" ]
+            merge |> should be False
+            retagged |> should equal [ "TD", Some "TH" ]))

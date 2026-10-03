@@ -388,6 +388,23 @@ module SuggestedTree =
             | first :: _ when first.Tag = "LI" ->
                 let items = blocks |> List.takeWhile (fun b -> b.Tag = "LI")
                 node "L" null [ for item in items -> region item ] :: group (blocks |> List.skip items.Length)
+            // A table's cells, after it, in its rows, with their spans, as tagging writes them
+            // (see TableGrid); its own text is theirs.
+            | first :: rest when first.Tag = "Table" ->
+                let cells = rest |> List.takeWhile (fun b -> TableGrid.isCell b.Tag && within first.Geometry b.Geometry >= 0.5)
+                if cells.IsEmpty then
+                    region first :: group rest
+                else
+                    let places = TableGrid.place [ for cell in cells -> cell.Geometry ]
+                    let rowCount = places |> List.map (fun p -> p.Row + p.RowSpan) |> List.max
+                    let rows =
+                        [ for row in 0 .. rowCount - 1 ->
+                              node "TR" null [
+                                  for cell, place in List.zip cells places |> List.filter (fun (_, p) -> p.Row = row) |> List.sortBy (fun (_, p) -> p.Column) ->
+                                      { region cell with RowSpan = place.RowSpan; ColSpan = place.ColSpan }
+                              ] ]
+                    let table = region first
+                    { table with Content = null; Children = List.ofSeq table.Children @ rows } :: group (rest |> List.skip cells.Length)
             | first :: rest -> region first :: group rest
         group (page.Blocks |> List.sortBy _.Order)
         @ [ for link, order in homes do if order.IsNone then linkNode link ]

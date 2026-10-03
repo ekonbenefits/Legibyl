@@ -732,7 +732,11 @@ into Neighbour** (or **Don't Merge**), for a region that isn't one of its own
 selects several, and selecting a list or the document applies to every region
 in it: the Tag picker then shows their tag when they share one, and gives the
 one picked to all of them. The preview draws a region merged into its neighbour in
-grey, and every region with its tag as edited.
+grey, and every region with its tag as edited. A table whose cells were found
+shows them in its rows, as a tagged table's are (a cell over two rows or columns
+spanning them); a cell's Tag picker offers TH or TD (a header cell the model
+missed, say); give the table the tag P to tag it as text instead, its cells then
+read as paragraphs.
 
 The layout itself is never changed: like a structure read from a
 tagged PDF, they're read-only, and what you decide is layered on top as edits
