@@ -334,8 +334,8 @@ let packages =
 /// version: (repository, commit or tag), by package and version, with how it's known.
 let knownCommits =
     Map.ofList
-        [ // Published 2018-02-01; its language profiles have 3-letter (ISO 639-3) codes, the change in
-          // this commit, the repository's last (it has no tag for 1.3.1).
+        [ // The commit whose LanguageDetection.csproj has <PackageId>LanguageDetection.NETStandard</PackageId>
+          // and <Version>1.3.1</Version> (the one before it has 1.2.0); the repository has no tag for it.
           ("LanguageDetection.NETStandard", "1.3.1"), ("https://github.com/TechnikEmpire/language-detection", "d10b91a41c2f31c7da82ffea3124f4472f2b8f46")
           // From .NET Core's host repository, tagged for its release.
           ("Microsoft.DotNet.PlatformAbstractions", "1.1.0"), ("https://github.com/dotnet/core-setup", "refs/tags/v1.1.0") ]
