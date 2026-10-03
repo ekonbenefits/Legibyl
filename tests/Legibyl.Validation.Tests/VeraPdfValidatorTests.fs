@@ -152,7 +152,7 @@ let ``common PDF/UA failures are explained in plain language, with what to do`` 
     let untagged = RuleGuide.forRule "ISO 14289-1:2014" "7.1" 3 |> Option.get
     untagged.Meaning |> should haveSubstring "neither tagged nor marked as decoration"
     // Shown only where no auto fix applies: a tagged PDF (an untagged one gets Suggest Structure…).
-    untagged.WhatToDo |> should haveSubstring "The tool that made the PDF left this out of its tags: fix it where the PDF was made"
+    untagged.WhatToDo |> should haveSubstring "In Structure…, it's listed under Not in the tags"
     (RuleGuide.forRule "ISO 14289-1:2014" "7.3" 1).Value.WhatToDo |> should haveSubstring "Edit Alt Text…"
     // Every test of a clause the guide covers as a whole.
     RuleGuide.forRule "ISO 14289-1:2014" "7.21.6" 4 |> Option.isSome |> should be True

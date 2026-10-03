@@ -481,7 +481,7 @@ let chooseFixOptions
                         TextBlock.textWrapping TextWrapping.Wrap
                         TextBlock.margin (0.0, 8.0, 0.0, 16.0)
                         TextBlock.text
-                            "Counts are findings in the current results, dismissed warnings included. These fixes are best-effort: they don't write alt text themselves (Export writes the alt text you wrote, with your other edits) or infer tables' rows and cells, and tags from the layout are a detector's best guess, to check."
+                            "Counts are findings in the current results, dismissed warnings included. These fixes are best-effort: they don't write alt text themselves (Export writes the alt text you wrote, with your other edits), and tags from the layout, tables' rows, cells and header rows among them, are a detector's best guess, to check."
                     ]
                     StackPanel.create [
                         Grid.row 4
@@ -790,7 +790,7 @@ let showFixResult (owner: Window) (outcome: Result<FixResult, string>) (after: V
                             | Ok _ ->
                                 TextBlock.create [
                                     TextBlock.text
-                                        "Fixes are best-effort and limited to the ones you selected. They don't write alt text themselves (only the alt text you wrote) or infer table headers, and tags from the layout are a detector's best guess, to check."
+                                        "Fixes are best-effort and limited to the ones you selected. They don't write alt text themselves (only the alt text you wrote), and tags from the layout, tables' rows, cells and header rows among them, are a detector's best guess, to check."
                                     TextBlock.fontSize 12.0
                                     TextBlock.textWrapping TextWrapping.Wrap
                                     TextBlock.margin (0.0, 0.0, 16.0, 0.0)

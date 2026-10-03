@@ -355,7 +355,7 @@ let pageOrderButtons (needs: OrderBarNeeds) : IView =
                              | 0 -> ")"
                              | size -> $"; downloads its models, about {size} MB, the first time)")
                           + ", as moves you can see in the Edits tab. "
-                          + "Never within a list or table, or across pages. Restore Page Original Order puts it back."
+                          + $"Never within a list or table, or across pages. Restore Page {pageName} Original Order, shown once it's moved, puts it back."
                       )
                       Button.onClick ((fun _ -> page |> Option.iter needs.OrderByLayout), SubPatchOptions.Always) ]
                 if not moved.IsEmpty then

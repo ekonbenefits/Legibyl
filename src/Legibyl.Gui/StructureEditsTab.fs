@@ -198,11 +198,11 @@ let view (needs: Needs) : IView =
                             TextBlock.text (
                                 let file = Path.GetFileName(Dismissals.filePath needs.SourceFilePath)
                                 if edits.Current.IsEmpty && needs.Suggested.IsSome then
-                                    "No edits yet. In the Blocks tab, select a region to give it another tag, merge it into its neighbour, or mark it not read (shift-click to select several); right-click a figure or a link to describe it, or text read with OCR to correct it."
+                                    "No edits yet. In the Blocks tab, select a region (shift-click to select several): under Selected element, or on its right-click menu, give it another tag (Artifact for one that's not read; a table's cell, TH or TD), merge it into its neighbour, describe a figure or a link, or correct text read with OCR (F2)."
                                 elif needs.Suggested.IsSome then
                                     $"Your edits on the suggested structure. Save in the main window keeps them in {file} next to the PDF; Export… tags a copy with the layout and them."
                                 elif edits.Current.IsEmpty then
-                                    "No edits yet. In the Blocks tab, right-click a figure or a link to describe it, or an element with replacement text to correct it; select a paragraph or heading to give it another tag, or shift-click neighbouring paragraphs (or figures drawn in pieces) to merge them; select a figure that's only decoration to tag it Artifact (not read)."
+                                    "No edits yet. In the Blocks tab, select a block: under Selected element, or on its right-click menu, describe a figure or a link, or correct replacement text (F2); Move Up or Move Down (Alt+Up, Alt+Down); give a paragraph or heading another tag, or a figure that's only decoration the tag Artifact (not read); shift-click neighbouring paragraphs (or figures drawn in pieces) to merge them; and for what's under Not in the tags, Not Read (Artifact), Tag as Figure or Tag as Paragraph. Under Page n, Order Page n by Layout reorders a whole page."
                                 else
                                     $"Your edits. Save in the main window keeps them in {file} next to the PDF; Export… writes the ones not in it yet to a copy."
                             )

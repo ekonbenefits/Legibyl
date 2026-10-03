@@ -63,7 +63,7 @@ module Checklist =
                 Title = "Alt text"
                 Shown = Some(plural facts.Figures "figure" + $", {facts.FiguresWithAlt} with alt text")
                 What =
-                  "In Structure…, right-click a figure › Edit Alt Text…: say what it's for here, in a sentence. A figure that's only decoration: select it › Not Read (Artifact)."
+                  "In Structure…, select a figure › Edit Alt Text… (or F2): say what it's for here, in a sentence. A figure that's only decoration: give it the tag Artifact (not read) in the Tag picker."
                 InStructure = true }
           { Id = "headings"
             Title = "Headings"
@@ -80,7 +80,7 @@ module Checklist =
           { Id = "reading-order"
             Title = "Reading order"
             Shown = None
-            What = "Structure… numbers each page's elements in the order they're read. Legibyl can't reorder them: fix the order where the PDF was made."
+            What = "Structure… numbers each page's elements in the order they're read, on the page preview. To change it, select an element and Move Up or Move Down (Alt+Up, Alt+Down), or Order Page n by Layout for the whole page."
             InStructure = true }
           if facts.Tables > 0 then
               { Id = "tables"

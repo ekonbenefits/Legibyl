@@ -90,7 +90,7 @@ let all: Check list =
         Inspect = emptyParagraph }
       { TestNumber = 2
         Message =
-          "Likely split paragraph: neighbouring paragraph tags look like lines of the same sentence, so a screen reader reads one sentence as several paragraphs. Best fixed where the PDF was made; an auto fix can join them where the page shows one block of text."
+          "Likely split paragraph: neighbouring paragraph tags look like lines of the same sentence, so a screen reader reads one sentence as several paragraphs. Best fixed where the PDF was made; an auto fix can join them where the page shows one block of text, or in Structure…, shift-click the paragraphs and Merge them."
         FixOptions = PdfFixOptions.JoinSplitParagraphs
         Inspect = splitParagraph }
       { TestNumber = 8
@@ -214,7 +214,7 @@ let private parentTreeFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private SplitFiguresMessage =
-    "Small figures side by side look like one picture drawn in pieces: a screen reader announces each, and each needs alt text. In Structure…, shift-click them and Merge them into one, then describe it once, or tag it Artifact (not read) if it's decoration."
+    "Small figures side by side look like one picture drawn in pieces: a screen reader announces each, and each needs alt text. In Structure…, shift-click them and Merge N Figures, then describe it once, or give it the tag Artifact (not read) if it's decoration."
 
 let private splitFigureFindings (document: PdfDocument) context =
     [ for run in SplitFigures.find document context ->
@@ -241,7 +241,7 @@ let private emptyFigureFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private ReadingJumpMessage =
-    "A page's tags aren't in the order the page reads: something that spans the page (a masthead, a heading over two columns) is read after content below it. In Structure…, select a block on the page and choose Order Page N by Layout to put it in its layout's order, or Move Up and Move Down to change it by hand."
+    "A page's tags aren't in the order the page reads: something that spans the page (a masthead, a heading over two columns) is read after content below it. In Structure…, select a block on that page: under Page n, Order Page n by Layout puts it in its layout's order, or Move Up and Move Down (Alt+Up, Alt+Down) change it by hand."
 
 /// The document's top-level elements: those in its one Document (or Part, Art, Sect, Div), else
 /// the structure tree's own.
