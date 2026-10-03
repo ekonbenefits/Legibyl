@@ -608,3 +608,75 @@ let ``with the safe fixes, the QR code is still linked, and its link described``
     figureLink output.Path |> should equal (Some "https://example.com/apply")
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetPage(1).GetPdfObject().GetAsName PdfName.Tabs |> should equal PdfName.S
+
+// ---- Tables ----
+
+/// An untagged page with a table: "Bed" over two header rows, "Garden" over two columns ("Sow"
+/// and "Plant" under it), two rows of data, and its rules drawn as lines.
+let private createTable (path: string) =
+    use document = new PdfDocument(new PdfWriter(path))
+    let page = document.AddNewPage PageSize.LETTER
+    let canvas = PdfCanvas page
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    let text (x: float) (y: float) (value: string) =
+        canvas.BeginText().SetFontAndSize(font, 11f).MoveText(x, y).ShowText(value).EndText() |> ignore
+    text 72.0 690.0 "Bed"
+    text 200.0 703.0 "Garden"
+    text 200.0 683.0 "Sow"
+    text 330.0 683.0 "Plant"
+    for y, row in [ 663.0, [ "North"; "Peas"; "Kale" ]; 643.0, [ "South"; "Corn"; "Melon" ] ] do
+        for x, value in List.zip [ 72.0; 200.0; 330.0 ] row do text x y value
+    for y in [ 715.0; 675.0; 655.0; 635.0 ] do canvas.MoveTo(70.0, y).LineTo(460.0, y).Stroke() |> ignore
+    canvas.MoveTo(195.0, 695.0).LineTo(460.0, 695.0).Stroke() |> ignore
+    for x in [ 70.0; 195.0; 460.0 ] do canvas.MoveTo(x, 635.0).LineTo(x, 715.0).Stroke() |> ignore
+    canvas.MoveTo(325.0, 635.0).LineTo(325.0, 695.0).Stroke() |> ignore
+
+let private tableRegions =
+    [ region "Table" (68.0, 633.0, 462.0, 717.0) null
+      region "TH" (70.0, 675.0, 195.0, 715.0) null
+      region "TH" (195.0, 695.0, 460.0, 715.0) null
+      region "TH" (195.0, 675.0, 325.0, 695.0) null
+      region "TH" (325.0, 675.0, 460.0, 695.0) null
+      region "TD" (70.0, 655.0, 195.0, 675.0) null
+      region "TD" (195.0, 655.0, 325.0, 675.0) null
+      region "TD" (325.0, 655.0, 460.0, 675.0) null
+      region "TD" (70.0, 635.0, 195.0, 655.0) null
+      region "TD" (195.0, 635.0, 325.0, 655.0) null
+      region "TD" (325.0, 635.0, 460.0, 655.0) null ]
+
+[<Fact>]
+let ``a table with cells is tagged in rows of header and data cells, with their spans, each cell's text its own`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTable input.Path
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout tableRegions))
+
+    result.AppliedFixes |> should contain "Tagged 1 table with rows and cells, from their layout: to check, the header row above all"
+    result.AppliedFixes |> Seq.exists (fun line -> line.Contains "tagged as text") |> should be False
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let table = (root.Children |> Seq.exactlyOne).Children |> Seq.exactlyOne
+    table.Tag |> should equal "Table"
+    [ for row in table.Children -> row.Tag, [ for cell in row.Children -> cell.Tag, cell.Content, cell.RowSpan, cell.ColSpan ] ]
+    |> should
+        equal
+        [ "TR", [ "TH", "Bed", 2, 1; "TH", "Garden", 1, 2 ]
+          "TR", [ "TH", "Sow", 1, 1; "TH", "Plant", 1, 1 ]
+          "TR", [ "TD", "North", 1, 1; "TD", "Peas", 1, 1; "TD", "Kale", 1, 1 ]
+          "TR", [ "TD", "South", 1, 1; "TD", "Corn", 1, 1; "TD", "Melon", 1, 1 ] ]
+    // Every piece of content is tagged (the rules as artifacts), and the table is well formed.
+    let rules = failedRules output.Path
+    rules |> should not' (contain "7.1-3")
+    rules |> Set.filter (fun rule -> rule.StartsWith "7.5") |> should be Empty
+
+[<Fact>]
+let ``a table without cells is still tagged as text, and so is a cell outside every table`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTable input.Path
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout [ region "Table" (68.0, 633.0, 462.0, 717.0) null; region "TD" (500.0, 100.0, 560.0, 120.0) null ]))
+
+    result.AppliedFixes |> should contain "1 table was tagged as text: rows and cells need tagging by hand"
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    flatten root |> List.map _.Tag |> List.filter (fun tag -> tag = "Table" || tag = "TR" || tag = "TD") |> should be Empty

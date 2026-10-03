@@ -724,7 +724,7 @@ no list regions, so runs of paragraphs that start with list markers become list
 items (LI), in a list, by the same rules as the lists-from-paragraphs fix; a web
 link without a description is a `Link` inside the region it's in. Selecting a
 region gives a **Tag** picker for another tag (H1, H, H2 to H6, P, LI, Figure,
-Table, Caption, Note, Formula, Lbl, Artifact) — a heading the detector took for a
+Table, TH, TD, Caption, Note, Formula, Lbl, Artifact) — a heading the detector took for a
 paragraph, say, or **Artifact** for page furniture a screen reader should skip,
 like a running header or a page number (which also undoes a merge) — and **Merge
 into Neighbour** (or **Don't Merge**), for a region that isn't one of its own
@@ -784,10 +784,14 @@ the same. The structure is a `Document` of the regions' elements in reading
 order: the title is H1 and other headings H2 (H1 when there's no title),
 consecutive list items form an `L` with its `/ListNumbering`, notes get the
 `/ID` PDF/UA asks for, and each link annotation gets a `Link` element (with its
-`/StructParent` and the page's `/Tabs /S`). What it can't do is reported:
-figures still need alt text, tables are tagged as text (their rows and cells
-need tagging by hand), and a page without text (a scan) is tagged as a figure
-that needs OCR. Text drawn as outlines is tagged as its region's element, with
+`/StructParent` and the page's `/Tabs /S`). A table whose cells are in the
+layout (`TH` and `TD` regions inside its `Table` region) is a `Table` of `TR`
+rows of `TH`/`TD` cells, each with what's drawn in it, a header cell with
+`/Scope /Column`, and a cell over more than one row or column with `/RowSpan` or
+`/ColSpan` (from where its edges fall among the table's, `TableGrid.fs`); its
+rules are artifacts. What it can't do is reported: figures still need alt text,
+a table without cells is tagged as text (its rows and cells need tagging by
+hand), and a page without text (a scan) is tagged as a figure that needs OCR. Text drawn as outlines is tagged as its region's element, with
 the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
 and the report asks for it to be checked. It doesn't describe links outside a table of contents.
 
@@ -1149,7 +1153,8 @@ has `"structure": null` and exits `1`.
 For an untagged PDF: `layout suggest` writes the layout the layout model
 suggests (`LayoutFile.fs`) — each page's regions in reading order, with the tag
 each suggests (`H1`, `H`, `P`, `LI`, `Figure`, `Table`, `Caption`, `Note`,
-`Formula`, `Lbl`, `Artifact`), its `page` and `box`, its `text` (`recognized`
+`Formula`, `Lbl`, `Artifact`, and `TH` or `TD` for a cell of the `Table` it's
+in), its `page` and `box`, its `text` (`recognized`
 when OCR read it because it's drawn rather than written), a QR code's `qrText`,
 and a `title` — to stdout, or with `--output <path>` to a file (stdout then
 gets a summary). Each figure also gets `textBefore` and `textAfter`, the text of
