@@ -441,7 +441,9 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
             | [ tag ] -> Some tag
             | _ -> None
         let tags =
-            if needs.Suggested then LayoutFile.tags
+            // A table's cell is a header cell or a data cell: anything else would leave a hole in it.
+            if needs.Suggested && targets |> List.forall (fun n -> TableGrid.isCell n.Tag) then [ "TH"; "TD" ]
+            elif needs.Suggested then LayoutFile.tags
             elif targets |> List.forall (fun n -> n.Tag = "Figure") then [ "Figure"; "Artifact" ]
             else retagTags
         Some
@@ -479,7 +481,8 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
 /// what's drawn outside every tag made decoration, or tagged as a figure or a paragraph; a tagged
 /// PDF's paragraphs, or a figure drawn in pieces, merged into one, or kept apart again.
 let otherActions (needs: SelectionNeeds) : Action list =
-    [ match (if needs.Suggested then regionsIn needs.Selected.Current else []) with
+    // (Not a table's cell: merged into its neighbour, it would leave a hole in the table.)
+    [ match (if needs.Suggested then regionsIn needs.Selected.Current |> List.filter (fun r -> not (TableGrid.isCell r.Tag)) else []) with
       | [] -> ()
       | regions ->
           let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"
