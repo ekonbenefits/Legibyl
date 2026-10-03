@@ -1215,8 +1215,8 @@ module private StructureView =
                                 secondary (String.Join(" ", progress))
                                 if not modelReady.Current then
                                     secondary (
-                                        $"Finding the layout needs a layout detection model (PP-DocLayoutV3, about {LayoutModel.DownloadSizeMegabytes} MB). "
-                                        + $"It's downloaded once from {LayoutModel.source ()} into {LayoutModel.directory ()}, and runs on this computer: "
+                                        $"Finding the layout needs a layout detection model (PP-DocLayoutV3) and a table-structure model (Table Transformer), about {LayoutModel.downloadMegabytes ()} MB still to download. "
+                                        + $"They're downloaded once, from {LayoutModel.source ()} into {LayoutModel.directory ()} and from Hugging Face into {System.IO.Path.GetDirectoryName(TableModel.path ())}, and run on this computer: "
                                         + "the PDF isn't sent anywhere."
                                     )
                                     match downloadProgress.Current with

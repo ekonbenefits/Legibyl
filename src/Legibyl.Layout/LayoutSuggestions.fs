@@ -404,11 +404,12 @@ module QrCodes =
                         add (text, (l / scale, t / scale, r / scale, b / scale))
         List.ofSeq found
 
-/// The layout detector's model: whether it's downloaded, and downloading it.
+/// The models suggesting structure needs: the layout detector's, and the table-structure model
+/// (see TableModel). Whether they're downloaded, and downloading them, together.
 module LayoutModel =
-    /// Roughly how much there is to download, for telling the user before they do.
+    /// Roughly how big the layout detector's is.
     [<Literal>]
-    let DownloadSizeMegabytes = 130
+    let private LayoutMegabytes = 130
 
     let private downloader () = new ModelDownloader()
 
@@ -422,12 +423,18 @@ module LayoutModel =
         use downloader = downloader ()
         downloader.Endpoint
 
-    let isDownloaded () =
+    let private layoutDownloaded () =
         use downloader = downloader ()
         downloader.IsComplete ModelCatalog.PpDocLayoutV3
 
-    /// Downloads the model if it isn't already, reporting the fraction done (0-1).
-    let download (progress: IProgress<float>) (cancellation: CancellationToken) : Task =
+    let isDownloaded () = layoutDownloaded () && TableModel.isDownloaded ()
+
+    /// Roughly how much there's left to download, for telling the user before they do.
+    let downloadMegabytes () =
+        (if layoutDownloaded () then 0 else LayoutMegabytes) + (if TableModel.isDownloaded () then 0 else TableModel.DownloadSizeMegabytes)
+
+    /// Downloads the layout detector's model if it isn't already, reporting the fraction done (0-1).
+    let private downloadLayout (progress: IProgress<float>) (cancellation: CancellationToken) : Task =
         task {
             use downloader = downloader ()
             let totals = Collections.Generic.Dictionary<string, int64 * int64>()
@@ -437,10 +444,22 @@ module LayoutModel =
                         totals[p.File] <- (p.BytesReceived, (if p.TotalBytes.HasValue then p.TotalBytes.Value else p.BytesReceived))
                         let received = totals.Values |> Seq.sumBy fst
                         // The weights are nearly all of it; before their size is known, guess.
-                        let total = max (totals.Values |> Seq.sumBy snd) (int64 DownloadSizeMegabytes * 1_000_000L)
+                        let total = max (totals.Values |> Seq.sumBy snd) (int64 LayoutMegabytes * 1_000_000L)
                         progress.Report(float received / float total)))
             let! _ = downloader.EnsureAsync(ModelCatalog.PpDocLayoutV3, report, cancellation)
             ()
+        }
+
+    /// Downloads the models that aren't already, reporting the fraction done of all of it (0-1).
+    let download (progress: IProgress<float>) (cancellation: CancellationToken) : Task =
+        task {
+            let layout = if layoutDownloaded () then 0.0 else float LayoutMegabytes
+            let table = if TableModel.isDownloaded () then 0.0 else float TableModel.DownloadSizeMegabytes
+            let total = max 1.0 (layout + table)
+            if layout > 0.0 then
+                do! downloadLayout (Progress<float>(fun f -> progress.Report(f * layout / total))) cancellation
+            if table > 0.0 then
+                do! TableModel.download (Progress<float>(fun f -> progress.Report((layout + f * table) / total))) cancellation
         }
 
 /// Suggests structure for a PDF's pages, one page at a time (each takes seconds). Keeps the
@@ -456,6 +475,12 @@ type LayoutSuggester(pdfPath: string) =
     let pages = new Legibyl.Rendering.PdfiumDocument(bytes)
     let detector = lazy (LayoutDetector.Load(LayoutModel.directory ()))
     let ocr = lazy (TextRecognition.createEngine ())
+    // The table-structure model, if it's downloaded: without it, tables have no cells (and are
+    // tagged as text).
+    let tables =
+        lazy (if TableModel.isDownloaded () then Some(new Microsoft.ML.OnnxRuntime.InferenceSession(TableModel.path ())) else None)
+    // How far round a table its picture reaches, in points: the model looks for one with a margin.
+    let tableMargin = 6.0
     // OCR wants more pixels than the detector: about 300 dpi.
     let ocrScale = 4.0
     // QR codes are scanned at 400 dpi, as qr-link-pdf does: stylised codes (rounded modules,
@@ -594,6 +619,54 @@ type LayoutSuggester(pdfPath: string) =
                         inFigures
                         |> List.exists (fun (other, (r: StructureGeometry)) -> other = text && x >= r.Left && x <= r.Right && y >= r.Bottom && y <= r.Top)
                     inFigures @ (onPage |> List.filter (not << known))
+            // Each table's cells, found by the table-structure model from a picture of it, after it:
+            // TH in its header rows, TD otherwise. Each gets the page's words in it; a table with
+            // none (drawn as outlines, or a scan) has each cell read with OCR.
+            let withCells (blocks: SuggestedBlock list) =
+                match highResolution, tables.Value with
+                | NonNull bitmap, Some session when blocks |> List.exists (fun b -> b.Tag = "Table") ->
+                    [ for block in blocks do
+                          yield block
+                          if block.Tag = "Table" then
+                              let g = block.Geometry
+                              let framed = { g with Left = g.Left - tableMargin; Right = g.Right + tableMargin; Top = g.Top + tableMargin; Bottom = g.Bottom - tableMargin }
+                              // Where the picture's top-left is in the page's rendering (as readRegions crops it).
+                              let left = max 0 (int (Math.Round((framed.Left - crop.Left) * ocrScale)))
+                              let top = max 0 (int (Math.Round((crop.Top - framed.Top) * ocrScale)))
+                              let found =
+                                  readRegions bitmap ocrScale crop [ Some(fun picture -> Some(TableStructure.grid (TableStructure.find session picture))), framed ]
+                              match found with
+                              | [ Some cells ] when not cells.IsEmpty ->
+                                  let geometry (box: SKRect) : StructureGeometry =
+                                      { PageNumber = pageNumber
+                                        Left = crop.Left + (float left + float box.Left) / ocrScale
+                                        Right = crop.Left + (float left + float box.Right) / ocrScale
+                                        Top = crop.Top - (float top + float box.Top) / ocrScale
+                                        Bottom = crop.Top - (float top + float box.Bottom) / ocrScale }
+                                  // In reading order: rows down the page, then across.
+                                  let cells =
+                                      cells
+                                      |> List.map (fun cell -> cell.Header, geometry cell.Box)
+                                      |> List.sortBy (fun (_, g) -> -(Math.Round(g.Top, 1)), g.Left)
+                                  let texts = LayoutSuggestions.assignText (List.map snd cells) words
+                                  let read =
+                                      if block.Text = "" then
+                                          readRegions bitmap ocrScale crop [ for _, g in cells -> Some recognize, g ]
+                                      else
+                                          cells |> List.map (fun _ -> None)
+                                  for ((header, g), text), read in List.zip (List.zip cells texts) read do
+                                      yield
+                                          { Order = 0
+                                            Label = (if header then "table_header_cell" else "table_cell")
+                                            Tag = (if header then "TH" else "TD")
+                                            Score = block.Score
+                                            Geometry = g
+                                            Text = defaultArg read text
+                                            ListNumbering = None
+                                            Recognized = read.IsSome
+                                            QrText = None }
+                              | _ -> () ]
+                | _ -> blocks
             { PageNumber = pageNumber
               HasText = not words.IsEmpty
               Rotated = rotated
@@ -611,6 +684,7 @@ type LayoutSuggester(pdfPath: string) =
                         ListNumbering = None
                         Recognized = read.IsSome
                         QrText = None } ]
+                |> withCells
                 |> LayoutSuggestions.placeQrCodes qrCodes
                 |> LayoutSuggestions.findLists })
 
@@ -621,6 +695,8 @@ type LayoutSuggester(pdfPath: string) =
                     detector.Value.Dispose()
                 if ocr.IsValueCreated then
                     ocr.Value |> Option.iter _.Dispose()
+                if tables.IsValueCreated then
+                    tables.Value |> Option.iter _.Dispose()
                 (pages :> IDisposable).Dispose()
                 document.Dispose())
 

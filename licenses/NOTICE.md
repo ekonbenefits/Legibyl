@@ -109,6 +109,21 @@ PP-DocLayoutV3 (Apache License 2.0, by PaddlePaddle), isn't shipped with
 Legibyl: the app downloads it only when the user asks, into PaddleOCR's own
 model cache.
 
+## Table Transformer and ONNX Runtime (tables' rows and cells)
+
+**Suggest Structure** and the tag-from-layout fix find a table's rows, columns,
+header and spanning cells with Microsoft's
+[Table Transformer](https://github.com/microsoft/table-transformer)
+structure-recognition model (copyright Microsoft Corporation, MIT License),
+in [Xenova's 8-bit ONNX export](https://huggingface.co/Xenova/table-transformer-structure-recognition)
+of version 1.0. The model isn't shipped with Legibyl: the app downloads it
+unmodified, at a fixed revision checked against its SHA-256, only when the user
+asks, into Legibyl's own folder. It's run with
+[ONNX Runtime](https://github.com/microsoft/onnxruntime) (the
+`Microsoft.ML.OnnxRuntime` NuGet package, copyright Microsoft Corporation, MIT
+License), used unmodified via a NuGet package reference. The MIT License's full
+text is in `LICENSE.MIT` in this directory.
+
 ## Tesseract OCR
 
 The **Suggest Structure** preview and the tag-from-layout fix read text drawn as

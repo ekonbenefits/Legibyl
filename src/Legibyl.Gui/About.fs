@@ -46,6 +46,10 @@ let components () =
         BuildInfo.libraryVersion typeof<PaddleOcrSharp.Download.ModelDownloader>.Assembly,
         (if LayoutModel.isDownloaded () then $"suggesting structure; its model is downloaded, in {LayoutModel.directory ()}"
          else "suggesting structure; its model isn't downloaded yet")
+        "Table Transformer", "1.0 (8-bit)",
+        (if TableModel.isDownloaded () then $"finding tables' rows and cells; its model is downloaded, in {IO.Path.GetDirectoryName(TableModel.path ())}"
+         else "finding tables' rows and cells; its model isn't downloaded yet")
+        "ONNX Runtime", BuildInfo.libraryVersion typeof<Microsoft.ML.OnnxRuntime.InferenceSession>.Assembly, "running the table model"
         "Tesseract tessdata", stamped "TessdataVersion", "reading text drawn as outlines or pixels (English)"
         "Avalonia", BuildInfo.libraryVersion typeof<Application>.Assembly, "the windows" ]
 

@@ -34,6 +34,8 @@
 
   <ItemGroup Label="Layout detection and OCR">
     <PackageVersion Include="PaddleOCR" Version="26.9.5517" />
+    <!-- Runs the table-structure model (Table Transformer, see TableStructure) - MIT. -->
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
     <PackageVersion Include="Tesseract.CrossPlatform" Version="5.5.2.200" />
     <PackageVersion Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>

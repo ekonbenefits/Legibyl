@@ -36,6 +36,7 @@
     <Compile Include="TitleFromFirstPageTests.fs" />
     <Compile Include="ValidatorNotesTests.fs" />
     <Compile Include="LayoutSuggestionsTests.fs" />
+    <Compile Include="TableStructureTests.fs" />
     <Compile Include="TableGridTests.fs" />
     <Compile Include="LayoutTaggingTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />

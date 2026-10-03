@@ -350,8 +350,11 @@ let pageOrderButtons (needs: OrderBarNeeds) : IView =
                     [ Button.margin (0.0, 0.0, 6.0, 8.0)
                       Button.isEnabled (page.IsSome && not needs.Ordering && needs.CanOrderByLayout)
                       ToolTip.tip (
-                          $"Put page {pageName} in the reading order its layout gives, found by a layout detector (several seconds; "
-                          + $"downloads its model, about {LayoutModel.DownloadSizeMegabytes} MB, the first time), as moves you can see in the Edits tab. "
+                          $"Put page {pageName} in the reading order its layout gives, found by a layout detector (several seconds"
+                          + (match LayoutModel.downloadMegabytes () with
+                             | 0 -> ")"
+                             | size -> $"; downloads its models, about {size} MB, the first time)")
+                          + ", as moves you can see in the Edits tab. "
                           + "Never within a list or table, or across pages. Restore Page Original Order puts it back."
                       )
                       Button.onClick ((fun _ -> page |> Option.iter needs.OrderByLayout), SubPatchOptions.Always) ]
