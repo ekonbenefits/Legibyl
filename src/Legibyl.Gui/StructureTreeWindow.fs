@@ -698,7 +698,8 @@ module private StructureView =
             ruler.Describe <- StructureBlocks.blockName
             ruler.Refresh()
 
-            // Above the blocks, with any: how many have failures and warnings, and Previous and Next.
+            // Below the blocks, with any (away from Move Up and Down): how many have failures and
+            // warnings, and Previous and Next.
             let findingsBar () : IView =
                 let failing = findingMarks |> List.filter (fun (mark, _) -> mark.Failure) |> List.length
                 let warning = findingMarks.Length - failing
@@ -708,8 +709,8 @@ module private StructureView =
                       if warning > 0 then $"{blocks warning} with warnings" ]
                     |> String.concat ", "
                 WrapPanel.create [
-                    DockPanel.dock Dock.Top
-                    WrapPanel.margin (8.0, 0.0, 8.0, 6.0)
+                    DockPanel.dock Dock.Bottom
+                    WrapPanel.margin (8.0, 6.0, 8.0, 0.0)
                     WrapPanel.children [
                         TextBlock.create [
                             TextBlock.text summary
