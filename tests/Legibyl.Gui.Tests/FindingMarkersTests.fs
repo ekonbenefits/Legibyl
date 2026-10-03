@@ -328,8 +328,7 @@ let ``a tagged PDF with a title of its own shows it`` () =
 
 /// The block focused in window, if one is.
 let private focusedBlock (window: Window) =
-    window.FocusManager
-    |> Option.ofObj
+    Some window.FocusManager
     |> Option.bind (fun f -> match f.GetFocusedElement() with :? Border as b -> Some b | _ -> None)
     |> Option.bind (fun b -> match b.Tag with :? StructureNode as n -> Some n.Tag | _ -> None)
 
@@ -396,8 +395,7 @@ let private withThreePages (test: string -> unit) =
 
 /// The page of the block focused in window, if one is.
 let private focusedPage (window: Window) =
-    window.FocusManager
-    |> Option.ofObj
+    Some window.FocusManager
     |> Option.bind (fun f -> match f.GetFocusedElement() with :? Border as b -> Some b | _ -> None)
     |> Option.bind (fun b -> match b.Tag with :? StructureNode as n -> Option.ofObj n.Geometry | _ -> None)
     |> Option.map _.PageNumber
@@ -423,13 +421,13 @@ let ``the arrows below the blocks go to the page before and after, and the picke
             let first = go "Next page"
             // The page's first block at the top of the blocks, its page after it.
             let atTop =
-                window.FocusManager
-                |> Option.ofObj
+                Some window.FocusManager
                 |> Option.bind (fun f -> match f.GetFocusedElement() with :? Border as b -> Some b | _ -> None)
                 |> Option.bind (fun b ->
                     let scroll = descendants<ScrollViewer> window |> List.find (fun s -> s.Name = FindingRuler.blocksName)
-                    b.TranslatePoint(Point(0.0, 0.0), scroll) |> Option.ofNullable)
-                |> Option.map (fun p -> p.Y)
+                    b.TranslatePoint(Point(0.0, 0.0), scroll) |> Option.ofNullable
+                    // Or as near as it goes: scrolled to the end, when the blocks after it don't fill the view.
+                    |> Option.map (fun p -> p.Y <= 20.0 || scroll.Offset.Y >= scroll.Extent.Height - scroll.Viewport.Height - 4.0))
             let visited = [ first; go "Next page" ]
             let atLast = (button "Next page").IsEnabled
             let back = go "Previous page"
@@ -445,10 +443,41 @@ let ``the arrows below the blocks go to the page before and after, and the picke
             pages |> should equal [ 1; 2; 3 ]
             atFirst |> should be False
             visited |> should equal [ Some 2; Some 3 ]
-            atTop.Value |> should be (lessThanOrEqualTo 20.0)
+            atTop |> should equal (Some true)
             atLast |> should be False
             back |> should equal (Some 2)
             shown |> should equal (box 2)
             picked |> should equal (Some 3)
             keys |> should equal (Input.KeyGesture(Input.Key.PageUp, Input.KeyModifiers.Alt), Input.KeyGesture(Input.Key.PageDown, Input.KeyModifiers.Alt))
             findingArrows |> should be Empty))
+
+[<Fact>]
+let ``editing is on the right with a pencil, going places on the left without one, and More holds Import and Export`` () =
+    withThreePages (fun pdf ->
+        onUiThread (fun () ->
+            let source = StructureSource.Tagged(VeraPdfValidator().ReadStructureTree pdf |> nonNull)
+            let window = StructureTreeWindow(source, pdf, DocumentReviews().For pdf, ignore, FindingMarkers.none)
+            window.Show()
+            pump ()
+            let named name = descendants<Button> window |> List.find (fun b -> string (AutomationProperties.GetName b) = name)
+            let splitter = descendants<GridSplitter> window |> List.exactlyOne
+            let x (b: Button) = (b.TranslatePoint(Point(0.0, 0.0), window) |> Option.ofNullable |> Option.get).X
+            let line = (splitter.TranslatePoint(Point(0.0, 0.0), window) |> Option.ofNullable |> Option.get).X
+            let pencilled (b: Button) =
+                descendants<Avalonia.Controls.Shapes.Path> b |> List.exists (fun p -> obj.ReferenceEquals(p.Data, Icons.pencil))
+            let edits = [ named "Move Up"; named "Move Down"; named "Order Page 1 by Layout" ]
+            let goes = [ named "Previous page"; named "Next page" ]
+            let editsRight = edits |> List.forall (fun b -> x b > line && pencilled b)
+            let goesLeft = goes |> List.forall (fun b -> x b < line && not (pencilled b) && not (isNull b.Theme))
+            let more = named "More"
+            let items =
+                match more.Flyout with
+                | :? MenuFlyout as flyout -> flyout.Items |> Seq.choose (function :? MenuItem as i -> Some(string i.Header) | _ -> None) |> List.ofSeq
+                | _ -> []
+            let footer = descendants<Button> window |> List.filter (fun b -> [ "Import Edits…"; "Export JSON…" ] |> List.contains (string b.Content))
+            window.Close()
+
+            editsRight |> should be True
+            goesLeft |> should be True
+            items |> should equal [ "Import Edits…"; "Export Structure as JSON…" ]
+            footer |> should be Empty))

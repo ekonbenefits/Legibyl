@@ -18,11 +18,18 @@ open Legibyl.Validation
 open Legibyl.Screenshots
 open Legibyl.Gui.Tests.HeadlessSession
 
+
+/// What a button says: its screen-reader name (an edit button's label, after its pencil), else its text.
+let private buttonText (b: Button) =
+    match Automation.AutomationProperties.GetName b with
+    | null | "" -> string b.Content
+    | name -> name
+
 let private descendants<'T when 'T :> Visual> (root: Visual) : 'T list =
     root.GetVisualDescendants() |> Seq.choose (fun v -> match box v with :? 'T as c -> Some c | _ -> None) |> List.ofSeq
 
 let private button (root: Visual) (text: string) =
-    descendants<Button> root |> List.find (fun b -> string b.Content = text)
+    descendants<Button> root |> List.find (fun b -> buttonText b = text)
 
 let private click (b: Button) = b.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
 
@@ -177,7 +184,7 @@ let ``a region can be marked not read, tagged as an artifact, and read again`` (
             pickTag window "Artifact"
             let notRead = review.Edits |> List.map (fun e -> e.Tag, e.Retag, e.Exclude)
             // Not read is the Tag picker's Artifact: no button of its own.
-            let buttons = descendants<Button> window |> List.map (fun b -> string b.Content)
+            let buttons = descendants<Button> window |> List.map buttonText
             use suggester = new LayoutSuggester(pdf)
             let regions = (ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review) :> IPageLayoutSource).PageRegions(pdf, 1)
             let tagged = [ for region in regions -> region.Tag ]

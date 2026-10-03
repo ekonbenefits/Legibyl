@@ -203,7 +203,7 @@ let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
       | Some text when text <> string node.ActualText -> "text", text
       | _ -> () ]
 
-/// What the reading-order bar works on, from the window.
+/// What the reading-order buttons work on, from the window.
 type OrderBarNeeds =
     { /// The page shown on the preview: the selected block's, or the first.
       Page: int option
@@ -219,28 +219,48 @@ type OrderBarNeeds =
       OrderByLayout: int -> unit
       SaveEdits: RegionEdits.Edit list -> unit }
 
-// Above a tagged PDF's blocks: the reading order. The selected element moves one place among
-// its siblings (on its page: not past one on another page, nor out of its parent); the
-// shown page is put in the order its layout reads, or back in the order it was tagged in.
-let orderBar (needs: OrderBarNeeds) : IView =
-        let page = needs.Page
-        let moving =
-            match needs.Selected with
-            | [ single ] when not (isNull single.Geometry) && not (isUntagged single) ->
-                match needs.Parents.TryGetValue single with
-                | true, parent when not (fixedOrder.Contains parent.Tag) ->
-                    let order = orderedChildren needs.Edits parent
-                    let index = order |> List.findIndex (fun n -> obj.ReferenceEquals(n, single))
-                    // The sibling it moves past: the nearest with a place on a page (one with none,
-                    // like a figure that draws nothing, stays where it is), if that's on its page.
-                    let page = (nonNull single.Geometry).PageNumber
-                    let past (indexes: int list) =
-                        indexes
-                        |> List.tryFind (fun i -> not (isNull order[i].Geometry))
-                        |> Option.filter (fun i -> (nonNull order[i].Geometry).PageNumber = page)
-                    Some(parent, order, index, past [ index - 1 .. -1 .. 0 ], past [ index + 1 .. order.Length - 1 ])
-                | _ -> None
-            | _ -> None
+/// A button that edits the structure (the edit goes into the PDF on Export): a pencil before its
+/// label, as the Edits tab marks edits, so it's told from the buttons that only go somewhere.
+/// Named for a screen reader by its label.
+let editButton (label: string) (attrs: IAttr<Button> list) : IView =
+    Button.create [
+        Button.content (
+            StackPanel.create [
+                StackPanel.orientation Orientation.Horizontal
+                StackPanel.children [
+                    Icons.decorativeIcon Icons.pencil Theme.Tokens.Primary 12.0
+                    TextBlock.create [ TextBlock.text label; TextBlock.verticalAlignment VerticalAlignment.Center ]
+                ]
+            ]
+        )
+        AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, label, ValueNone)
+        yield! attrs
+    ]
+
+/// The selected element's place among its siblings (on its page: not past one on another page,
+/// nor out of its parent): its parent, their order, its index, and the index of the sibling it
+/// would move past going up and going down, if it can.
+let private moving (needs: OrderBarNeeds) =
+    match needs.Selected with
+    | [ single ] when not (isNull single.Geometry) && not (isUntagged single) ->
+        match needs.Parents.TryGetValue single with
+        | true, parent when not (fixedOrder.Contains parent.Tag) ->
+            let order = orderedChildren needs.Edits parent
+            let index = order |> List.findIndex (fun n -> obj.ReferenceEquals(n, single))
+            // The sibling it moves past: the nearest with a place on a page (one with none,
+            // like a figure that draws nothing, stays where it is), if that's on its page.
+            let page = (nonNull single.Geometry).PageNumber
+            let past (indexes: int list) =
+                indexes
+                |> List.tryFind (fun i -> not (isNull order[i].Geometry))
+                |> Option.filter (fun i -> (nonNull order[i].Geometry).PageNumber = page)
+            Some(parent, order, index, past [ index - 1 .. -1 .. 0 ], past [ index + 1 .. order.Length - 1 ])
+        | _ -> None
+    | _ -> None
+
+// For a tagged PDF's selected element: one place earlier or later in the reading order.
+let moveButtons (needs: OrderBarNeeds) : IView =
+        let moving = moving needs
         let move (up: bool) =
             match moving with
             | Some(parent, order, index, before, after) ->
@@ -252,48 +272,49 @@ let orderBar (needs: OrderBarNeeds) : IView =
                     recordOrder needs.Edits parent target |> needs.SaveEdits
                 | None -> ()
             | None -> ()
-        let moved = page |> Option.map (fun page -> needs.Edits |> List.filter (fun e -> e.Move.IsSome && e.Page = page)) |> Option.defaultValue []
-        let pageName = page |> Option.map string |> Option.defaultValue ""
         WrapPanel.create [
-            DockPanel.dock Dock.Top
-            WrapPanel.margin (8.0, 0.0, 8.0, 6.0)
             WrapPanel.children [
-                Button.create [
-                    Button.content "Move Up"
+                editButton "Move Up" [
                     AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.Up, KeyModifiers.Alt), ValueNone)
-                    Button.margin (0.0, 0.0, 6.0, 4.0)
+                    Button.margin (0.0, 0.0, 6.0, 8.0)
                     Button.isEnabled (match moving with Some(_, _, _, before, _) -> before.IsSome | None -> false)
                     ToolTip.tip "Read the selected element before the one above it (Alt+Up): one place earlier in the reading order, among the elements in the same one, on its page."
                     Button.onClick ((fun _ -> move true), SubPatchOptions.Always)
                 ]
-                Button.create [
-                    Button.content "Move Down"
+                editButton "Move Down" [
                     AttrBuilder<Button>.CreateProperty<KeyGesture | null>(Button.HotKeyProperty, KeyGesture(Key.Down, KeyModifiers.Alt), ValueNone)
-                    Button.margin (0.0, 0.0, 16.0, 4.0)
+                    Button.margin (0.0, 0.0, 6.0, 8.0)
                     Button.isEnabled (match moving with Some(_, _, _, _, after) -> after.IsSome | None -> false)
                     ToolTip.tip "Read the selected element after the one below it (Alt+Down): one place later in the reading order, among the elements in the same one, on its page."
                     Button.onClick ((fun _ -> move false), SubPatchOptions.Always)
                 ]
-                Button.create [
-                    Button.content (
-                        match needs.Ordering, needs.Download with
-                        | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
-                        | true, None -> $"Finding page {pageName}'s layout…"
-                        | false, _ -> $"Order Page {pageName} by Layout"
-                    )
-                    Button.margin (0.0, 0.0, 6.0, 4.0)
-                    Button.isEnabled (page.IsSome && not needs.Ordering && needs.CanOrderByLayout)
-                    ToolTip.tip (
-                        $"Put page {pageName} in the reading order its layout gives, found by a layout detector (several seconds; "
-                        + $"downloads its model, about {LayoutModel.DownloadSizeMegabytes} MB, the first time), as moves you can see in the Edits tab. "
-                        + "Never within a list or table, or across pages. Restore Page Original Order puts it back."
-                    )
-                    Button.onClick ((fun _ -> page |> Option.iter needs.OrderByLayout), SubPatchOptions.Always)
-                ]
+            ]
+        ]
+
+// For a tagged PDF's shown page: put in the order its layout reads, or back in the order it was
+// tagged in.
+let pageOrderButtons (needs: OrderBarNeeds) : IView =
+        let page = needs.Page
+        let moved = page |> Option.map (fun page -> needs.Edits |> List.filter (fun e -> e.Move.IsSome && e.Page = page)) |> Option.defaultValue []
+        let pageName = page |> Option.map string |> Option.defaultValue ""
+        WrapPanel.create [
+            WrapPanel.children [
+                editButton
+                    (match needs.Ordering, needs.Download with
+                     | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
+                     | true, None -> $"Finding page {pageName}'s layout…"
+                     | false, _ -> $"Order Page {pageName} by Layout")
+                    [ Button.margin (0.0, 0.0, 6.0, 8.0)
+                      Button.isEnabled (page.IsSome && not needs.Ordering && needs.CanOrderByLayout)
+                      ToolTip.tip (
+                          $"Put page {pageName} in the reading order its layout gives, found by a layout detector (several seconds; "
+                          + $"downloads its model, about {LayoutModel.DownloadSizeMegabytes} MB, the first time), as moves you can see in the Edits tab. "
+                          + "Never within a list or table, or across pages. Restore Page Original Order puts it back."
+                      )
+                      Button.onClick ((fun _ -> page |> Option.iter needs.OrderByLayout), SubPatchOptions.Always) ]
                 if not moved.IsEmpty then
-                    Button.create [
-                        Button.content $"Restore Page {pageName} Original Order"
-                        Button.margin (0.0, 0.0, 0.0, 4.0)
+                    editButton $"Restore Page {pageName} Original Order" [
+                        Button.margin (0.0, 0.0, 0.0, 8.0)
                         ToolTip.tip $"Drop every move on page {pageName}: its elements go back to the order they're tagged in."
                         Button.onClick (
                             (fun _ ->
@@ -320,13 +341,12 @@ type SelectionNeeds =
       /// Opens the prompt for an element's alt text, replacement text or link description.
       EditNode: StructureNode -> EditKind -> unit }
 
-/// Under the page preview: what can be done to the selection (its tag; merging; and for what's
+/// Under Selected element: what can be done to the selection (its tag; merging; and for what's
 /// drawn outside the tags, not read or tagged).
 let selectionActions (needs: SelectionNeeds) : IView =
     // A block of text can be given another tag; paragraphs next to each
     // other can be merged into one.
     StackPanel.create [
-      Grid.row 2
       StackPanel.children [
     // What the Tag picker tags: a tagged PDF's block of text, or its figures (Figure,
     // or Artifact for decoration not read), several at once; a suggested
@@ -414,8 +434,7 @@ let selectionActions (needs: SelectionNeeds) : IView =
     | regions ->
         let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"
         let merged = regions |> List.forall (fun r -> editFor needs.Edits.Current r |> Option.exists _.Exclude)
-        Button.create [
-            Button.content (if merged then $"Don't Merge{what}" else $"Merge into Neighbour{what}")
+        editButton (if merged then $"Don't Merge{what}" else $"Merge into Neighbour{what}") [
             Button.margin (0.0, 0.0, 0.0, 8.0)
             ToolTip.tip (
                 if merged then "Keep it as a region of its own."
@@ -448,8 +467,7 @@ let selectionActions (needs: SelectionNeeds) : IView =
             |> needs.SaveEdits
             |> ignore
         let action (label: string) (tip: string) (onClick: unit -> unit) =
-            Button.create [
-                Button.content label
+            editButton label [
                 Button.margin (0.0, 0.0, 8.0, 8.0)
                 ToolTip.tip tip
                 Button.onClick ((fun _ -> onClick ()), SubPatchOptions.Always)
@@ -491,8 +509,7 @@ let selectionActions (needs: SelectionNeeds) : IView =
         | _ -> None
     match mergeable needs.Selected.Current, pendingMerge with
     | Some _, Some merge ->
-        Button.create [
-            Button.content "Don't Merge These"
+        editButton "Don't Merge These" [
             Button.margin (0.0, 0.0, 0.0, 8.0)
             ToolTip.tip "Drop this merge: they stay separate."
             Button.onClick (
@@ -502,8 +519,7 @@ let selectionActions (needs: SelectionNeeds) : IView =
         ]
     | Some nodes, None ->
         let figures = nodes.Head.Tag = "Figure"
-        Button.create [
-            Button.content (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs")
+        editButton (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs") [
             Button.margin (0.0, 0.0, 0.0, 8.0)
             ToolTip.tip (
                 if figures then "Make these one figure: a picture drawn in pieces. Then give the first alt text, or the tag Artifact, for all of them."

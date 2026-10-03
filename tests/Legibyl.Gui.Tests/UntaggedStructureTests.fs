@@ -19,6 +19,13 @@ open Legibyl.Validation
 open Legibyl.Screenshots
 open Legibyl.Gui.Tests.HeadlessSession
 
+
+/// What a button says: its screen-reader name (an edit button's label, after its pencil), else its text.
+let private buttonText (b: Button) =
+    match Automation.AutomationProperties.GetName b with
+    | null | "" -> string b.Content
+    | name -> name
+
 let private descendants<'T when 'T :> Visual> (root: Visual) : 'T list =
     root.GetVisualDescendants() |> Seq.choose (fun v -> match box v with :? 'T as c -> Some c | _ -> None) |> List.ofSeq
 
@@ -77,10 +84,10 @@ let private click (block: Border) (extend: bool) =
     block.RaiseEvent(Input.PointerPressedEventArgs(block, new Input.Pointer(0, Input.PointerType.Mouse, true), block, Point(4.0, 4.0), 0UL, properties, modifiers))
     pump ()
 
-let private buttons (window: Window) = descendants<Button> window |> List.map (fun b -> string b.Content)
+let private buttons (window: Window) = descendants<Button> window |> List.map buttonText
 
 let private press (window: Window) (label: string) =
-    (descendants<Button> window |> List.find (fun b -> string b.Content = label)).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+    (descendants<Button> window |> List.find (fun b -> buttonText b = label)).RaiseEvent(RoutedEventArgs Button.ClickEvent)
     pump ()
 
 let private blockStarting (window: Window) (start: string) =

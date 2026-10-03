@@ -13,6 +13,13 @@ open Legibyl.Validation
 open Legibyl.Screenshots
 open Legibyl.Gui.Tests.HeadlessSession
 
+
+/// What a button says: its screen-reader name (an edit button's label, after its pencil), else its text.
+let private buttonText (b: Button) =
+    match Automation.AutomationProperties.GetName b with
+    | null | "" -> string b.Content
+    | name -> name
+
 let private rect left bottom right top : StructureGeometry =
     { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
 
@@ -87,7 +94,7 @@ let private editVia (window: Window) (tag: string) (item: string) (text: string)
     let prompt = window.OwnedWindows |> Seq.exactlyOne
     (descendants<TextBox> prompt |> List.exactlyOne).Text <- text
     pump ()
-    (descendants<Button> prompt |> List.find (fun b -> string b.Content = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+    (descendants<Button> prompt |> List.find (fun b -> buttonText b = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
     pump ()
 
 let private selectTab (window: Window) (header: string) =
@@ -160,7 +167,7 @@ let ``an edit the PDF already has shows as in it, and can be removed`` () =
             let layout = texts window
             selectTab window "Edits"
             let status = texts window
-            (descendants<Button> window |> List.find (fun b -> string b.Content = "Remove")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            (descendants<Button> window |> List.find (fun b -> buttonText b = "Remove")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
             pump ()
             let header = descendants<TabItem> window |> List.map (fun t -> string t.Header)
             window.Close()
@@ -208,7 +215,7 @@ let private click (block: Border) (extend: bool) =
     pump ()
 
 let private mergeButton (window: Window) =
-    descendants<Button> window |> List.tryFind (fun b -> (string b.Content).StartsWith "Merge ")
+    descendants<Button> window |> List.tryFind (fun b -> (buttonText b).StartsWith "Merge ")
 
 [<Fact>]
 let ``shift-clicking selects the paragraphs between, which can be merged as an edit`` () =
@@ -219,7 +226,7 @@ let ``shift-clicking selects the paragraphs between, which can be merged as an e
             click blocks[0] false
             let hint = texts window
             click blocks[2] true
-            let offer = mergeButton window |> Option.map (fun b -> string b.Content)
+            let offer = mergeButton window |> Option.map buttonText
             (mergeButton window |> Option.get).RaiseEvent(RoutedEventArgs Button.ClickEvent)
             pump ()
             let layout = texts window
@@ -245,10 +252,10 @@ let ``paragraphs already chosen to merge offer to stay apart instead`` () =
             click blocks[1] true
             (mergeButton window |> Option.get).RaiseEvent(RoutedEventArgs Button.ClickEvent)
             pump ()
-            let undo = descendants<Button> window |> List.find (fun b -> string b.Content = "Don't Merge These")
+            let undo = descendants<Button> window |> List.find (fun b -> buttonText b = "Don't Merge These")
             undo.RaiseEvent(RoutedEventArgs Button.ClickEvent)
             pump ()
-            let offer = mergeButton window |> Option.map (fun b -> string b.Content)
+            let offer = mergeButton window |> Option.map buttonText
             window.Close()
 
             window.Review.Edits |> should be Empty
@@ -354,7 +361,7 @@ let ``a link's description can be edited, starting from the one it has`` () =
             let prompt = window.OwnedWindows |> Seq.exactlyOne
             let prefilled = (descendants<TextBox> prompt |> List.exactlyOne).Text
             (descendants<TextBox> prompt |> List.exactlyOne).Text <- "Example (example.com)"
-            (descendants<Button> prompt |> List.find (fun b -> string b.Content = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            (descendants<Button> prompt |> List.find (fun b -> buttonText b = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
             pump ()
             let layout = texts window
             window.Close()
@@ -379,7 +386,7 @@ let ``a tagged PDF's figure can be tagged Artifact, not read, and Figure again``
             let header = descendants<TabItem> window |> List.map (fun t -> string t.Header)
             let pendingLine = texts window |> List.exists (fun t -> t = "✎ not read (decoration), not in the PDF yet")
             // No button for it: the Tag picker says it.
-            let buttons = descendants<Button> window |> List.map (fun b -> string b.Content)
+            let buttons = descendants<Button> window |> List.map buttonText
             picker().SelectedItem <- "Figure"
             pump ()
             let after = window.Review.Edits
@@ -429,7 +436,7 @@ let ``neighbouring figures can be merged as an edit, but not ones described diff
             let blocks = figureBlocks window
             click blocks[0] false
             click blocks[1] true
-            let mergeButton = descendants<Button> window |> List.tryFind (fun b -> string b.Content = "Merge 2 Figures")
+            let mergeButton = descendants<Button> window |> List.tryFind (fun b -> buttonText b = "Merge 2 Figures")
             mergeButton.Value.RaiseEvent(RoutedEventArgs Button.ClickEvent)
             pump ()
             let recorded = window.Review.Edits |> List.map (fun e -> e.Tag, e.MergeWith.Length)
@@ -440,7 +447,7 @@ let ``neighbouring figures can be merged as an edit, but not ones described diff
             let blocks = figureBlocks described
             click blocks[0] false
             click blocks[1] true
-            let offered = descendants<Button> described |> List.exists (fun b -> (string b.Content).StartsWith "Merge ")
+            let offered = descendants<Button> described |> List.exists (fun b -> (buttonText b).StartsWith "Merge ")
             described.Close()
 
             recorded |> should equal [ "Figure", 1 ]
@@ -481,7 +488,7 @@ let private shownOrder (window: Window) =
     paragraphs window |> List.map (fun b -> (nonNull b.Tag :?> StructureNode).Content |> string)
 
 let private moveButton (window: Window) (label: string) =
-    descendants<Button> window |> List.find (fun b -> string b.Content = label)
+    descendants<Button> window |> List.find (fun b -> buttonText b = label)
 
 [<Fact>]
 let ``Move Up reads an element one place earlier, as an edit; the Edits tab says so, and Remove puts it back`` () =
@@ -497,7 +504,7 @@ let ``Move Up reads an element one place earlier, as an edit; the Edits tab says
             let marked = texts window |> List.filter ((=) "✎ moved in the reading order, not in the PDF yet") |> List.length
             selectTab window "Edits"
             let editsTab = texts window
-            for remove in descendants<Button> window |> List.filter (fun b -> string b.Content = "Remove") do
+            for remove in descendants<Button> window |> List.filter (fun b -> buttonText b = "Remove") do
                 remove.RaiseEvent(RoutedEventArgs Button.ClickEvent)
                 pump ()
             selectTab window "Blocks"
