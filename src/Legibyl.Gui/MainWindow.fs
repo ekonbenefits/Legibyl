@@ -1907,14 +1907,19 @@ module private MainView =
                                 // Export waits for: said, and shown in the warning colour.
                                 let suggest = untagged ()
                                 let structureLabel = if suggest then "Suggest Structure…" else "Structure…"
+                                // An untagged PDF's suggested structure, which Export tags a copy from,
+                                // counts as a change of its own: the biggest one.
+                                let suggested = suggest && pending.Current.TagsFromReview
+                                let edits = if changes = 1 then "1 edit" else $"{changes} edits"
                                 let structureName =
-                                    match changes with
-                                    | 0 -> structureLabel
-                                    | 1 -> $"{structureLabel}, 1 edit not in the PDF yet"
-                                    | n -> $"{structureLabel}, {n} edits not in the PDF yet"
+                                    match suggested, changes with
+                                    | true, 0 -> $"{structureLabel}, suggested structure not in the PDF yet"
+                                    | true, _ -> $"{structureLabel}, suggested structure and {edits} not in the PDF yet"
+                                    | false, 0 -> structureLabel
+                                    | false, _ -> $"{structureLabel}, {edits} not in the PDF yet"
                                 let autoFixesName = if chosen = 0 then "Auto Fixes…" else $"Auto Fixes…, {chosen} chosen"
                                 Button.create [
-                                    Button.content (badged (if suggest then suggestIcon else None) structureLabel changes)
+                                    Button.content (badged (if suggest then suggestIcon else None) structureLabel (changes + (if suggested then 1 else 0)))
                                     AttrBuilder<Button>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, structureName, ValueNone)
                                     Button.padding (12.0, 4.0)
                                     Button.margin (0.0, 0.0, 8.0, 0.0)
@@ -1924,7 +1929,9 @@ module private MainView =
                                         Button.classes [ "Warning" ]
                                         Theme.resources [ Button.ThemeProperty, "SolidButton" ]
                                     ToolTip.tip (
-                                        if suggest then
+                                        if suggested then
+                                            "The suggested structure goes into the copy on Export…, which tags it from it. The count is the suggestion and your edits on it. Suggest Structure… shows it again, to check and edit."
+                                        elif suggest then
                                             "This PDF has no tags. Suggest Structure… shows the structure a layout detector finds on each page (headings, paragraphs, figures, reading order), to check and edit; Export… then tags a copy from it."
                                         else
                                             "Shows the PDF's structure (the heading/paragraph/list/table/link hierarchy a screen reader uses), where you edit its elements. The count is your edits not in it yet, which Export writes."
