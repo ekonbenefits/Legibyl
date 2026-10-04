@@ -86,12 +86,23 @@ let ``a composite font's CIDSystemInfo is set to its predefined CMap's`` () =
     report |> should contain "Set the character collection (CIDSystemInfo) of 1 embedded composite font(s) to their CMap's."
 
 [<Fact>]
-let ``an embedded CMap's /WMode is set to its program's, and the page looks the same`` () =
+let ``predefined CMaps are known by their collection, the 78- Japanese ones and bare H and V included`` () =
+    [ "78-EUC-H"; "78-RKSJ-V"; "90ms-RKSJ-H"; "UniJIS-UCS2-H"; "Hankaku"; "H"; "V"; "UniGB-UCS2-H"; "GBK-EUC-H"; "HKscs-B5-H"; "HKdla-B5-V"; "UniKS-UCS2-H"; "KSCms-UHC-H"; "Identity-H"; "Hypothetical-H" ]
+    |> List.map PredefinedCMaps.ordering
+    |> should
+        equal
+        [ Some "Japan1"; Some "Japan1"; Some "Japan1"; Some "Japan1"; Some "Japan1"; Some "Japan1"; Some "Japan1"
+          Some "GB1"; Some "GB1"; Some "CNS1"; Some "CNS1"; Some "Korea1"; Some "Korea1"; None; None ]
+
+[<Fact>]
+let ``an embedded CMap's /WMode is set to its program's (not a comment's), and the page looks the same`` () =
     let before, after, report, same =
         check (fun document font _ ->
             let program =
                 "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
                 + "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> def\n"
+                // A comment that mentions /WMode isn't its definition.
+                + "% Don't take this for it: /WMode 1 def\n"
                 + "/CMapName /Legibyl-Test-H def /CMapType 1 def /WMode 0 def\n"
                 + "1 begincodespacerange <0000> <FFFF> endcodespacerange\n"
                 + "1 begincidrange <0000> <FFFF> 0 endcidrange\n"

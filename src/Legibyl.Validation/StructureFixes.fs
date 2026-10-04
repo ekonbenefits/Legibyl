@@ -477,15 +477,34 @@ let private setLanguageFromText (document: PdfDocument) context =
 /// titles is where LinkTitlesFromWeb reads the titles of the pages links go to, layout where
 /// JoinSplitParagraphs finds the pages' regions (without one, it does nothing), and edits and title
 /// what ApplyEdits writes (the title before the title fixes, which then leave it).
-/// The character collection (registry, ordering) a predefined CMap's name belongs to (ISO 32000,
-/// 9.7.5.2), for the CJK CMaps that name one; Identity CMaps have none.
-let private predefinedOrdering (cmap: string) =
-    let starts (prefixes: string list) = prefixes |> List.exists cmap.StartsWith
-    if starts [ "UniGB"; "GB"; "GBK"; "GBT"; "GBpc" ] then Some "GB1"
-    elif starts [ "UniCNS"; "B5"; "ETen"; "HKscs"; "CNS" ] then Some "CNS1"
-    elif starts [ "UniJIS"; "90ms"; "90pv"; "83pv"; "Add"; "EUC"; "Ext"; "H"; "V" ] && cmap <> "Identity-H" && cmap <> "Identity-V" then Some "Japan1"
-    elif starts [ "UniKS"; "KSC" ] then Some "Korea1"
-    else None
+/// A CMap program's text without its PostScript comments, strings left as they are: so a
+/// comment that mentions /WMode isn't taken for its definition.
+let private withoutComments (program: string) =
+    let out = Text.StringBuilder(program.Length)
+    let mutable depth = 0 // inside a string literal ( ... ), which can nest
+    let mutable i = 0
+    while i < program.Length do
+        let c = program[i]
+        if depth > 0 then
+            out.Append c |> ignore
+            if c = '\\' && i + 1 < program.Length then
+                out.Append program[i + 1] |> ignore
+                i <- i + 1
+            elif c = '(' then depth <- depth + 1
+            elif c = ')' then depth <- depth - 1
+        elif c = '(' then
+            depth <- 1
+            out.Append c |> ignore
+        elif c = '%' then
+            // To the end of the line.
+            while i < program.Length && program[i] <> '\n' && program[i] <> '\r' do
+                i <- i + 1
+            out.Append ' ' |> ignore
+            i <- i - 1
+        else
+            out.Append c |> ignore
+        i <- i + 1
+    out.ToString()
 
 /// The glyphs an embedded TrueType font program draws (those with an outline in its glyf table,
 /// by its loca table), or None if it can't be read.
@@ -572,10 +591,11 @@ let private repairFontDictionaries (document: PdfDocument) _ =
             match encoding with
             | :? PdfStream as cmap ->
                 // Its /WMode as its program has it, which readers use.
-                let program = Text.Encoding.Latin1.GetString(cmap.GetBytes())
-                let inProgram = Regex.Match(program, @"/WMode\s+(\d)\s+def")
-                if inProgram.Success then
-                    let wanted = int inProgram.Groups[1].Value
+                let program = withoutComments (Text.Encoding.Latin1.GetString(cmap.GetBytes()))
+                // The last definition is the one in force.
+                let definitions = Regex.Matches(program, @"/WMode\s+(\d)\s+def")
+                if definitions.Count > 0 then
+                    let wanted = int definitions[definitions.Count - 1].Groups[1].Value
                     let stated = match cmap.GetAsNumber (PdfName "WMode") with null -> 0 | n -> n.IntValue()
                     if stated <> wanted then
                         cmap.Put((PdfName "WMode"), PdfNumber wanted) |> ignore
@@ -588,7 +608,7 @@ let private repairFontDictionaries (document: PdfDocument) _ =
                         Some(registry.ToUnicodeString(), ordering.ToUnicodeString(), (match info.GetAsNumber PdfName.Supplement with null -> 0 | n -> n.IntValue()))
                     | _ -> None
             | :? PdfName as name ->
-                predefinedOrdering (name.GetValue()) |> Option.map (fun ordering -> "Adobe", ordering, 0)
+                PredefinedCMaps.ordering (name.GetValue()) |> Option.map (fun ordering -> "Adobe", ordering, 0)
             | _ -> None
         match descendant, cmapCollection with
         | Some cidFont, Some(registry, ordering, supplement) ->

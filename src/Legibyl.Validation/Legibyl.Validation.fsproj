@@ -36,6 +36,7 @@
     <Compile Include="EmptyFigures.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="ElementEdits.fs" />
+    <Compile Include="PredefinedCMaps.fs" />
     <Compile Include="StructureFixes.fs" />
     <Compile Include="DocumentTitles.fs" />
     <Compile Include="DocumentFacts.fs" />
