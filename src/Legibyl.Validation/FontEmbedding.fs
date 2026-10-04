@@ -284,7 +284,12 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
             if whole then
                 codes
                 @ [ for code in 0..255 do
-                        if (symbolic || characters.ContainsKey code) && (match expected code with Some width -> width > 0.0 | None -> false) then
+                        // (Not control codes: no font draws them, though encodings, as iText's
+                        // WinAnsi, give them characters and PDFs widths.)
+                        let drawable =
+                            if symbolic then code >= 32 && code <> 127
+                            else match Map.tryFind code characters with Some unicode -> not (Char.IsControl(char unicode)) | None -> false
+                        if drawable && (match expected code with Some width -> width > 0.0 | None -> false) then
                             code ]
                 |> List.distinct
             else
@@ -309,7 +314,9 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
                     match Map.tryFind code characters with
                     | Some unicode -> winAnsi.GetUnicode code = unicode || not (isNull (AdobeGlyphList.UnicodeToName unicode))
                     | None -> true))
-        if not rewritable then Some(shownName, Left "its encoding can't be kept") else
+        if not symbolic && codes |> List.exists (fun code -> not (characters.ContainsKey code)) then
+            Some(shownName, Left "a code the pages draw has no character in its encoding")
+        elif not rewritable then Some(shownName, Left "its encoding can't be kept") else
         let fits (candidate: Candidate) =
             checkedCodes
             |> List.forall (fun code ->
