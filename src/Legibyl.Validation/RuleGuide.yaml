@@ -121,7 +121,7 @@ rules:
 
   - clause: "7.5"
     meaning: "A table's header cells don't say whether they head a row or a column, so a screen reader can't announce the right header with each cell."
-    whatToDo: "Mark the header row or column in the tool that made the PDF and export it again, or set each header cell's scope in a PDF editor's table tools."
+    whatToDo: "Choose Table header scope in Auto Fixes…: it gives each header cell a scope (Column in a header row, Row for one heading its row); check the tables read right. Or mark the header row or column in the tool that made the PDF and export it again."
 
   - clause: "7.7"
     tests: [1]
@@ -306,6 +306,11 @@ pdfUa2Rules:
   - clause: "8.2.5.25"
     meaning: "A list's tags are shaped wrongly (an item's content outside its body, or numbering not declared), so a screen reader can't announce it properly as a list."
     whatToDo: *inTheSource
+
+  - clause: "8.2.5.26"
+    tests: [5]
+    meaning: "A table's header cells don't say which cells they head (a Scope, or the cells naming their headers), so a screen reader can't announce the right header with each cell."
+    whatToDo: "Choose Table header scope in Auto Fixes…: it gives each header cell a scope (Column in a header row, Row for one heading its row); check the tables read right. Or mark the header row or column in the tool that made the PDF and export it again."
 
   - clause: "8.2.5.26"
     meaning: "A table's tags are shaped wrongly (rows of different lengths, overlapping cells), or its header cells can't be matched to its cells, so a screen reader can't move through it or say which header goes with a cell."

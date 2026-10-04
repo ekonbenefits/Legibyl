@@ -1052,6 +1052,7 @@ keeps this table in step with it):
 | `empty-figures` | Remove figure tags that draw nothing |  |
 | `join-split-paragraphs` | Join paragraphs tagged line by line where the page layout shows one block of text | uses the layout models |
 | `lists` | Tag paragraphs that start with list markers as a list |  |
+| `table-header-scope` | Say which cells each table header cell heads (its Scope: column or row) |  |
 | `bookmarks` | Add bookmarks for the H1 and H2 headings |  |
 | `link-targets` | Point links and bookmarks within a PDF 2.0 document at the tags they go to |  |
 | `tabs` | Make the Tab key follow the reading order on pages with links or other annotations | safe |
