@@ -698,6 +698,11 @@ let ``an installed font in a collection is embedded from its own tables`` () =
 
     failed output.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
     fonts output.Path |> List.map (fun (name, embedded) -> name.Substring 7, embedded) |> should equal [ "Lato-Regular", true ]
+    // The face, a font file of its own, sums as one should (its head's checkSumAdjustment its own).
+    let program = FontEmbedding.faceProgram (FontEmbedding.findInstalled "Lato-Regular").Value
+    let padded = Array.append program (Array.zeroCreate ((4 - program.Length % 4) % 4))
+    Seq.fold (+) 0u [ for i in 0..4 .. padded.Length - 4 -> (uint32 padded[i] <<< 24) ||| (uint32 padded[i + 1] <<< 16) ||| (uint32 padded[i + 2] <<< 8) ||| uint32 padded[i + 3] ]
+    |> should equal 0xB1B0AFBAu
 
 [<Fact>]
 let ``an installed font whose licence doesn't let it be embedded is left, and one that can't be subset is embedded whole`` () =
