@@ -176,6 +176,21 @@ rules:
     meaning: "A font leaves out how its character codes map to its glyphs; readers assume the usual mapping, but the standard wants it said."
     whatToDo: "Choose Font glyph mapping in Auto Fixes…."
 
+  - clause: "7.21.4.2"
+    tests: [1, 2]
+    meaning: "A subset font's list of its glyphs (CharSet or CIDSet) leaves some out. Readers don't draw from it, but the standard wants it complete if it's there."
+    whatToDo: "Choose Font dictionaries in Auto Fixes…: it removes the list, which is optional. Nothing changes on the page."
+
+  - clause: "7.21.3.1"
+    tests: [1]
+    meaning: "A composite font's character collection (CIDSystemInfo) doesn't match its CMap's, which can make its text map to the wrong characters."
+    whatToDo: "Choose Font dictionaries in Auto Fixes…: for an embedded font, it sets the collection to its CMap's. Nothing changes on the page."
+
+  - clause: "7.21.3.3"
+    tests: [2]
+    meaning: "An embedded CMap says one writing direction (/WMode) in its dictionary and another in its program."
+    whatToDo: "Choose Font dictionaries in Auto Fixes…: it sets the dictionary to the program's, which readers use. Nothing changes on the page."
+
   - clause: "7.21.4.1"
     tests: [1]
     meaning: "A font isn't embedded, so the text may look different, or not read the same, on another computer."
@@ -321,6 +336,16 @@ pdfUa2Rules:
   - clause: "8.4.5.3.2"
     meaning: "A font leaves out how its character codes map to its glyphs; readers assume the usual mapping, but the standard wants it said."
     whatToDo: "Choose Font glyph mapping in Auto Fixes…."
+
+  - clause: "8.4.5.3.1"
+    tests: [1]
+    meaning: "A composite font's character collection (CIDSystemInfo) doesn't match its CMap's, which can make its text map to the wrong characters."
+    whatToDo: "Choose Font dictionaries in Auto Fixes…: for an embedded font, it sets the collection to its CMap's. Nothing changes on the page."
+
+  - clause: "8.4.5.4"
+    tests: [2]
+    meaning: "An embedded CMap says one writing direction (/WMode) in its dictionary and another in its program."
+    whatToDo: "Choose Font dictionaries in Auto Fixes…: it sets the dictionary to the program's, which readers use. Nothing changes on the page."
 
   - clause: "8.4.5.5.1"
     tests: [1]

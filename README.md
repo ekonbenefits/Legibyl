@@ -1056,6 +1056,7 @@ keeps this table in step with it):
 | `link-targets` | Point links and bookmarks within a PDF 2.0 document at the tags they go to |  |
 | `tabs` | Make the Tab key follow the reading order on pages with links or other annotations | safe |
 | `font-glyphs` | Write down how embedded fonts map their character codes to glyphs (/CIDToGIDMap) | safe |
+| `font-dictionaries` | Make embedded fonts' dictionaries agree with their font programs and CMaps | safe |
 | `link-contents` | Describe table-of-contents links with their own text | safe |
 | `link-titles-from-web` | Describe web links and QR codes by the titles of the pages they go to | not in all: it visits web pages |
 | `title` | Set a document title and show it in the title bar | safe |
