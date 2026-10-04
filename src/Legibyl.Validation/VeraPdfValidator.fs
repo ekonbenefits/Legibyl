@@ -129,7 +129,11 @@ module internal VeraPdf =
               ua1 "7.21.3.1-1" PdfFixOptions.FontDictionaries
               ua2 "8.4.5.3.1-1" PdfFixOptions.FontDictionaries
               ua1 "7.21.3.3-2" PdfFixOptions.FontDictionaries
-              ua2 "8.4.5.4-2" PdfFixOptions.FontDictionaries ]
+              ua2 "8.4.5.4-2" PdfFixOptions.FontDictionaries
+              ua1 "7.21.7-1" PdfFixOptions.FontUnicode
+              ua1 "7.21.7-2" PdfFixOptions.FontUnicode
+              ua2 "8.4.5.8-1" PdfFixOptions.FontUnicode
+              ua2 "8.4.5.8-2" PdfFixOptions.FontUnicode ]
 
     /// The rules for a missing metadata stream, and (by standard) the clause and test of the rule
     /// for its dc:title, which veraPDF can only check once there's metadata.

@@ -657,6 +657,189 @@ let private repairFontDictionaries (document: PdfDocument) _ =
       if writingModes > 0 then
           $"Set the writing direction (/WMode) of {writingModes} embedded CMap(s) to the one in their program, which readers use." ]
 
+/// The character codes each font draws, by its dictionary: what the pages' text uses (and the
+/// forms they draw), each code as many bytes as the font's codes are.
+let private usedCodes (document: PdfDocument) =
+    let used = Dictionary<PdfDictionary, HashSet<int>>(HashIdentity.Reference)
+    let listener =
+        { new iText.Kernel.Pdf.Canvas.Parser.Listener.IEventListener with
+            member _.EventOccurred(data, kind) =
+                match data with
+                | :? iText.Kernel.Pdf.Canvas.Parser.Data.TextRenderInfo as info ->
+                    let font = info.GetFont()
+                    let dictionary = font.GetPdfObject()
+                    let bytes = info.GetPdfString().GetValueBytes()
+                    let codes =
+                        match font with
+                        | :? iText.Kernel.Font.PdfType0Font -> [ for i in 0 .. 2 .. bytes.Length - 2 -> (int bytes[i] <<< 8) ||| int bytes[i + 1] ]
+                        | _ -> [ for b in bytes -> int b ]
+                    match used.TryGetValue dictionary with
+                    | true, set -> set.UnionWith codes
+                    | _ -> used[dictionary] <- HashSet<int>(codes)
+                | _ -> ()
+            member _.GetSupportedEvents() =
+                HashSet<iText.Kernel.Pdf.Canvas.Parser.EventType>([ iText.Kernel.Pdf.Canvas.Parser.EventType.RENDER_TEXT ]) }
+    for number in 1 .. document.GetNumberOfPages() do
+        try
+            iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent(document.GetPage number)
+        with _ ->
+            ()
+    used
+
+/// Fonts made to say which characters their codes draw (a ToUnicode map), so a screen reader can
+/// read their text (7.21.7; 8.4.5.8), where some code the pages use says none: a composite
+/// Identity font with no map, a map that leaves codes out or gives U+0000, U+FEFF or U+FFFE, or a
+/// simple font whose glyph names aren't the Glyph List's. What each code draws comes from what the
+/// font says (see ToUnicodeMaps): its glyph names, or its embedded TrueType program's Unicode
+/// cmap. A code nothing says is left out, and counted: its text still can't be read.
+let private writeFontUnicode (document: PdfDocument) _ =
+    let mutable fonts = 0
+    let mutable added = 0
+    let mutable missing = 0
+    let symbolic (descriptor: PdfDictionary | null) =
+        match descriptor with
+        | NonNull d -> (match d.GetAsNumber PdfName.Flags with null -> false | n -> (n.IntValue() &&& 4) <> 0)
+        | Null -> false
+    let trueTypeProgram (descriptor: PdfDictionary | null) =
+        match descriptor with
+        | NonNull d ->
+            match d.GetAsStream PdfName.FontFile2 with
+            | null -> None
+            | program -> Some(program.GetBytes())
+        | Null -> None
+    for KeyValue(font, codes) in usedCodes document do
+        let existing =
+            match font.GetAsStream PdfName.ToUnicode with
+            | null -> Map.empty
+            | stream -> try ToUnicodeMaps.parse (Text.Encoding.Latin1.GetString(stream.GetBytes())) with _ -> Map.empty
+        let subtype = font.GetAsName PdfName.Subtype
+        // What each code draws, as the font says it, and whether a reader already knows it
+        // without a map (a simple font's standard names).
+        let says, known, bytes =
+            if PdfName.Type0.Equals subtype then
+                match font.GetAsName PdfName.Encoding, font.GetAsArray PdfName.DescendantFonts with
+                | NonNull encoding, NonNull descendants when (encoding.GetValue() = "Identity-H" || encoding.GetValue() = "Identity-V") && descendants.Size() > 0 ->
+                    let cidFont = descendants.GetAsDictionary 0
+                    let descriptor = cidFont.GetAsDictionary PdfName.FontDescriptor
+                    let glyphOf =
+                        match cidFont.Get(PdfName.CIDToGIDMap, true) with
+                        | :? PdfStream as map ->
+                            let table = map.GetBytes()
+                            fun (cid: int) -> if 2 * cid + 1 < table.Length then (int table[2 * cid] <<< 8) ||| int table[2 * cid + 1] else 0
+                        | _ -> id
+                    let glyphText =
+                        if PdfName.CIDFontType2.Equals(cidFont.GetAsName PdfName.Subtype) then
+                            trueTypeProgram descriptor |> Option.bind ToUnicodeMaps.trueTypeGlyphText
+                        else
+                            None
+                    (fun cid -> glyphText |> Option.bind (fun text -> text (glyphOf cid))), (fun _ -> None), 2
+                | _ -> (fun _ -> None), (fun _ -> Some ""), 2 // another CMap: left as it is
+            else
+                let descriptor = font.GetAsDictionary PdfName.FontDescriptor
+                let baseEncoding, differences =
+                    match font.Get(PdfName.Encoding, true) with
+                    | :? PdfName as name -> Some(name.GetValue()), Map.empty
+                    | :? PdfDictionary as encoding ->
+                        let names = Dictionary<int, string>()
+                        match encoding.GetAsArray PdfName.Differences with
+                        | null -> ()
+                        | array ->
+                            let mutable code = 0
+                            for i in 0 .. array.Size() - 1 do
+                                match array.Get i with
+                                | :? PdfNumber as n -> code <- n.IntValue()
+                                | :? PdfName as name ->
+                                    names[code] <- name.GetValue()
+                                    code <- code + 1
+                                | _ -> ()
+                        (encoding.GetAsName PdfName.BaseEncoding |> Option.ofObj |> Option.map _.GetValue()),
+                        (names |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
+                    | _ -> None, Map.empty
+                let standard =
+                    if symbolic descriptor && differences.IsEmpty then None
+                    else Some(FontEncoding.CreateFontEncoding(defaultArg baseEncoding "StandardEncoding"))
+                // A name's text, if the Glyph List has it exactly (as readers take it).
+                let exact (name: string) =
+                    let unicode = AdobeGlyphList.NameToUnicode name
+                    if unicode > 0 && unicode <= 0x10FFFF && (unicode < 0xD800 || unicode > 0xDFFF) then Some(Char.ConvertFromUtf32 unicode) else None
+                let program =
+                    if PdfName.TrueType.Equals subtype then
+                        trueTypeProgram descriptor
+                        |> Option.bind (fun bytes ->
+                            try Some(UglyToad.PdfPig.Fonts.TrueType.Parser.TrueTypeFontParser.Parse(UglyToad.PdfPig.Fonts.TrueType.TrueTypeDataBytes bytes), bytes)
+                            with _ -> None)
+                    else
+                        None
+                // Worked out once for the font, if a code needs it.
+                let glyphText = lazy (program |> Option.bind (fun (_, bytes) -> ToUnicodeMaps.trueTypeGlyphText bytes))
+                let fromProgram (code: int) =
+                    match program with
+                    | Some(parsed, _) ->
+                        match glyphText.Value with
+                        | Some glyphText ->
+                            // (PdfPig says these are never null; a font without one gives null.)
+                            let viaSymbol =
+                                match Option.ofObj (box parsed.WindowsSymbolCMap) with
+                                | Some table ->
+                                    let table = table :?> UglyToad.PdfPig.Fonts.TrueType.Tables.CMapSubTables.ICMapSubTable
+                                    max (table.CharacterCodeToGlyphIndex(0xF000 + code)) (table.CharacterCodeToGlyphIndex code)
+                                | None -> 0
+                            let viaMac =
+                                match Option.ofObj (box parsed.MacRomanCMap) with
+                                | Some table -> (table :?> UglyToad.PdfPig.Fonts.TrueType.Tables.CMapSubTables.ICMapSubTable).CharacterCodeToGlyphIndex code
+                                | None -> 0
+                            let glyph = if viaSymbol > 0 then viaSymbol else viaMac
+                            if glyph > 0 then glyphText glyph else None
+                        | None -> None
+                    | None -> None
+                let says (code: int) =
+                    match Map.tryFind code differences with
+                    | Some name -> ToUnicodeMaps.glyphNameText name |> Option.orElse (fromProgram code)
+                    | None ->
+                        match standard with
+                        | Some encoding when encoding.GetUnicode code > 0 -> Some(Char.ConvertFromUtf32(encoding.GetUnicode code))
+                        | _ -> fromProgram code
+                let known (code: int) =
+                    match Map.tryFind code differences with
+                    | Some name -> exact name
+                    | None ->
+                        match standard with
+                        | Some encoding when encoding.GetUnicode code > 0 -> Some(Char.ConvertFromUtf32(encoding.GetUnicode code))
+                        | _ -> None
+                says, known, 1
+        let readable (code: int) =
+            match Map.tryFind code existing with
+            | Some text -> ToUnicodeMaps.isReadable text
+            | None -> (known code).IsSome
+        let invalid = existing |> Map.exists (fun _ text -> not (ToUnicodeMaps.isReadable text))
+        if invalid || codes |> Seq.exists (not << readable) then
+            let mutable newly = 0
+            let mutable still = 0
+            let entries =
+                [ for code in codes |> Seq.sort do
+                      match Map.tryFind code existing with
+                      | Some text when ToUnicodeMaps.isReadable text -> yield code, text
+                      | _ ->
+                          match known code |> Option.filter ToUnicodeMaps.isReadable |> Option.orElse (says code) with
+                          | Some text ->
+                              newly <- newly + 1
+                              yield code, text
+                          | None -> still <- still + 1 ]
+                // And what the old map gave codes these pages don't use, if it gave it right.
+                @ [ for KeyValue(code, text) in existing do if not (codes.Contains code) && ToUnicodeMaps.isReadable text then code, text ]
+                |> Map.ofList
+            if newly > 0 || invalid then
+                let stream = PdfStream(Text.Encoding.ASCII.GetBytes(ToUnicodeMaps.write bytes entries))
+                stream.SetCompressionLevel CompressionConstants.DEFAULT_COMPRESSION
+                font.Put(PdfName.ToUnicode, stream.MakeIndirect document) |> ignore
+                fonts <- fonts + 1
+                added <- added + newly
+            missing <- missing + still
+    [ if fonts > 0 then
+          $"Wrote which characters {fonts} font(s) draw (ToUnicode), from their own glyph names and Unicode tables, so a screen reader can read {added} more character code(s): to check."
+      if missing > 0 then
+          $"{missing} character code(s) the pages use say nothing a reader can map to text: they need fixing where the PDF was made." ]
+
 let orderedFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
@@ -682,6 +865,7 @@ let orderedFixes
       PdfFixOptions.LinkTitlesFromWeb, describeWebLinks titles
       PdfFixOptions.FontGlyphs, setIdentityCidToGidMaps
       PdfFixOptions.FontDictionaries, repairFontDictionaries
+      PdfFixOptions.FontUnicode, writeFontUnicode
       PdfFixOptions.Title, setDocumentTitle false
       PdfFixOptions.TitleFromFirstPage, setDocumentTitle true
       PdfFixOptions.Metadata, addMissingMetadata ]

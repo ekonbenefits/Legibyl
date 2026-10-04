@@ -20,6 +20,7 @@ let order =
       PdfFixOptions.Tabs
       PdfFixOptions.FontGlyphs
       PdfFixOptions.FontDictionaries
+      PdfFixOptions.FontUnicode
       PdfFixOptions.LinkContents
       PdfFixOptions.LinkTitlesFromWeb
       PdfFixOptions.Title

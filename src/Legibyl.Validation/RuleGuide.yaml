@@ -202,7 +202,7 @@ rules:
 
   - clause: "7.21.7"
     meaning: "Some text uses a font that doesn't say which characters it draws, so a screen reader (or copying the text) gets nothing, or the wrong letters."
-    whatToDo: *fonts
+    whatToDo: "Choose Readable font text in Auto Fixes…: it writes which characters each font draws (a ToUnicode map) from what the font says itself, its glyph names or its own Unicode table, so a screen reader can read it. Check the text reads right. Characters a font says nothing about need fixing where the PDF was made: export it again with fonts that map to Unicode (most tools do)."
 
   - clause: "6.1"
     meaning: "The file doesn't start the way a PDF 1.x file must, so some readers and assistive technology may not open it, or read it wrongly."
@@ -354,7 +354,7 @@ pdfUa2Rules:
 
   - clause: "8.4.5.8"
     meaning: "Some text uses a font that doesn't say which characters it draws, so a screen reader (or copying the text) gets nothing, or the wrong letters."
-    whatToDo: *fonts
+    whatToDo: "Choose Readable font text in Auto Fixes…: it writes which characters each font draws (a ToUnicode map) from what the font says itself, its glyph names or its own Unicode table, so a screen reader can read it. Check the text reads right. Characters a font says nothing about need fixing where the PDF was made: export it again with fonts that map to Unicode (most tools do)."
 
   - clauses: ["8.4.5.3.1", "8.4.5.4", "8.4.5.5.1", "8.4.5.6", "8.4.5.7", "8.4.5.9"]
     meaning: "A font in the PDF is incomplete or inconsistent, which can make its text display or read wrongly."
