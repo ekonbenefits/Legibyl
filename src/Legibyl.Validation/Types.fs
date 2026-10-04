@@ -66,7 +66,12 @@ type PdfFixOptions =
     /// Removes figures tagged around nothing (see EmptyFigures): they fail for having no alt text,
     /// with nothing on the page to describe.
     | EmptyFigures = 524288
-    | All = 1048575
+    /// Makes embedded fonts' dictionaries agree with their font programs and CMaps, without
+    /// changing what's drawn: removes a subset font's glyph list (CharSet, CIDSet) where it's
+    /// incomplete, sets a composite font's CIDSystemInfo to its CMap's, and an embedded CMap's
+    /// /WMode to its program's.
+    | FontDictionaries = 1048576
+    | All = 2097151
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.

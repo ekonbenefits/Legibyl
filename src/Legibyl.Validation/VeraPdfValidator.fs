@@ -123,7 +123,13 @@ module internal VeraPdf =
               ua2 "8.9.3.3-1" PdfFixOptions.Tabs
               // CIDToGIDMap on embedded Type 2 CIDFonts.
               ua1 "7.21.3.2-1" PdfFixOptions.FontGlyphs
-              ua2 "8.4.5.3.2-1" PdfFixOptions.FontGlyphs ]
+              ua2 "8.4.5.3.2-1" PdfFixOptions.FontGlyphs
+              ua1 "7.21.4.2-1" PdfFixOptions.FontDictionaries
+              ua1 "7.21.4.2-2" PdfFixOptions.FontDictionaries
+              ua1 "7.21.3.1-1" PdfFixOptions.FontDictionaries
+              ua2 "8.4.5.3.1-1" PdfFixOptions.FontDictionaries
+              ua1 "7.21.3.3-2" PdfFixOptions.FontDictionaries
+              ua2 "8.4.5.4-2" PdfFixOptions.FontDictionaries ]
 
     /// The rules for a missing metadata stream, and (by standard) the clause and test of the rule
     /// for its dc:title, which veraPDF can only check once there's metadata.

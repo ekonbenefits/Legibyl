@@ -477,6 +477,166 @@ let private setLanguageFromText (document: PdfDocument) context =
 /// titles is where LinkTitlesFromWeb reads the titles of the pages links go to, layout where
 /// JoinSplitParagraphs finds the pages' regions (without one, it does nothing), and edits and title
 /// what ApplyEdits writes (the title before the title fixes, which then leave it).
+/// The character collection (registry, ordering) a predefined CMap's name belongs to (ISO 32000,
+/// 9.7.5.2), for the CJK CMaps that name one; Identity CMaps have none.
+let private predefinedOrdering (cmap: string) =
+    let starts (prefixes: string list) = prefixes |> List.exists cmap.StartsWith
+    if starts [ "UniGB"; "GB"; "GBK"; "GBT"; "GBpc" ] then Some "GB1"
+    elif starts [ "UniCNS"; "B5"; "ETen"; "HKscs"; "CNS" ] then Some "CNS1"
+    elif starts [ "UniJIS"; "90ms"; "90pv"; "83pv"; "Add"; "EUC"; "Ext"; "H"; "V" ] && cmap <> "Identity-H" && cmap <> "Identity-V" then Some "Japan1"
+    elif starts [ "UniKS"; "KSC" ] then Some "Korea1"
+    else None
+
+/// The glyphs an embedded TrueType font program draws (those with an outline in its glyf table,
+/// by its loca table), or None if it can't be read.
+let private trueTypeGlyphs (program: byte array) : Set<int> option =
+    try
+        let u16 (at: int) = (int program[at] <<< 8) ||| int program[at + 1]
+        let u32 (at: int) = (int64 (u16 at) <<< 16) ||| int64 (u16 (at + 2))
+        let tables =
+            dict [ for i in 0 .. u16 4 - 1 ->
+                       let entry = 12 + 16 * i
+                       Text.Encoding.ASCII.GetString(program, entry, 4), int (u32 (entry + 8)) ]
+        let glyphs = u16 (tables["maxp"] + 4)
+        let longOffsets = u16 (tables["head"] + 50) = 1
+        let loca = tables["loca"]
+        let offset (glyph: int) = if longOffsets then u32 (loca + 4 * glyph) else int64 (u16 (loca + 2 * glyph)) * 2L
+        Some(set [ for g in 0 .. glyphs - 1 do if offset (g + 1) > offset g then g ])
+    with _ -> None
+
+/// Embedded fonts' dictionaries made to agree with their font programs and CMaps, as PDF/UA asks,
+/// without changing what's drawn: a subset font's glyph list (a Type 1 font's CharSet, a CID
+/// font's CIDSet: optional, and not used to draw) is removed, since it has to list every glyph
+/// to be right (7.21.4.2); an embedded composite font's CIDSystemInfo is set to its CMap's, which
+/// it has to match (7.21.3.1; it only matters for choosing a substitute, and the font is
+/// embedded); and an embedded CMap's /WMode is set to the one in its program, which readers use
+/// (7.21.3.3-2).
+let private repairFontDictionaries (document: PdfDocument) _ =
+    let mutable glyphLists = 0
+    let mutable uncheckedLists = 0
+    let mutable collections = 0
+    let mutable writingModes = 0
+    let subset (name: PdfName | null) =
+        match name with
+        | NonNull name -> Regex.IsMatch(name.GetValue(), "^[A-Z]{6}\\+")
+        | Null -> false
+    let embedded (descriptor: PdfDictionary) =
+        not (isNull (descriptor.Get PdfName.FontFile) && isNull (descriptor.Get PdfName.FontFile2) && isNull (descriptor.Get PdfName.FontFile3))
+    let descriptorOf (font: PdfDictionary) =
+        match font.GetAsDictionary PdfName.FontDescriptor with
+        | null -> None
+        | descriptor -> Some descriptor
+    // A subset font's glyph list.
+    let glyphList (font: PdfDictionary) =
+        match descriptorOf font with
+        | Some descriptor when embedded descriptor && subset (font.GetAsName PdfName.BaseFont) ->
+            let subtype = font.GetAsName PdfName.Subtype
+            if PdfName.Type1.Equals subtype && not (isNull (descriptor.Get PdfName.CharSet)) then
+                // A Type 1 font's glyph names can't be read here to check it against: it goes.
+                descriptor.Remove PdfName.CharSet |> ignore
+                uncheckedLists <- uncheckedLists + 1
+            elif (PdfName.CIDFontType0.Equals subtype || PdfName.CIDFontType2.Equals subtype) && not (isNull (descriptor.Get PdfName.CIDSet)) then
+                // A TrueType font's (with CIDs as its glyph numbers) is checked: kept if it lists
+                // every glyph the program draws. Another kind's can't be, and goes: it's optional.
+                let identity = PdfName.CIDFontType2.Equals subtype && (match font.Get PdfName.CIDToGIDMap with :? PdfName as m -> PdfName.Identity.Equals m | null -> true | _ -> false)
+                let complete =
+                    match descriptor.GetAsStream PdfName.FontFile2, descriptor.GetAsStream PdfName.CIDSet with
+                    | NonNull program, NonNull cidSet when identity ->
+                        trueTypeGlyphs (program.GetBytes())
+                        |> Option.map (fun glyphs ->
+                            let bits = cidSet.GetBytes()
+                            glyphs |> Set.forall (fun g -> g / 8 < bits.Length && (bits[g / 8] &&& (0x80uy >>> (g % 8))) <> 0uy))
+                    | _ -> None
+                match complete with
+                | Some true -> ()
+                | Some false ->
+                    descriptor.Remove PdfName.CIDSet |> ignore
+                    glyphLists <- glyphLists + 1
+                | None ->
+                    descriptor.Remove PdfName.CIDSet |> ignore
+                    uncheckedLists <- uncheckedLists + 1
+        | _ -> ()
+    // A composite font's CIDSystemInfo, and its embedded CMap's /WMode.
+    let composite (font: PdfDictionary) =
+        let descendant =
+            match font.GetAsArray PdfName.DescendantFonts with
+            | null -> None
+            | descendants when descendants.Size() > 0 ->
+                match descendants.Get(0, true) with
+                | :? PdfDictionary as descendant -> Some descendant
+                | _ -> None
+            | _ -> None
+        let encoding = font.Get(PdfName.Encoding, true)
+        // The CMap's registry, ordering and supplement, if it says (or its name does).
+        let cmapCollection =
+            match encoding with
+            | :? PdfStream as cmap ->
+                // Its /WMode as its program has it, which readers use.
+                let program = Text.Encoding.Latin1.GetString(cmap.GetBytes())
+                let inProgram = Regex.Match(program, @"/WMode\s+(\d)\s+def")
+                if inProgram.Success then
+                    let wanted = int inProgram.Groups[1].Value
+                    let stated = match cmap.GetAsNumber (PdfName "WMode") with null -> 0 | n -> n.IntValue()
+                    if stated <> wanted then
+                        cmap.Put((PdfName "WMode"), PdfNumber wanted) |> ignore
+                        writingModes <- writingModes + 1
+                match cmap.GetAsDictionary PdfName.CIDSystemInfo with
+                | null -> None
+                | info ->
+                    match info.GetAsString PdfName.Registry, info.GetAsString PdfName.Ordering with
+                    | NonNull registry, NonNull ordering ->
+                        Some(registry.ToUnicodeString(), ordering.ToUnicodeString(), (match info.GetAsNumber PdfName.Supplement with null -> 0 | n -> n.IntValue()))
+                    | _ -> None
+            | :? PdfName as name ->
+                predefinedOrdering (name.GetValue()) |> Option.map (fun ordering -> "Adobe", ordering, 0)
+            | _ -> None
+        match descendant, cmapCollection with
+        | Some cidFont, Some(registry, ordering, supplement) ->
+            match descriptorOf cidFont with
+            | Some descriptor when embedded descriptor ->
+                let info = cidFont.GetAsDictionary PdfName.CIDSystemInfo
+                let same =
+                    not (isNull info)
+                    && (match info.GetAsString PdfName.Registry with NonNull r -> r.ToUnicodeString() = registry | Null -> false)
+                    && (match info.GetAsString PdfName.Ordering with NonNull o -> o.ToUnicodeString() = ordering | Null -> false)
+                    && (match info.GetAsNumber PdfName.Supplement with null -> false | n -> n.IntValue() <= supplement)
+                if not same then
+                    let replacement = PdfDictionary()
+                    replacement.Put(PdfName.Registry, PdfString registry) |> ignore
+                    replacement.Put(PdfName.Ordering, PdfString ordering) |> ignore
+                    // No more than the CMap's: for a predefined CMap, 0, the first supplement.
+                    let current = match info with null -> 0 | info -> (match info.GetAsNumber PdfName.Supplement with null -> 0 | n -> n.IntValue())
+                    replacement.Put(PdfName.Supplement, PdfNumber(min current supplement)) |> ignore
+                    cidFont.Put(PdfName.CIDSystemInfo, replacement) |> ignore
+                    collections <- collections + 1
+            | _ -> ()
+        | _ -> ()
+    let rec fix (font: PdfDictionary) =
+        glyphList font
+        if PdfName.Type0.Equals(font.GetAsName PdfName.Subtype) then
+            composite font
+            // A descendant can be a direct object, which the loop over objects won't reach.
+            match font.GetAsArray PdfName.DescendantFonts with
+            | null -> ()
+            | descendants ->
+                for i in 0 .. descendants.Size() - 1 do
+                    match descendants.Get(i, false) with
+                    | :? PdfDictionary as descendant -> glyphList descendant
+                    | _ -> ()
+    let seen = Collections.Generic.HashSet<PdfDictionary>(HashIdentity.Reference)
+    for number in 1 .. document.GetNumberOfPdfObjects() - 1 do
+        match document.GetPdfObject number with
+        | :? PdfDictionary as font when PdfName.Font.Equals(font.GetAsName PdfName.Type) && seen.Add font -> fix font
+        | _ -> ()
+    [ if glyphLists > 0 then
+          $"Removed the incomplete glyph list (CharSet or CIDSet) of {glyphLists} subset font(s): it's optional, and isn't used to draw."
+      if uncheckedLists > 0 then
+          $"Removed the glyph list (CharSet or CIDSet) of {uncheckedLists} subset font(s) whose list couldn't be checked against the font: it's optional, and isn't used to draw."
+      if collections > 0 then
+          $"Set the character collection (CIDSystemInfo) of {collections} embedded composite font(s) to their CMap's."
+      if writingModes > 0 then
+          $"Set the writing direction (/WMode) of {writingModes} embedded CMap(s) to the one in their program, which readers use." ]
+
 let orderedFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
@@ -501,6 +661,7 @@ let orderedFixes
       PdfFixOptions.LinkContents, describeTocLinks
       PdfFixOptions.LinkTitlesFromWeb, describeWebLinks titles
       PdfFixOptions.FontGlyphs, setIdentityCidToGidMaps
+      PdfFixOptions.FontDictionaries, repairFontDictionaries
       PdfFixOptions.Title, setDocumentTitle false
       PdfFixOptions.TitleFromFirstPage, setDocumentTitle true
       PdfFixOptions.Metadata, addMissingMetadata ]

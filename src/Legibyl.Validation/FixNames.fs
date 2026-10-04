@@ -19,6 +19,7 @@ let order =
       PdfFixOptions.LinkTargets
       PdfFixOptions.Tabs
       PdfFixOptions.FontGlyphs
+      PdfFixOptions.FontDictionaries
       PdfFixOptions.LinkContents
       PdfFixOptions.LinkTitlesFromWeb
       PdfFixOptions.Title
@@ -43,6 +44,7 @@ let safe =
     ||| PdfFixOptions.LinkContents
     ||| PdfFixOptions.Title
     ||| PdfFixOptions.FontGlyphs
+    ||| PdfFixOptions.FontDictionaries
 
 /// The names of the fixes in options, in the order they run.
 let ofOptions (options: PdfFixOptions) =

@@ -39,6 +39,7 @@
     <Compile Include="TableStructureTests.fs" />
     <Compile Include="TableGridTests.fs" />
     <Compile Include="LayoutTaggingTests.fs" />
+    <Compile Include="FontDictionariesTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />
     <Compile Include="MetadataAndFontFixTests.fs" />
     <Compile Include="LinkTitlesTests.fs" />
