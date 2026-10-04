@@ -186,7 +186,11 @@ let private readCandidate (bytes: byte array) (symbolic: bool) (characters: Map<
             | table -> table.CharacterCodeToGlyphIndex code
         let glyph =
             if symbolic then
-                fun code -> lookup font.WindowsSymbolCMap (0xF000 + code)
+                // A symbol cmap maps a code at 0xF000 up, as most do, or as itself.
+                fun code ->
+                    match lookup font.WindowsSymbolCMap (0xF000 + code) with
+                    | 0 -> lookup font.WindowsSymbolCMap code
+                    | glyph -> glyph
             else
                 fun code -> match Map.tryFind code characters with Some unicode -> lookup font.WindowsUnicodeCMap unicode | None -> 0
         Some
@@ -301,7 +305,25 @@ let faceProgram (face: InstalledFace) : byte array =
             let length = u32 (entry + 12)
             out.Write(file, u32 (entry + 8), length)
             out.Write(Array.zeroCreate<byte> (padded length - length), 0, padded length - length)
-        out.ToArray()
+        let font = out.ToArray()
+        // Its head table's checkSumAdjustment made the font file's own: 0xB1B0AFBA less the sum of
+        // its big-endian words, counted with it 0.
+        let directory = [ for i in 0 .. tables - 1 -> 12 + 16 * i ]
+        match directory |> List.tryFind (fun e -> Text.Encoding.ASCII.GetString(font, e, 4) = "head") with
+        | None -> font
+        | Some entry ->
+            let at (i: int) = (uint32 font[i] <<< 24) ||| (uint32 font[i + 1] <<< 16) ||| (uint32 font[i + 2] <<< 8) ||| uint32 font[i + 3]
+            let adjustment = int (at (entry + 8)) + 8
+            Array.fill font adjustment 4 0uy
+            let mutable sum = 0u
+            for i in 0..4 .. font.Length - 4 do
+                sum <- sum + at i
+            let value = 0xB1B0AFBAu - sum
+            font[adjustment] <- byte (value >>> 24)
+            font[adjustment + 1] <- byte (value >>> 16)
+            font[adjustment + 2] <- byte (value >>> 8)
+            font[adjustment + 3] <- byte value
+            font
 
 /// The folders this computer's fonts are installed in.
 let private systemFontFolders () =
