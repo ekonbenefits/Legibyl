@@ -27,7 +27,7 @@
 //   - veraPDF's apps at the jar's version, and a sources jar from Maven Central for each library
 //     bundled in it (its META-INF/maven pom.properties);
 //   - PDFium at the version the bblanchon.PDFium packages are built from;
-//   - the models' and tessdata's pinned files are listed (they're data, already pinned, not built).
+//   - the models', tessdata's and fonts' pinned files are listed (they're data, already pinned, not built).
 //
 // Left out unless --all (but listed): the .NET runtime and base libraries (dotnet/runtime,
 // dotnet/dotnet: system libraries, several GB), packages only used to build (Dotnet.Bundle,
@@ -449,16 +449,20 @@ if wanted "pdfium" then
             fetchGit "https://pdfium.googlesource.com/pdfium" $"refs/heads/chromium/{branch}" $"pdfium/pdfium-chromium-{branch}.tar.gz"
             |> Result.map (fun file -> $"{file} (its third-party code comes from its DEPS when it's built: see pdfium-binaries' build scripts, in its repository's archive)") }
 
-// ---- Data: the models and tessdata (pinned files, not built) ----
+// ---- Data: the models, tessdata and fonts (pinned files, not built) ----
 
 let layoutRevision = property "Directory.Build.props" "LayoutModelRevision"
 let tableRevision = property "Directory.Build.props" "TableModelRevision"
 let tessdata = property "Directory.Build.props" "TessdataVersion"
+let urwFonts = property "Directory.Build.props" "UrwFontsVersion"
+let liberationFonts = property "Directory.Build.props" "LiberationFontsVersion"
 for name, version, licence, source in
     [ "PP-DocLayoutV3 layout model", layoutRevision, "Apache-2.0", $"https://huggingface.co/PaddlePaddle/PP-DocLayoutV3/tree/{layoutRevision}"
       "Table Transformer model (8-bit ONNX)", tableRevision, "MIT", $"https://huggingface.co/Xenova/table-transformer-structure-recognition/tree/{tableRevision}"
       "Table Transformer (training and model code)", "1.0", "MIT", "https://github.com/microsoft/table-transformer"
-      "tessdata_fast eng.traineddata", tessdata, "Apache-2.0", $"https://github.com/tesseract-ocr/tessdata_fast/tree/{tessdata}" ] do
+      "tessdata_fast eng.traineddata", tessdata, "Apache-2.0", $"https://github.com/tesseract-ocr/tessdata_fast/tree/{tessdata}"
+      "URW base 35 fonts (TrueType)", urwFonts, "AGPL-3.0 with a font exception", $"https://github.com/ArtifexSoftware/urw-base35-fonts/tree/{urwFonts}"
+      "Liberation fonts (TrueType)", liberationFonts, "OFL-1.1", $"https://github.com/liberationfonts/liberation-fonts/releases/tag/{liberationFonts}" ] do
     entries.Add
         { Component = name
           Version = version

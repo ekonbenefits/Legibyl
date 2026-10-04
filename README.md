@@ -1056,6 +1056,7 @@ keeps this table in step with it):
 | `bookmarks` | Add bookmarks for the H1 and H2 headings |  |
 | `link-targets` | Point links and bookmarks within a PDF 2.0 document at the tags they go to |  |
 | `tabs` | Make the Tab key follow the reading order on pages with links or other annotations | safe |
+| `embed-fonts` | Embed fonts that aren't embedded, from open fonts made to the same measure |  |
 | `font-glyphs` | Write down how embedded fonts map their character codes to glyphs (/CIDToGIDMap) | safe |
 | `font-dictionaries` | Make embedded fonts' dictionaries agree with their font programs and CMaps | safe |
 | `font-unicode` | Write which characters fonts draw (ToUnicode), from their own glyph names and Unicode tables | |
@@ -1126,6 +1127,24 @@ out, waits for a title. A title typed in Structure… (or a review's `title`, wi
 the same pass: Auto Fixes… then ticks Fix XMP metadata, and NEXT STEP, which
 asks for a title first, suggests it. The
 GUI's Auto Fixes dialog lists the same fixes, in the order they run.
+
+`embed-fonts` embeds fonts the pages draw with but don't embed (PDF/UA's
+commonest font failure, 7.21.4.1-1; 8.4.5.5.1-1), from open fonts made to the
+same measure that come with Legibyl: [URW's base 35](https://github.com/ArtifexSoftware/urw-base35-fonts)
+(Nimbus Sans, Nimbus Roman, Nimbus Mono PS, Standard Symbols PS and D050000L)
+for the PostScript standard 14 (Helvetica, Times, Courier, Symbol and
+ZapfDingbats), and [Liberation](https://github.com/liberationfonts/liberation-fonts)
+(Sans, Serif, Mono) for Arial, Times New Roman and Courier New. The font's name
+chooses which set to try first, and the PDF decides: a font is only embedded if
+it has every glyph the pages draw, each as wide as the PDF's `/Widths` (or,
+without them, the standard metrics) say, to within the standard's tolerance, so
+the text stays where it was. Only those glyphs are embedded (the whole font for
+one a form's fields fill in with), as a TrueType font with a WinAnsi encoding,
+and the report names each one embedded, and each left (another font, or one
+whose widths don't match: fix those where the PDF was made). The fonts (about
+7 MB) are fetched at build time, each pinned by its SHA-256
+(`UrwFontsVersion`, `LiberationFontsVersion` in `Directory.Build.props`), and
+shipped in the app's `fonts` folder.
 
 Structural fixes run before the veraPDF metadata fixer so metadata is fixed
 against the already-cleaned copy in the same operation. veraPDF saves its

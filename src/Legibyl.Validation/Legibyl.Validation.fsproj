@@ -38,6 +38,7 @@
     <Compile Include="ElementEdits.fs" />
     <Compile Include="PredefinedCMaps.fs" />
     <Compile Include="ToUnicodeMaps.fs" />
+    <Compile Include="FontEmbedding.fs" />
     <Compile Include="StructureFixes.fs" />
     <Compile Include="DocumentTitles.fs" />
     <Compile Include="DocumentFacts.fs" />
@@ -95,9 +96,66 @@
     <Move SourceFiles="$(VeraPdfJar).download" DestinationFiles="$(VeraPdfJar)" />
   </Target>
 
+  <!-- The fonts the embed-fonts fix embeds (see BundledFonts), pinned in Directory.Build.props and
+       here, cached under obj/ and copied to the output's fonts/. -->
+  <PropertyGroup>
+    <BundledFontsDir>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)fonts/</BundledFontsDir>
+    <UrwFontsUrl>https://raw.githubusercontent.com/ArtifexSoftware/urw-base35-fonts/$(UrwFontsVersion)/fonts</UrwFontsUrl>
+    <LiberationFontsName>liberation-fonts-ttf-$(LiberationFontsVersion)</LiberationFontsName>
+    <LiberationFontsUrl>https://github.com/liberationfonts/liberation-fonts/files/7261482/$(LiberationFontsName).tar.gz</LiberationFontsUrl>
+    <UrwFontsDir>$(BundledFontsDir)urw-$(UrwFontsVersion)/</UrwFontsDir>
+    <LiberationFontsDir>$(BundledFontsDir)$(LiberationFontsName)/</LiberationFontsDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <UrwFont Include="D050000L.ttf" Sha256="1FBC322B557D2519023A3EF9C4FF998F514B63F95C07352E059B35E605E7B02D" />
+    <UrwFont Include="NimbusMonoPS-Bold.ttf" Sha256="068C0AB2D516F9DA930421B75FA5DD00892764CF635C9E423E602E01C44BCB83" />
+    <UrwFont Include="NimbusMonoPS-BoldItalic.ttf" Sha256="3B19993E134CD18BB4EE7C6A811A39EACF287D2F1F4B41121DE00DCF034C734D" />
+    <UrwFont Include="NimbusMonoPS-Italic.ttf" Sha256="AB1FD6320A326643A9BE6BDDB65ABCF499A51F3EFAD5578F291302EBBC7A28BC" />
+    <UrwFont Include="NimbusMonoPS-Regular.ttf" Sha256="BF749D47BF69F4BF6963833AFB66A3A5B6E62185BFFFAF068B7A1B3F0276BA82" />
+    <UrwFont Include="NimbusRoman-Bold.ttf" Sha256="03A62D23942E51F48E42DA30F0C50E008C67F0E5D6DACF739B5117C15A2E0BFD" />
+    <UrwFont Include="NimbusRoman-BoldItalic.ttf" Sha256="4B80D3617DA875D4FA789BF4698417117CF2C52A9E678038B3B5F490736CE39C" />
+    <UrwFont Include="NimbusRoman-Italic.ttf" Sha256="B9111288E478CB36A23433DF28A54AAB49F9007663DDC877D35C7E0275724129" />
+    <UrwFont Include="NimbusRoman-Regular.ttf" Sha256="47DBFF21EDE6F3B8428FFE9F8C7C4AC5F1E3C1BC33CD987CFE42E99E0298C495" />
+    <UrwFont Include="NimbusSans-Bold.ttf" Sha256="148726BE75D2060A38DFD2E2637569F56C82AF9F671E97131023B47ADD06F2CB" />
+    <UrwFont Include="NimbusSans-BoldItalic.ttf" Sha256="F02DD8D808C9BF70323810C3F3F4EBFD4BB0D6DA97B28E584869D26815AFE7EB" />
+    <UrwFont Include="NimbusSans-Italic.ttf" Sha256="225992B14BD46CE8FEEF45D4A46A0A950BF21042691B534293DED0B98BE15D8F" />
+    <UrwFont Include="NimbusSans-Regular.ttf" Sha256="DF5D1CE7B86C2E74974008623612BAE136123A35BA7885DE8A0721B68258EDBC" />
+    <UrwFont Include="StandardSymbolsPS.ttf" Sha256="CBB297E02AFF8F3067B1C53C3047DCD42DEC6B420A6766D640D2D0CBE223C0E5" />
+    <LiberationFont Include="LiberationSans-Regular.ttf" />
+    <LiberationFont Include="LiberationSans-Bold.ttf" />
+    <LiberationFont Include="LiberationSans-Italic.ttf" />
+    <LiberationFont Include="LiberationSans-BoldItalic.ttf" />
+    <LiberationFont Include="LiberationSerif-Regular.ttf" />
+    <LiberationFont Include="LiberationSerif-Bold.ttf" />
+    <LiberationFont Include="LiberationSerif-Italic.ttf" />
+    <LiberationFont Include="LiberationSerif-BoldItalic.ttf" />
+    <LiberationFont Include="LiberationMono-Regular.ttf" />
+    <LiberationFont Include="LiberationMono-Bold.ttf" />
+    <LiberationFont Include="LiberationMono-Italic.ttf" />
+    <LiberationFont Include="LiberationMono-BoldItalic.ttf" />
+    <None Include="@(UrwFont->'$(UrwFontsDir)%(Identity)')" Link="fonts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="@(LiberationFont->'$(LiberationFontsDir)%(Identity)')" Link="fonts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="FetchBundledFonts" BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems">
+    <DownloadFile SourceUrl="$(UrwFontsUrl)/%(UrwFont.Identity)" DestinationFolder="$(UrwFontsDir)" DestinationFileName="%(UrwFont.Identity).download" Retries="3" Condition="!Exists('$(UrwFontsDir)%(UrwFont.Identity)')" />
+    <VerifyFileHash File="$(UrwFontsDir)%(UrwFont.Identity).download" Hash="%(UrwFont.Sha256)" Algorithm="SHA256" Condition="!Exists('$(UrwFontsDir)%(UrwFont.Identity)')" />
+    <Move SourceFiles="$(UrwFontsDir)%(UrwFont.Identity).download" DestinationFiles="$(UrwFontsDir)%(UrwFont.Identity)" Condition="!Exists('$(UrwFontsDir)%(UrwFont.Identity)')" />
+    <!-- Liberation comes as one archive, its fonts in a folder of its name (tar is on Windows 10
+         and later, macOS and Linux). -->
+    <DownloadFile SourceUrl="$(LiberationFontsUrl)" DestinationFolder="$(BundledFontsDir)" DestinationFileName="$(LiberationFontsName).tar.gz" Retries="3" Condition="!Exists('$(LiberationFontsDir)LICENSE')" />
+    <VerifyFileHash File="$(BundledFontsDir)$(LiberationFontsName).tar.gz" Hash="$(LiberationFontsSha256)" Algorithm="SHA256" Condition="!Exists('$(LiberationFontsDir)LICENSE')" />
+    <Exec Command="tar -xzf &quot;$(LiberationFontsName).tar.gz&quot;" WorkingDirectory="$(BundledFontsDir)" Condition="!Exists('$(LiberationFontsDir)LICENSE')" />
+    <Delete Files="$(BundledFontsDir)$(LiberationFontsName).tar.gz" />
+  </Target>
+
   <ItemGroup>
     <!-- The veraPDF version its results come from (see VeraPdfValidator.EngineVersion). -->
     <AssemblyMetadata Include="VeraPdfVersion" Value="$(VeraPdfVersion)" />
+    <!-- The bundled fonts' versions (see BuildInfo.validationComponents). -->
+    <AssemblyMetadata Include="UrwFontsVersion" Value="$(UrwFontsVersion)" />
+    <AssemblyMetadata Include="LiberationFontsVersion" Value="$(LiberationFontsVersion)" />
   </ItemGroup>
 
 </Project>

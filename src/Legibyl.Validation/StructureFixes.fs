@@ -795,7 +795,8 @@ let private repairFontDictionaries (document: PdfDocument) _ =
           $"Set the writing direction (/WMode) of {writingModes} embedded CMap(s) to the one in their program, which readers use." ]
 
 /// The character codes each font draws, by its dictionary: what the pages' text uses (and the
-/// forms they draw), each code as many bytes as the font's codes are.
+/// forms they draw, and their annotations' appearances), each code as many bytes as the font's
+/// codes are. And the pages that couldn't be read.
 let private usedCodes (document: PdfDocument) =
     let used = Dictionary<PdfDictionary, HashSet<int>>(HashIdentity.Reference)
     let listener =
@@ -818,8 +819,19 @@ let private usedCodes (document: PdfDocument) =
                 HashSet<iText.Kernel.Pdf.Canvas.Parser.EventType>([ iText.Kernel.Pdf.Canvas.Parser.EventType.RENDER_TEXT ]) }
     let unread = ResizeArray<int>()
     for number in 1 .. document.GetNumberOfPages() do
+        let page = document.GetPage number
         try
-            iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent(document.GetPage number)
+            iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent page
+            // And what its annotations' appearances draw (a form field's text, say).
+            for annotation in page.GetAnnotations() do
+                let appearances =
+                    match annotation.GetNormalAppearanceObject() with
+                    | null -> []
+                    | :? PdfStream as stream -> [ stream ]
+                    | states -> [ for key in states.KeySet() do match states.GetAsStream key with null -> () | stream -> stream ]
+                for appearance in appearances do
+                    let resources = match appearance.GetAsDictionary PdfName.Resources with null -> PdfDictionary() | r -> r
+                    iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessContent(appearance.GetBytes(), PdfResources resources)
         with _ ->
             unread.Add number
     used, List.ofSeq unread
@@ -899,9 +911,9 @@ let private writeFontUnicode (document: PdfDocument) _ =
                 // symbolic font, the font's built-in one (not known here), or Standard.
                 let standard =
                     match baseEncoding with
-                    | Some name -> Some(FontEncoding.CreateFontEncoding name)
+                    | Some name -> ToUnicodeMaps.baseEncoding name
                     | None when symbolic descriptor -> None
-                    | None -> Some(FontEncoding.CreateFontEncoding "StandardEncoding")
+                    | None -> ToUnicodeMaps.baseEncoding "StandardEncoding"
                 // A name's text, if the Glyph List has it exactly (as readers take it).
                 let exact (name: string) =
                     let unicode = AdobeGlyphList.NameToUnicode name
@@ -948,14 +960,14 @@ let private writeFontUnicode (document: PdfDocument) _ =
                     | Some name -> ToUnicodeMaps.glyphNameText name |> Option.orElse (fromProgramName name)
                     | None ->
                         match standard with
-                        | Some encoding when encoding.GetUnicode code > 0 -> Some(Char.ConvertFromUtf32(encoding.GetUnicode code))
+                        | Some unicode when unicode code > 0 -> Some(Char.ConvertFromUtf32(unicode code))
                         | _ -> fromProgram code
                 let known (code: int) =
                     match Map.tryFind code differences with
                     | Some name -> exact name
                     | None ->
                         match standard with
-                        | Some encoding when encoding.GetUnicode code > 0 -> Some(Char.ConvertFromUtf32(encoding.GetUnicode code))
+                        | Some unicode when unicode code > 0 -> Some(Char.ConvertFromUtf32(unicode code))
                         | _ -> None
                 Some(says, known, 1)
         match worked with
@@ -997,6 +1009,33 @@ let private writeFontUnicode (document: PdfDocument) _ =
       if missing > 0 then
           $"{missing} character code(s) the pages use say nothing a reader can map to text: they need fixing where the PDF was made." ]
 
+/// Fonts the pages draw with but don't embed, embedded from the open fonts Legibyl brings, where
+/// one is made to the font's measure (see FontEmbedding): only the glyphs the pages draw, unless a
+/// form's fields fill in with the font or some page couldn't be read, when it's the whole font.
+/// The others are left, and reported.
+let private embedFonts (document: PdfDocument) _ =
+    let used, unread = usedCodes document
+    let formFonts = HashSet<PdfDictionary>(HashIdentity.Reference)
+    match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.AcroForm with
+    | null -> ()
+    | form ->
+        match form.GetAsDictionary PdfName.DR with
+        | null -> ()
+        | resources ->
+            match resources.GetAsDictionary PdfName.Font with
+            | null -> ()
+            | fonts -> for key in fonts.KeySet() do match fonts.GetAsDictionary key with null -> () | font -> formFonts.Add font |> ignore
+    let outcomes =
+        [ for KeyValue(font, codes) in used do
+              match FontEmbedding.embed document font codes (not unread.IsEmpty || formFonts.Contains font) with
+              | Some outcome -> outcome
+              | None -> () ]
+        |> List.distinct
+    [ for name, outcome in outcomes do
+          match outcome with
+          | FontEmbedding.Embedded shown -> $"Embedded {shown} in place of {name}, which wasn't embedded: an open font with its glyphs, each as wide."
+          | FontEmbedding.Left reason -> $"{name} isn't embedded, and was left as it is ({reason}): export the PDF again with fonts embedded." ]
+
 let orderedFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
@@ -1021,6 +1060,7 @@ let orderedFixes
       PdfFixOptions.Tabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
       PdfFixOptions.LinkTitlesFromWeb, describeWebLinks titles
+      PdfFixOptions.EmbedFonts, embedFonts
       PdfFixOptions.FontGlyphs, setIdentityCidToGidMaps
       PdfFixOptions.FontDictionaries, repairFontDictionaries
       PdfFixOptions.FontUnicode, writeFontUnicode

@@ -27,6 +27,14 @@
     <LayoutModelYmlSha256>506FCFAC13B3B546AE40D7886B44126420F392ADB694E3F8BB6A6286A1F90FDC</LayoutModelYmlSha256>
     <TableModelRevision>5387550de655512721e1b88e4e42117001ba4813</TableModelRevision>
     <TableModelSha256>C11F4033DA75E9C4D41C403EF356E89CAA0A37A7D111B55461E7D5BA856BB6B6</TableModelSha256>
+    <!-- The fonts the embed-fonts fix embeds in place of fonts a PDF doesn't (fetched by
+         Legibyl.Validation's build like tessdata, and copied to the output under fonts/): URW's
+         base 35 (AGPL-3.0 with a font exception), metric clones of the PostScript standard 14, each
+         file pinned by its SHA-256 in Legibyl.Validation.fsproj; and Liberation (SIL OFL 1.1),
+         metric clones of Arial, Times New Roman and Courier New, the release's archive pinned here. -->
+    <UrwFontsVersion>20200910</UrwFontsVersion>
+    <LiberationFontsVersion>2.1.5</LiberationFontsVersion>
+    <LiberationFontsSha256>7191C669BF38899F73A2094ED00F7B800553364F90E2637010A69C0E268F25D0</LiberationFontsSha256>
   </PropertyGroup>
 
   <PropertyGroup>

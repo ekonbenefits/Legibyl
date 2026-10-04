@@ -20,6 +20,29 @@ let private hexValue (hex: string) =
     | true, value -> Some value
     | _ -> None
 
+/// The characters Adobe's StandardEncoding gives its codes, from the standard Helvetica's metrics
+/// (an AFM's codes are its font's built-in encoding: for the standard 14's text fonts, this one).
+let private standardEncoding =
+    lazy
+        (let helvetica = iText.IO.Font.FontProgramFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+         Map.ofList [ for code in 0..255 do
+                          match helvetica.GetGlyphByCode code with
+                          | null -> ()
+                          | glyph when glyph.GetUnicode() > 0 -> code, glyph.GetUnicode()
+                          | _ -> () ])
+
+/// The character a simple font's base encoding (StandardEncoding, WinAnsiEncoding,
+/// MacRomanEncoding…) gives each code (0 for none), or None for an encoding it doesn't know.
+let baseEncoding (name: string) : (int -> int) option =
+    if name = "StandardEncoding" then
+        Some(fun code -> Map.tryFind code standardEncoding.Value |> Option.defaultValue 0)
+    else
+        try
+            let encoding = iText.IO.Font.FontEncoding.CreateFontEncoding name
+            Some(fun code -> encoding.GetUnicode code)
+        with _ ->
+            None
+
 /// The text a glyph name stands for, by the Adobe Glyph List's rules: what follows its first
 /// full stop is a variant ("a.sc" is "a"); underscores join components ("f_i" is "fi"); each
 /// component is a glyph list name, "uniXXXX" (one or more four-digit codes), or "uXXXX" to

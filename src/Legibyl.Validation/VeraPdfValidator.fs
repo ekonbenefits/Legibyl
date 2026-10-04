@@ -121,6 +121,9 @@ module internal VeraPdf =
               // Tab order on pages with annotations.
               ua1 "7.18.3-1" PdfFixOptions.Tabs
               ua2 "8.9.3.3-1" PdfFixOptions.Tabs
+              // Fonts not embedded.
+              ua1 "7.21.4.1-1" PdfFixOptions.EmbedFonts
+              ua2 "8.4.5.5.1-1" PdfFixOptions.EmbedFonts
               // CIDToGIDMap on embedded Type 2 CIDFonts.
               ua1 "7.21.3.2-1" PdfFixOptions.FontGlyphs
               ua2 "8.4.5.3.2-1" PdfFixOptions.FontGlyphs
