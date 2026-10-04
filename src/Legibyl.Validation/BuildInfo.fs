@@ -29,9 +29,18 @@ let libraryVersion (assembly: Assembly) =
         attribute.InformationalVersion.Split('+').[0]
     | _ -> string (assembly.GetName().Version)
 
+/// A version this assembly was stamped with (from Directory.Build.props).
+let private stamped (key: string) =
+    typeof<VeraPdfValidator>.Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+    |> Seq.tryFind (fun a -> a.Key = key)
+    |> Option.bind (fun a -> Option.ofObj a.Value)
+    |> Option.defaultValue "unknown"
+
 /// What validating and fixing run on, each with its version and what it does here.
 let validationComponents () =
     [ "veraPDF", VeraPdfValidator.EngineVersion, "validation against PDF/UA"
       "IKVM.NET", libraryVersion typeof<IKVM.Runtime.JVM>.Assembly, "runs veraPDF's Java in .NET"
       "iText", libraryVersion typeof<iText.Kernel.Pdf.PdfDocument>.Assembly, "reading and fixing PDFs"
-      "PdfPig", libraryVersion typeof<UglyToad.PdfPig.PdfDocument>.Assembly, "reading pages' text and drawing" ]
+      "PdfPig", libraryVersion typeof<UglyToad.PdfPig.PdfDocument>.Assembly, "reading pages' text and drawing"
+      "URW base 35 fonts", stamped "UrwFontsVersion", "embedded in place of Helvetica, Times, Courier, Symbol and ZapfDingbats"
+      "Liberation fonts", stamped "LiberationFontsVersion", "embedded in place of Arial, Times New Roman and Courier New" ]

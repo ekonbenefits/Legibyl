@@ -78,7 +78,12 @@ type PdfFixOptions =
     /// Gives a tagged table's header cells (TH) without one a Scope, so a screen reader can tell
     /// which cells each heads: Column in a header row, Row for one heading its row.
     | TableHeaderScope = 4194304
-    | All = 8388607
+    /// Embeds fonts the pages draw with but don't embed, from the open fonts Legibyl brings (URW's
+    /// base 35 and Liberation), where one has every glyph the pages draw, each as wide as the PDF
+    /// says (see FontEmbedding): Helvetica, Times, Courier, Symbol and ZapfDingbats, and Arial,
+    /// Times New Roman and Courier New. Others are left, and reported.
+    | EmbedFonts = 8388608
+    | All = 16777215
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.

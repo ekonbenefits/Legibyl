@@ -137,6 +137,32 @@ The app also ships Tesseract's English model, `eng.traineddata` from
 [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache License
 2.0), unmodified.
 
+## URW base 35 and Liberation fonts
+
+The **Embed fonts** fix embeds, in place of fonts a PDF uses without embedding
+them, open fonts made to the same measure, which Legibyl ships unmodified in
+its `fonts` folder (the fix embeds a subset of one in the PDF it writes):
+
+- **URW's base 35 fonts** (Nimbus Sans, Nimbus Roman, Nimbus Mono PS, Standard
+  Symbols PS and D050000L), release 20200910 of
+  [urw-base35-fonts](https://github.com/ArtifexSoftware/urw-base35-fonts),
+  copyright (URW)++ Design & Development, licensed under
+  the GNU Affero General Public License, version 3 (`LICENSE.AGPL` in this
+  directory), with this exemption: "As a special exception, permission is
+  granted to include these font programs in a Postscript or PDF file that
+  consists of a document that contains text to be displayed or printed using
+  this font, regardless of the conditions or license applying to the document
+  itself."
+- **Liberation fonts** (Sans, Serif and Mono), version 2.1.5 of
+  [liberation-fonts](https://github.com/liberationfonts/liberation-fonts),
+  digitized data copyright Google Corporation, copyright Red Hat, Inc., with
+  Reserved Font Names Arimo, Tinos, Cousine and Liberation, licensed under the
+  SIL Open Font License, Version 1.1 (`LICENSE.OFL` in this directory).
+
+The build fetches each unmodified, checked against its SHA-256
+(`Legibyl.Validation.fsproj` and `LiberationFontsSha256` in
+`Directory.Build.props`).
+
 ## LanguageDetection
 
 The **Declare the document's language** fix detects a document's language with

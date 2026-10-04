@@ -13,6 +13,7 @@ module PdfFixDescriptions =
           PdfFixOptions.ParentTree, "Rebuild the parent tree, so the tags are found for the content they hold"
           PdfFixOptions.Language, "Declare the document's language, detected from its text"
           PdfFixOptions.Metadata, "Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP)"
+          PdfFixOptions.EmbedFonts, "Embed fonts that aren't embedded, from open fonts made to the same measure"
           PdfFixOptions.FontGlyphs, "Write down how embedded fonts map their character codes to glyphs (/CIDToGIDMap)"
           PdfFixOptions.FontDictionaries, "Make embedded fonts' dictionaries agree with their font programs and CMaps"
           PdfFixOptions.FontUnicode, "Write which characters fonts draw (ToUnicode), from their own glyph names and Unicode tables"

@@ -168,3 +168,23 @@ let ``a composite font with another CMap is left as it is, map and all`` () =
         seq { for n in 1 .. document.GetNumberOfPdfObjects() - 1 -> document.GetPdfObject n }
         |> Seq.pick (function :? PdfDictionary as d when PdfName.Type0.Equals(d.GetAsName PdfName.Subtype) -> Some d | _ -> None)
     Text.Encoding.ASCII.GetString(font.GetAsStream(PdfName.ToUnicode).GetBytes()) |> should equal before
+
+[<Fact>]
+let ``a simple font in the standard encoding is read by it`` () =
+    use plain = new TempPdf()
+    use broken = new TempPdf()
+    use fixedPdf = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(plain.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        let font = PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+        PdfCanvas(page).BeginText().SetFontAndSize(font, 14f).MoveText(72.0, 700.0).ShowText(sentence).EndText() |> ignore
+    // No /Encoding: a reader takes the standard one, which names every code the sentence uses.
+    do
+        use document = new PdfDocument(new PdfReader(plain.Path), new PdfWriter(broken.Path))
+        let fonts = document.GetPage(1).GetResources().GetResource PdfName.Font
+        (fonts.GetAsDictionary(Seq.head (fonts.KeySet()))).Remove PdfName.Encoding |> ignore
+
+    let report = fix broken.Path fixedPdf.Path
+
+    report |> List.exists (fun line -> line.Contains "ToUnicode" || line.Contains "character code") |> should be False

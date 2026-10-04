@@ -19,6 +19,7 @@ let order =
       PdfFixOptions.Bookmarks
       PdfFixOptions.LinkTargets
       PdfFixOptions.Tabs
+      PdfFixOptions.EmbedFonts
       PdfFixOptions.FontGlyphs
       PdfFixOptions.FontDictionaries
       PdfFixOptions.FontUnicode

@@ -138,6 +138,7 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
               "Add bookmarks"
               "Point links at their tags"
               "Tab order for annotations"
+              "Embed fonts"
               "Font glyph mapping"
               "Font dictionaries"
               "Readable font text"
