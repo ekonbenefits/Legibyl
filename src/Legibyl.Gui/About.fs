@@ -44,7 +44,7 @@ let components () =
     @ [ "PDFium", stamped "PdfiumVersion", "drawing pages"
         "PaddleOCR (PP-DocLayoutV3)",
         BuildInfo.libraryVersion typeof<PaddleOcrSharp.Download.ModelDownloader>.Assembly,
-        (if LayoutModel.isDownloaded () then $"suggesting structure; its model is in {LayoutModel.directory ()}"
+        (if LayoutModel.layoutDownloaded () then $"suggesting structure; its model is in {LayoutModel.directory ()}"
          else "suggesting structure; its model isn't downloaded yet")
         "Table Transformer", "1.0 (8-bit)",
         (if TableModel.isDownloaded () then $"finding tables' rows and cells; its model is in {IO.Path.GetDirectoryName(TableModel.path ())}"
