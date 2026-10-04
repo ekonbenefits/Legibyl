@@ -194,6 +194,22 @@ let private subsetTag (name: string) (glyphs: int seq) =
     let hash = SHA256.HashData(Text.Encoding.UTF8.GetBytes(name + ":" + String.Join(",", glyphs)))
     String(Array.init 6 (fun i -> char (int 'A' + int hash[i] % 26)))
 
+/// For Symbol and ZapfDingbats, which say nothing of what their codes are, a ToUnicode map from
+/// their standard encodings (Symbol's a is α, ZapfDingbats' 3 is ✓), so a reader can read them
+/// (7.21.7), unless they've one.
+let private writeSymbolUnicode (document: PdfDocument) (font: PdfDictionary) (family: Family) =
+    if isNull (font.Get PdfName.ToUnicode) then
+        let encoding = if family = Dingbats then PdfEncodings.ZAPFDINGBATS else PdfEncodings.SYMBOL
+        let entries =
+            Map.ofList
+                [ for code in 32..255 do
+                      let text = PdfEncodings.ConvertToString([| byte code |], encoding)
+                      if ToUnicodeMaps.isReadable text && not (String.IsNullOrWhiteSpace text && code <> 32) then code, text ]
+        if not entries.IsEmpty then
+            let stream = PdfStream(Text.Encoding.ASCII.GetBytes(ToUnicodeMaps.write 1 entries))
+            stream.SetCompressionLevel CompressionConstants.DEFAULT_COMPRESSION
+            font.Put(PdfName.ToUnicode, stream.MakeIndirect document) |> ignore
+
 /// Embeds a bundled font in place of font, which isn't embedded, if one fits: codes are the codes
 /// the pages draw with it, and whole says to embed every glyph (the font fills in form fields, or
 /// some page couldn't be read), not only theirs, and to check every code the font gives a width.
@@ -258,6 +274,25 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
                 |> List.distinct
             else
                 codes
+        // Whether the encoding can be kept, or written as WinAnsi's with what differs in Glyph List
+        // names (7.21.6-2: a uniXXXX name won't do), for every code checked.
+        let keeps =
+            match font.Get(PdfName.Encoding, true) with
+            | :? PdfName as name -> PdfName.WinAnsiEncoding.Equals name || PdfName.MacRomanEncoding.Equals name
+            | :? PdfDictionary as encoding ->
+                let baseEncoding = encoding.GetAsName PdfName.BaseEncoding
+                PdfName.WinAnsiEncoding.Equals baseEncoding || PdfName.MacRomanEncoding.Equals baseEncoding
+            | _ -> false
+        let rewritable =
+            symbolic
+            || keeps
+            || (let winAnsi = FontEncoding.CreateFontEncoding "WinAnsiEncoding"
+                checkedCodes
+                |> List.forall (fun code ->
+                    match Map.tryFind code characters with
+                    | Some unicode -> winAnsi.GetUnicode code = unicode || not (isNull (AdobeGlyphList.UnicodeToName unicode))
+                    | None -> true))
+        if not rewritable then Some(shownName, Left "its encoding can't be kept") else
         let fits (candidate: Candidate) =
             checkedCodes
             |> List.forall (fun code ->
@@ -305,27 +340,29 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
         newDescriptor.Put(PdfName.CapHeight, PdfNumber(metrics.GetCapHeight())) |> ignore
         newDescriptor.Put(PdfName.StemV, PdfNumber(metrics.GetStemV())) |> ignore
         newDescriptor.Put(PdfName.FontFile2, file.MakeIndirect document) |> ignore
+        // The width readers give codes /Widths leaves out, as the font's was.
+        match font.GetAsDictionary PdfName.FontDescriptor with
+        | null -> ()
+        | old ->
+            match old.GetAsNumber PdfName.MissingWidth with
+            | null -> ()
+            | width -> newDescriptor.Put(PdfName.MissingWidth, width) |> ignore
         font.Put(PdfName.Subtype, PdfName.TrueType) |> ignore
         font.Put(PdfName.BaseFont, PdfName fontName) |> ignore
         font.Put(PdfName.FontDescriptor, newDescriptor.MakeIndirect document) |> ignore
         if symbolic then
             font.Remove PdfName.Encoding |> ignore
+            writeSymbolUnicode document font family
         else
             // A TrueType font's encoding has to be WinAnsi or MacRoman, or differ from one by
             // Glyph List names: kept if it is, else written as WinAnsi with what differs.
-            let keeps =
-                match font.Get(PdfName.Encoding, true) with
-                | :? PdfName as name -> PdfName.WinAnsiEncoding.Equals name || PdfName.MacRomanEncoding.Equals name
-                | :? PdfDictionary as encoding ->
-                    let baseEncoding = encoding.GetAsName PdfName.BaseEncoding
-                    PdfName.WinAnsiEncoding.Equals baseEncoding || PdfName.MacRomanEncoding.Equals baseEncoding
-                | _ -> false
             if not keeps then
                 let winAnsi = FontEncoding.CreateFontEncoding "WinAnsiEncoding"
                 let differences = PdfArray()
                 let mutable next = -1
                 for KeyValue(code, unicode) in characters do
                     if winAnsi.GetUnicode code <> unicode then
+                        // (A code the Glyph List can't name isn't one checked: see rewritable.)
                         match AdobeGlyphList.UnicodeToName unicode with
                         | null -> ()
                         | name ->

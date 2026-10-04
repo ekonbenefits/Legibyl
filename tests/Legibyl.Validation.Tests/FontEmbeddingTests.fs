@@ -59,7 +59,7 @@ let private fonts (path: string) =
           match document.GetPdfObject n with
           | :? PdfDictionary as d when PdfName.Font.Equals(d.GetAsName PdfName.Type) ->
               let descriptor = d.GetAsDictionary PdfName.FontDescriptor
-              d.GetAsName(PdfName.BaseFont).GetValue(), not (isNull descriptor) && not (isNull (descriptor.Get PdfName.FontFile2))
+              (match d.GetAsName PdfName.BaseFont with null -> "(Type 3)" | name -> name.GetValue()), not (isNull descriptor) && not (isNull (descriptor.Get PdfName.FontFile2))
           | _ -> () ]
     |> List.sort
 
@@ -116,8 +116,8 @@ let ``the PostScript fonts are embedded as URW's, the page drawn to the same mea
 
     failed input.Path |> should contain "7.21.4.1-1"
     let after = failed output.Path
-    // No font rule fails but which characters Symbol's and ZapfDingbats' codes are (see FontUnicode).
-    after |> Set.filter (fun rule -> rule.StartsWith "7.21" && not (rule.StartsWith "7.21.7")) |> should be Empty
+    // No font rule fails: Symbol and ZapfDingbats say what their codes are, from their encodings.
+    after |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
     fonts output.Path |> List.map (fun (name, embedded) -> name.Substring 7, embedded) |> List.sort
     |> should equal [ "D050000L", true; "NimbusMonoPS-Regular", true; "NimbusRoman-Bold", true; "NimbusSans-Regular", true; "StandardSymbolsPS", true ]
     report |> should contain "Embedded Nimbus Sans in place of Helvetica, which wasn't embedded: an open font with its glyphs, each as wide."
@@ -258,3 +258,161 @@ let ``only the glyphs the page draws are embedded`` () =
     let whole = FileInfo(Path.Combine(FontEmbedding.fontsFolder (), "NimbusSans-Regular.ttf")).Length
     let grown = FileInfo(output.Path).Length - FileInfo(input.Path).Length
     grown |> should be (lessThan (whole / 10L))
+
+/// The (only) font on page 1 of path.
+let private pageFont (document: PdfDocument) =
+    let fonts = document.GetPage(1).GetResources().GetResource PdfName.Font
+    fonts.GetAsDictionary(Seq.head (fonts.KeySet()))
+
+[<Fact>]
+let ``a default width for codes outside /Widths is kept`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // Widths for A to Z only, and a space as wide as /MissingWidth says.
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        PdfCanvas(page).BeginText().SetFontAndSize(font, 18f).MoveText(72.0, 700.0).ShowText("A B C").EndText() |> ignore
+    use changed = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfReader(input.Path), new PdfWriter(changed.Path))
+        let font = pageFont document
+        let program = iText.IO.Font.FontProgramFactory.CreateFont StandardFonts.HELVETICA
+        font.Put(PdfName.FirstChar, PdfNumber 65) |> ignore
+        font.Put(PdfName.LastChar, PdfNumber 90) |> ignore
+        font.Put(PdfName.Widths, PdfArray([| for code in 65..90 -> program.GetGlyph(code).GetWidth() |])) |> ignore
+        let descriptor = PdfDictionary()
+        descriptor.Put(PdfName.Type, PdfName.FontDescriptor) |> ignore
+        descriptor.Put(PdfName.FontName, PdfName "Helvetica") |> ignore
+        descriptor.Put(PdfName.Flags, PdfNumber 32) |> ignore
+        descriptor.Put(PdfName.MissingWidth, PdfNumber 278) |> ignore
+        font.Put(PdfName.FontDescriptor, descriptor.MakeIndirect document) |> ignore
+
+    fix changed.Path output.Path |> ignore
+
+    failed output.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
+    use document = new PdfDocument(new PdfReader(output.Path))
+    (pageFont document).GetAsDictionary(PdfName.FontDescriptor).GetAsNumber(PdfName.MissingWidth).IntValue() |> should equal 278
+    let before, now = inkExtents changed.Path, inkExtents output.Path
+    List.zip before now |> List.forall (fun ((l1, r1), (l2, r2)) -> abs (l1 - l2) <= 2 && abs (r1 - r2) <= 2) |> should be True
+
+[<Fact>]
+let ``a font drawing a character the Glyph List doesn't name is left, its encoding not rewritable`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // Code 65 is Ţ (U+021A), which Nimbus Sans has; the base encoding is Standard, so it would be
+    // rewritten as WinAnsi's, and a uniXXXX name in it fails 7.21.6-2.
+    let nimbus = iText.IO.Font.FontProgramFactory.CreateFont(Path.Combine(FontEmbedding.fontsFolder (), "NimbusSans-Regular.ttf"))
+    createText input.Path [ StandardFonts.HELVETICA ] true (fun _ font ->
+        let widths = font.GetAsArray PdfName.Widths
+        widths.Set(65 - 32, PdfNumber(nimbus.GetGlyph(0x021A).GetWidth())) |> ignore
+        let encoding = PdfDictionary()
+        encoding.Put(PdfName.Differences, PdfArray([| PdfNumber 65 :> PdfObject; PdfName "uni021A" |])) |> ignore
+        font.Put(PdfName.Encoding, encoding) |> ignore)
+    use drawsA = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfReader(input.Path), new PdfWriter(drawsA.Path))
+        let content = document.GetPage(1).GetFirstContentStream()
+        let text = System.Text.Encoding.Latin1.GetString(content.GetBytes())
+        content.SetData(System.Text.Encoding.Latin1.GetBytes(text.Replace("(The garden opens at 8, Thursday.)", "(A)")))
+
+    let result = VeraPdfValidator().Fix(drawsA.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
+
+    result.OutputPath |> should equal null
+    result.NotApplied |> should contain "Helvetica isn't embedded, and was left as it is (its encoding can't be kept): export the PDF again with fonts embedded."
+
+[<Fact>]
+let ``a font only drawing invisible text (an OCR layer) is left as it is`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        PdfCanvas(page).BeginText().SetTextRenderingMode(3).SetFontAndSize(font, 18f).MoveText(72.0, 700.0).ShowText(sentence).EndText() |> ignore
+
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
+
+    failed input.Path |> should not' (contain "7.21.4.1-1")
+    result.OutputPath |> should equal null
+    result.NotApplied |> List.ofSeq |> List.exists (fun line -> line.Contains "isn't embedded") |> should be False
+
+[<Fact>]
+let ``a font a Type 3 font's glyphs draw with is embedded`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        // A Type 3 font whose one glyph, x, draws Helvetica's X.
+        let helvetica = PdfDictionary()
+        helvetica.Put(PdfName.Type, PdfName.Font) |> ignore
+        helvetica.Put(PdfName.Subtype, PdfName.Type1) |> ignore
+        helvetica.Put(PdfName.BaseFont, PdfName "Helvetica") |> ignore
+        helvetica.Put(PdfName.Encoding, PdfName.WinAnsiEncoding) |> ignore
+        let procedure = PdfStream(System.Text.Encoding.ASCII.GetBytes "600 0 d0 BT /H 700 Tf 0 0 Td (X) Tj ET")
+        let type3 = PdfDictionary()
+        type3.Put(PdfName.Type, PdfName.Font) |> ignore
+        type3.Put(PdfName.Subtype, PdfName.Type3) |> ignore
+        type3.Put(PdfName.FontBBox, PdfArray([| 0; 0; 1000; 1000 |])) |> ignore
+        type3.Put(PdfName.FontMatrix, PdfArray([| 0.001; 0.0; 0.0; 0.001; 0.0; 0.0 |])) |> ignore
+        type3.Put(PdfName.CharProcs, PdfDictionary(dict [ PdfName "x", procedure.MakeIndirect document :> PdfObject ])) |> ignore
+        type3.Put(PdfName.Encoding, PdfDictionary(dict [ PdfName.Differences, PdfArray([| PdfNumber 120 :> PdfObject; PdfName "x" |]) :> PdfObject ])) |> ignore
+        type3.Put(PdfName.FirstChar, PdfNumber 120) |> ignore
+        type3.Put(PdfName.LastChar, PdfNumber 120) |> ignore
+        type3.Put(PdfName.Widths, PdfArray([| 600 |])) |> ignore
+        let fontResources = PdfDictionary(dict [ PdfName "H", helvetica.MakeIndirect document :> PdfObject ])
+        type3.Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Font, fontResources :> PdfObject ])) |> ignore
+        let pageFonts = PdfDictionary(dict [ PdfName "T3", type3.MakeIndirect document :> PdfObject ])
+        page.GetPdfObject().Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Font, pageFonts :> PdfObject ])) |> ignore
+        page.GetPdfObject().Put(PdfName.Contents, PdfStream(System.Text.Encoding.ASCII.GetBytes "BT /T3 18 Tf 72 700 Td (xx) Tj ET").MakeIndirect document) |> ignore
+
+    fix input.Path output.Path |> ignore
+
+    failed input.Path |> should contain "7.21.4.1-1"
+    failed output.Path |> should not' (contain "7.21.4.1-1")
+    fonts output.Path |> List.exists (fun (name, embedded) -> name.EndsWith "+NimbusSans-Regular" && embedded) |> should be True
+
+[<Fact>]
+let ``a form field's appearance without resources of its own uses the form's, and fonts are still subset`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        let times = PdfFontFactory.CreateFont StandardFonts.TIMES_ROMAN
+        PdfCanvas(page).BeginText().SetFontAndSize(times, 18f).MoveText(72.0, 700.0).ShowText(sentence).EndText() |> ignore
+        let helvetica = PdfDictionary()
+        helvetica.Put(PdfName.Type, PdfName.Font) |> ignore
+        helvetica.Put(PdfName.Subtype, PdfName.Type1) |> ignore
+        helvetica.Put(PdfName.BaseFont, PdfName "Helvetica") |> ignore
+        helvetica.Put(PdfName.Encoding, PdfName.WinAnsiEncoding) |> ignore
+        helvetica.MakeIndirect document |> ignore
+        // A text field whose appearance names /Helv, which only the form's resources have.
+        let appearance = PdfStream(System.Text.Encoding.ASCII.GetBytes "/Tx BMC BT /Helv 12 Tf 2 4 Td (Hello) Tj ET EMC")
+        appearance.Put(PdfName.Type, PdfName.XObject) |> ignore
+        appearance.Put(PdfName.Subtype, PdfName.Form) |> ignore
+        appearance.Put(PdfName.BBox, PdfArray([| 0; 0; 200; 20 |])) |> ignore
+        let widget = PdfDictionary()
+        widget.Put(PdfName.Type, PdfName.Annot) |> ignore
+        widget.Put(PdfName.Subtype, PdfName.Widget) |> ignore
+        widget.Put(PdfName.FT, PdfName.Tx) |> ignore
+        widget.Put(PdfName.T, PdfString "name") |> ignore
+        widget.Put(PdfName.Rect, PdfArray([| 72; 600; 272; 620 |])) |> ignore
+        widget.Put(PdfName.AP, PdfDictionary(dict [ PdfName.N, appearance.MakeIndirect document :> PdfObject ])) |> ignore
+        widget.MakeIndirect document |> ignore
+        page.GetPdfObject().Put(PdfName.Annots, PdfArray([| widget :> PdfObject |])) |> ignore
+        let fonts = PdfDictionary(dict [ PdfName "Helv", helvetica :> PdfObject ])
+        let form = PdfDictionary()
+        form.Put(PdfName.Fields, PdfArray([| widget :> PdfObject |])) |> ignore
+        form.Put(PdfName.DR, PdfDictionary(dict [ PdfName.Font, fonts :> PdfObject ])) |> ignore
+        document.GetCatalog().GetPdfObject().Put(PdfName.AcroForm, form) |> ignore
+
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts ||| PdfFixOptions.FontUnicode)
+
+    result.NotApplied |> List.ofSeq |> List.filter (fun line -> line.Contains "couldn't be read") |> should equal List.empty<string>
+    // The page's font a subset (tagged), the form's whole.
+    fonts output.Path |> List.map (fun (name, embedded) -> (if name.Contains "+" then "subset " + name.Substring 7 else name), embedded)
+    |> List.sort
+    |> should equal [ "NimbusSans-Regular", true; "subset NimbusRoman-Regular", true ]
