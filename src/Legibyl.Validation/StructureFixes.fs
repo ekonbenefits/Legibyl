@@ -1138,8 +1138,7 @@ let private embedFonts (document: PdfDocument) (context: Context) =
 /// The PDF's own tag names mapped to standard tags by what they say, and a broken role map mended
 /// (see RoleMaps); names that don't say are noted, for a person to map. The fixes after it read
 /// tags through the map as it now is.
-let private mapRoles (document: PdfDocument) (context: Context) =
-    let repair = RoleMaps.repair document
+let private refreshRoleMap (document: PdfDocument) (context: Context) =
     // (The context's map is the one read at the start: brought up to date.)
     match context.RoleMap with
     | :? Dictionary<PdfName, PdfName> as map ->
@@ -1151,9 +1150,13 @@ let private mapRoles (document: PdfDocument) (context: Context) =
             | null -> ()
             | roles -> for key in roles.KeySet() do match roles.GetAsName key with null -> () | role -> map[key] <- role
     | _ -> ()
+
+let private mapRoles (document: PdfDocument) (context: Context) =
+    let repair = RoleMaps.repair document
+    refreshRoleMap document context
     let elements (n: int) = if n = 1 then "1 element" else $"{n} elements"
     for name, uses in repair.Unknown do
-        context.Notes.Add $"The tag name \"{name}\" ({elements uses}) isn't mapped to a standard tag, and doesn't say which it is: map it in a PDF editor's role map."
+        context.Notes.Add $"The tag name \"{name}\" ({elements uses}) isn't mapped to a standard tag, and doesn't say which it is: choose one in Structure…'s Role map."
     [ for name, tag, uses in repair.Mapped do
           yield $"Mapped the tag name \"{name}\" ({elements uses}) to {tag}, which it says it is: to check."
       for name in repair.Remapped do
@@ -1162,13 +1165,23 @@ let private mapRoles (document: PdfDocument) (context: Context) =
           let names = String.Join(", ", circle |> List.map (fun n -> $"\"{n}\""))
           yield $"Broke the role map's circle through {names}." ]
 
+/// The standard tag a person chose for each of the PDF's own tag names (see RoleMaps.choose),
+/// written to its role map before the RoleMap fix maps the others.
+let private chooseRoles (chosen: Map<string, string>) (document: PdfDocument) (context: Context) =
+    let written = RoleMaps.choose document chosen
+    refreshRoleMap document context
+    [ for name, tag in written -> $"Mapped the tag name \"{name}\" to {tag}, as chosen." ]
+
 let orderedFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
     (edits: ElementEdit list)
     (title: string option)
+    (roleMap: Map<string, string>)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.ParentTree, ParentTree.rebuild
+      // A person's role map first: the RoleMap fix maps what's left.
+      PdfFixOptions.ApplyEdits, chooseRoles roleMap
       PdfFixOptions.RoleMap, mapRoles
       PdfFixOptions.Language, setLanguageFromText
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
@@ -1208,13 +1221,14 @@ let applyFixes
     (layout: PageLayout option)
     (edits: ElementEdit list)
     (title: string option)
+    (roleMap: Map<string, string>)
     : string list * PdfFixOptions list * string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
     let results =
-        [ for option, apply in orderedFixes titles layout edits title do
+        [ for option, apply in orderedFixes titles layout edits title roleMap do
               if options.HasFlag option then
                   let notes = context.Notes.Count
                   let lines = apply document context

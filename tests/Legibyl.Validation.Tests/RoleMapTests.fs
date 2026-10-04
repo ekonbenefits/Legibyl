@@ -104,7 +104,7 @@ let ``a name that doesn't say is left alone, and reported for a person to map`` 
     roleMap output.Path |> should equal (Map.ofList [ "Heading 1", "H1" ])
     failed PdfProfile.PdfUa1 output.Path |> should contain "7.1-5"
     result.NotApplied
-    |> should contain "The tag name \"Zorp\" (1 element) isn't mapped to a standard tag, and doesn't say which it is: map it in a PDF editor's role map."
+    |> should contain "The tag name \"Zorp\" (1 element) isn't mapped to a standard tag, and doesn't say which it is: choose one in Structure…'s Role map."
 
 [<Fact>]
 let ``a name mapped to one that isn't mapped has that one mapped, by what it says`` () =
@@ -193,3 +193,62 @@ let ``a role map that's right is left as it is`` () =
     result.OutputPath |> should equal null
     FixNames.nameOf PdfFixOptions.RoleMap |> should equal "role-map"
     FixNames.safe.HasFlag PdfFixOptions.RoleMap |> should be False
+
+/// The validator with a person's role map choices.
+let private choosing (chosen: (string * string) list) =
+    let validator = VeraPdfValidator()
+    validator.RoleMap <- System.Collections.Generic.Dictionary<string, string>(dict chosen)
+    validator
+
+[<Fact>]
+let ``a person's choices are written to the role map first, and the fix maps the rest`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // Zorp says nothing; Heading 1 would be H1, but a person chose H2.
+    createTagged input.Path PdfVersion.PDF_1_7 [ "Heading 1", "Garden notes"; "Zorp", "The garden opens at 8."; "Body Text", "Bring gloves." ] []
+
+    let result =
+        (choosing [ "Zorp", "P"; "Heading 1", "H2" ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits ||| PdfFixOptions.RoleMap)
+
+    roleMap output.Path |> should equal (Map.ofList [ "Body Text", "P"; "Heading 1", "H2"; "Zorp", "P" ])
+    failed PdfProfile.PdfUa1 output.Path |> should not' (contain "7.1-5")
+    result.AppliedFixes |> should contain "Mapped the tag name \"Zorp\" to P, as chosen."
+    result.AppliedFixes |> should contain "Mapped the tag name \"Heading 1\" to H2, as chosen."
+    result.NotApplied |> Seq.exists (fun line -> line.Contains "Zorp") |> should be False
+
+[<Fact>]
+let ``a choice of a tag that isn't standard, or for a standard tag, isn't written`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path PdfVersion.PDF_1_7 [ "Zorp", "The garden opens at 8."; "P", "Bring gloves." ] []
+
+    let result = (choosing [ "Zorp", "Paragraph"; "P", "H1" ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.OutputPath |> should equal null
+    ReviewFile.problems """{ "roleMap": { "Zorp": "Paragraph", "Heading 1": "H1" } }"""
+    |> should equal [ "roleMap maps \"Zorp\" to \"Paragraph\", which isn't a standard tag (e.g. H1 to H6, P, LI, Figure, Caption, Note)." ]
+
+[<Fact>]
+let ``an edit for an element of the PDF's own tag name finds it by that name`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path PdfVersion.PDF_1_7 [ "Heading 1", "Garden notes"; "Body Text", "The garden opens at 8." ] [ "Heading 1", "H1"; "Body Text", "P" ]
+    let rec find (node: StructureNode) : StructureNode list =
+        (if node.Tag = "Heading 1" then [ node ] else []) @ List.collect find (List.ofSeq node.Children)
+    let heading = VeraPdfValidator().ReadStructureTree input.Path |> nonNull |> find |> List.exactlyOne
+    let validator = VeraPdfValidator()
+    validator.Edits <-
+        [ { Page = 1; Tag = "Heading 1"; Box = heading.Geometry |> nonNull; Alt = null; Text = null; MergeWith = []; Retag = "P"; Exclude = false; Move = None } ]
+
+    validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
+
+    let tags = VeraPdfValidator().ReadStructureTree output.Path |> nonNull |> fun root -> [ for d in root.Children do for c in d.Children -> c.Tag ]
+    tags |> should equal [ "P"; "Body Text" ]
+
+[<Fact>]
+let ``a review's role map is read and written`` () =
+    let file =
+        ReviewFile.parse """{ "version": 1, "roleMap": { "Zorp": "P" } }""" |> Option.get
+    file.RoleMap |> nonNull |> Seq.map (fun kv -> kv.Key, kv.Value) |> List.ofSeq |> should equal [ "Zorp", "P" ]
+    ReviewFile.isEmpty file |> should be False
+    (ReviewFile.toJson file).Contains "\"roleMap\"" |> should be True

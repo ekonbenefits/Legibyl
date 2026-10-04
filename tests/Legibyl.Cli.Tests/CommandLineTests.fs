@@ -82,6 +82,7 @@ let private writeReview (path: string) (alt: string) =
           DismissedWarnings = null
           Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false } |]
           Title = null
+          RoleMap = null
           Layout = null
           Fixes = null
           Validation = null
@@ -110,6 +111,7 @@ let ``--edits with a figure retagged Artifact makes it decoration`` () =
               DismissedWarnings = null
               Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = null; Text = null; MergeWith = null; Retag = "Artifact"; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false } |]
               Title = null
+              RoleMap = null
               Layout = null
               Fixes = null
               Validation = null
@@ -131,6 +133,7 @@ let ``--edits gives a tagged PDF the review's title`` () =
               DismissedWarnings = null
               Edits = null
               Title = "The Community Garden"
+              RoleMap = null
               Layout = null
               Fixes = null
               Validation = null
@@ -380,7 +383,7 @@ let ``validate reports the steps a person checked, carried in a copy Legibyl wro
     withTaggedPdf (fun pdf ->
         let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
         let review: ReviewFile.SavedFile =
-            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; RoleMap = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
         ReviewFile.checkedCopy pdf copy review (SavedResults.hashOf pdf) (set [ "title"; "headings" ]) (DateTime(2026, 9, 27))
 
         let _, original = run [ "validate"; pdf ]
@@ -466,7 +469,7 @@ let private withWarning (test: string -> unit) =
 let private dismissing (rule: string) : ReviewFile.SavedFile =
     { Version = 1
       DismissedWarnings = [| { Rule = rule; Location = ReviewFile.AnyLocation; Message = "" } |]
-      Edits = null; Title = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+      Edits = null; Title = null; RoleMap = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
 
 let private warningRules (result: JsonElement) =
     [ for w in result.GetProperty("warnings").EnumerateArray() ->

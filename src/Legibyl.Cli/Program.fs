@@ -414,6 +414,10 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                     validator.Edits <- ReviewFile.edits review
                     // Its title too, on a tagged PDF (tagging from the layout gives it as well).
                     validator.Title <- (if String.IsNullOrWhiteSpace review.Title then null else review.Title)
+                    // And the tags chosen for its own tag names.
+                    match review.RoleMap with
+                    | NonNull map -> validator.RoleMap <- map
+                    | Null -> ()
                     validator.Review <- ReviewFile.forCopy (Some review)
                 | None -> ()
                 let fix = validator.Fix(file, profile, targetPath, options)
@@ -455,6 +459,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
             validator.LayoutSource <- null
             validator.Edits <- []
             validator.Title <- null
+            validator.RoleMap <- Collections.Generic.Dictionary<string, string>()
             validator.Review <- null
             model |> Option.iter (fun model -> (model :> IDisposable).Dispose())
 

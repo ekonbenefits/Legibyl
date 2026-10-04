@@ -36,10 +36,11 @@ type DocumentReview(modified: DateTime) =
     /// The last validation's result (see SavedResults): as saved next to the PDF, or a newer one
     /// Save hasn't kept yet.
     member val Validation: ReviewFile.SavedValidation option = None with get, set
-    /// What was last saved (or read): the dismissals, edits, title, auto fixes and which validation.
+    /// What was last saved (or read): the dismissals, edits, title, role map, auto fixes and which
+    /// validation.
     member val private Saved:
-        Dismissals.Dismissed * RegionEdits.Edit list * string option * PdfFixOptions option * (string * DateTime) option * (string * Set<string>) option =
-        (Map.empty, [], None, None, None, None) with get, set
+        Dismissals.Dismissed * RegionEdits.Edit list * string option * Map<string, string> * PdfFixOptions option * (string * DateTime) option * (string * Set<string>) option =
+        (Map.empty, [], None, Map.empty, None, None, None) with get, set
 
     /// Which validation it has: the file checked, and when.
     member private this.ValidationStamp = this.Validation |> Option.map (fun v -> v.Hash, v.CheckedAt)
@@ -85,6 +86,8 @@ type DocumentReview(modified: DateTime) =
     member this.TitleLookup = this.Titles :> Collections.Generic.IReadOnlyDictionary<string, string>
     /// The document title as edited on the suggested structure (saved next to the PDF), if it was.
     member val Title: string option = None with get, set
+    /// The standard tag chosen for each of the PDF's own tag names (Structure…'s Role map).
+    member val RoleMap: Map<string, string> = Map.empty with get, set
     /// The title the window prefilled and showed, if it was opened.
     member val ShownTitle: string option = None with get, set
 
@@ -115,6 +118,7 @@ type DocumentReview(modified: DateTime) =
             if this.Dismissed.IsEmpty && not this.CarriedDismissed.IsEmpty then [||] else Dismissals.toSaved this.Dismissed
           Edits = (if edits.Length = 0 then null else edits)
           Title = Option.toObj this.Title
+          RoleMap = (if this.RoleMap.IsEmpty then null else Collections.Generic.Dictionary<string, string>(this.RoleMap))
           Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null)
           Fixes = (this.AutoFixes |> Option.map (FixNames.ofOptions >> Array.ofList) |> Option.toObj)
           Validation = Option.toObj this.Validation
@@ -148,6 +152,7 @@ type DocumentReview(modified: DateTime) =
             { own with
                 Edits = (if edits.Length = 0 then null else edits)
                 Title = (if isNull own.Title then carried.Title else own.Title)
+                RoleMap = (if isNull own.RoleMap then carried.RoleMap else own.RoleMap)
                 Fixes = own.Fixes }
         | None -> own
 
@@ -157,12 +162,12 @@ type DocumentReview(modified: DateTime) =
         let checkedSteps = Set.union (this.CheckedFor hash) this.CarriedChecked
         ReviewFile.checkedCopy pdfPath outputPath (this.CopyFile pdfPath) hash checkedSteps (this.ChecklistAt |> Option.defaultValue DateTime.Now)
 
-    /// Whether there are changes Save hasn't kept: the dismissals, edits, title or auto fixes differ
+    /// Whether there are changes Save hasn't kept: the dismissals, edits, title, role map or auto fixes differ
     /// from what was last saved (changing one back isn't a change), or there's a newer validation.
-    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.AutoFixes, this.ValidationStamp, this.Checklist) <> this.Saved
+    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.AutoFixes, this.ValidationStamp, this.Checklist) <> this.Saved
 
     /// Takes what it has now as what's saved.
-    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.AutoFixes, this.ValidationStamp, this.Checklist)
+    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.AutoFixes, this.ValidationStamp, this.Checklist)
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
@@ -205,6 +210,10 @@ type DocumentReviews() =
             | Some saved ->
                 review.Edits <- RegionEdits.editsIn saved
                 review.Title <- Option.ofObj saved.Title
+                review.RoleMap <-
+                    match saved.RoleMap with
+                    | NonNull map -> map |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+                    | Null -> Map.empty
                 review.AutoFixes <- Option.ofObj saved.Fixes |> Option.map FixNames.toOptions
                 review.Validation <- Option.ofObj saved.Validation
                 review.Checklist <-

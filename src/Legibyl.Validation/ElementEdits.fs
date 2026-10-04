@@ -120,19 +120,24 @@ let private findIn (document: PdfDocument) context (boxes: ElementEdit -> Struct
         // An element retagged already has its new tag.
         let tagsOf (e: ElementEdit) = [ e.Tag; yield! Option.toList (Option.ofObj e.Retag) ]
         let wanted = edits |> List.collect (fun e -> tagsOf e |> List.map (fun tag -> e.Page, tag)) |> set
-        // Only elements an edit could be for, with their boxes.
+        // Only elements an edit could be for, with their boxes: by their tag, or (one of the PDF's
+        // own names, as Structure… shows it) by their name.
         let candidates =
             [ for visit in walk structTreeRoot context do
-                  match standardTag visit.Element context, visit.Page with
-                  | NonNull tag, Some page when wanted.Contains((page, tag.GetValue())) ->
+                  let names =
+                      [ match standardTag visit.Element context with NonNull tag -> tag.GetValue() | Null -> ()
+                        match visit.Element.GetAsName PdfName.S with NonNull name -> name.GetValue() | Null -> () ]
+                      |> List.distinct
+                  match visit.Page with
+                  | Some page when names |> List.exists (fun name -> wanted.Contains((page, name))) ->
                       match subtreeGeometry visit.Element context visit.Page with
-                      | Some box when box.PageNumber = page -> yield tag.GetValue(), box, visit.Element
+                      | Some box when box.PageNumber = page -> yield names, box, visit.Element
                       | _ -> ()
                   | _ -> () ]
         edits
         |> List.choose (fun edit ->
             candidates
-            |> List.filter (fun (tag, box, _) -> List.contains tag (tagsOf edit) && box.PageNumber = edit.Page)
+            |> List.filter (fun (names, box, _) -> names |> List.exists (fun name -> List.contains name (tagsOf edit)) && box.PageNumber = edit.Page)
             |> List.map (fun (_, box, element) -> element, boxes edit |> List.map (Boxes.overlap box) |> List.max)
             |> List.filter (fun (_, o) -> o >= SameElementOverlap)
             |> List.sortByDescending snd

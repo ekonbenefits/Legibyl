@@ -1129,6 +1129,16 @@ the same pass: Auto Fixes… then ticks Fix XMP metadata, and NEXT STEP, which
 asks for a title first, suggests it. The
 GUI's Auto Fixes dialog lists the same fixes, in the order they run.
 
+`role-map` maps the PDF's own tag names (Word's `Heading 1`, `Body Text`, `InlineShape`,
+LibreOffice's `Text body`…) to the standard tags they say they are, in the structure tree
+root's role map, so a screen reader can tell a heading from a paragraph (7.1-5; 8.2.4-1),
+and mends a broken map: a standard tag mapped to another is unmapped (7.1-7), and a circle
+is broken (7.1-6). A name that doesn't say what it is is left, and reported. Structure…'s
+**Role map** tab lists the PDF's own names, how many elements use each and what each is
+mapped to, with a picker of standard tags: Export… writes those chosen (before the fix
+guesses the rest), and the review keeps them as `roleMap` (`"Zorp": "P"`). The Tag picker
+shows such an element as what a screen reader hears ("Heading1 → H1").
+
 `embed-fonts` embeds fonts the pages draw with but don't embed (PDF/UA's
 commonest font failure, 7.21.4.1-1; 8.4.5.5.1-1), from open fonts made to the
 same measure that come with Legibyl: [URW's base 35](https://github.com/ArtifexSoftware/urw-base35-fonts)

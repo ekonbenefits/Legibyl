@@ -220,3 +220,48 @@ let repair (document: PdfDocument) : Repair =
           Remapped = remapped
           Circles = circles
           Unknown = List.ofSeq unknown }
+
+/// Writes the standard tag a person chose for each of a document's own tag names to its role map
+/// (a choice of a tag that isn't standard, or for a name that is, is passed over), replacing
+/// what it had; returns those it changed. Nothing for a document without a structure tree.
+let choose (document: PdfDocument) (chosen: Map<string, string>) : (string * string) list =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
+    | null -> []
+    | root ->
+        let map =
+            match root.GetAsDictionary PdfName.RoleMap with
+            | null ->
+                let map = PdfDictionary()
+                root.Put(PdfName.RoleMap, map) |> ignore
+                map
+            | map -> map
+        let changed =
+            [ for KeyValue(name, tag) in chosen do
+                  if standardTags.Contains tag && not (standardTags.Contains name) then
+                      match map.GetAsName(PdfName name) with
+                      | NonNull current when current.GetValue() = tag -> ()
+                      | _ ->
+                          map.Put(PdfName name, PdfName tag) |> ignore
+                          yield name, tag ]
+        if map.Size() = 0 then root.Remove PdfName.RoleMap |> ignore
+        changed
+
+/// How many of the tags a person chose for the PDF at pdfPath's own tag names it doesn't have
+/// in its role map yet (see choose).
+let pending (pdfPath: string) (chosen: Map<string, string>) : int =
+    if chosen.IsEmpty then
+        0
+    else
+        use document = new PdfDocument(new PdfReader(pdfPath))
+        let map =
+            match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
+            | null -> null
+            | root -> root.GetAsDictionary PdfName.RoleMap
+        chosen
+        |> Seq.filter (fun (KeyValue(name, tag)) ->
+            standardTags.Contains tag
+            && not (standardTags.Contains name)
+            && (match map with
+                | null -> true
+                | map -> match map.GetAsName(PdfName name) with NonNull current -> current.GetValue() <> tag | Null -> true))
+        |> Seq.length

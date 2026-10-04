@@ -66,8 +66,10 @@ let retagTags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "B
 /// Whether node can be given another tag: in a tagged PDF, a block of text; in a suggested
 /// layout, any region (it needs its place on its page, which is how the edit finds it again).
 let canRetag (suggested: bool) (node: StructureNode) =
+    // (One of the PDF's own tag names by what its role map makes it.)
+    let tag = match node.Role with NonNull role -> role | Null -> node.Tag
     not (isNull node.Geometry)
-    && (if suggested then node.Tag <> "Link" else node.Tag = "H" || List.contains node.Tag retagTags)
+    && (if suggested then node.Tag <> "Link" else tag = "H" || List.contains tag retagTags)
 
 /// The suggested regions in the selection: those selected, and those inside a selected list
 /// or document, to leave out or keep.
@@ -385,7 +387,9 @@ type SelectionNeeds =
       /// Marks not read every piece drawn outside the tags like this one (the same kind and size).
       MarkAllLike: StructureNode -> unit
       /// Opens the prompt for an element's alt text, replacement text or link description.
-      EditNode: StructureNode -> EditKind -> unit }
+      EditNode: StructureNode -> EditKind -> unit
+      /// The standard tag chosen for each of the PDF's own tag names (the Role map tab).
+      RoleMap: unit -> Map<string, string> }
 
 /// What a screen reader says for the selected element (alt text, replacement text, a link's
 /// description): only those it has, for one element at a time. (F2 on its block opens the first.)
@@ -434,7 +438,16 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
     match tagging with
     | [] -> None
     | targets ->
-        let tagOf (node: StructureNode) = editFor needs.Edits.Current node |> Option.bind _.Retag |> Option.defaultValue node.Tag
+        // One of the PDF's own tag names shows what it's mapped to: "Heading1 → H1", what a screen
+        // reader hears.
+        let named (node: StructureNode) =
+            if needs.Suggested || RoleMaps.standardTags.Contains node.Tag then
+                node.Tag
+            else
+                match needs.RoleMap () |> Map.tryFind node.Tag |> Option.orElse (Option.ofObj node.Role) with
+                | Some role -> $"{node.Tag} → {role}"
+                | None -> node.Tag
+        let tagOf (node: StructureNode) = editFor needs.Edits.Current node |> Option.bind _.Retag |> Option.defaultValue (named node)
         // Their tag, when they share one.
         let tag =
             match targets |> List.map tagOf |> List.distinct with
