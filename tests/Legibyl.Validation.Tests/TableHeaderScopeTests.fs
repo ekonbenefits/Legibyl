@@ -45,6 +45,32 @@ type private FixedLayout(regions: LayoutRegion list) =
         member _.PageTitles = null
         member _.DocumentTitle = null
 
+/// The rows of a tagged table's cells (TR, then TH/TD), in document.
+let private rowsIn (document: PdfDocument) =
+    let rec find (element: PdfDictionary) : PdfDictionary list =
+        let kids =
+            match element.Get(PdfName.K, true) with
+            | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as d -> d | _ -> () ]
+            | :? PdfDictionary as d -> [ d ]
+            | _ -> []
+        (if PdfName.TR.Equals(element.GetAsName PdfName.S) then [ element ] else []) @ List.collect find kids
+    [ for row in find (document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot) ->
+          [ for i in 0 .. row.GetAsArray(PdfName.K).Size() - 1 -> row.GetAsArray(PdfName.K).GetAsDictionary i ] ]
+
+/// The table tagged from regions, then each cell's Scope taken away, then change made to its rows.
+let private taggedThen (path: string) (layout: LayoutRegion list) (change: PdfDocument -> PdfDictionary list list -> unit) =
+    use untagged = new TempPdf()
+    use tagged = new TempPdf()
+    createTable untagged.Path
+    VeraPdfValidator(LayoutSource = FixedLayout layout).Fix(untagged.Path, PdfProfile.PdfUa1, tagged.Path, PdfFixOptions.TagFromLayout) |> ignore
+    use document = new PdfDocument(new PdfReader(tagged.Path), new PdfWriter(path))
+    for row in rowsIn document do
+        for cell in row do
+            match cell.GetAsDictionary PdfName.A with
+            | null -> ()
+            | attributes -> attributes.Remove PdfName.Scope |> ignore
+    change document (rowsIn document)
+
 /// The table tagged from its layout, then each header cell's Scope taken away (and, with headers,
 /// each data cell naming its headers instead).
 let private taggedWithoutScope (path: string) (rowHeaders: bool) (headers: bool) =
@@ -130,3 +156,79 @@ let ``a table whose cells name their headers is left as it is, and the fix isn't
     report |> List.exists (fun line -> line.Contains "Scope") |> should be False
     FixNames.nameOf PdfFixOptions.TableHeaderScope |> should equal "table-header-scope"
     FixNames.safe.HasFlag PdfFixOptions.TableHeaderScope |> should be False
+
+/// A header row, then two rows headed by their first cell, the data cell beside them spanning both.
+let private spanningRegions =
+    [ region "Table" (70.0, 624.0, 522.0, 698.0)
+      region "TH" (72.0, 672.0, 220.0, 696.0)
+      region "TH" (220.0, 672.0, 520.0, 696.0)
+      region "TH" (72.0, 648.0, 220.0, 672.0)
+      region "TD" (220.0, 624.0, 520.0, 672.0)
+      region "TH" (72.0, 624.0, 220.0, 648.0) ]
+
+[<Fact>]
+let ``a header cell in a row a data cell spans down into heads its row`` () =
+    use broken = new TempPdf()
+    use fixedPdf = new TempPdf()
+    taggedThen broken.Path spanningRegions (fun _ _ -> ())
+
+    fix broken.Path fixedPdf.Path |> ignore
+
+    // The last row's only cell of its own is a header, but the data cell above spans into it.
+    scopes fixedPdf.Path |> should equal [ [ "TH", "Column"; "TH", "Column" ]; [ "TH", "Row"; "TD", "" ]; [ "TH", "Row" ] ]
+    failed fixedPdf.Path |> should not' (contain "7.5-1")
+
+[<Fact>]
+let ``spans far past the table are bounded, not followed`` () =
+    use broken = new TempPdf()
+    use fixedPdf = new TempPdf()
+    taggedThen broken.Path (regions false) (fun _ rows ->
+        let cell = List.last (List.last rows)
+        let attributes = cell.GetAsDictionary PdfName.A
+        attributes.Put(PdfName.RowSpan, PdfNumber 1000000) |> ignore
+        attributes.Put(PdfName.ColSpan, PdfNumber 1000000) |> ignore)
+
+    let watch = System.Diagnostics.Stopwatch.StartNew()
+    let report = fix broken.Path fixedPdf.Path
+    watch.Stop()
+
+    watch.Elapsed.TotalSeconds |> should be (lessThan 20.0)
+    report |> List.exists (fun line -> line.StartsWith "Gave 3 table header cell(s)") |> should be True
+
+[<Fact>]
+let ``header cells sharing their attributes each get their own scope`` () =
+    use broken = new TempPdf()
+    use fixedPdf = new TempPdf()
+    taggedThen broken.Path (regions true) (fun document rows ->
+        // The first column header and the first row header share one attributes dictionary.
+        let shared = PdfDictionary()
+        shared.Put(PdfName.O, PdfName.Table) |> ignore
+        shared.MakeIndirect document |> ignore
+        rows[0].[0].Put(PdfName.A, shared) |> ignore
+        rows[1].[0].Put(PdfName.A, shared) |> ignore)
+
+    fix broken.Path fixedPdf.Path |> ignore
+
+    let shown = scopes fixedPdf.Path
+    shown[0].[0] |> should equal ("TH", "Column")
+    shown[1].[0] |> should equal ("TH", "Row")
+
+[<Fact>]
+let ``a header cell whose class gives its scope keeps it`` () =
+    use broken = new TempPdf()
+    use fixedPdf = new TempPdf()
+    taggedThen broken.Path (regions false) (fun document rows ->
+        let classMap = PdfDictionary()
+        let both = PdfDictionary()
+        both.Put(PdfName.O, PdfName.Table) |> ignore
+        both.Put(PdfName.Scope, PdfName.Both) |> ignore
+        classMap.Put(PdfName "HeaderBoth", both) |> ignore
+        document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot).Put(PdfName "ClassMap", classMap) |> ignore
+        rows[0].[0].Put(PdfName.C, PdfName "HeaderBoth") |> ignore)
+
+    let report = fix broken.Path fixedPdf.Path
+
+    // The other two header cells are scoped; the one with the class isn't given another.
+    report |> should contain "Gave 2 table header cell(s) in 1 table(s) a Scope (Column in a header row, Row for one heading its row), so a screen reader can tell which cells each heads: to check."
+    let shown = scopes fixedPdf.Path
+    shown[0].[0] |> should equal ("TH", "")
