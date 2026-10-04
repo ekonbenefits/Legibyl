@@ -557,3 +557,42 @@ let ``Acrobat's form font encoding, with .notdef in it, is embedded`` () =
 
     report |> should contain "Embedded Nimbus Sans in place of Helvetica, which wasn't embedded: an open font with its glyphs, each as wide."
     failed output.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
+
+[<Fact>]
+let ``a whole font is checked without control codes, which iText gives a width`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // As iText writes widths, from code 0, with .notdef's width at the control codes (and 127);
+    // and a form that fills in with the font, so it's embedded whole.
+    createText input.Path [ StandardFonts.HELVETICA ] true (fun document font ->
+        let widths = font.GetAsArray PdfName.Widths
+        widths.Set(127 - 32, PdfNumber 278) |> ignore
+        font.Put(PdfName.FirstChar, PdfNumber 0) |> ignore
+        font.Put(PdfName.Widths, PdfArray(Array.append (Array.create 32 (PdfNumber 278 :> PdfObject)) [| for i in 0 .. widths.Size() - 1 -> widths.Get i |])) |> ignore
+        let form = PdfDictionary()
+        form.Put(PdfName.Fields, PdfArray()) |> ignore
+        form.Put(PdfName.DR, PdfDictionary(dict [ PdfName.Font, PdfDictionary(dict [ PdfName "Helv", font :> PdfObject ]) :> PdfObject ])) |> ignore
+        document.GetCatalog().GetPdfObject().Put(PdfName.AcroForm, form) |> ignore)
+
+    let report = fix input.Path output.Path
+
+    report |> should contain "Embedded Nimbus Sans in place of Helvetica, which wasn't embedded: an open font with its glyphs, each as wide."
+    fonts output.Path |> should equal [ "NimbusSans-Regular", true ]
+    failed output.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
+
+[<Fact>]
+let ``a code the page draws that its encoding gives no character is said to be the reason`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // No /Encoding: Standard, which gives code 0x92 nothing.
+    createText input.Path [ StandardFonts.HELVETICA ] true (fun _ font -> font.Remove PdfName.Encoding |> ignore)
+    use drawn = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfReader(input.Path), new PdfWriter(drawn.Path))
+        let content = document.GetPage(1).GetFirstContentStream()
+        let source = System.Text.Encoding.Latin1.GetString(content.GetBytes())
+        content.SetData(System.Text.Encoding.Latin1.GetBytes(source.Replace($"({sentence})", "(It\\222s)")))
+
+    let result = VeraPdfValidator().Fix(drawn.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
+
+    result.NotApplied |> should contain "Helvetica isn't embedded, and was left as it is (a code the pages draw has no character in its encoding): export the PDF again with fonts embedded."

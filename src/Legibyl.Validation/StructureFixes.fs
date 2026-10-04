@@ -867,9 +867,13 @@ let private usedCodes (document: PdfDocument) =
         try
             current <- pageResources
             iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent page
+        with _ ->
+            unread.Add number
+        // Its patterns, and what its annotations' appearances draw (a form field's text, say):
+        // normal, rollover and down, in each state; with the form's resources where they've none.
+        // Those that can't be read leave the codes short, not the page unread.
+        try
             processPatterns pageResources
-            // And what its annotations' appearances draw (a form field's text, say): normal,
-            // rollover and down, in each state; with the form's resources where they've none.
             for annotation in page.GetAnnotations() do
                 let appearances =
                     match annotation.GetAppearanceDictionary() with
@@ -887,7 +891,7 @@ let private usedCodes (document: PdfDocument) =
                     with _ ->
                         partial <- true
         with _ ->
-            unread.Add number
+            partial <- true
     // The glyphs of the Type 3 fonts found, which can draw text themselves (and theirs, in turn):
     // with their own resources, else those where they're drawn.
     let processed = HashSet<PdfDictionary>(HashIdentity.Reference)
