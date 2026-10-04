@@ -434,7 +434,8 @@ module LayoutModel =
         use downloader = downloader ()
         downloader.Endpoint
 
-    let private layoutDownloaded () =
+    /// Whether the layout detector's own model is there (isDownloaded is both models').
+    let layoutDownloaded () =
         isBundled ()
         || (use downloader = downloader ()
             downloader.IsComplete ModelCatalog.PpDocLayoutV3)
