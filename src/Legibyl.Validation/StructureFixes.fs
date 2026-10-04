@@ -1125,7 +1125,8 @@ let private embedFonts (document: PdfDocument) (context: Context) =
         | FontEmbedding.Embedded _ -> ()
     [ for name, outcome in outcomes do
           match outcome with
-          | FontEmbedding.Embedded shown -> $"Embedded {shown} in place of {name}, which wasn't embedded: an open font with its glyphs, each as wide."
+          | FontEmbedding.Embedded(shown, false) -> $"Embedded {shown} in place of {name}, which wasn't embedded: an open font with its glyphs, each as wide."
+          | FontEmbedding.Embedded(shown, true) -> $"Embedded {shown}, installed on this computer, in place of {name}, which wasn't embedded: the same font, its glyphs each as wide."
           | FontEmbedding.Left _ -> () ]
 
 let orderedFixes

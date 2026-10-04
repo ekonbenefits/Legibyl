@@ -194,7 +194,7 @@ rules:
   - clause: "7.21.4.1"
     tests: [1]
     meaning: "A font isn't embedded, so the text may look different, or not read the same, on another computer."
-    whatToDo: &embed "Choose Embed fonts in Auto Fixes…: it embeds Helvetica, Times, Courier, Symbol and ZapfDingbats, and Arial, Times New Roman and Courier New, from open fonts made to the same measure, where one has every letter the pages use. For other fonts, export the PDF again with fonts embedded (most tools have an option for it)."
+    whatToDo: &embed "Choose Embed fonts in Auto Fixes…: it embeds Helvetica, Times, Courier, Symbol and ZapfDingbats, and Arial, Times New Roman and Courier New, from open fonts made to the same measure, where one has every letter the pages use; another font from this computer's own copy, if it has it and its licence lets it be embedded. For the rest, export the PDF again with fonts embedded (most tools have an option for it)."
 
   - clauses: ["7.21.3.1", "7.21.3.3", "7.21.4.1", "7.21.4.2", "7.21.5", "7.21.6", "7.21.8"]
     meaning: "A font in the PDF is incomplete or inconsistent, which can make its text display or read wrongly."
