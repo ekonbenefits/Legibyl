@@ -1125,8 +1125,14 @@ let private embedFonts (document: PdfDocument) (context: Context) =
         | FontEmbedding.Embedded _ -> ()
     [ for name, outcome in outcomes do
           match outcome with
-          | FontEmbedding.Embedded(shown, false) -> $"Embedded {shown} in place of {name}, which wasn't embedded: an open font with its glyphs, each as wide."
-          | FontEmbedding.Embedded(shown, true) -> $"Embedded {shown}, installed on this computer, in place of {name}, which wasn't embedded: the same font, its glyphs each as wide."
+          | FontEmbedding.Embedded(shown, false, _) -> $"Embedded {shown} in place of {name}, which wasn't embedded: an open font with its glyphs, each as wide."
+          | FontEmbedding.Embedded(shown, true, whole) ->
+              let size =
+                  match whole with
+                  // (A large font, whole: say what it costs.)
+                  | Some bytes when bytes > 4 * 1024 * 1024 -> $" It's embedded whole ({bytes / (1024 * 1024)} MB), so the PDF is that much bigger."
+                  | _ -> ""
+              $"Embedded {shown}, installed on this computer, in place of {name}, which wasn't embedded: the same font, its glyphs each as wide.{size}"
           | FontEmbedding.Left _ -> () ]
 
 let orderedFixes

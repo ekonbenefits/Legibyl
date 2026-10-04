@@ -740,3 +740,31 @@ let ``an installed font whose widths aren't the PDF's is left`` () =
     let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
 
     result.NotApplied |> should contain "Lato-Regular isn't embedded, and was left as it is (the copy installed on this computer doesn't have its glyphs at its widths): export the PDF again with fonts embedded."
+
+[<Fact>]
+let ``a restricted licence is one, whatever reserved bit's set with it`` () =
+    use folder = new TempFolder()
+    File.WriteAllBytes(Path.Combine(folder.Path, "Lato-Regular.ttf"), latoWith 0x0003)
+    use _ = FontEmbedding.useInstalledFolders [ folder.Path ]
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createLatoText input.Path "Lato-Regular"
+
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
+
+    result.NotApplied |> should contain "Lato-Regular isn't embedded, and was left as it is (its licence doesn't let it be embedded): export the PDF again with fonts embedded."
+
+[<Fact>]
+let ``a large installed font embedded whole says what it costs`` () =
+    use folder = new TempFolder()
+    // Lato, which can't be subset, with 5 MB more in its file.
+    File.WriteAllBytes(Path.Combine(folder.Path, "Lato-Regular.ttf"), Array.append (latoWith 0x0100) (Array.zeroCreate (5 * 1024 * 1024)))
+    use _ = FontEmbedding.useInstalledFolders [ folder.Path ]
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createLatoText input.Path "Lato-Regular"
+
+    let report = fix input.Path output.Path
+
+    report
+    |> should contain "Embedded Lato Regular, installed on this computer, in place of Lato-Regular, which wasn't embedded: the same font, its glyphs each as wide. It's embedded whole (5 MB), so the PDF is that much bigger."
