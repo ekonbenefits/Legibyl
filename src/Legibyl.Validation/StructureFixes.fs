@@ -1135,6 +1135,33 @@ let private embedFonts (document: PdfDocument) (context: Context) =
               $"Embedded {shown}, installed on this computer, in place of {name}, which wasn't embedded: the same font, its glyphs each as wide.{size}"
           | FontEmbedding.Left _ -> () ]
 
+/// The PDF's own tag names mapped to standard tags by what they say, and a broken role map mended
+/// (see RoleMaps); names that don't say are noted, for a person to map. The fixes after it read
+/// tags through the map as it now is.
+let private mapRoles (document: PdfDocument) (context: Context) =
+    let repair = RoleMaps.repair document
+    // (The context's map is the one read at the start: brought up to date.)
+    match context.RoleMap with
+    | :? Dictionary<PdfName, PdfName> as map ->
+        map.Clear()
+        match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
+        | null -> ()
+        | root ->
+            match root.GetAsDictionary PdfName.RoleMap with
+            | null -> ()
+            | roles -> for key in roles.KeySet() do match roles.GetAsName key with null -> () | role -> map[key] <- role
+    | _ -> ()
+    let elements (n: int) = if n = 1 then "1 element" else $"{n} elements"
+    for name, uses in repair.Unknown do
+        context.Notes.Add $"The tag name \"{name}\" ({elements uses}) isn't mapped to a standard tag, and doesn't say which it is: map it in a PDF editor's role map."
+    [ for name, tag, uses in repair.Mapped do
+          yield $"Mapped the tag name \"{name}\" ({elements uses}) to {tag}, which it says it is: to check."
+      for name in repair.Remapped do
+          yield $"Removed the role map's mapping of the standard tag {name}, which means itself."
+      if not repair.Circles.IsEmpty then
+          let names = String.Join(", ", repair.Circles |> List.map (fun n -> $"\"{n}\""))
+          yield $"Broke the role map's circle through {names}." ]
+
 let orderedFixes
     (titles: IPageTitleSource)
     (layout: PageLayout option)
@@ -1142,6 +1169,7 @@ let orderedFixes
     (title: string option)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.ParentTree, ParentTree.rebuild
+      PdfFixOptions.RoleMap, mapRoles
       PdfFixOptions.Language, setLanguageFromText
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.EmptyParagraphs, removeEmptyParagraphs

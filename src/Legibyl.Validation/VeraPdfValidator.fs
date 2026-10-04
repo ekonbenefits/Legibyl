@@ -137,6 +137,14 @@ module internal VeraPdf =
               ua1 "7.21.7-2" PdfFixOptions.FontUnicode
               ua2 "8.4.5.8-1" PdfFixOptions.FontUnicode
               ua2 "8.4.5.8-2" PdfFixOptions.FontUnicode
+              // The role map: names not mapped, circles, standard tags mapped.
+              ua1 "7.1-5" PdfFixOptions.RoleMap
+              ua1 "7.1-6" PdfFixOptions.RoleMap
+              ua1 "7.1-7" PdfFixOptions.RoleMap
+              ua2 "8.2.4-1" PdfFixOptions.RoleMap
+              ua2 "8.2.4-2" PdfFixOptions.RoleMap
+              ua2 "8.2.4-3" PdfFixOptions.RoleMap
+              ua2 "8.2.4-4" PdfFixOptions.RoleMap
               ua1 "7.5-1" PdfFixOptions.TableHeaderScope
               ua2 "8.2.5.26-5" PdfFixOptions.TableHeaderScope ]
 

@@ -1045,6 +1045,7 @@ keeps this table in step with it):
 | `tag-from-layout` | Tag an untagged document from each page's layout | uses the layout models |
 | `qr-links` | Link QR codes to the web addresses they encode | with tag-from-layout |
 | `parent-tree` | Rebuild the parent tree, so the tags are found for the content they hold | safe |
+| `role-map` | Map the PDF's own tag names to standard tags, and fix a broken role map |  |
 | `language` | Declare the document's language, detected from its text |  |
 | `headings-from-toc` | Tag headings the table of contents lists (H1–H6) and point its links at them |  |
 | `empty-paragraphs` | Remove empty paragraph tags |  |

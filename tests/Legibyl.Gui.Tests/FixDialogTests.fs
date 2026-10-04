@@ -127,6 +127,7 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
             equal
             [ "Link QR codes"
               "Rebuild the parent tree"
+              "Map the PDF's own tag names"
               "Declare the language"
               "Headings from the table of contents"
               "Remove empty paragraphs"
