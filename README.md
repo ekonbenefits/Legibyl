@@ -1155,7 +1155,8 @@ PostScript name (`Calibri-Bold`), its family and style as PDFs write them
 (`Calibri,Bold`) or its full name, from a TrueType font (`.ttf`, or one in a
 `.ttc` collection), with the same width check against the PDF's `/Widths`, and
 only if its licence (its OS/2 `fsType`) lets it be embedded: not restricted, nor
-bitmaps only, and whole where it says it can't be subset.
+bitmaps only, and whole where it says it can't be subset (the report says what a
+whole font over 4 MB adds to the file).
 
 Structural fixes run before the veraPDF metadata fixer so metadata is fixed
 against the already-cleaned copy in the same operation. veraPDF saves its

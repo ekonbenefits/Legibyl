@@ -385,7 +385,7 @@ let findInstalled (baseFont: string) : InstalledFace option =
 /// What came of a font that isn't embedded.
 type Outcome =
     /// Embedded as the font named: one Legibyl brings, or (installed) this computer's own copy.
-    | Embedded of shown: string * installed: bool
+    | Embedded of shown: string * installed: bool * wholeBytes: int option
     /// Left as it is, for the reason given.
     | Left of reason: string
 
@@ -607,7 +607,7 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
             match replace document font codes whole symbolic characters expected [ for file, _ in bundled -> readBundled file ] flags with
             | Ok index ->
                 if symbolic then writeSymbolUnicode document font family
-                Some(shownName, Embedded(snd bundled[index], false))
+                Some(shownName, Embedded(snd bundled[index], false, None))
             | Error "" -> Some(shownName, Left "no font Legibyl brings has its glyphs at its widths")
             | Error reason -> Some(shownName, Left reason)
         | None ->
@@ -626,7 +626,7 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
         | None -> Some(shownName, Left "the copy installed on this computer can't be read")
         | Some program when (sfntTable program "glyf").IsNone ->
             Some(shownName, Left "the copy installed on this computer isn't a TrueType font Legibyl can embed")
-        | Some program when (embeddingFlags program &&& 0x000F) = 0x0002 || (embeddingFlags program &&& 0x0200) <> 0 ->
+        | Some program when (embeddingFlags program &&& 0x000E) = 0x0002 || (embeddingFlags program &&& 0x0200) <> 0 ->
             Some(shownName, Left "its licence doesn't let it be embedded")
         | Some program ->
         // A symbolic TrueType font without an encoding draws its codes by its Windows Symbol cmap.
@@ -642,6 +642,6 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
         let whole = whole || (embeddingFlags program &&& 0x0100) <> 0
         let flags (program: iText.IO.Font.TrueTypeFont) = program.GetPdfFontFlags()
         match replace document font codes whole symbolic characters (fun code -> Some(widths code)) [ fun () -> Some program ] flags with
-        | Ok _ -> Some(shownName, Embedded(face.FullName, true))
+        | Ok _ -> Some(shownName, Embedded(face.FullName, true, (if whole then Some program.Length else None)))
         | Error "" -> Some(shownName, Left "the copy installed on this computer doesn't have its glyphs at its widths")
         | Error reason -> Some(shownName, Left reason)
