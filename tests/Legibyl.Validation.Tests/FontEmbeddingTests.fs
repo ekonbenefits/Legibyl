@@ -357,14 +357,14 @@ let ``a font a Type 3 font's glyphs draw with is embedded`` () =
         type3.Put(PdfName.Subtype, PdfName.Type3) |> ignore
         type3.Put(PdfName.FontBBox, PdfArray([| 0; 0; 1000; 1000 |])) |> ignore
         type3.Put(PdfName.FontMatrix, PdfArray([| 0.001; 0.0; 0.0; 0.001; 0.0; 0.0 |])) |> ignore
-        type3.Put(PdfName.CharProcs, PdfDictionary(dict [ PdfName "x", procedure.MakeIndirect document :> PdfObject ])) |> ignore
+        type3.Put(PdfName.CharProcs, PdfDictionary(dict [ PdfName "x", procedure.MakeIndirect document ])) |> ignore
         type3.Put(PdfName.Encoding, PdfDictionary(dict [ PdfName.Differences, PdfArray([| PdfNumber 120 :> PdfObject; PdfName "x" |]) :> PdfObject ])) |> ignore
         type3.Put(PdfName.FirstChar, PdfNumber 120) |> ignore
         type3.Put(PdfName.LastChar, PdfNumber 120) |> ignore
         type3.Put(PdfName.Widths, PdfArray([| 600 |])) |> ignore
-        let fontResources = PdfDictionary(dict [ PdfName "H", helvetica.MakeIndirect document :> PdfObject ])
+        let fontResources = PdfDictionary(dict [ PdfName "H", helvetica.MakeIndirect document ])
         type3.Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Font, fontResources :> PdfObject ])) |> ignore
-        let pageFonts = PdfDictionary(dict [ PdfName "T3", type3.MakeIndirect document :> PdfObject ])
+        let pageFonts = PdfDictionary(dict [ PdfName "T3", type3.MakeIndirect document ])
         page.GetPdfObject().Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Font, pageFonts :> PdfObject ])) |> ignore
         page.GetPdfObject().Put(PdfName.Contents, PdfStream(System.Text.Encoding.ASCII.GetBytes "BT /T3 18 Tf 72 700 Td (xx) Tj ET").MakeIndirect document) |> ignore
 
@@ -400,7 +400,7 @@ let ``a form field's appearance without resources of its own uses the form's, an
         widget.Put(PdfName.FT, PdfName.Tx) |> ignore
         widget.Put(PdfName.T, PdfString "name") |> ignore
         widget.Put(PdfName.Rect, PdfArray([| 72; 600; 272; 620 |])) |> ignore
-        widget.Put(PdfName.AP, PdfDictionary(dict [ PdfName.N, appearance.MakeIndirect document :> PdfObject ])) |> ignore
+        widget.Put(PdfName.AP, PdfDictionary(dict [ PdfName.N, appearance.MakeIndirect document ])) |> ignore
         widget.MakeIndirect document |> ignore
         page.GetPdfObject().Put(PdfName.Annots, PdfArray([| widget :> PdfObject |])) |> ignore
         let fonts = PdfDictionary(dict [ PdfName "Helv", helvetica :> PdfObject ])
@@ -454,12 +454,12 @@ let ``a Type 3 font without resources of its own draws with the page's, whose gl
         type3.Put(PdfName.Subtype, PdfName.Type3) |> ignore
         type3.Put(PdfName.FontBBox, PdfArray([| 0; 0; 1000; 1000 |])) |> ignore
         type3.Put(PdfName.FontMatrix, PdfArray([| 0.001; 0.0; 0.0; 0.001; 0.0; 0.0 |])) |> ignore
-        type3.Put(PdfName.CharProcs, PdfDictionary(dict [ PdfName "x", procedure.MakeIndirect document :> PdfObject ])) |> ignore
+        type3.Put(PdfName.CharProcs, PdfDictionary(dict [ PdfName "x", procedure.MakeIndirect document ])) |> ignore
         type3.Put(PdfName.Encoding, PdfDictionary(dict [ PdfName.Differences, PdfArray([| PdfNumber 120 :> PdfObject; PdfName "x" |]) :> PdfObject ])) |> ignore
         type3.Put(PdfName.FirstChar, PdfNumber 120) |> ignore
         type3.Put(PdfName.LastChar, PdfNumber 120) |> ignore
         type3.Put(PdfName.Widths, PdfArray([| 600 |])) |> ignore
-        let fonts = PdfDictionary(dict [ PdfName "H", helveticaDictionary document :> PdfObject; PdfName "T3", type3.MakeIndirect document :> PdfObject ])
+        let fonts = PdfDictionary(dict [ PdfName "H", helveticaDictionary document :> PdfObject; PdfName "T3", type3.MakeIndirect document ])
         PdfDictionary(dict [ PdfName.Font, fonts :> PdfObject ]))
 
     fix input.Path output.Path |> ignore
@@ -489,11 +489,11 @@ let ``a pattern inside a form draws with glyphs that are kept`` () =
         form.Put(PdfName.Type, PdfName.XObject) |> ignore
         form.Put(PdfName.Subtype, PdfName.Form) |> ignore
         form.Put(PdfName.BBox, PdfArray([| 0; 0; 300; 200 |])) |> ignore
-        form.Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Pattern, PdfDictionary(dict [ PdfName "P1", pattern.MakeIndirect document :> PdfObject ]) :> PdfObject ])) |> ignore
+        form.Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Pattern, PdfDictionary(dict [ PdfName "P1", pattern.MakeIndirect document ]) :> PdfObject ])) |> ignore
         PdfDictionary(
             dict
                 [ PdfName.Font, PdfDictionary(dict [ PdfName "H", helvetica :> PdfObject ]) :> PdfObject
-                  PdfName.XObject, PdfDictionary(dict [ PdfName "Fm", form.MakeIndirect document :> PdfObject ]) :> PdfObject ]
+                  PdfName.XObject, PdfDictionary(dict [ PdfName "Fm", form.MakeIndirect document ]) :> PdfObject ]
         ))
 
     fix input.Path output.Path |> ignore
