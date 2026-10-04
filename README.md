@@ -1056,7 +1056,7 @@ keeps this table in step with it):
 | `bookmarks` | Add bookmarks for the H1 and H2 headings |  |
 | `link-targets` | Point links and bookmarks within a PDF 2.0 document at the tags they go to |  |
 | `tabs` | Make the Tab key follow the reading order on pages with links or other annotations | safe |
-| `embed-fonts` | Embed fonts that aren't embedded, from open fonts made to the same measure |  |
+| `embed-fonts` | Embed fonts that aren't embedded, from open fonts made to the same measure, or this computer's own copy |  |
 | `font-glyphs` | Write down how embedded fonts map their character codes to glyphs (/CIDToGIDMap) | safe |
 | `font-dictionaries` | Make embedded fonts' dictionaries agree with their font programs and CMaps | safe |
 | `font-unicode` | Write which characters fonts draw (ToUnicode), from their own glyph names and Unicode tables | |
@@ -1143,11 +1143,19 @@ one a form's fields fill in with), as a TrueType font: its encoding is kept
 if it's WinAnsi or MacRoman, else written as WinAnsi with a `/Differences` of
 Glyph List names for the codes that differ; Symbol and ZapfDingbats are
 symbolic, with no `/Encoding` (their codes go to their own glyphs). The report
-names each one embedded; each left (another font, or one whose widths don't
-match: fix those where the PDF was made) is listed as not applied. The fonts (about
-7 MB) are fetched at build time, each pinned by its SHA-256
-(`UrwFontsVersion`, `LiberationFontsVersion` in `Directory.Build.props`), and
-shipped in the app's `fonts` folder.
+names each one embedded; each left (one whose widths don't match, or that
+nothing stands in for: fix those where the PDF was made) is listed as not
+applied. The fonts (about 7 MB) are fetched at build time, each pinned by its
+SHA-256 (`UrwFontsVersion`, `LiberationFontsVersion` in `Directory.Build.props`),
+and shipped in the app's `fonts` folder.
+
+Another font (Calibri, Garamond…) is embedded from the same font installed on
+the computer running the fix, as Acrobat's preflight does: found by its
+PostScript name (`Calibri-Bold`), its family and style as PDFs write them
+(`Calibri,Bold`) or its full name, from a TrueType font (`.ttf`, or one in a
+`.ttc` collection), with the same width check against the PDF's `/Widths`, and
+only if its licence (its OS/2 `fsType`) lets it be embedded: not restricted, nor
+bitmaps only, and whole where it says it can't be subset.
 
 Structural fixes run before the veraPDF metadata fixer so metadata is fixed
 against the already-cleaned copy in the same operation. veraPDF saves its

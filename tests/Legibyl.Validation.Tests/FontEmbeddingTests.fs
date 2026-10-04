@@ -14,6 +14,13 @@ open Legibyl.Validation.Tests.TestSupport
 
 let private sentence = "The garden opens at 8, Thursday."
 
+/// A folder deleted with what's in it when disposed.
+type private TempFolder() =
+    let path = Directory.CreateTempSubdirectory("legibyl-fonts-").FullName
+    member _.Path = path
+    interface System.IDisposable with
+        member _.Dispose() = try Directory.Delete(path, true) with _ -> ()
+
 /// A page with a line in each of fonts (standard 14 names; iText embeds none of them), with their
 /// /Widths or without, and then change done to each font's dictionary.
 let private createText (path: string) (fonts: string list) (widths: bool) (change: PdfDocument -> PdfDictionary -> unit) =
@@ -206,15 +213,17 @@ let ``a font whose widths no bundled font has is left as it is, and reported`` (
     result.OutputPath |> should equal null
 
 [<Fact>]
-let ``a font no bundled font stands in for is left as it is, and reported`` () =
+let ``a font no bundled font stands in for, and not installed, is left as it is, and reported`` () =
     use input = new TempPdf()
     use output = new TempPdf()
+    use noFonts = new TempFolder()
+    use _ = FontEmbedding.useInstalledFolders [ noFonts.Path ]
     createText input.Path [ StandardFonts.HELVETICA ] false (fun _ font -> font.Put(PdfName.BaseFont, PdfName "Calibri") |> ignore)
 
     let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
 
     result.OutputPath |> should equal null
-    result.NotApplied |> should contain "Calibri isn't embedded, and was left as it is (no font Legibyl brings stands in for it): export the PDF again with fonts embedded."
+    result.NotApplied |> should contain "Calibri isn't embedded, and was left as it is (it isn't installed on this computer, and no font Legibyl brings stands in for it): export the PDF again with fonts embedded."
     FixNames.nameOf PdfFixOptions.EmbedFonts |> should equal "embed-fonts"
     FixNames.safe.HasFlag PdfFixOptions.EmbedFonts |> should be False
 
@@ -596,3 +605,133 @@ let ``a code the page draws that its encoding gives no character is said to be t
     let result = VeraPdfValidator().Fix(drawn.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
 
     result.NotApplied |> should contain "Helvetica isn't embedded, and was left as it is (a code the pages draw has no character in its encoding): export the PDF again with fonts embedded."
+// ---- Fonts installed on this computer (here, a folder of them, with Lato in it) ----
+
+let private lato = corpusFile "fonts/Lato-Regular.ttf"
+
+/// Where a table is in a font file's directory entries (its entry's offset), by its tag.
+let private tableEntry (bytes: byte array) (tag: string) =
+    let tables = (int bytes[4] <<< 8) ||| int bytes[5]
+    [ for i in 0 .. tables - 1 -> 12 + 16 * i ] |> List.find (fun e -> System.Text.Encoding.ASCII.GetString(bytes, e, 4) = tag)
+
+let private u32 (bytes: byte array) (at: int) =
+    (int bytes[at] <<< 24) ||| (int bytes[at + 1] <<< 16) ||| (int bytes[at + 2] <<< 8) ||| int bytes[at + 3]
+
+/// Lato with its embedding permissions (OS/2 fsType) set to fsType.
+let private latoWith (fsType: int) =
+    let bytes = File.ReadAllBytes lato
+    let os2 = u32 bytes (tableEntry bytes "OS/2" + 8)
+    bytes[os2 + 8] <- byte (fsType >>> 8)
+    bytes[os2 + 9] <- byte fsType
+    bytes
+
+/// The page in Lato, not embedded, as Office writes a font it doesn't: TrueType, with its widths
+/// and a descriptor without a program. Its /BaseFont is name.
+let private createLatoText (path: string) (name: string) =
+    let program = iText.IO.Font.FontProgramFactory.CreateFont(lato, false)
+    let encoding = iText.IO.Font.FontEncoding.CreateFontEncoding "WinAnsiEncoding"
+    createText path [ StandardFonts.HELVETICA ] false (fun document font ->
+        font.Put(PdfName.BaseFont, PdfName name) |> ignore
+        font.Put(PdfName.Subtype, PdfName.TrueType) |> ignore
+        let width code = match program.GetGlyph(encoding.GetUnicode code) with null -> 0 | glyph -> glyph.GetWidth()
+        font.Put(PdfName.FirstChar, PdfNumber 32) |> ignore
+        font.Put(PdfName.LastChar, PdfNumber 255) |> ignore
+        font.Put(PdfName.Widths, PdfArray([| for code in 32..255 -> width code |])) |> ignore
+        let descriptor = PdfDictionary()
+        descriptor.Put(PdfName.Type, PdfName.FontDescriptor) |> ignore
+        descriptor.Put(PdfName.FontName, PdfName name) |> ignore
+        descriptor.Put(PdfName.Flags, PdfNumber 32) |> ignore
+        descriptor.Put(PdfName.FontBBox, PdfArray([| -100; -200; 1000; 900 |])) |> ignore
+        descriptor.Put(PdfName.ItalicAngle, PdfNumber 0) |> ignore
+        descriptor.Put(PdfName.Ascent, PdfNumber 800) |> ignore
+        descriptor.Put(PdfName.Descent, PdfNumber -200) |> ignore
+        descriptor.Put(PdfName.CapHeight, PdfNumber 700) |> ignore
+        descriptor.Put(PdfName.StemV, PdfNumber 80) |> ignore
+        font.Put(PdfName.FontDescriptor, descriptor.MakeIndirect document) |> ignore)
+
+[<Fact>]
+let ``an installed font is found by its PostScript name, or its family and style`` () =
+    use folder = new TempFolder()
+    File.Copy(lato, Path.Combine(folder.Path, "Lato-Regular.ttf"))
+    use _ = FontEmbedding.useInstalledFolders [ folder.Path ]
+    [ "Lato-Regular"; "Lato"; "Lato,Regular"; "ABCDEF+Lato-Regular"; "Lato Regular"; "Lato,Bold"; "Lato-Bold" ]
+    |> List.map (FontEmbedding.findInstalled >> Option.map _.FullName)
+    |> should equal [ Some "Lato Regular"; Some "Lato Regular"; Some "Lato Regular"; Some "Lato Regular"; Some "Lato Regular"; None; None ]
+
+[<Fact>]
+let ``a font installed on this computer is embedded from it, where its licence lets it, and it passes`` () =
+    use folder = new TempFolder()
+    File.Copy(lato, Path.Combine(folder.Path, "Lato-Regular.ttf"))
+    use _ = FontEmbedding.useInstalledFolders [ folder.Path ]
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createLatoText input.Path "Lato,Regular"
+
+    let report = fix input.Path output.Path
+
+    failed input.Path |> should contain "7.21.4.1-1"
+    failed output.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
+    fonts output.Path |> List.map (fun (name, embedded) -> name.Substring 7, embedded) |> should equal [ "Lato-Regular", true ]
+    report |> should contain "Embedded Lato Regular, installed on this computer, in place of Lato,Regular, which wasn't embedded: the same font, its glyphs each as wide."
+
+[<Fact>]
+let ``an installed font in a collection is embedded from its own tables`` () =
+    use folder = new TempFolder()
+    // A collection of one: Lato, its tables moved along by the collection's header.
+    let font = File.ReadAllBytes lato
+    let tables = (int font[4] <<< 8) ||| int font[5]
+    for i in 0 .. tables - 1 do
+        let at = 12 + 16 * i + 8
+        let moved = u32 font at + 16
+        font[at] <- byte (moved >>> 24)
+        font[at + 1] <- byte (moved >>> 16)
+        font[at + 2] <- byte (moved >>> 8)
+        font[at + 3] <- byte moved
+    let header = Array.append "ttcf"B [| 0uy; 1uy; 0uy; 0uy; 0uy; 0uy; 0uy; 1uy; 0uy; 0uy; 0uy; 16uy |]
+    File.WriteAllBytes(Path.Combine(folder.Path, "Lato.ttc"), Array.append header font)
+    use _ = FontEmbedding.useInstalledFolders [ folder.Path ]
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createLatoText input.Path "Lato-Regular"
+
+    fix input.Path output.Path |> ignore
+
+    failed output.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
+    fonts output.Path |> List.map (fun (name, embedded) -> name.Substring 7, embedded) |> should equal [ "Lato-Regular", true ]
+
+[<Fact>]
+let ``an installed font whose licence doesn't let it be embedded is left, and one that can't be subset is embedded whole`` () =
+    use restricted = new TempFolder()
+    use whole = new TempFolder()
+    File.WriteAllBytes(Path.Combine(restricted.Path, "Lato-Regular.ttf"), latoWith 0x0002)
+    File.WriteAllBytes(Path.Combine(whole.Path, "Lato-Regular.ttf"), latoWith 0x0100)
+    use input = new TempPdf()
+    use left = new TempPdf()
+    use output = new TempPdf()
+    createLatoText input.Path "Lato-Regular"
+
+    let result =
+        use _ = FontEmbedding.useInstalledFolders [ restricted.Path ]
+        VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, left.Path, PdfFixOptions.EmbedFonts)
+    do
+        use _ = FontEmbedding.useInstalledFolders [ whole.Path ]
+        fix input.Path output.Path |> ignore
+
+    result.OutputPath |> should equal null
+    result.NotApplied |> should contain "Lato-Regular isn't embedded, and was left as it is (its licence doesn't let it be embedded): export the PDF again with fonts embedded."
+    // No subset tag: the whole font.
+    fonts output.Path |> should equal [ "Lato-Regular", true ]
+
+[<Fact>]
+let ``an installed font whose widths aren't the PDF's is left`` () =
+    use folder = new TempFolder()
+    File.Copy(lato, Path.Combine(folder.Path, "Lato-Regular.ttf"))
+    use _ = FontEmbedding.useInstalledFolders [ folder.Path ]
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // Helvetica's widths, under Lato's name.
+    createText input.Path [ StandardFonts.HELVETICA ] true (fun _ font -> font.Put(PdfName.BaseFont, PdfName "Lato-Regular") |> ignore)
+
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
+
+    result.NotApplied |> should contain "Lato-Regular isn't embedded, and was left as it is (the copy installed on this computer doesn't have its glyphs at its widths): export the PDF again with fonts embedded."

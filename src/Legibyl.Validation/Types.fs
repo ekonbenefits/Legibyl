@@ -81,7 +81,8 @@ type PdfFixOptions =
     /// Embeds fonts the pages draw with but don't embed, from the open fonts Legibyl brings (URW's
     /// base 35 and Liberation), where one has every glyph the pages draw, each as wide as the PDF
     /// says (see FontEmbedding): Helvetica, Times, Courier, Symbol and ZapfDingbats, and Arial,
-    /// Times New Roman and Courier New. Others are left, and reported.
+    /// Times New Roman and Courier New. Another font is embedded from the same font installed on
+    /// this computer, if its licence lets it be. Others are left, and reported.
     | EmbedFonts = 8388608
     | All = 16777215
 
