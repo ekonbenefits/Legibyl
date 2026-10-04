@@ -753,9 +753,10 @@ type VeraPdfValidator() =
                     // Edits of elements (not regions, which tagging takes) that won't change anything, and why.
                     if options.HasFlag PdfFixOptions.ApplyEdits && not (options.HasFlag PdfFixOptions.TagFromLayout) then
                         notApplied.AddRange(ElementEdits.unapplied currentInput (List.ofSeq this.Edits))
-                    let structuralFixes, nothingToDo =
+                    let structuralFixes, nothingToDo, notes =
                         StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) (Option.ofObj this.Title)
                     unneeded <- nothingToDo
+                    notApplied.AddRange notes
                     match structuralFixes with
                     | [] ->
                         tryDeleteTemporary tempOutput

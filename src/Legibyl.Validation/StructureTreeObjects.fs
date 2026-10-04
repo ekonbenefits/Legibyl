@@ -14,7 +14,10 @@ type Context =
     { PageNumberByObject: IReadOnlyDictionary<int, int>
       MarkedContent: MarkedContentTextIndex.Index
       /// The StructTreeRoot's /RoleMap: custom tag -> the tag it stands for.
-      RoleMap: IReadOnlyDictionary<PdfName, PdfName> }
+      RoleMap: IReadOnlyDictionary<PdfName, PdfName>
+      /// What fixes found and couldn't change (a font left as it is), said to the user as not
+      /// applied: a note doesn't make a change.
+      Notes: List<string> }
 
 /// Maps each page's indirect object number to its 1-based page number.
 let pageNumberIndex (document: PdfDocument) : IReadOnlyDictionary<int, int> =
@@ -42,7 +45,8 @@ let private roleMap (document: PdfDocument) : IReadOnlyDictionary<PdfName, PdfNa
 let createContext (document: PdfDocument) (pdfPath: string) =
     { PageNumberByObject = pageNumberIndex document
       MarkedContent = MarkedContentTextIndex.build pdfPath
-      RoleMap = roleMap document }
+      RoleMap = roleMap document
+      Notes = List<string>() }
 
 /// Unions geometries that are all on one page; None if there are none or they span pages.
 let unionGeometry (geometries: StructureGeometry seq) =

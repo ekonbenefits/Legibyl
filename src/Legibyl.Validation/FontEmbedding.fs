@@ -196,8 +196,8 @@ let private subsetTag (name: string) (glyphs: int seq) =
 
 /// Embeds a bundled font in place of font, which isn't embedded, if one fits: codes are the codes
 /// the pages draw with it, and whole says to embed every glyph (the font fills in form fields, or
-/// some page couldn't be read), not only theirs. None if font is embedded, or isn't a simple font
-/// (Type 1 or TrueType) or a composite one.
+/// some page couldn't be read), not only theirs, and to check every code the font gives a width.
+/// None if font is embedded, or isn't a simple font (Type 1 or TrueType) or a composite one.
 let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole: bool) : (string * Outcome) option =
     let subtype = font.GetAsName PdfName.Subtype
     let descriptor = font.GetAsDictionary PdfName.FontDescriptor
@@ -247,8 +247,19 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
                     match glyph with
                     | null -> None
                     | glyph -> Some(float (glyph.GetWidth()))
+        // The codes to check: those the pages draw; and for the whole font (when some codes may
+        // not be known, a page's or a form field's), every code the font gives a width.
+        let checkedCodes =
+            if whole then
+                codes
+                @ [ for code in 0..255 do
+                        if (symbolic || characters.ContainsKey code) && (match expected code with Some width -> width > 0.0 | None -> false) then
+                            code ]
+                |> List.distinct
+            else
+                codes
         let fits (candidate: Candidate) =
-            codes
+            checkedCodes
             |> List.forall (fun code ->
                 let glyph = candidate.Glyph code
                 glyph > 0
