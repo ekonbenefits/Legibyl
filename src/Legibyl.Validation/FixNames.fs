@@ -8,6 +8,7 @@ let order =
     [ PdfFixOptions.TagFromLayout
       PdfFixOptions.QrLinks
       PdfFixOptions.ParentTree
+      PdfFixOptions.RoleMap
       PdfFixOptions.Language
       PdfFixOptions.HeadingsFromToc
       PdfFixOptions.EmptyParagraphs

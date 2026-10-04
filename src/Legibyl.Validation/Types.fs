@@ -84,7 +84,11 @@ type PdfFixOptions =
     /// Times New Roman and Courier New. Another font is embedded from the same font installed on
     /// this computer, if its licence lets it be. Others are left, and reported.
     | EmbedFonts = 8388608
-    | All = 16777215
+    /// Maps the PDF's own tag names to standard tags in its role map, by what they say (Heading 1
+    /// is H1, Body Text P, Image Figure; see RoleMaps), and repairs a broken map: a standard tag
+    /// mapped, or a circle. A name that doesn't say is left, and reported.
+    | RoleMap = 16777216
+    | All = 33554431
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.
