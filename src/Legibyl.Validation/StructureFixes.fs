@@ -679,12 +679,13 @@ let private usedCodes (document: PdfDocument) =
                 | _ -> ()
             member _.GetSupportedEvents() =
                 HashSet<iText.Kernel.Pdf.Canvas.Parser.EventType>([ iText.Kernel.Pdf.Canvas.Parser.EventType.RENDER_TEXT ]) }
+    let unread = ResizeArray<int>()
     for number in 1 .. document.GetNumberOfPages() do
         try
             iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent(document.GetPage number)
         with _ ->
-            ()
-    used
+            unread.Add number
+    used, List.ofSeq unread
 
 /// Fonts made to say which characters their codes draw (a ToUnicode map), so a screen reader can
 /// read their text (7.21.7; 8.4.5.8), where some code the pages use says none: a composite
@@ -707,7 +708,8 @@ let private writeFontUnicode (document: PdfDocument) _ =
             | null -> None
             | program -> Some(program.GetBytes())
         | Null -> None
-    for KeyValue(font, codes) in usedCodes document do
+    let used, unread = usedCodes document
+    for KeyValue(font, codes) in used do
         let existing =
             match font.GetAsStream PdfName.ToUnicode with
             | null -> Map.empty
@@ -715,7 +717,7 @@ let private writeFontUnicode (document: PdfDocument) _ =
         let subtype = font.GetAsName PdfName.Subtype
         // What each code draws, as the font says it, and whether a reader already knows it
         // without a map (a simple font's standard names).
-        let says, known, bytes =
+        let worked =
             if PdfName.Type0.Equals subtype then
                 match font.GetAsName PdfName.Encoding, font.GetAsArray PdfName.DescendantFonts with
                 | NonNull encoding, NonNull descendants when (encoding.GetValue() = "Identity-H" || encoding.GetValue() = "Identity-V") && descendants.Size() > 0 ->
@@ -732,8 +734,9 @@ let private writeFontUnicode (document: PdfDocument) _ =
                             trueTypeProgram descriptor |> Option.bind ToUnicodeMaps.trueTypeGlyphText
                         else
                             None
-                    (fun cid -> glyphText |> Option.bind (fun text -> text (glyphOf cid))), (fun _ -> None), 2
-                | _ -> (fun _ -> None), (fun _ -> Some ""), 2 // another CMap: left as it is
+                    Some((fun cid -> glyphText |> Option.bind (fun text -> text (glyphOf cid))), (fun _ -> None), 2)
+                // Another CMap (CJK; its codes aren't two bytes each): left as it is, map and all.
+                | _ -> None
             else
                 let descriptor = font.GetAsDictionary PdfName.FontDescriptor
                 let baseEncoding, differences =
@@ -755,9 +758,13 @@ let private writeFontUnicode (document: PdfDocument) _ =
                         (encoding.GetAsName PdfName.BaseEncoding |> Option.ofObj |> Option.map _.GetValue()),
                         (names |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
                     | _ -> None, Map.empty
+                // Codes /Differences doesn't name use the base encoding: the one named, else, for a
+                // symbolic font, the font's built-in one (not known here), or Standard.
                 let standard =
-                    if symbolic descriptor && differences.IsEmpty then None
-                    else Some(FontEncoding.CreateFontEncoding(defaultArg baseEncoding "StandardEncoding"))
+                    match baseEncoding with
+                    | Some name -> Some(FontEncoding.CreateFontEncoding name)
+                    | None when symbolic descriptor -> None
+                    | None -> Some(FontEncoding.CreateFontEncoding "StandardEncoding")
                 // A name's text, if the Glyph List has it exactly (as readers take it).
                 let exact (name: string) =
                     let unicode = AdobeGlyphList.NameToUnicode name
@@ -772,6 +779,13 @@ let private writeFontUnicode (document: PdfDocument) _ =
                         None
                 // Worked out once for the font, if a code needs it.
                 let glyphText = lazy (program |> Option.bind (fun (_, bytes) -> ToUnicodeMaps.trueTypeGlyphText bytes))
+                let glyphNamed = lazy (program |> Option.bind (fun (_, bytes) -> ToUnicodeMaps.trueTypeGlyphNamed bytes))
+                // A glyph /Differences names, by that name in the program (never by the code: the
+                // name chose another glyph).
+                let fromProgramName (name: string) =
+                    match glyphNamed.Value, glyphText.Value with
+                    | Some named, Some text -> named name |> Option.bind text
+                    | _ -> None
                 let fromProgram (code: int) =
                     match program with
                     | Some(parsed, _) ->
@@ -794,7 +808,7 @@ let private writeFontUnicode (document: PdfDocument) _ =
                     | None -> None
                 let says (code: int) =
                     match Map.tryFind code differences with
-                    | Some name -> ToUnicodeMaps.glyphNameText name |> Option.orElse (fromProgram code)
+                    | Some name -> ToUnicodeMaps.glyphNameText name |> Option.orElse (fromProgramName name)
                     | None ->
                         match standard with
                         | Some encoding when encoding.GetUnicode code > 0 -> Some(Char.ConvertFromUtf32(encoding.GetUnicode code))
@@ -806,7 +820,10 @@ let private writeFontUnicode (document: PdfDocument) _ =
                         match standard with
                         | Some encoding when encoding.GetUnicode code > 0 -> Some(Char.ConvertFromUtf32(encoding.GetUnicode code))
                         | _ -> None
-                says, known, 1
+                Some(says, known, 1)
+        match worked with
+        | None -> ()
+        | Some(says, known, bytes) ->
         let readable (code: int) =
             match Map.tryFind code existing with
             | Some text -> ToUnicodeMaps.isReadable text
@@ -835,7 +852,10 @@ let private writeFontUnicode (document: PdfDocument) _ =
                 fonts <- fonts + 1
                 added <- added + newly
             missing <- missing + still
-    [ if fonts > 0 then
+    [ if not unread.IsEmpty then
+          let pages = String.Join(", ", unread)
+          $"The text of page(s) {pages} couldn't be read, so their fonts weren't checked for what they draw."
+      if fonts > 0 then
           $"Wrote which characters {fonts} font(s) draw (ToUnicode), from their own glyph names and Unicode tables, so a screen reader can read {added} more character code(s): to check."
       if missing > 0 then
           $"{missing} character code(s) the pages use say nothing a reader can map to text: they need fixing where the PDF was made." ]
