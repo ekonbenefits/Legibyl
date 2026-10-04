@@ -416,3 +416,144 @@ let ``a form field's appearance without resources of its own uses the form's, an
     fonts output.Path |> List.map (fun (name, embedded) -> (if name.Contains "+" then "subset " + name.Substring 7 else name), embedded)
     |> List.sort
     |> should equal [ "NimbusSans-Regular", true; "subset NimbusRoman-Regular", true ]
+
+/// A Helvetica font dictionary, not embedded.
+let private helveticaDictionary (document: PdfDocument) =
+    let font = PdfDictionary()
+    font.Put(PdfName.Type, PdfName.Font) |> ignore
+    font.Put(PdfName.Subtype, PdfName.Type1) |> ignore
+    font.Put(PdfName.BaseFont, PdfName "Helvetica") |> ignore
+    font.Put(PdfName.Encoding, PdfName.WinAnsiEncoding) |> ignore
+    font.MakeIndirect document :?> PdfDictionary
+
+/// A one-page PDF whose page draws content, with resources made by resources.
+let private createRaw (path: string) (content: string) (resources: PdfDocument -> PdfDictionary) =
+    use document = new PdfDocument(new PdfWriter(path))
+    let page = document.AddNewPage PageSize.LETTER
+    page.GetPdfObject().Put(PdfName.Resources, resources document) |> ignore
+    page.GetPdfObject().Put(PdfName.Contents, PdfStream(System.Text.Encoding.ASCII.GetBytes content).MakeIndirect document) |> ignore
+
+/// How many dark pixels the page renders with.
+let private ink (path: string) =
+    use renderer = new PdfRegionRenderer()
+    let offPage = { PageNumber = 1; Left = -20.0; Bottom = -20.0; Right = -10.0; Top = -10.0 }
+    use bitmap = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(path, offPage).PngBytes)
+    bitmap.Pixels |> Array.filter (fun c -> int c.Red + int c.Green + int c.Blue < 384) |> Array.length
+
+let private noFontFailures (path: string) =
+    failed path |> Set.filter (fun rule -> rule.StartsWith "7.21" && not (rule.StartsWith "7.21.7")) |> should be Empty
+
+[<Fact>]
+let ``a Type 3 font without resources of its own draws with the page's, whose glyphs are kept`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createRaw input.Path "BT /H 18 Tf 72 700 Td (ab) Tj ET BT /T3 18 Tf 72 600 Td (xxxx) Tj ET" (fun document ->
+        let procedure = PdfStream(System.Text.Encoding.ASCII.GetBytes "600 0 d0 BT /H 700 Tf 0 0 Td (X) Tj ET")
+        let type3 = PdfDictionary()
+        type3.Put(PdfName.Type, PdfName.Font) |> ignore
+        type3.Put(PdfName.Subtype, PdfName.Type3) |> ignore
+        type3.Put(PdfName.FontBBox, PdfArray([| 0; 0; 1000; 1000 |])) |> ignore
+        type3.Put(PdfName.FontMatrix, PdfArray([| 0.001; 0.0; 0.0; 0.001; 0.0; 0.0 |])) |> ignore
+        type3.Put(PdfName.CharProcs, PdfDictionary(dict [ PdfName "x", procedure.MakeIndirect document :> PdfObject ])) |> ignore
+        type3.Put(PdfName.Encoding, PdfDictionary(dict [ PdfName.Differences, PdfArray([| PdfNumber 120 :> PdfObject; PdfName "x" |]) :> PdfObject ])) |> ignore
+        type3.Put(PdfName.FirstChar, PdfNumber 120) |> ignore
+        type3.Put(PdfName.LastChar, PdfNumber 120) |> ignore
+        type3.Put(PdfName.Widths, PdfArray([| 600 |])) |> ignore
+        let fonts = PdfDictionary(dict [ PdfName "H", helveticaDictionary document :> PdfObject; PdfName "T3", type3.MakeIndirect document :> PdfObject ])
+        PdfDictionary(dict [ PdfName.Font, fonts :> PdfObject ]))
+
+    fix input.Path output.Path |> ignore
+
+    failed output.Path |> should not' (contain "7.21.4.1-1")
+    // X, which only the Type 3 glyphs draw, is in the subset.
+    noFontFailures output.Path
+    let before, after = ink input.Path, ink output.Path
+    float after |> should be (greaterThan (0.9 * float before))
+
+[<Fact>]
+let ``a pattern inside a form draws with glyphs that are kept`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createRaw input.Path "q 1 0 0 1 72 300 cm /Fm Do Q BT /H 18 Tf 72 700 Td (ab) Tj ET" (fun document ->
+        let helvetica = helveticaDictionary document
+        let pattern = PdfStream(System.Text.Encoding.ASCII.GetBytes "BT /H 20 Tf 10 10 Td (XYZW) Tj ET")
+        pattern.Put(PdfName.Type, PdfName.Pattern) |> ignore
+        pattern.Put(PdfName.PatternType, PdfNumber 1) |> ignore
+        pattern.Put(PdfName.PaintType, PdfNumber 1) |> ignore
+        pattern.Put(PdfName.TilingType, PdfNumber 1) |> ignore
+        pattern.Put(PdfName.BBox, PdfArray([| 0; 0; 100; 40 |])) |> ignore
+        pattern.Put(PdfName.XStep, PdfNumber 100) |> ignore
+        pattern.Put(PdfName.YStep, PdfNumber 40) |> ignore
+        pattern.Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Font, PdfDictionary(dict [ PdfName "H", helvetica :> PdfObject ]) :> PdfObject ])) |> ignore
+        let form = PdfStream(System.Text.Encoding.ASCII.GetBytes "/Pattern cs /P1 scn 0 0 300 200 re f")
+        form.Put(PdfName.Type, PdfName.XObject) |> ignore
+        form.Put(PdfName.Subtype, PdfName.Form) |> ignore
+        form.Put(PdfName.BBox, PdfArray([| 0; 0; 300; 200 |])) |> ignore
+        form.Put(PdfName.Resources, PdfDictionary(dict [ PdfName.Pattern, PdfDictionary(dict [ PdfName "P1", pattern.MakeIndirect document :> PdfObject ]) :> PdfObject ])) |> ignore
+        PdfDictionary(
+            dict
+                [ PdfName.Font, PdfDictionary(dict [ PdfName "H", helvetica :> PdfObject ]) :> PdfObject
+                  PdfName.XObject, PdfDictionary(dict [ PdfName "Fm", form.MakeIndirect document :> PdfObject ]) :> PdfObject ]
+        ))
+
+    fix input.Path output.Path |> ignore
+
+    failed output.Path |> should not' (contain "7.21.4.1-1")
+    // (veraPDF doesn't look inside patterns: the page drawn shows the glyphs are there.)
+    let before, after = ink input.Path, ink output.Path
+    float after |> should be (greaterThan (0.9 * float before))
+
+[<Fact>]
+let ``a kept encoding's names have to be the Glyph List's: one that isn't is rewritten, or the font left`` () =
+    // WinAnsi with a uniXXXX name: at an unused code, the encoding is rewritten without it; at a
+    // code the page draws, the font is left (veraPDF takes no uniXXXX name in a TrueType font's).
+    let create (path: string) (code: int) (text: string) =
+        createText path [ StandardFonts.HELVETICA ] true (fun _ font ->
+            let encoding = PdfDictionary()
+            encoding.Put(PdfName.BaseEncoding, PdfName.WinAnsiEncoding) |> ignore
+            encoding.Put(PdfName.Differences, PdfArray([| PdfNumber code :> PdfObject; PdfName "uni021A" |])) |> ignore
+            font.Put(PdfName.Encoding, encoding) |> ignore)
+        if text <> sentence then
+            let copy = path + ".copy.pdf"
+            do
+                use document = new PdfDocument(new PdfReader(path), new PdfWriter(copy))
+                let content = document.GetPage(1).GetFirstContentStream()
+                let source = System.Text.Encoding.Latin1.GetString(content.GetBytes())
+                content.SetData(System.Text.Encoding.Latin1.GetBytes(source.Replace($"({sentence})", $"({text})")))
+            File.Move(copy, path, true)
+    use unused = new TempPdf()
+    use drawn = new TempPdf()
+    use fixedUnused = new TempPdf()
+    use fixedDrawn = new TempPdf()
+    create unused.Path 200 sentence
+    create drawn.Path 65 "A"
+
+    fix unused.Path fixedUnused.Path |> ignore
+    let result = VeraPdfValidator().Fix(drawn.Path, PdfProfile.PdfUa1, fixedDrawn.Path, PdfFixOptions.EmbedFonts)
+
+    failed fixedUnused.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
+    result.OutputPath |> should equal null
+    result.NotApplied |> should contain "Helvetica isn't embedded, and was left as it is (its encoding can't be kept): export the PDF again with fonts embedded."
+
+[<Fact>]
+let ``Acrobat's form font encoding, with .notdef in it, is embedded`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // As Acrobat's default /Helv has it: Standard, with a /Differences that names .notdef.
+    createText input.Path [ StandardFonts.HELVETICA ] false (fun _ font ->
+        let differences =
+            PdfArray(
+                [| PdfNumber 24 :> PdfObject; PdfName "breve"; PdfName "caron"; PdfName "circumflex"
+                   PdfNumber 39 :> PdfObject; PdfName "quotesingle"
+                   PdfNumber 96 :> PdfObject; PdfName "grave"
+                   PdfNumber 173 :> PdfObject; PdfName ".notdef" |]
+            )
+        let encoding = PdfDictionary()
+        encoding.Put(PdfName.Type, PdfName.Encoding) |> ignore
+        encoding.Put(PdfName.Differences, differences) |> ignore
+        font.Put(PdfName.Encoding, encoding) |> ignore)
+
+    let report = fix input.Path output.Path
+
+    report |> should contain "Embedded Nimbus Sans in place of Helvetica, which wasn't embedded: an open font with its glyphs, each as wide."
+    failed output.Path |> Set.filter (fun rule -> rule.StartsWith "7.21") |> should be Empty
