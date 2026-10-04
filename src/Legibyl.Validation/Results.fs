@@ -15,6 +15,7 @@ module PdfFixDescriptions =
           PdfFixOptions.Metadata, "Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP)"
           PdfFixOptions.FontGlyphs, "Write down how embedded fonts map their character codes to glyphs (/CIDToGIDMap)"
           PdfFixOptions.FontDictionaries, "Make embedded fonts' dictionaries agree with their font programs and CMaps"
+          PdfFixOptions.FontUnicode, "Write which characters fonts draw (ToUnicode), from their own glyph names and Unicode tables"
           PdfFixOptions.Tabs, "Make the Tab key follow the reading order on pages with links or other annotations"
           PdfFixOptions.EmptyParagraphs, "Remove empty paragraph tags"
           PdfFixOptions.EmptyTocEntries, "Remove empty table-of-contents entries"

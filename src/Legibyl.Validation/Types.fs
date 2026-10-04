@@ -71,7 +71,11 @@ type PdfFixOptions =
     /// incomplete, sets a composite font's CIDSystemInfo to its CMap's, and an embedded CMap's
     /// /WMode to its program's.
     | FontDictionaries = 1048576
-    | All = 2097151
+    /// Writes which characters fonts draw (a ToUnicode map), where codes the pages use say none
+    /// a reader can map, from the fonts' own glyph names and Unicode tables (see ToUnicodeMaps),
+    /// so a screen reader can read their text. Codes nothing says are left out.
+    | FontUnicode = 2097152
+    | All = 4194303
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.
