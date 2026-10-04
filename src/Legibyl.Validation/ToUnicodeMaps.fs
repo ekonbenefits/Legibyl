@@ -55,8 +55,12 @@ let glyphNameText (name: string) : string option =
         else
             None
 
-/// What an embedded TrueType program says each glyph is: the code point its Unicode cmap maps to
-/// it (the lowest, where several do), else its post table name's text. None if it can't be read.
+/// Whether a code point is in one of Unicode's private use areas, which mean nothing to a reader.
+let private privateUse (code: int) = (code >= 0xE000 && code <= 0xF8FF) || code >= 0xF0000
+
+/// What an embedded TrueType program says each glyph is: the code point its Unicode cmaps map to it
+/// (one outside the private use areas over one in them, then the lowest, where several do), else
+/// its post table name's text. None if it can't be read.
 let trueTypeGlyphText (program: byte array) : (int -> string option) option =
     try
         let font = Parser.TrueTypeFontParser.Parse(TrueTypeDataBytes program)
@@ -71,12 +75,21 @@ let trueTypeGlyphText (program: byte array) : (int -> string option) option =
                       if (table.PlatformId = Tables.CMapSubTables.TrueTypeCMapPlatform.Windows && (table.EncodingId = 1us || table.EncodingId = 10us))
                          || table.PlatformId = Tables.CMapSubTables.TrueTypeCMapPlatform.Unicode then
                           table ]
-        let byGlyph = Dictionary<int, string>()
+        let best = Dictionary<int, int>()
+        let consider (glyph: int) (code: int) =
+            if glyph > 0 then
+                match best.TryGetValue glyph with
+                | true, other when (privateUse other, other) <= (privateUse code, code) -> ()
+                | _ -> best[glyph] <- code
         for table in unicodeTables do
-            for code in Seq.append (seq { 0x20 .. 0xD7FF }) (seq { 0xE000 .. 0x1FFFF }) do
-                let glyph = table.CharacterCodeToGlyphIndex code
-                if glyph > 0 && not (byGlyph.ContainsKey glyph) then
-                    byGlyph[glyph] <- Char.ConvertFromUtf32 code
+            // The Basic Multilingual Plane (but surrogates) in every Unicode table; the planes above
+            // it only in the ones that can map them (Windows full repertoire, Unicode 2.0 full).
+            let full =
+                (table.PlatformId = Tables.CMapSubTables.TrueTypeCMapPlatform.Windows && table.EncodingId = 10us)
+                || (table.PlatformId = Tables.CMapSubTables.TrueTypeCMapPlatform.Unicode && (table.EncodingId = 4us || table.EncodingId = 6us))
+            for code in Seq.append (seq { 0x01 .. 0xD7FF }) (seq { 0xE000 .. (if full then 0x10FFFF else 0xFFFF) }) do
+                consider (table.CharacterCodeToGlyphIndex code) code
+        let byGlyph = best |> Seq.map (fun kv -> kv.Key, Char.ConvertFromUtf32 kv.Value) |> dict
         let names =
             match Option.ofObj (box font.TableRegister.PostScriptTable) with
             | None -> [||]
@@ -89,6 +102,22 @@ let trueTypeGlyphText (program: byte array) : (int -> string option) option =
             | true, text -> Some text
             | _ when glyph > 0 && glyph < names.Length -> glyphNameText names[glyph]
             | _ -> None)
+    with _ ->
+        None
+
+/// The glyph an embedded TrueType program's post table names name, if it does.
+let trueTypeGlyphNamed (program: byte array) : (string -> int option) option =
+    try
+        let font = Parser.TrueTypeFontParser.Parse(TrueTypeDataBytes program)
+        match Option.ofObj (box font.TableRegister.PostScriptTable) with
+        | Some post ->
+            match Option.ofObj (box (post :?> Tables.PostScriptTable).GlyphNames) with
+            | Some names ->
+                let index = Dictionary<string, int>()
+                (names :?> IReadOnlyList<string>) |> Seq.iteri (fun glyph name -> if not (String.IsNullOrEmpty name) && not (index.ContainsKey name) then index[name] <- glyph)
+                Some(fun name -> match index.TryGetValue name with | true, glyph -> Some glyph | _ -> None)
+            | None -> None
+        | None -> None
     with _ ->
         None
 
@@ -110,11 +139,15 @@ let parse (program: string) : Map<int, string> =
                 // Consecutive codes, the destination's last byte counting up.
                 let start = Convert.FromHexString(if m.Groups[4].Value.Length % 2 = 1 then m.Groups[4].Value + "0" else m.Groups[4].Value)
                 for code in first .. min last (first + 0xFFFF) do
+                    // The destination plus the code's offset, as a big-endian number of its length.
                     let bytes = Array.copy start
-                    if bytes.Length > 0 then
-                        let added = int bytes[bytes.Length - 1] + (code - first)
-                        bytes[bytes.Length - 1] <- byte (added &&& 0xFF)
-                        if bytes.Length > 1 then bytes[bytes.Length - 2] <- byte ((int bytes[bytes.Length - 2] + (added >>> 8)) &&& 0xFF)
+                    let mutable carry = code - first
+                    let mutable i = bytes.Length - 1
+                    while carry > 0 && i >= 0 do
+                        let sum = int bytes[i] + (carry &&& 0xFF)
+                        bytes[i] <- byte (sum &&& 0xFF)
+                        carry <- (carry >>> 8) + (sum >>> 8)
+                        i <- i - 1
                     entries[code] <- Encoding.BigEndianUnicode.GetString bytes
             else
                 let values = [ for v in Regex.Matches(m.Groups[5].Value, @"<([0-9A-Fa-f]*)>") -> hexText v.Groups[1].Value ]

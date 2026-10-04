@@ -29,6 +29,8 @@ let ``a ToUnicode map's bfchar and bfrange entries are read, and written back`` 
     let entries = ToUnicodeMaps.parse program
     entries |> Map.toList |> should equal [ 3, " "; 0x10, "A"; 0x11, "B"; 0x12, "C"; 0x20, "a"; 0x21, "b"; 0x24, "fi" ]
     ToUnicodeMaps.parse (ToUnicodeMaps.write 2 entries) |> should equal entries
+    // A range's destination counts up as one big-endian number, carrying past its last two bytes.
+    ToUnicodeMaps.parse "1 beginbfrange <0010> <0011> <0041FFFF> endbfrange" |> Map.find 0x11 |> should equal "B\u0000"
 
 /// The sentence in Lato as a composite (Identity-H) font, embedded whole (subset false: with its
 /// Unicode cmap) or as iText subsets it (without one).
@@ -143,3 +145,26 @@ let ``a font that says what it draws already is left alone`` () =
     report |> List.exists (fun line -> line.Contains "ToUnicode" || line.Contains "character code") |> should be False
     FixNames.nameOf PdfFixOptions.FontUnicode |> should equal "font-unicode"
     FixNames.safe.HasFlag PdfFixOptions.FontUnicode |> should be False
+
+[<Fact>]
+let ``a composite font with another CMap is left as it is, map and all`` () =
+    use plain = new TempPdf()
+    use broken = new TempPdf()
+    use fixedPdf = new TempPdf()
+    createText plain.Path true
+    let mutable before = ""
+    changeFont plain.Path broken.Path (fun document font ->
+        // A CJK CMap (its codes needn't be two bytes each), and a map with a bad value.
+        font.Put(PdfName.Encoding, PdfName "UniGB-UCS2-H") |> ignore
+        let program = ToUnicodeMaps.parse (Text.Encoding.Latin1.GetString(font.GetAsStream(PdfName.ToUnicode).GetBytes())) |> Map.map (fun _ _ -> "\u0000")
+        before <- ToUnicodeMaps.write 2 program
+        font.Put(PdfName.ToUnicode, PdfStream(Text.Encoding.ASCII.GetBytes before).MakeIndirect document) |> ignore)
+
+    let report = fix broken.Path fixedPdf.Path
+
+    report |> List.exists (fun line -> line.Contains "ToUnicode" || line.Contains "character code") |> should be False
+    use document = new PdfDocument(new PdfReader(fixedPdf.Path))
+    let font =
+        seq { for n in 1 .. document.GetNumberOfPdfObjects() - 1 -> document.GetPdfObject n }
+        |> Seq.pick (function :? PdfDictionary as d when PdfName.Type0.Equals(d.GetAsName PdfName.Subtype) -> Some d | _ -> None)
+    Text.Encoding.ASCII.GetString(font.GetAsStream(PdfName.ToUnicode).GetBytes()) |> should equal before
