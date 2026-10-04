@@ -798,10 +798,15 @@ let private repairFontDictionaries (document: PdfDocument) _ =
 /// forms they draw, the tiling patterns they paint, the glyphs of their Type 3 fonts, and their
 /// annotations' appearances), each code as many bytes as the font's codes are. And the fonts
 /// that draw something visible (in a text rendering mode other than 3, invisible text, which
-/// PDF/UA doesn't need embedded), and the pages that couldn't be read.
+/// PDF/UA doesn't need embedded); the pages that couldn't be read; and whether some other
+/// content couldn't be (a pattern, an appearance, a Type 3 glyph), so the codes may be short.
 let private usedCodes (document: PdfDocument) =
     let used = Dictionary<PdfDictionary, HashSet<int>>(HashIdentity.Reference)
     let visible = HashSet<PdfDictionary>(HashIdentity.Reference)
+    // The resources of the content being read, for a Type 3 font without its own (whose glyphs
+    // then use those of where it's drawn).
+    let mutable current = PdfDictionary()
+    let type3Resources = Dictionary<PdfDictionary, PdfDictionary>(HashIdentity.Reference)
     let listener =
         { new iText.Kernel.Pdf.Canvas.Parser.Listener.IEventListener with
             member _.EventOccurred(data, kind) =
@@ -818,24 +823,39 @@ let private usedCodes (document: PdfDocument) =
                     | true, set -> set.UnionWith codes
                     | _ -> used[dictionary] <- HashSet<int>(codes)
                     if info.GetTextRenderMode() <> 3 then visible.Add dictionary |> ignore
+                    if PdfName.Type3.Equals(dictionary.GetAsName PdfName.Subtype) && isNull (dictionary.Get PdfName.Resources) then
+                        type3Resources.TryAdd(dictionary, current) |> ignore
                 | _ -> ()
             member _.GetSupportedEvents() =
                 HashSet<iText.Kernel.Pdf.Canvas.Parser.EventType>([ iText.Kernel.Pdf.Canvas.Parser.EventType.RENDER_TEXT ]) }
+    let mutable partial = false
     let processContent (stream: PdfStream) (fallback: PdfDictionary) =
         let resources = match stream.GetAsDictionary PdfName.Resources with null -> fallback | r -> r
+        current <- resources
         iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessContent(stream.GetBytes(), PdfResources resources)
-    // What tiling patterns in resources paint (iText doesn't draw them while reading a page).
-    let processPatterns (resources: PdfDictionary | null) =
+    // What the tiling patterns in resources paint (iText doesn't draw them while reading), and in
+    // the resources of the forms and patterns there, in turn.
+    let walked = HashSet<PdfDictionary>(HashIdentity.Reference)
+    let rec processPatterns (resources: PdfDictionary | null) =
         match resources with
-        | null -> ()
-        | resources ->
+        | NonNull resources when walked.Add resources ->
             match resources.GetAsDictionary PdfName.Pattern with
             | null -> ()
             | patterns ->
                 for key in patterns.KeySet() do
                     match patterns.GetAsStream key with
                     | null -> ()
-                    | pattern -> processContent pattern resources
+                    | pattern ->
+                        try processContent pattern resources with _ -> partial <- true
+                        processPatterns (pattern.GetAsDictionary PdfName.Resources)
+            match resources.GetAsDictionary PdfName.XObject with
+            | null -> ()
+            | objects ->
+                for key in objects.KeySet() do
+                    match objects.GetAsStream key with
+                    | NonNull form when PdfName.Form.Equals(form.GetAsName PdfName.Subtype) -> processPatterns (form.GetAsDictionary PdfName.Resources)
+                    | _ -> ()
+        | _ -> ()
     let formResources =
         match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.AcroForm with
         | null -> null
@@ -843,9 +863,11 @@ let private usedCodes (document: PdfDocument) =
     let unread = ResizeArray<int>()
     for number in 1 .. document.GetNumberOfPages() do
         let page = document.GetPage number
+        let pageResources = page.GetResources().GetPdfObject()
         try
+            current <- pageResources
             iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent page
-            processPatterns (page.GetResources().GetPdfObject())
+            processPatterns pageResources
             // And what its annotations' appearances draw (a form field's text, say): normal,
             // rollover and down, in each state; with the form's resources where they've none.
             for annotation in page.GetAnnotations() do
@@ -859,25 +881,34 @@ let private usedCodes (document: PdfDocument) =
                               | :? PdfDictionary as states -> for key in states.KeySet() do match states.GetAsStream key with null -> () | stream -> stream
                               | _ -> () ]
                 for appearance in appearances do
-                    processContent appearance (match formResources with null -> page.GetResources().GetPdfObject() | r -> r)
+                    try
+                        processContent appearance (match formResources with null -> pageResources | r -> r)
+                        processPatterns (appearance.GetAsDictionary PdfName.Resources)
+                    with _ ->
+                        partial <- true
         with _ ->
             unread.Add number
-    // The glyphs of the Type 3 fonts found, which can draw text themselves (and theirs, in turn).
+    // The glyphs of the Type 3 fonts found, which can draw text themselves (and theirs, in turn):
+    // with their own resources, else those where they're drawn.
     let processed = HashSet<PdfDictionary>(HashIdentity.Reference)
     let mutable pending = [ for font in used.Keys do if PdfName.Type3.Equals(font.GetAsName PdfName.Subtype) then font ]
     while not pending.IsEmpty do
         for font in pending do
             if processed.Add font then
-                let resources = match font.GetAsDictionary PdfName.Resources with null -> PdfDictionary() | r -> r
+                let resources =
+                    match font.GetAsDictionary PdfName.Resources with
+                    | null -> (match type3Resources.TryGetValue font with | true, r -> r | _ -> PdfDictionary())
+                    | r -> r
+                processPatterns resources
                 match font.GetAsDictionary PdfName.CharProcs with
                 | null -> ()
                 | procedures ->
                     for key in procedures.KeySet() do
                         match procedures.GetAsStream key with
                         | null -> ()
-                        | procedure -> try processContent procedure resources with _ -> ()
+                        | procedure -> try processContent procedure resources with _ -> partial <- true
         pending <- [ for font in used.Keys do if PdfName.Type3.Equals(font.GetAsName PdfName.Subtype) && not (processed.Contains font) then font ]
-    used, visible, List.ofSeq unread
+    used, visible, List.ofSeq unread, partial
 
 /// Fonts made to say which characters their codes draw (a ToUnicode map), so a screen reader can
 /// read their text (7.21.7; 8.4.5.8), where some code the pages use says none: a composite
@@ -900,7 +931,7 @@ let private writeFontUnicode (document: PdfDocument) (context: Context) =
             | null -> None
             | program -> Some(program.GetBytes())
         | Null -> None
-    let used, _, unread = usedCodes document
+    let used, _, unread, _ = usedCodes document
     for KeyValue(font, codes) in used do
         let existing =
             match font.GetAsStream PdfName.ToUnicode with
@@ -1054,10 +1085,10 @@ let private writeFontUnicode (document: PdfDocument) (context: Context) =
 
 /// Fonts the pages draw with but don't embed, embedded from the open fonts Legibyl brings, where
 /// one is made to the font's measure (see FontEmbedding): only the glyphs the pages draw, unless a
-/// form's fields fill in with the font or some page couldn't be read, when it's the whole font.
+/// form's fields fill in with the font or some content couldn't be read, when it's the whole font.
 /// The others are left, and reported.
 let private embedFonts (document: PdfDocument) (context: Context) =
-    let used, visible, unread = usedCodes document
+    let used, visible, unread, partial = usedCodes document
     let formFonts = HashSet<PdfDictionary>(HashIdentity.Reference)
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.AcroForm with
     | null -> ()
@@ -1075,12 +1106,15 @@ let private embedFonts (document: PdfDocument) (context: Context) =
               if visible.Contains font || formFonts.Contains font then
                   let shown = match font.GetAsName PdfName.BaseFont with null -> "A font" | name -> name.GetValue()
                   match
-                      (try FontEmbedding.embed document font codes (not unread.IsEmpty || formFonts.Contains font)
+                      (try FontEmbedding.embed document font codes (not unread.IsEmpty || partial || formFonts.Contains font)
                        with _ -> Some(shown, FontEmbedding.Left "it couldn't be embedded"))
                   with
                   | Some outcome -> outcome
                   | None -> () ]
         |> List.distinct
+    if not unread.IsEmpty then
+        let pages = String.Join(", ", unread)
+        context.Notes.Add $"The text of page(s) {pages} couldn't be read, so fonts used only there weren't checked for embedding."
     for name, outcome in outcomes do
         match outcome with
         | FontEmbedding.Left reason -> context.Notes.Add $"{name} isn't embedded, and was left as it is ({reason}): export the PDF again with fonts embedded."

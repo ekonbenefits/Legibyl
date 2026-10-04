@@ -105,28 +105,41 @@ let private nameUnicode (name: string) =
     let unicode = AdobeGlyphList.NameToUnicode name
     if unicode > 0 then Some unicode else None
 
+/// A font's /Differences: each code and the glyph name it gives it.
+let private differences (font: PdfDictionary) : (int * string) list =
+    match font.Get(PdfName.Encoding, true) with
+    | :? PdfDictionary as encoding ->
+        match encoding.GetAsArray PdfName.Differences with
+        | null -> []
+        | array ->
+            let mutable code = 0
+            [ for i in 0 .. array.Size() - 1 do
+                  match array.Get i with
+                  | :? PdfNumber as n -> code <- n.IntValue()
+                  | :? PdfName as name ->
+                      yield code, name.GetValue()
+                      code <- code + 1
+                  | _ -> () ]
+    | _ -> []
+
+/// Whether a glyph name is one the Glyph List lists (as a TrueType font's /Differences must have:
+/// 7.21.6-2), not a uniXXXX or uXXXX name, nor .notdef.
+let private listed (name: string) =
+    AdobeGlyphList.NameToUnicode name > 0
+    && not (Text.RegularExpressions.Regex.IsMatch(name, "^(uni[0-9A-F]{4}|u[0-9A-F]{4,6})"))
+
 /// The codes a simple text font's encoding gives a character, each with it: its /Differences over
-/// its base encoding (the one named, else Standard). None if a /Differences name isn't in the
-/// Glyph List (a reader can't find it in a TrueType font), or the base encoding isn't known.
+/// its base encoding (the one named, else Standard); a code /Differences names .notdef is none. None
+/// if another /Differences name isn't in the Glyph List (a reader can't find it in a TrueType
+/// font), or the base encoding isn't known.
 let private encodedCharacters (font: PdfDictionary) : Map<int, int> option =
     let baseName, differences =
         match font.Get(PdfName.Encoding, true) with
         | :? PdfName as name -> name.GetValue(), Some []
         | :? PdfDictionary as encoding ->
-            let names =
-                match encoding.GetAsArray PdfName.Differences with
-                | null -> []
-                | array ->
-                    let mutable code = 0
-                    [ for i in 0 .. array.Size() - 1 do
-                          match array.Get i with
-                          | :? PdfNumber as n -> code <- n.IntValue()
-                          | :? PdfName as name ->
-                              yield code, name.GetValue()
-                              code <- code + 1
-                          | _ -> () ]
+            let names = differences font
             (match encoding.GetAsName PdfName.BaseEncoding with null -> "StandardEncoding" | name -> name.GetValue()),
-            (if names |> List.forall (fun (_, name) -> (nameUnicode name).IsSome) then Some names else None)
+            (if names |> List.forall (fun (_, name) -> name = ".notdef" || (nameUnicode name).IsSome) then Some names else None)
         | _ -> "StandardEncoding", Some []
     match differences, ToUnicodeMaps.baseEncoding baseName with
     | Some differences, Some encoding ->
@@ -136,7 +149,9 @@ let private encodedCharacters (font: PdfDictionary) : Map<int, int> option =
             | unicode when unicode > 0 -> characters[code] <- unicode
             | _ -> ()
         for code, name in differences do
-            if code >= 0 && code <= 255 then characters[code] <- (nameUnicode name).Value
+            if code >= 0 && code <= 255 then
+                if name = ".notdef" then characters.Remove code |> ignore
+                else characters[code] <- (nameUnicode name).Value
         Some(characters |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
     | _ -> None
 
@@ -274,14 +289,16 @@ let embed (document: PdfDocument) (font: PdfDictionary) (codes: int seq) (whole:
                 |> List.distinct
             else
                 codes
-        // Whether the encoding can be kept, or written as WinAnsi's with what differs in Glyph List
-        // names (7.21.6-2: a uniXXXX name won't do), for every code checked.
+        // Whether the encoding can be kept (WinAnsi or MacRoman, any /Differences in Glyph List names),
+        // or written as WinAnsi's with what differs in Glyph List names (7.21.6-2: a uniXXXX name
+        // won't do), for every code checked.
         let keeps =
             match font.Get(PdfName.Encoding, true) with
             | :? PdfName as name -> PdfName.WinAnsiEncoding.Equals name || PdfName.MacRomanEncoding.Equals name
             | :? PdfDictionary as encoding ->
                 let baseEncoding = encoding.GetAsName PdfName.BaseEncoding
-                PdfName.WinAnsiEncoding.Equals baseEncoding || PdfName.MacRomanEncoding.Equals baseEncoding
+                (PdfName.WinAnsiEncoding.Equals baseEncoding || PdfName.MacRomanEncoding.Equals baseEncoding)
+                && differences font |> List.forall (snd >> listed)
             | _ -> false
         let rewritable =
             symbolic
