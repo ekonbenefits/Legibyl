@@ -19,6 +19,7 @@
     <Compile Include="MainWindowTests.fs" />
     <Compile Include="StructureTreeWindowTests.fs" />
     <Compile Include="StructureEditsTests.fs" />
+    <Compile Include="RoleMapTabTests.fs" />
     <Compile Include="LayoutOrderTests.fs" />
     <Compile Include="BlocksPreviewTests.fs" />
     <Compile Include="TableLayoutTests.fs" />

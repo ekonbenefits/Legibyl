@@ -156,6 +156,11 @@ type SavedFile =
       [<JsonPropertyName "title">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       Title: string | null
+      /// The standard tag a person chose for each of the PDF's own tag names (Structure…'s Role
+      /// map), which Export… writes to its role map: "Heading1": "H1".
+      [<JsonPropertyName "roleMap">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      RoleMap: Collections.Generic.Dictionary<string, string> | null
       /// For an untagged PDF: its layout as reviewed (see LayoutFile), the pages reviewed so far;
       /// tagging takes it, and the layout model for the others.
       [<JsonPropertyName "layout">]
@@ -221,11 +226,20 @@ let retagTags =
           "Figure"; "Formula"; "Form"; "Artifact" ]
 
 /// What's wrong with a review's edits as written (json), which reading it would otherwise pass
-/// over: fields an edit doesn't have (e.g. "description": a link's description is its "alt"), and
-/// retags to tags that aren't standard. Empty when there's nothing wrong, or it isn't JSON.
+/// over: fields an edit doesn't have (e.g. "description": a link's description is its "alt"),
+/// retags to tags that aren't standard, and role map entries to tags that aren't. Empty when
+/// there's nothing wrong, or it isn't JSON.
 let problems (json: string) : string list =
     try
         use document = JsonDocument.Parse json
+        (match document.RootElement.TryGetProperty "roleMap" with
+         | true, map when map.ValueKind = JsonValueKind.Object ->
+             [ for entry in map.EnumerateObject() do
+                   let tag = if entry.Value.ValueKind = JsonValueKind.String then entry.Value.GetString() |> string else ""
+                   if not (RoleMaps.standardTags.Contains tag) then
+                       $"roleMap maps \"{entry.Name}\" to \"{tag}\", which isn't a standard tag (e.g. H1 to H6, P, LI, Figure, Caption, Note)." ]
+         | _ -> [])
+        @
         match document.RootElement.TryGetProperty "edits" with
         | true, edits when edits.ValueKind = JsonValueKind.Array ->
             [ for index, edit in Seq.indexed (edits.EnumerateArray()) do
@@ -252,7 +266,8 @@ let isEmpty (file: SavedFile) =
         | Null -> true
     // Fixes chosen as none is still a choice, as is none dismissed (over a review carried inside
     // the PDF that has some).
-    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Layout && isNull file.Fixes && isNull file.Validation && isNull file.Checklist
+    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && (match file.RoleMap with null -> true | map -> map.Count = 0)
+    && isNull file.Layout && isNull file.Fixes && isNull file.Validation && isNull file.Checklist
 
 /// Writes file next to pdfPath, or deletes it when there's nothing in it. Throws
 /// IOException/UnauthorizedAccessException if it can't be written.

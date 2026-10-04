@@ -33,6 +33,7 @@
     <Compile Include="StructureBlocks.fs" />
     <Compile Include="FindingRuler.fs" />
     <Compile Include="StructureEditsTab.fs" />
+    <Compile Include="StructureRoleMapTab.fs" />
     <Compile Include="StructureTreeWindow.fs" />
     <Compile Include="LinkTitleOffer.fs" />
     <Compile Include="Markdown.fs" />

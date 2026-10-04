@@ -706,7 +706,8 @@ module private StructureView =
                   Suggested = isSuggested
                   SaveEdits = saveEdits
                   MarkAllLike = markAllLike
-                  EditNode = editNode }
+                  EditNode = editNode
+                  RoleMap = fun () -> review.RoleMap }
             /// A tagged PDF's selected element's moves in the reading order.
             let moves () = if isSuggested then [] else StructureActions.moveActions (orderNeeds ())
             menuFill.Value <-
@@ -1273,6 +1274,12 @@ module private StructureView =
                                 TabItem.header (if edits.Current.IsEmpty then "Edits" else $"Edits ({edits.Current.Length})")
                                 TabItem.content editsTab
                             ]
+                            // A tagged PDF's own tag names, when it uses any: what each is mapped to.
+                            if not isSuggested && not (StructureRoleMapTab.names root.Current).IsEmpty then
+                                TabItem.create [
+                                    TabItem.header "Role map"
+                                    TabItem.content (StructureRoleMapTab.view { Root = root.Current; Review = review; OnChanged = onEditsChanged })
+                                ]
                         ]
                     ]
                     DockPanel.create [

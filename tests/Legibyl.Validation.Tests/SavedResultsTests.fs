@@ -22,7 +22,7 @@ let ``a saved result reads back as the validation gave it, messages and all`` (n
     let report = { VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1) with ProfileDetected = true }
     let hash = SavedResults.hashOf pdf
     let file: ReviewFile.SavedFile =
-        { Version = 1; DismissedWarnings = null; Edits = null; Title = null; Layout = null; Fixes = null
+        { Version = 1; DismissedWarnings = null; Edits = null; Title = null; RoleMap = null; Layout = null; Fixes = null
           Validation = SavedResults.ofReport report hash (DateTime(2026, 9, 27, 10, 0, 0))
           Checklist = null }
 
@@ -56,7 +56,7 @@ let ``a copy's review doesn't carry the saved result, or the checklist`` () =
     let pdf = corpusFile "pdfua1-pass.pdf"
     let report = VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1)
     let file: ReviewFile.SavedFile =
-        { Version = 1; DismissedWarnings = [||]; Edits = null; Title = "A title"; Layout = null; Fixes = null
+        { Version = 1; DismissedWarnings = [||]; Edits = null; Title = "A title"; RoleMap = null; Layout = null; Fixes = null
           Validation = SavedResults.ofReport report (SavedResults.hashOf pdf) DateTime.Now
           Checklist = { Hash = "abc"; Checked = [| "title" |]; CheckedAt = Nullable(); Length = 0L } }
 

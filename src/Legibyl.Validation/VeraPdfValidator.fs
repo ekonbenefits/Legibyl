@@ -624,6 +624,11 @@ type VeraPdfValidator() =
         with get (): string | null = title
         and set (value: string | null) = title <- value
 
+    /// The standard tag a person chose for each of the PDF's own tag names (Structure…'s Role
+    /// map, or a review's "roleMap"), which the ApplyEdits fix writes to its role map before the
+    /// RoleMap fix maps the others by what they say.
+    member val RoleMap: Collections.Generic.IReadOnlyDictionary<string, string> = Collections.Generic.Dictionary<string, string>() with get, set
+
     /// Where the LinkTitlesFromWeb fix reads the titles of the web pages links go to: the web
     /// itself, safely (see LinkTitles), unless replaced.
     member val PageTitleSource: IPageTitleSource = LinkTitles.WebPageTitles() with get, set
@@ -678,7 +683,7 @@ type VeraPdfValidator() =
             raise (VeraPdfValidationException "At least one fix option must be selected.")
 
         let structuralOptions =
-            StructureFixes.orderedFixes this.PageTitleSource None [] None |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
+            StructureFixes.orderedFixes this.PageTitleSource None [] None Map.empty |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
         let steps =
@@ -762,7 +767,15 @@ type VeraPdfValidator() =
                     if options.HasFlag PdfFixOptions.ApplyEdits && not (options.HasFlag PdfFixOptions.TagFromLayout) then
                         notApplied.AddRange(ElementEdits.unapplied currentInput (List.ofSeq this.Edits))
                     let structuralFixes, nothingToDo, notes =
-                        StructureFixes.applyFixes currentInput tempOutput options this.PageTitleSource layout (List.ofSeq this.Edits) (Option.ofObj this.Title)
+                        StructureFixes.applyFixes
+                            currentInput
+                            tempOutput
+                            options
+                            this.PageTitleSource
+                            layout
+                            (List.ofSeq this.Edits)
+                            (Option.ofObj this.Title)
+                            (this.RoleMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
                     unneeded <- nothingToDo
                     notApplied.AddRange notes
                     match structuralFixes with

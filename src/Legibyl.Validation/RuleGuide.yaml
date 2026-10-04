@@ -48,12 +48,12 @@ rules:
   - clause: "7.1"
     tests: [5]
     meaning: "The PDF uses tag names of its own without saying which standard tag each means, so a screen reader can't tell what they are (a heading, a list, a paragraph)."
-    whatToDo: &roleMap "Choose Map the PDF's own tag names in Auto Fixes…: it maps each name that says what it is (Heading 1 to H1, Body Text to P, Image to Figure…) to that standard tag. A name that doesn't say is left, and reported: add it to the role map in a PDF editor, or fix it where the PDF was made."
+    whatToDo: &roleMap "Choose Map the PDF's own tag names in Auto Fixes…: it maps each name that says what it is (Heading 1 to H1, Body Text to P, Image to Figure…) to that standard tag. A name that doesn't say is left, and reported: choose its tag in Structure…'s Role map, then Export…."
 
   - clause: "7.1"
     tests: [6, 7]
     meaning: "The PDF's role map, which says what its own tag names mean, is broken: it goes round in a circle, or redefines a standard tag."
-    whatToDo: &brokenRoleMap "Choose Map the PDF's own tag names in Auto Fixes…: it removes a standard tag's mapping (a standard tag means itself), and breaks a circle by mapping each of its names to the standard tag it says it is. A name that doesn't say is left, and reported: map it in a PDF editor."
+    whatToDo: &brokenRoleMap "Choose Map the PDF's own tag names in Auto Fixes…: it removes a standard tag's mapping (a standard tag means itself), and breaks a circle by mapping each of its names to the standard tag it says it is. A name that doesn't say is left, and reported: choose its tag in Structure…'s Role map, then Export…."
 
   - clause: "7.1"
     tests: [8]
