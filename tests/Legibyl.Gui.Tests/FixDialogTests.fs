@@ -134,6 +134,7 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
               "Remove empty figures"
               "Join split paragraphs"
               "Tag lists"
+              "Table header scope"
               "Add bookmarks"
               "Point links at their tags"
               "Tab order for annotations"

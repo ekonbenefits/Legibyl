@@ -321,6 +321,96 @@ let private tagParagraphLists (document: PdfDocument) context =
             ParagraphLists.tagAsList document run
         [ $"Tagged {runs.Length} run(s) of marked paragraphs as lists." ]
 
+/// The table attributes (attribute dictionaries with /O /Table) of a structure element's /A, which
+/// can be one dictionary or an array of them (with revision numbers between).
+let private tableAttributes (element: PdfDictionary) : PdfDictionary list =
+    let isTable (attributes: PdfDictionary) = PdfName.Table.Equals(attributes.GetAsName PdfName.O)
+    match element.Get(PdfName.A, true) with
+    | :? PdfDictionary as attributes when isTable attributes -> [ attributes ]
+    | :? PdfArray as array ->
+        [ for i in 0 .. array.Size() - 1 do
+              match array.Get(i, true) with
+              | :? PdfDictionary as attributes when isTable attributes -> attributes
+              | _ -> () ]
+    | _ -> []
+
+/// Tagged tables' header cells (TH) without a Scope given one (PDF/UA 7.5; 8.2.5.26), so a screen
+/// reader can tell which cells each heads: Column in a header row (in THead, or a row of header
+/// cells only), Row for one with only header cells before it and a data cell after it, Column
+/// otherwise. Cells are placed in the table's grid by their RowSpan and ColSpan. A table whose cells
+/// name their headers (/Headers) is left as it is.
+let private scopeTableHeaders (document: PdfDocument) context =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
+    | null -> []
+    | root ->
+        let tag (element: PdfDictionary) = standardTag element context
+        let kids (element: PdfDictionary) : PdfDictionary list =
+            match element.Get(PdfName.K, true) with
+            | :? PdfDictionary as kid -> [ kid ]
+            | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as kid -> kid | _ -> () ]
+            | _ -> []
+        let span (cell: PdfDictionary) (name: PdfName) =
+            tableAttributes cell |> List.tryPick (fun a -> a.GetAsNumber name |> Option.ofObj |> Option.map _.IntValue()) |> Option.defaultValue 1 |> max 1
+        let mutable scoped = 0
+        let mutable tables = 0
+        for visit in walk root context do
+            if PdfName.Table.Equals(tag visit.Element) then
+                // Its rows, and whether each is in the table's head.
+                let rows =
+                    [ for kid in kids visit.Element do
+                          match tag kid with
+                          | t when PdfName.TR.Equals t -> kid, false
+                          | t when PdfName.THead.Equals t -> for row in kids kid do if PdfName.TR.Equals(tag row) then row, true
+                          | t when PdfName.TBody.Equals t || PdfName.TFoot.Equals t -> for row in kids kid do if PdfName.TR.Equals(tag row) then row, false
+                          | _ -> () ]
+                let cells = [ for row, head in rows -> row, head, [ for cell in kids row do if PdfName.TH.Equals(tag cell) || PdfName.TD.Equals(tag cell) then cell ] ]
+                let named = cells |> List.exists (fun (_, _, row) -> row |> List.exists (fun cell -> tableAttributes cell |> List.exists (fun a -> not (isNull (a.Get PdfName.Headers)))))
+                if not named then
+                    // Each cell's column, filling the grid left to right past cells spanning down into it.
+                    let taken = HashSet<int * int>()
+                    let placed =
+                        [ for r, (_, head, row) in List.indexed cells ->
+                              let mutable column = 0
+                              head,
+                              [ for cell in row ->
+                                    while taken.Contains((r, column)) do column <- column + 1
+                                    let rowSpan, colSpan = span cell PdfName.RowSpan, span cell PdfName.ColSpan
+                                    for dr in 0 .. rowSpan - 1 do
+                                        for dc in 0 .. colSpan - 1 do taken.Add((r + dr, column + dc)) |> ignore
+                                    let at = column
+                                    column <- column + colSpan
+                                    cell, at ] ]
+                    let mutable changed = false
+                    for head, row in placed do
+                        let isHeader (cell: PdfDictionary) = PdfName.TH.Equals(tag cell)
+                        let headerRow = head || row |> List.forall (fst >> isHeader)
+                        for cell, column in row do
+                            let hasScope = tableAttributes cell |> List.exists (fun a -> not (isNull (a.Get PdfName.Scope)))
+                            if isHeader cell && not hasScope then
+                                let before = row |> List.filter (fun (_, c) -> c < column)
+                                let after = row |> List.filter (fun (_, c) -> c > column)
+                                let scope =
+                                    if headerRow then PdfName.Column
+                                    elif before |> List.forall (fst >> isHeader) && after |> List.exists (not << isHeader << fst) then PdfName.Row
+                                    else PdfName.Column
+                                match tableAttributes cell with
+                                | attributes :: _ -> attributes.Put(PdfName.Scope, scope) |> ignore
+                                | [] ->
+                                    let attributes = PdfDictionary()
+                                    attributes.Put(PdfName.O, PdfName.Table) |> ignore
+                                    attributes.Put(PdfName.Scope, scope) |> ignore
+                                    match cell.Get(PdfName.A, true) with
+                                    | null -> cell.Put(PdfName.A, attributes) |> ignore
+                                    | :? PdfArray as array -> array.Add attributes
+                                    | other -> cell.Put(PdfName.A, PdfArray([ other; attributes :> PdfObject ] |> Collections.Generic.List)) |> ignore
+                                scoped <- scoped + 1
+                                changed <- true
+                    if changed then tables <- tables + 1
+        if scoped > 0 then
+            [ $"Gave {scoped} table header cell(s) in {tables} table(s) a Scope (Column in a header row, Row for one heading its row), so a screen reader can tell which cells each heads: to check." ]
+        else
+            []
+
 /// Where JoinSplitParagraphs finds each page's regions: the source, the document to ask it about
 /// (the original: tagging doesn't change how its pages look), and what to tell as it asks for
 /// each page (its number, and the document's page count).
@@ -874,6 +964,7 @@ let orderedFixes
       PdfFixOptions.EmptyFigures, EmptyFigures.remove
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
       PdfFixOptions.Lists, tagParagraphLists
+      PdfFixOptions.TableHeaderScope, scopeTableHeaders
       PdfFixOptions.Bookmarks, addBookmarks
       PdfFixOptions.ApplyEdits,
       (fun document context ->

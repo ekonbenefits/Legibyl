@@ -75,7 +75,10 @@ type PdfFixOptions =
     /// a reader can map, from the fonts' own glyph names and Unicode tables (see ToUnicodeMaps),
     /// so a screen reader can read their text. Codes nothing says are left out.
     | FontUnicode = 2097152
-    | All = 4194303
+    /// Gives a tagged table's header cells (TH) without one a Scope, so a screen reader can tell
+    /// which cells each heads: Column in a header row, Row for one heading its row.
+    | TableHeaderScope = 4194304
+    | All = 8388607
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.

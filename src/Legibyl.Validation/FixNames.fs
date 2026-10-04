@@ -15,6 +15,7 @@ let order =
       PdfFixOptions.EmptyFigures
       PdfFixOptions.JoinSplitParagraphs
       PdfFixOptions.Lists
+      PdfFixOptions.TableHeaderScope
       PdfFixOptions.Bookmarks
       PdfFixOptions.LinkTargets
       PdfFixOptions.Tabs

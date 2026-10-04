@@ -41,6 +41,7 @@
     <Compile Include="LayoutTaggingTests.fs" />
     <Compile Include="FontDictionariesTests.fs" />
     <Compile Include="FontUnicodeTests.fs" />
+    <Compile Include="TableHeaderScopeTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />
     <Compile Include="MetadataAndFontFixTests.fs" />
     <Compile Include="LinkTitlesTests.fs" />
