@@ -1139,9 +1139,12 @@ chooses which set to try first, and the PDF decides: a font is only embedded if
 it has every glyph the pages draw, each as wide as the PDF's `/Widths` (or,
 without them, the standard metrics) say, to within the standard's tolerance, so
 the text stays where it was. Only those glyphs are embedded (the whole font for
-one a form's fields fill in with), as a TrueType font with a WinAnsi encoding,
-and the report names each one embedded, and each left (another font, or one
-whose widths don't match: fix those where the PDF was made). The fonts (about
+one a form's fields fill in with), as a TrueType font: its encoding is kept
+if it's WinAnsi or MacRoman, else written as WinAnsi with a `/Differences` of
+Glyph List names for the codes that differ; Symbol and ZapfDingbats are
+symbolic, with no `/Encoding` (their codes go to their own glyphs). The report
+names each one embedded; each left (another font, or one whose widths don't
+match: fix those where the PDF was made) is listed as not applied. The fonts (about
 7 MB) are fetched at build time, each pinned by its SHA-256
 (`UrwFontsVersion`, `LiberationFontsVersion` in `Directory.Build.props`), and
 shipped in the app's `fonts` folder.

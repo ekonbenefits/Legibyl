@@ -109,11 +109,12 @@ let ``with nothing in the font to say what a code draws, nothing is made up, and
         let descriptor = font.GetAsArray(PdfName.DescendantFonts).GetAsDictionary(0).GetAsDictionary PdfName.FontDescriptor
         descriptor.Remove PdfName.FontFile2 |> ignore)
 
-    let report = fix broken.Path fixedPdf.Path
+    let result = VeraPdfValidator().Fix(broken.Path, PdfProfile.PdfUa1, fixedPdf.Path, PdfFixOptions.FontUnicode)
 
-    report |> should contain "15 character code(s) the pages use say nothing a reader can map to text: they need fixing where the PDF was made."
-    report |> List.exists (fun line -> line.StartsWith "Wrote which characters") |> should be False
-    failed fixedPdf.Path |> should contain "7.21.7-1"
+    // Said as not applied: nothing changed, so no copy is written.
+    result.NotApplied |> should contain "15 character code(s) the pages use say nothing a reader can map to text: they need fixing where the PDF was made."
+    result.AppliedFixes |> should be Empty
+    result.OutputPath |> should equal null
 
 [<Fact>]
 let ``a ToUnicode map that gives U+0000 is put right`` () =
@@ -160,10 +161,12 @@ let ``a composite font with another CMap is left as it is, map and all`` () =
         before <- ToUnicodeMaps.write 2 program
         font.Put(PdfName.ToUnicode, PdfStream(Text.Encoding.ASCII.GetBytes before).MakeIndirect document) |> ignore)
 
-    let report = fix broken.Path fixedPdf.Path
+    let result = VeraPdfValidator().Fix(broken.Path, PdfProfile.PdfUa1, fixedPdf.Path, PdfFixOptions.FontUnicode)
 
-    report |> List.exists (fun line -> line.Contains "ToUnicode" || line.Contains "character code") |> should be False
-    use document = new PdfDocument(new PdfReader(fixedPdf.Path))
+    // Nothing changed, map and all: no copy is written.
+    result.AppliedFixes |> should be Empty
+    result.OutputPath |> should equal null
+    use document = new PdfDocument(new PdfReader(broken.Path))
     let font =
         seq { for n in 1 .. document.GetNumberOfPdfObjects() - 1 -> document.GetPdfObject n }
         |> Seq.pick (function :? PdfDictionary as d when PdfName.Type0.Equals(d.GetAsName PdfName.Subtype) -> Some d | _ -> None)

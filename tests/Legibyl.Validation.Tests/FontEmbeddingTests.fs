@@ -198,10 +198,12 @@ let ``a font whose widths no bundled font has is left as it is, and reported`` (
         font.Put(PdfName.LastChar, PdfNumber 255) |> ignore
         font.Put(PdfName.Widths, PdfArray(Array.create 256 400)) |> ignore)
 
-    let report = fix input.Path output.Path
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
 
-    fonts output.Path |> should equal [ "Helvetica", false ]
-    report |> should contain "Helvetica isn't embedded, and was left as it is (no font Legibyl brings has its glyphs at its widths): export the PDF again with fonts embedded."
+    // Said as not applied: nothing changed, so no copy is written.
+    result.NotApplied |> should contain "Helvetica isn't embedded, and was left as it is (no font Legibyl brings has its glyphs at its widths): export the PDF again with fonts embedded."
+    result.AppliedFixes |> should be Empty
+    result.OutputPath |> should equal null
 
 [<Fact>]
 let ``a font no bundled font stands in for is left as it is, and reported`` () =
@@ -209,12 +211,41 @@ let ``a font no bundled font stands in for is left as it is, and reported`` () =
     use output = new TempPdf()
     createText input.Path [ StandardFonts.HELVETICA ] false (fun _ font -> font.Put(PdfName.BaseFont, PdfName "Calibri") |> ignore)
 
-    let report = fix input.Path output.Path
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmbedFonts)
 
-    fonts output.Path |> should equal [ "Calibri", false ]
-    report |> should contain "Calibri isn't embedded, and was left as it is (no font Legibyl brings stands in for it): export the PDF again with fonts embedded."
+    result.OutputPath |> should equal null
+    result.NotApplied |> should contain "Calibri isn't embedded, and was left as it is (no font Legibyl brings stands in for it): export the PDF again with fonts embedded."
     FixNames.nameOf PdfFixOptions.EmbedFonts |> should equal "embed-fonts"
     FixNames.safe.HasFlag PdfFixOptions.EmbedFonts |> should be False
+
+[<Fact>]
+let ``a form's font is embedded whole, and only if every code it gives a width fits`` () =
+    // Widths as the standard metrics give them, Z's (which the page doesn't draw) aside.
+    let create (path: string) (zWidth: int) =
+        createText path [ StandardFonts.HELVETICA ] true (fun document font ->
+            let widths = font.GetAsArray PdfName.Widths
+            widths.Set(int 'Z' - 32, PdfNumber zWidth) |> ignore
+            // A form whose fields fill in with the font.
+            let resources = PdfDictionary()
+            resources.Put(PdfName.Font, PdfDictionary(dict [ PdfName "Helv", font :> PdfObject ])) |> ignore
+            let form = PdfDictionary()
+            form.Put(PdfName.Fields, PdfArray()) |> ignore
+            form.Put(PdfName.DR, resources) |> ignore
+            document.GetCatalog().GetPdfObject().Put(PdfName.AcroForm, form) |> ignore)
+    use input = new TempPdf()
+    use output = new TempPdf()
+    use wrongZ = new TempPdf()
+    use notFixed = new TempPdf()
+    create input.Path 611
+    create wrongZ.Path 400
+
+    fix input.Path output.Path |> ignore
+    let result = VeraPdfValidator().Fix(wrongZ.Path, PdfProfile.PdfUa1, notFixed.Path, PdfFixOptions.EmbedFonts)
+
+    // The whole font: no subset tag.
+    fonts output.Path |> should equal [ "NimbusSans-Regular", true ]
+    result.OutputPath |> should equal null
+    result.NotApplied |> should contain "Helvetica isn't embedded, and was left as it is (no font Legibyl brings has its glyphs at its widths): export the PDF again with fonts embedded."
 
 [<Fact>]
 let ``only the glyphs the page draws are embedded`` () =

@@ -822,13 +822,18 @@ let private usedCodes (document: PdfDocument) =
         let page = document.GetPage number
         try
             iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent page
-            // And what its annotations' appearances draw (a form field's text, say).
+            // And what its annotations' appearances draw (a form field's text, say): normal,
+            // rollover and down, in each state.
             for annotation in page.GetAnnotations() do
                 let appearances =
-                    match annotation.GetNormalAppearanceObject() with
+                    match annotation.GetAppearanceDictionary() with
                     | null -> []
-                    | :? PdfStream as stream -> [ stream ]
-                    | states -> [ for key in states.KeySet() do match states.GetAsStream key with null -> () | stream -> stream ]
+                    | appearance ->
+                        [ for kind in [ PdfName.N; PdfName.R; PdfName.D ] do
+                              match appearance.Get(kind, true) with
+                              | :? PdfStream as stream -> stream
+                              | :? PdfDictionary as states -> for key in states.KeySet() do match states.GetAsStream key with null -> () | stream -> stream
+                              | _ -> () ]
                 for appearance in appearances do
                     let resources = match appearance.GetAsDictionary PdfName.Resources with null -> PdfDictionary() | r -> r
                     iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessContent(appearance.GetBytes(), PdfResources resources)
@@ -842,7 +847,7 @@ let private usedCodes (document: PdfDocument) =
 /// simple font whose glyph names aren't the Glyph List's. What each code draws comes from what the
 /// font says (see ToUnicodeMaps): its glyph names, or its embedded TrueType program's Unicode
 /// cmap. A code nothing says is left out, and counted: its text still can't be read.
-let private writeFontUnicode (document: PdfDocument) _ =
+let private writeFontUnicode (document: PdfDocument) (context: Context) =
     let mutable fonts = 0
     let mutable added = 0
     let mutable missing = 0
@@ -1001,19 +1006,19 @@ let private writeFontUnicode (document: PdfDocument) _ =
                 fonts <- fonts + 1
                 added <- added + newly
             missing <- missing + still
-    [ if not unread.IsEmpty then
-          let pages = String.Join(", ", unread)
-          $"The text of page(s) {pages} couldn't be read, so their fonts weren't checked for what they draw."
-      if fonts > 0 then
-          $"Wrote which characters {fonts} font(s) draw (ToUnicode), from their own glyph names and Unicode tables, so a screen reader can read {added} more character code(s): to check."
-      if missing > 0 then
-          $"{missing} character code(s) the pages use say nothing a reader can map to text: they need fixing where the PDF was made." ]
+    if not unread.IsEmpty then
+        let pages = String.Join(", ", unread)
+        context.Notes.Add $"The text of page(s) {pages} couldn't be read, so their fonts weren't checked for what they draw."
+    if missing > 0 then
+        context.Notes.Add $"{missing} character code(s) the pages use say nothing a reader can map to text: they need fixing where the PDF was made."
+    [ if fonts > 0 then
+          $"Wrote which characters {fonts} font(s) draw (ToUnicode), from their own glyph names and Unicode tables, so a screen reader can read {added} more character code(s): to check." ]
 
 /// Fonts the pages draw with but don't embed, embedded from the open fonts Legibyl brings, where
 /// one is made to the font's measure (see FontEmbedding): only the glyphs the pages draw, unless a
 /// form's fields fill in with the font or some page couldn't be read, when it's the whole font.
 /// The others are left, and reported.
-let private embedFonts (document: PdfDocument) _ =
+let private embedFonts (document: PdfDocument) (context: Context) =
     let used, unread = usedCodes document
     let formFonts = HashSet<PdfDictionary>(HashIdentity.Reference)
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.AcroForm with
@@ -1031,10 +1036,14 @@ let private embedFonts (document: PdfDocument) _ =
               | Some outcome -> outcome
               | None -> () ]
         |> List.distinct
+    for name, outcome in outcomes do
+        match outcome with
+        | FontEmbedding.Left reason -> context.Notes.Add $"{name} isn't embedded, and was left as it is ({reason}): export the PDF again with fonts embedded."
+        | FontEmbedding.Embedded _ -> ()
     [ for name, outcome in outcomes do
           match outcome with
           | FontEmbedding.Embedded shown -> $"Embedded {shown} in place of {name}, which wasn't embedded: an open font with its glyphs, each as wide."
-          | FontEmbedding.Left reason -> $"{name} isn't embedded, and was left as it is ({reason}): export the PDF again with fonts embedded." ]
+          | FontEmbedding.Left _ -> () ]
 
 let orderedFixes
     (titles: IPageTitleSource)
@@ -1070,8 +1079,9 @@ let orderedFixes
 
 /// The structural fixes Legibyl makes itself, writing the result to outputPath.
 /// Returns one plain-language line per fix that actually changed something, so a
-/// document that already had a given fix applied reports nothing for it; and the fixes asked
-/// for that found nothing to change.
+/// document that already had a given fix applied reports nothing for it; the fixes asked
+/// for that found nothing to change (nor anything to note); and what they found and couldn't
+/// change.
 let applyFixes
     (inputPath: string)
     (outputPath: string)
@@ -1080,7 +1090,7 @@ let applyFixes
     (layout: PageLayout option)
     (edits: ElementEdit list)
     (title: string option)
-    : string list * PdfFixOptions list =
+    : string list * PdfFixOptions list * string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
@@ -1088,6 +1098,10 @@ let applyFixes
     let results =
         [ for option, apply in orderedFixes titles layout edits title do
               if options.HasFlag option then
-                  yield option, apply document context ]
-    // What each did, and those asked for that found nothing to change.
-    List.collect snd results, [ for option, lines in results do if lines.IsEmpty then option ]
+                  let notes = context.Notes.Count
+                  let lines = apply document context
+                  yield option, lines, context.Notes.Count > notes ]
+    // What each did, those asked for that found nothing to change, and what they noted.
+    [ for _, lines, _ in results do yield! lines ],
+    [ for option, lines, noted in results do if lines.IsEmpty && not noted then option ],
+    List.ofSeq context.Notes
