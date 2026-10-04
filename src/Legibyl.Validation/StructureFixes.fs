@@ -321,28 +321,55 @@ let private tagParagraphLists (document: PdfDocument) context =
             ParagraphLists.tagAsList document run
         [ $"Tagged {runs.Length} run(s) of marked paragraphs as lists." ]
 
-/// The table attributes (attribute dictionaries with /O /Table) of a structure element's /A, which
-/// can be one dictionary or an array of them (with revision numbers between).
-let private tableAttributes (element: PdfDictionary) : PdfDictionary list =
+/// The table attributes (attribute dictionaries with /O /Table) that apply to a structure element:
+/// its own (/A, one dictionary or an array of them, with revision numbers between), then its
+/// classes' (/C, through the StructTreeRoot's /ClassMap).
+let private tableAttributes (classMap: PdfDictionary | null) (element: PdfDictionary) : PdfDictionary list =
     let isTable (attributes: PdfDictionary) = PdfName.Table.Equals(attributes.GetAsName PdfName.O)
-    match element.Get(PdfName.A, true) with
-    | :? PdfDictionary as attributes when isTable attributes -> [ attributes ]
-    | :? PdfArray as array ->
-        [ for i in 0 .. array.Size() - 1 do
-              match array.Get(i, true) with
-              | :? PdfDictionary as attributes when isTable attributes -> attributes
-              | _ -> () ]
-    | _ -> []
+    let tablesIn (value: PdfObject | null) =
+        match value with
+        | :? PdfDictionary as attributes when isTable attributes -> [ attributes ]
+        | :? PdfArray as array ->
+            [ for i in 0 .. array.Size() - 1 do
+                  match array.Get(i, true) with
+                  | :? PdfDictionary as attributes when isTable attributes -> attributes
+                  | _ -> () ]
+        | _ -> []
+    let classes =
+        match classMap, element.Get(PdfName.C, true) with
+        | NonNull map, (:? PdfName as name) -> tablesIn (map.Get(name, true))
+        | NonNull map, (:? PdfArray as names) ->
+            [ for i in 0 .. names.Size() - 1 do
+                  match names.Get(i, true) with
+                  | :? PdfName as name -> yield! tablesIn (map.Get(name, true))
+                  | _ -> () ]
+        | _ -> []
+    tablesIn (element.Get(PdfName.A, true)) @ classes
+
+/// The most a table can span, in rows or columns: more is taken for a malformed value.
+[<Literal>]
+let private MostSpan = 1000
 
 /// Tagged tables' header cells (TH) without a Scope given one (PDF/UA 7.5; 8.2.5.26), so a screen
-/// reader can tell which cells each heads: Column in a header row (in THead, or a row of header
-/// cells only), Row for one with only header cells before it and a data cell after it, Column
-/// otherwise. Cells are placed in the table's grid by their RowSpan and ColSpan. A table whose cells
+/// reader can tell which cells each heads: Column in a header row (in THead, or a row whose cells,
+/// those spanning down into it included, are all header cells), Row for one with only header cells
+/// before it in its row and a data cell after it, Column otherwise. Cells are placed in the table's
+/// grid by their RowSpan and ColSpan (a row span no further than the table's last row, either at
+/// most MostSpan). Attributes are read from the cell and its classes; a new Scope is written on the
+/// cell alone (its /A copied, so attributes another cell shares aren't changed). A table whose cells
 /// name their headers (/Headers) is left as it is.
+/// A structure element's own first table attributes (in its /A), if it has some.
+let private ownTableAttributes (cell: PdfDictionary) =
+    match tableAttributes null cell with
+    | own :: _ -> Some own
+    | [] -> None
+
 let private scopeTableHeaders (document: PdfDocument) context =
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> []
     | root ->
+        let classMap = root.GetAsDictionary(PdfName "ClassMap")
+        let attributesOf = tableAttributes classMap
         let tag (element: PdfDictionary) = standardTag element context
         let kids (element: PdfDictionary) : PdfDictionary list =
             match element.Get(PdfName.K, true) with
@@ -350,7 +377,7 @@ let private scopeTableHeaders (document: PdfDocument) context =
             | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as kid -> kid | _ -> () ]
             | _ -> []
         let span (cell: PdfDictionary) (name: PdfName) =
-            tableAttributes cell |> List.tryPick (fun a -> a.GetAsNumber name |> Option.ofObj |> Option.map _.IntValue()) |> Option.defaultValue 1 |> max 1
+            attributesOf cell |> List.tryPick (fun a -> a.GetAsNumber name |> Option.ofObj |> Option.map _.IntValue()) |> Option.defaultValue 1 |> max 1 |> min MostSpan
         let mutable scoped = 0
         let mutable tables = 0
         for visit in walk root context do
@@ -363,46 +390,66 @@ let private scopeTableHeaders (document: PdfDocument) context =
                           | t when PdfName.THead.Equals t -> for row in kids kid do if PdfName.TR.Equals(tag row) then row, true
                           | t when PdfName.TBody.Equals t || PdfName.TFoot.Equals t -> for row in kids kid do if PdfName.TR.Equals(tag row) then row, false
                           | _ -> () ]
-                let cells = [ for row, head in rows -> row, head, [ for cell in kids row do if PdfName.TH.Equals(tag cell) || PdfName.TD.Equals(tag cell) then cell ] ]
-                let named = cells |> List.exists (fun (_, _, row) -> row |> List.exists (fun cell -> tableAttributes cell |> List.exists (fun a -> not (isNull (a.Get PdfName.Headers)))))
+                let cells = [| for row, head in rows -> head, [ for cell in kids row do if PdfName.TH.Equals(tag cell) || PdfName.TD.Equals(tag cell) then cell ] |]
+                let named = cells |> Array.exists (fun (_, row) -> row |> List.exists (fun cell -> attributesOf cell |> List.exists (fun a -> not (isNull (a.Get PdfName.Headers)))))
                 if not named then
-                    // Each cell's column, filling the grid left to right past cells spanning down into it.
-                    let taken = HashSet<int * int>()
-                    let placed =
-                        [ for r, (_, head, row) in List.indexed cells ->
-                              let mutable column = 0
-                              head,
-                              [ for cell in row ->
-                                    while taken.Contains((r, column)) do column <- column + 1
-                                    let rowSpan, colSpan = span cell PdfName.RowSpan, span cell PdfName.ColSpan
-                                    for dr in 0 .. rowSpan - 1 do
-                                        for dc in 0 .. colSpan - 1 do taken.Add((r + dr, column + dc)) |> ignore
-                                    let at = column
-                                    column <- column + colSpan
-                                    cell, at ] ]
+                    // Which cell occupies each place in the grid, filling each row left to right past
+                    // the cells spanning down into it; and where each cell starts.
+                    let occupant = Dictionary<int * int, PdfDictionary>()
+                    let starts = Dictionary<PdfDictionary, int * int>(HashIdentity.Reference)
+                    for r in 0 .. cells.Length - 1 do
+                        let mutable column = 0
+                        for cell in snd cells[r] do
+                            while occupant.ContainsKey((r, column)) do column <- column + 1
+                            let rowSpan = min (span cell PdfName.RowSpan) (cells.Length - r)
+                            let colSpan = span cell PdfName.ColSpan
+                            starts[cell] <- (r, column)
+                            for dr in 0 .. rowSpan - 1 do
+                                for dc in 0 .. colSpan - 1 do occupant[(r + dr, column + dc)] <- cell
+                            column <- column + colSpan
+                    let isHeader (cell: PdfDictionary) = PdfName.TH.Equals(tag cell)
+                    // A row's cells, those spanning down into it included, by the column each covers.
+                    let inRow (r: int) =
+                        occupant |> Seq.filter (fun kv -> fst kv.Key = r) |> Seq.map (fun kv -> snd kv.Key, kv.Value) |> List.ofSeq
                     let mutable changed = false
-                    for head, row in placed do
-                        let isHeader (cell: PdfDictionary) = PdfName.TH.Equals(tag cell)
-                        let headerRow = head || row |> List.forall (fst >> isHeader)
-                        for cell, column in row do
-                            let hasScope = tableAttributes cell |> List.exists (fun a -> not (isNull (a.Get PdfName.Scope)))
+                    for r in 0 .. cells.Length - 1 do
+                        let head, row = cells[r]
+                        let covering = inRow r
+                        let headerRow = head || covering |> List.forall (snd >> isHeader)
+                        for cell in row do
+                            let hasScope = attributesOf cell |> List.exists (fun a -> not (isNull (a.Get PdfName.Scope)))
                             if isHeader cell && not hasScope then
-                                let before = row |> List.filter (fun (_, c) -> c < column)
-                                let after = row |> List.filter (fun (_, c) -> c > column)
+                                let _, column = starts[cell]
+                                let before = covering |> List.filter (fun (c, _) -> c < column)
+                                let after = covering |> List.filter (fun (c, other) -> c > column && not (obj.ReferenceEquals(other, cell)))
                                 let scope =
                                     if headerRow then PdfName.Column
-                                    elif before |> List.forall (fst >> isHeader) && after |> List.exists (not << isHeader << fst) then PdfName.Row
+                                    elif before |> List.forall (snd >> isHeader) && after |> List.exists (not << isHeader << snd) then PdfName.Row
                                     else PdfName.Column
-                                match tableAttributes cell with
-                                | attributes :: _ -> attributes.Put(PdfName.Scope, scope) |> ignore
-                                | [] ->
-                                    let attributes = PdfDictionary()
-                                    attributes.Put(PdfName.O, PdfName.Table) |> ignore
-                                    attributes.Put(PdfName.Scope, scope) |> ignore
+                                // On the cell alone: its own table attributes copied with the scope
+                                // (another cell may share them), in a copy of its /A.
+                                let withScope = PdfDictionary()
+                                match ownTableAttributes cell with
+                                | Some own -> withScope.PutAll own
+                                | None -> withScope.Put(PdfName.O, PdfName.Table) |> ignore
+                                withScope.Put(PdfName.Scope, scope) |> ignore
+                                let replacement =
                                     match cell.Get(PdfName.A, true) with
-                                    | null -> cell.Put(PdfName.A, attributes) |> ignore
-                                    | :? PdfArray as array -> array.Add attributes
-                                    | other -> cell.Put(PdfName.A, PdfArray([ other; attributes :> PdfObject ] |> Collections.Generic.List)) |> ignore
+                                    | null -> withScope :> PdfObject
+                                    | :? PdfDictionary as only when PdfName.Table.Equals(only.GetAsName PdfName.O) -> withScope :> PdfObject
+                                    | :? PdfArray as array ->
+                                        let copy = PdfArray()
+                                        let mutable replaced = false
+                                        for i in 0 .. array.Size() - 1 do
+                                            match array.Get(i, true) with
+                                            | :? PdfDictionary as a when not replaced && PdfName.Table.Equals(a.GetAsName PdfName.O) ->
+                                                copy.Add withScope
+                                                replaced <- true
+                                            | _ -> copy.Add(array.Get(i, false))
+                                        if not replaced then copy.Add withScope
+                                        copy :> PdfObject
+                                    | other -> PdfArray([ other; withScope :> PdfObject ] |> Collections.Generic.List) :> PdfObject
+                                cell.Put(PdfName.A, replacement) |> ignore
                                 scoped <- scoped + 1
                                 changed <- true
                     if changed then tables <- tables + 1
