@@ -1158,8 +1158,8 @@ let private mapRoles (document: PdfDocument) (context: Context) =
           yield $"Mapped the tag name \"{name}\" ({elements uses}) to {tag}, which it says it is: to check."
       for name in repair.Remapped do
           yield $"Removed the role map's mapping of the standard tag {name}, which means itself."
-      if not repair.Circles.IsEmpty then
-          let names = String.Join(", ", repair.Circles |> List.map (fun n -> $"\"{n}\""))
+      for circle in repair.Circles do
+          let names = String.Join(", ", circle |> List.map (fun n -> $"\"{n}\""))
           yield $"Broke the role map's circle through {names}." ]
 
 let orderedFixes

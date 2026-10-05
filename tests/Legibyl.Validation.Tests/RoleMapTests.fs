@@ -141,6 +141,37 @@ let ``a circle and a standard tag mapped are mended`` () =
     result.AppliedFixes |> should contain "Broke the role map's circle through \"Body Text\", \"Heading 2\"."
 
 [<Fact>]
+let ``a mapping says every element it serves, whichever name reached it first`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // Zorp (2) and Blip (3) both map to Image, which isn't mapped.
+    createTagged
+        input.Path
+        PdfVersion.PDF_1_7
+        [ "Zorp", "One."; "Zorp", "Two."; "Blip", "Three."; "Blip", "Four."; "Blip", "Five." ]
+        [ "Zorp", "Image"; "Blip", "Image" ]
+
+    let result = fix input.Path output.Path
+
+    result.AppliedFixes |> should contain "Mapped the tag name \"Image\" (5 elements) to Figure, which it says it is: to check."
+
+[<Fact>]
+let ``two circles are each said`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged
+        input.Path
+        PdfVersion.PDF_1_7
+        [ "Heading 2", "Hours."; "Body Text", "Open at 8."; "Figure Caption", "A photo."; "Footnote Text", "1. Weather allowing." ]
+        [ "Heading 2", "Body Text"; "Body Text", "Heading 2"; "Figure Caption", "Footnote Text"; "Footnote Text", "Figure Caption" ]
+
+    let result = fix input.Path output.Path
+
+    result.AppliedFixes |> should contain "Broke the role map's circle through \"Body Text\", \"Heading 2\"."
+    result.AppliedFixes |> should contain "Broke the role map's circle through \"Figure Caption\", \"Footnote Text\"."
+    failed PdfProfile.PdfUa1 output.Path |> Set.filter (fun rule -> rule.StartsWith "7.1-") |> Set.intersect (set [ "7.1-5"; "7.1-6"; "7.1-7" ]) |> should be Empty
+
+[<Fact>]
 let ``a PDF 2.0 file's names are mapped too, for PDF/UA-2`` () =
     use input = new TempPdf()
     use output = new TempPdf()
