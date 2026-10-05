@@ -1076,6 +1076,9 @@ module private StructureView =
             let roleMapNames =
                 ctx.useStateLazy(fun () -> if isSuggested then None else try Some(RoleMaps.usedNamesIn sourceFilePath) with _ -> None).Current
             let inRoleMap (name: string) = match roleMapNames with Some names -> names.ContainsKey name | None -> true
+            // A tagged PDF's attached files and media clips, read from it; none if it can't be read.
+            let attachments =
+                ctx.useStateLazy(fun () -> if isSuggested then [] else try Attachments.list sourceFilePath with _ -> []).Current
 
             /// Every edit for this PDF, and whether it's in the PDF yet (see StructureEditsTab).
             let editsTab =
@@ -1322,6 +1325,14 @@ module private StructureView =
                                     TabItem.header "Role map"
                                     TabItem.content (
                                         StructureRoleMapTab.view { Root = root.Current; InRoleMap = inRoleMap; Review = review; OnChanged = onEditsChanged }
+                                    )
+                                ]
+                            // Its attached files and media, when it has any.
+                            if not attachments.IsEmpty then
+                                TabItem.create [
+                                    TabItem.header "Attachments"
+                                    TabItem.content (
+                                        StructureAttachmentsTab.view { Attachments = attachments; Review = review; Window = window; OnChanged = onEditsChanged }
                                     )
                                 ]
                         ]

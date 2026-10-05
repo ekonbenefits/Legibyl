@@ -418,6 +418,10 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                     match review.RoleMap with
                     | NonNull map -> validator.RoleMap <- map
                     | Null -> ()
+                    // And what's given its attached files and media.
+                    match review.Attachments with
+                    | NonNull edits -> validator.Attachments <- edits
+                    | Null -> ()
                     validator.Review <- ReviewFile.forCopy (Some review)
                 | None -> ()
                 let fix = validator.Fix(file, profile, targetPath, options)
@@ -460,6 +464,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
             validator.Edits <- []
             validator.Title <- null
             validator.RoleMap <- Collections.Generic.Dictionary<string, string>()
+            validator.Attachments <- Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>()
             validator.Review <- null
             model |> Option.iter (fun model -> (model :> IDisposable).Dispose())
 

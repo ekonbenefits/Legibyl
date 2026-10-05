@@ -39,8 +39,15 @@ type DocumentReview(modified: DateTime) =
     /// What was last saved (or read): the dismissals, edits, title, role map, auto fixes and which
     /// validation.
     member val private Saved:
-        Dismissals.Dismissed * RegionEdits.Edit list * string option * Map<string, string> * PdfFixOptions option * (string * DateTime) option * (string * Set<string>) option =
-        (Map.empty, [], None, Map.empty, None, None, None) with get, set
+        Dismissals.Dismissed
+        * RegionEdits.Edit list
+        * string option
+        * Map<string, string>
+        * Map<string, Attachments.AttachmentEdit>
+        * PdfFixOptions option
+        * (string * DateTime) option
+        * (string * Set<string>) option =
+        (Map.empty, [], None, Map.empty, Map.empty, None, None, None) with get, set
 
     /// Which validation it has: the file checked, and when.
     member private this.ValidationStamp = this.Validation |> Option.map (fun v -> v.Hash, v.CheckedAt)
@@ -88,6 +95,8 @@ type DocumentReview(modified: DateTime) =
     member val Title: string option = None with get, set
     /// The standard tag chosen for each of the PDF's own tag names (Structure…'s Role map).
     member val RoleMap: Map<string, string> = Map.empty with get, set
+    /// What's given the PDF's attached files and media clips, by key (Structure…'s Attachments).
+    member val Attachments: Map<string, Attachments.AttachmentEdit> = Map.empty with get, set
     /// The title the window prefilled and showed, if it was opened.
     member val ShownTitle: string option = None with get, set
 
@@ -119,6 +128,7 @@ type DocumentReview(modified: DateTime) =
           Edits = (if edits.Length = 0 then null else edits)
           Title = Option.toObj this.Title
           RoleMap = (if this.RoleMap.IsEmpty then null else Collections.Generic.Dictionary<string, string>(this.RoleMap))
+          Attachments = (if this.Attachments.IsEmpty then null else Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>(this.Attachments))
           Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null)
           Fixes = (this.AutoFixes |> Option.map (FixNames.ofOptions >> Array.ofList) |> Option.toObj)
           Validation = Option.toObj this.Validation
@@ -153,6 +163,7 @@ type DocumentReview(modified: DateTime) =
                 Edits = (if edits.Length = 0 then null else edits)
                 Title = (if isNull own.Title then carried.Title else own.Title)
                 RoleMap = (if isNull own.RoleMap then carried.RoleMap else own.RoleMap)
+                Attachments = (if isNull own.Attachments then carried.Attachments else own.Attachments)
                 Fixes = own.Fixes }
         | None -> own
 
@@ -164,10 +175,10 @@ type DocumentReview(modified: DateTime) =
 
     /// Whether there are changes Save hasn't kept: the dismissals, edits, title, role map or auto fixes differ
     /// from what was last saved (changing one back isn't a change), or there's a newer validation.
-    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.AutoFixes, this.ValidationStamp, this.Checklist) <> this.Saved
+    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist) <> this.Saved
 
     /// Takes what it has now as what's saved.
-    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.AutoFixes, this.ValidationStamp, this.Checklist)
+    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
@@ -213,6 +224,10 @@ type DocumentReviews() =
                 review.RoleMap <-
                     match saved.RoleMap with
                     | NonNull map -> map |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+                    | Null -> Map.empty
+                review.Attachments <-
+                    match saved.Attachments with
+                    | NonNull edits -> edits |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
                     | Null -> Map.empty
                 review.AutoFixes <- Option.ofObj saved.Fixes |> Option.map FixNames.toOptions
                 review.Validation <- Option.ofObj saved.Validation

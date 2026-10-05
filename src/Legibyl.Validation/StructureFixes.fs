@@ -1178,6 +1178,7 @@ let orderedFixes
     (edits: ElementEdit list)
     (title: string option)
     (roleMap: Map<string, string>)
+    (attachments: Map<string, Attachments.AttachmentEdit>)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.ParentTree, ParentTree.rebuild
       // A person's role map first: the RoleMap fix maps what's left.
@@ -1195,7 +1196,8 @@ let orderedFixes
       PdfFixOptions.ApplyEdits,
       (fun document context ->
           ElementEdits.apply document context edits
-          @ (title |> Option.map (ElementEdits.applyTitle document) |> Option.defaultValue []))
+          @ (title |> Option.map (ElementEdits.applyTitle document) |> Option.defaultValue [])
+          @ Attachments.apply document attachments)
       PdfFixOptions.LinkTargets, (fun document context -> LinkTargets.apply document (LinkTargets.find document context))
       PdfFixOptions.Tabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
@@ -1222,13 +1224,14 @@ let applyFixes
     (edits: ElementEdit list)
     (title: string option)
     (roleMap: Map<string, string>)
+    (attachments: Map<string, Attachments.AttachmentEdit>)
     : string list * PdfFixOptions list * string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
     let results =
-        [ for option, apply in orderedFixes titles layout edits title roleMap do
+        [ for option, apply in orderedFixes titles layout edits title roleMap attachments do
               if options.HasFlag option then
                   let notes = context.Notes.Count
                   let lines = apply document context
