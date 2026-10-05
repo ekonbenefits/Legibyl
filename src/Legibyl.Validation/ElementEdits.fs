@@ -128,9 +128,18 @@ let private findIn (document: PdfDocument) context (boxes: ElementEdit -> Struct
                       [ match standardTag visit.Element context with NonNull tag -> tag.GetValue() | Null -> ()
                         match visit.Element.GetAsName PdfName.S with NonNull name -> name.GetValue() | Null -> () ]
                       |> List.distinct
-                  match visit.Page with
+                  // Its page: its own (or an ancestor's), else that of what it holds, as a table's or
+                  // a list's, which often has none of its own.
+                  let page =
+                      visit.Page
+                      |> Option.orElseWith (fun () ->
+                          if names |> List.exists (fun name -> wanted |> Set.exists (fun (_, tag) -> tag = name)) then
+                              subtreeGeometry visit.Element context None |> Option.map _.PageNumber
+                          else
+                              None)
+                  match page with
                   | Some page when names |> List.exists (fun name -> wanted.Contains((page, name))) ->
-                      match subtreeGeometry visit.Element context visit.Page with
+                      match subtreeGeometry visit.Element context (Some page) with
                       | Some box when box.PageNumber = page -> yield names, box, visit.Element
                       | _ -> ()
                   | _ -> () ]
@@ -383,6 +392,13 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
             context
             [ for edit, piece in untaggedPieces document outside ->
                   piece, (if edit.Retag = "Artifact" then UntaggedContent.NotRead else UntaggedContent.TagAs(edit.Retag |> nonNull, edit.Alt)) ]
+    // Tables rebuilt from their page first: what's in them then moves with them.
+    let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
+    let rebuilt =
+        [ for edit, table in find document context tables do
+              if TableRebuild.refusal table context edit.Page = None && not (TableRebuild.rebuilt table context edit.Page edit.Cells) then
+                  TableRebuild.rebuild document context table edit.Page edit.Cells |> ignore
+                  yield () ]
     let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
     let runs = merges |> List.choose (mergeRun document context)
     ParagraphJoins.join runs |> ignore
@@ -402,7 +418,8 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     let moved = moveElements document context (found |> List.filter (fun (e, _) -> e.Move.IsSome))
     let count = applied.Length + runs.Length + artifacts.Length + outsideWritten
     // Those that don't apply are said by unapplied, one by one.
-    [ if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    [ if rebuilt.Length > 0 then $"Rebuilt {rebuilt.Length} table(s)' rows and cells from the page, as you checked them."
+      if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)."
       if moved > 0 then $"Put {moved} element(s) in the reading order you gave them." ]
 
 // ---- The document's title ----
@@ -473,11 +490,21 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
         let context = createContext document pdfPath
         let outside, edits = edits |> List.partition isUntagged
         let outsideFound = untaggedPieces document outside
+        let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
+        let tablesFound = find document context tables
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
         let found = findIn document context (boxesOf merges) edits
         let moves = found |> List.filter (fun (e, _) -> e.Move.IsSome)
         let moving = movedElements document context moves
-        [ for edit in outside do
+        [ for edit in tables do
+              match tablesFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
+              | None -> $"Your rebuild of the {describe edit} wasn't applied: no <{edit.Tag}> is in about that place."
+              | Some(_, table) ->
+                  match TableRebuild.refusal table context edit.Page with
+                  | Some why -> $"Your rebuild of the {describe edit} wasn't applied: {why}."
+                  | None when TableRebuild.rebuilt table context edit.Page edit.Cells -> $"Your rebuild of the {describe edit} changed nothing: its rows and cells are those already."
+                  | None -> ()
+          for edit in outside do
               match outsideFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
               | Some(_, piece) when piece.Kind = UntaggedContent.Text && edit.Retag = "Artifact" ->
                   $"Your edit making text outside the tags on page {edit.Page} decoration wasn't applied: text isn't hidden. Tag it as a paragraph (P) instead."
@@ -509,7 +536,12 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         use document = new PdfDocument(new PdfReader(pdfPath))
         let context = createContext document pdfPath
         let outside, edits = edits |> List.partition isUntagged
+        let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
+        (find document context tables
+         |> List.filter (fun (edit, table) -> TableRebuild.refusal table context edit.Page = None && not (TableRebuild.rebuilt table context edit.Page edit.Cells))
+         |> List.length)
+        +
         // (Text asked to be made decoration never is.)
         (untaggedPieces document outside |> List.filter (fun (e, piece) -> not (piece.Kind = UntaggedContent.Text && e.Retag = "Artifact")) |> List.length)
         + (merges |> List.choose (mergeRun document context) |> List.length)

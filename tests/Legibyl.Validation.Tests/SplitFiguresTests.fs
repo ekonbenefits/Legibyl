@@ -66,7 +66,7 @@ let ``a merge edit on figures, and alt text on the first, describe the picture o
     use output = new TempPdf()
     createPdf input.Path
     let pieces = [ for i in 0 .. 11 -> box (72.0 + float i * 10.0, 60.0, 81.0 + float i * 10.0, 71.0) ]
-    let merge = { Page = 1; Tag = "Figure"; Box = pieces.Head; Alt = null; Text = null; MergeWith = pieces.Tail; Retag = null; Exclude = false; Move = None }
+    let merge = { Page = 1; Tag = "Figure"; Box = pieces.Head; Alt = null; Text = null; MergeWith = pieces.Tail; Retag = null; Exclude = false; Move = None; Cells = [] }
     let alt = { merge with MergeWith = []; Alt = "A row of coloured pencils" }
 
     VeraPdfValidator(Edits = [ merge; alt ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
@@ -82,7 +82,7 @@ let ``a merged picture made not read is decoration as a whole`` () =
     use output = new TempPdf()
     createPdf input.Path
     let pieces = [ for i in 0 .. 11 -> box (72.0 + float i * 10.0, 60.0, 81.0 + float i * 10.0, 71.0) ]
-    let merge = { Page = 1; Tag = "Figure"; Box = pieces.Head; Alt = null; Text = null; MergeWith = pieces.Tail; Retag = null; Exclude = false; Move = None }
+    let merge = { Page = 1; Tag = "Figure"; Box = pieces.Head; Alt = null; Text = null; MergeWith = pieces.Tail; Retag = null; Exclude = false; Move = None; Cells = [] }
     let notRead = { merge with MergeWith = []; Retag = "Artifact" }
 
     VeraPdfValidator(Edits = [ merge; notRead ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore

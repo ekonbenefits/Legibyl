@@ -40,7 +40,7 @@ let private createTagged (path: string) =
 
 /// The figure's alt text, as given in Structure…: its box is about where the image is.
 let private altEdit =
-    { Page = 1; Tag = "Figure"; Box = box (73.0, 551.0, 171.0, 649.0); Alt = "Tomato seedlings in a tray"; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None }
+    { Page = 1; Tag = "Figure"; Box = box (73.0, 551.0, 171.0, 649.0); Alt = "Tomato seedlings in a tray"; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [] }
 
 let private applyEdits (input: string) (output: string) (edits: ElementEdit list) =
     VeraPdfValidator(Edits = edits).Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.ApplyEdits)
@@ -130,7 +130,7 @@ let private createLines (path: string) =
 let private line y = box (72.0, y - 2.0, 236.0, y + 12.0)
 
 let private merge (boxes: StructureGeometry list) =
-    { Page = 1; Tag = "P"; Box = boxes.Head; Alt = null; Text = null; MergeWith = boxes.Tail; Retag = null; Exclude = false; Move = None }
+    { Page = 1; Tag = "P"; Box = boxes.Head; Alt = null; Text = null; MergeWith = boxes.Tail; Retag = null; Exclude = false; Move = None; Cells = [] }
 
 let private paragraphTexts (path: string) =
     VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P") |> List.map (fun n -> (string n.Content).Trim())
