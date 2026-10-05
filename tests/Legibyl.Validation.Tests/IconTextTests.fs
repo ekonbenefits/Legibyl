@@ -52,7 +52,7 @@ let ``replacement text for text with icon characters satisfies PDF/UA-2, said or
     let paragraph = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "P")
     paragraph.Content |> should haveSubstring ""
     failed input.Path |> should contain "8.4.3-1"
-    let edit = { Page = 1; Tag = "P"; Box = paragraph.Geometry |> notNull; Alt = null; Text = text; MergeWith = []; Retag = null; Exclude = false; Move = None }
+    let edit = { Page = 1; Tag = "P"; Box = paragraph.Geometry |> notNull; Alt = null; Text = text; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [] }
 
     VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa2, output.Path, PdfFixOptions.ApplyEdits) |> ignore
 

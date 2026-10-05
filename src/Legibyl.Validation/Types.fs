@@ -159,6 +159,9 @@ type ElementMove =
     /// After the sibling in about this place.
     | After of StructureGeometry
 
+/// A table's cell as a rebuild gives it: a header cell (TH) or a data cell (TD), where it is.
+type TableCell = { Tag: string; Box: StructureGeometry }
+
 type ElementEdit =
     { Page: int
       /// Its standard tag, e.g. "Figure".
@@ -177,7 +180,10 @@ type ElementEdit =
       /// kept; anything else it holds is decoration).
       Exclude: bool
       /// Where it goes among its siblings, if it's moved.
-      Move: ElementMove option }
+      Move: ElementMove option
+      /// For a table: its rows and cells rebuilt as these cells (from the page, see TableRebuild);
+      /// empty to leave it.
+      Cells: TableCell list }
 
 /// The order of an element's children once some are moved (see ElementMove): those moved are
 /// taken out and put where their moves say, the rest keeping the order they were read in. The

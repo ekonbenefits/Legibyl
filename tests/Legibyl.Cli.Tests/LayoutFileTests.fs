@@ -110,7 +110,7 @@ let private edits (title: string | null) (edits: ReviewFile.SavedEdit list) : Re
     { Version = 1; DismissedWarnings = null; Edits = Array.ofList edits; Title = title; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
 
 let private editOn tag box : ReviewFile.SavedEdit =
-    { Page = 1; Tag = tag; Box = box; Alt = null; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false }
+    { Page = 1; Tag = tag; Box = box; Alt = null; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null}
 
 let private heading = [| 70.0; 695.0; 300.0; 715.0 |]
 let private figure = [| 70.0; 548.0; 175.0; 652.0 |]

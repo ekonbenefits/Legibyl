@@ -238,7 +238,7 @@ let ``an edit for an element of the PDF's own tag name finds it by that name`` (
     let heading = VeraPdfValidator().ReadStructureTree input.Path |> nonNull |> find |> List.exactlyOne
     let validator = VeraPdfValidator()
     validator.Edits <-
-        [ { Page = 1; Tag = "Heading 1"; Box = heading.Geometry |> nonNull; Alt = null; Text = null; MergeWith = []; Retag = "P"; Exclude = false; Move = None } ]
+        [ { Page = 1; Tag = "Heading 1"; Box = heading.Geometry |> nonNull; Alt = null; Text = null; MergeWith = []; Retag = "P"; Exclude = false; Move = None; Cells = [] } ]
 
     validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
 

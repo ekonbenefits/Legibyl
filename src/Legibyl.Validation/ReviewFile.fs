@@ -61,7 +61,16 @@ type SavedEdit =
       /// ...or that it's first among them.
       [<JsonPropertyName "moveFirst">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)>]
-      MoveFirst: bool }
+      MoveFirst: bool
+      /// For a table: the cells to rebuild its rows and cells as (see TableRebuild).
+      [<JsonPropertyName "cells">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Cells: SavedCell array | null }
+
+/// A table's cell, as a rebuild keeps it: TH or TD, and its box.
+and [<CLIMutable>] SavedCell =
+    { [<JsonPropertyName "tag">] Tag: string
+      [<JsonPropertyName "box">] Box: float array }
 
 /// A finding as a saved validation keeps it: where it is and what fixes it, without its message
 /// (which comes from the rule, when it's read back; see SavedResults).
@@ -306,7 +315,11 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
                     let page = if saved.MoveAfterPage > 0 then saved.MoveAfterPage else saved.Page
                     Some(After { PageNumber = page; Left = left; Bottom = bottom; Right = right; Top = top })
                 | _ -> None
-        if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude && move.IsNone then
+        let cells =
+            match saved.Cells with
+            | NonNull cells -> [ for cell in cells do match geometry cell.Box with Some box -> ({ Tag = cell.Tag; Box = box }: TableCell) | None -> () ]
+            | Null -> []
+        if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude && move.IsNone && cells.IsEmpty then
             None
         else
             Some
@@ -318,7 +331,8 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
                   MergeWith = mergeWith
                   Retag = saved.Retag
                   Exclude = saved.Exclude
-                  Move = move }
+                  Move = move
+                  Cells = cells }
     | None -> None
 
 /// The edit as it's saved.
@@ -334,7 +348,8 @@ let ofElementEdit (e: ElementEdit) : SavedEdit =
       Exclude = e.Exclude
       MoveAfter = (match e.Move with Some(After box) -> saved box | _ -> null)
       MoveAfterPage = (match e.Move with Some(After box) when box.PageNumber <> e.Page -> box.PageNumber | _ -> 0)
-      MoveFirst = (e.Move = Some First) }
+      MoveFirst = (e.Move = Some First)
+      Cells = if e.Cells.IsEmpty then null else [| for cell in e.Cells -> ({ Tag = cell.Tag; Box = saved cell.Box }: SavedCell) |] }
 
 /// The review's edits, as the ApplyEdits fix takes them.
 let edits (saved: SavedFile) : ElementEdit list =
