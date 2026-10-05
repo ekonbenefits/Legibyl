@@ -54,7 +54,7 @@ type Ruler() as this =
         | Some(top, height) -> top, height
         | None -> 0.0, this.Bounds.Height
 
-    /// Where a tick at at (0 to 1 down the blocks) is drawn: its top.
+    /// The top of a tick for a block whose place down the blocks is at (0 to 1).
     let tickTop (at: float) =
         let top, height = span ()
         top + at * (height - tickHeight)
