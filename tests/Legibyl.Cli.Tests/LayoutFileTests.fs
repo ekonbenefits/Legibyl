@@ -169,7 +169,7 @@ let ``edits with a field an edit doesn't have, or a tag that isn't one, are usag
         File.WriteAllText(pdf + ".legibyl.json", """{ "version": 1, "edits": [ { "page": 1, "tag": "P", "box": [ 1, 2, 3, 4 ], "contents": "x" } ] }""")
         fst (run [ "fix"; pdf; "--edits" ]) |> should equal 64
         ReviewFile.problems (File.ReadAllText(pdf + ".legibyl.json"))
-        |> should equal [ "edits[0] has \"contents\", which isn't a field of an edit (a link's description is its \"alt\"). An edit has page, tag and box, and any of alt, text, retag, exclude, mergeWith, and moveAfter (with moveAfterPage) or moveFirst." ])
+        |> should equal [ "edits[0] has \"contents\", which isn't a field of an edit (a link's description is its \"alt\"). An edit has page, tag and box, and any of alt, text, retag, exclude, mergeWith, moveAfter (with moveAfterPage) or moveFirst, and cells (a table's, rebuilt)." ])
 
 [<Fact>]
 let ``layout apply on a tagged file says it's already tagged`` () =

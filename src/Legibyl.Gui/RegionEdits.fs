@@ -60,7 +60,7 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
             existing
             |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = []; Retag = None; Exclude = false; Move = None; Cells = [] }
         )
-    if edited.Alt.IsNone && edited.Text.IsNone && edited.Retag.IsNone && not edited.Exclude && edited.Move.IsNone then others
+    if edited.Alt.IsNone && edited.Text.IsNone && edited.Retag.IsNone && not edited.Exclude && edited.Move.IsNone && edited.Cells.IsEmpty then others
     else others @ [ { edited with Box = box } ]
 
 /// A figure's alt text set, or removed if blank.

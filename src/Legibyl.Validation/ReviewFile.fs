@@ -228,7 +228,7 @@ let readFrom (path: string) : SavedFile option =
     else readFile path
 
 /// The fields an edit can have.
-let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mergeWith"; "moveAfter"; "moveAfterPage"; "moveFirst" ]
+let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mergeWith"; "moveAfter"; "moveAfterPage"; "moveFirst"; "cells" ]
 
 /// The tags an edit can give (retag): PDF's standard structure types, and Artifact for a
 /// suggested region that's page furniture.
@@ -261,7 +261,17 @@ let problems (json: string) : string list =
                       for field in edit.EnumerateObject() do
                           if not (List.contains field.Name editFields) then
                               let hint = if field.Name = "description" || field.Name = "contents" then " (a link's description is its \"alt\")" else ""
-                              $"edits[{index}] has \"{field.Name}\", which isn't a field of an edit{hint}. An edit has page, tag and box, and any of alt, text, retag, exclude, mergeWith, and moveAfter (with moveAfterPage) or moveFirst."
+                              $"edits[{index}] has \"{field.Name}\", which isn't a field of an edit{hint}. An edit has page, tag and box, and any of alt, text, retag, exclude, mergeWith, moveAfter (with moveAfterPage) or moveFirst, and cells (a table's, rebuilt)."
+                      match edit.TryGetProperty "cells" with
+                      | true, cells when cells.ValueKind = JsonValueKind.Array ->
+                          for c, cell in Seq.indexed (cells.EnumerateArray()) do
+                              let tag =
+                                  match cell.ValueKind, (if cell.ValueKind = JsonValueKind.Object then cell.TryGetProperty "tag" else (false, Unchecked.defaultof<JsonElement>)) with
+                                  | JsonValueKind.Object, (true, tag) when tag.ValueKind = JsonValueKind.String -> tag.GetString() |> string
+                                  | _ -> ""
+                              if tag <> "TH" && tag <> "TD" then
+                                  $"edits[{index}].cells[{c}] is a \"{tag}\", not a header cell (TH) or a data cell (TD)."
+                      | _ -> ()
                       match edit.TryGetProperty "retag" with
                       | true, retag when retag.ValueKind = JsonValueKind.String && not (retagTags.Contains(retag.GetString() |> string)) ->
                           $"edits[{index}] retags to \"{retag.GetString()}\", which isn't a standard tag (e.g. H1 to H6, P, LI, Figure, Caption, Note, Artifact)."

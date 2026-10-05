@@ -7,6 +7,7 @@ open iText.Kernel.Font
 open iText.Kernel.Geom
 open iText.Kernel.Pdf
 open iText.Kernel.Pdf.Canvas
+open iText.Kernel.Pdf.Tagutils
 open Legibyl.Validation
 open Legibyl.Validation.Tests.TestSupport
 
@@ -212,6 +213,8 @@ let ``a table's caption stays the table's, before its rows`` () =
     [ for kid in rebuilt.Children -> kid.Tag ] |> should equal [ "Caption"; "TR" ]
     (rebuilt.Children[0]).Content |> should equal "Planting times"
     rows output.Path |> List.tail |> should equal [ "TR", [ "TH", "Plant"; "TH", "Sow" ] ]
+    // And it counts as rebuilt, caption and all.
+    ElementEdits.pending output.Path [ rebuildEdit table [ cell "TH" 0 0; cell "TH" 0 1 ] ] |> should equal 0
 
 [<Fact>]
 let ``a rebuild's other changes are made too`` () =
@@ -263,3 +266,90 @@ let ``an edit for an element with a page is its, not a wrapper's without one aro
 
     VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.map _.Tag |> List.filter (fun t -> t = "Sect" || t = "Div")
     |> should equal [ "Sect"; "Div" ]
+
+/// A tagged page whose table is built by build (the tag pointer at the Table, and a function that
+/// tags a text at a place with a tag).
+let private createTable (path: string) (build: TagTreePointer -> (string -> float -> float -> string -> unit) -> unit) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.SetTagged() |> ignore
+    document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+    let page = document.AddNewPage PageSize.LETTER
+    let canvas = PdfCanvas page
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+    let tagged (tag: string) (x: float) (y: float) (text: string) =
+        pointer.AddTag tag |> ignore
+        canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(x, y).ShowText(text).EndText().CloseTag() |> ignore
+        pointer.MoveToParent() |> ignore
+    pointer.AddTag "Table" |> ignore
+    build pointer tagged
+
+[<Fact>]
+let ``a table that's one row of all its cells isn't taken for the grid rebuilt`` () =
+    use input = new TempPdf()
+    // A 2 × 2 table tagged as one row of four cells.
+    createTable input.Path (fun pointer tagged ->
+        pointer.AddTag "TR" |> ignore
+        tagged "TD" 80.0 680.0 "Plant"
+        tagged "TD" 230.0 680.0 "Sow"
+        tagged "TD" 80.0 656.0 "Tomato"
+        tagged "TD" 230.0 656.0 "March")
+    let table = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+
+    ElementEdits.pending input.Path [ rebuildEdit table [ cell "TD" 0 0; cell "TD" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] ] |> should equal 1
+
+[<Fact>]
+let ``a table nested too deeply to follow is left, and said`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTable input.Path (fun pointer tagged ->
+        for _ in 1..70 do pointer.AddTag "TBody" |> ignore
+        tagged "TD" 80.0 680.0 "Plant")
+    let table = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+    let edit = rebuildEdit table [ cell "TH" 0 0 ]
+
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.OutputPath |> should equal null
+    ElementEdits.unapplied input.Path [ edit ] |> List.exists (fun line -> line.EndsWith "its rows and cells are nested too deeply to follow.") |> should be True
+
+[<Fact>]
+let ``a table holding an annotation on another page is left`` () =
+    use plain = new TempPdf()
+    use input = new TempPdf()
+    createTable plain.Path (fun _ tagged ->
+        tagged "TD" 80.0 680.0 "Plant"
+        tagged "TD" 230.0 680.0 "Sow")
+    // A link on a second page, its reference put in the table's first cell.
+    do
+        use document = new PdfDocument(new PdfReader(plain.Path), new PdfWriter(input.Path))
+        let second = document.AddNewPage PageSize.LETTER
+        let link = iText.Kernel.Pdf.Annot.PdfLinkAnnotation(Rectangle(72f, 700f, 80f, 15f))
+        second.AddAnnotation link |> ignore
+        let rec cells (element: PdfDictionary) : PdfDictionary list =
+            let kids =
+                match element.Get(PdfName.K, true) with
+                | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> d | _ -> () ]
+                | :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> [ d ]
+                | _ -> []
+            (if PdfName.TD.Equals(element.GetAsName PdfName.S) then [ element ] else []) @ List.collect cells kids
+        let first = cells (document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot) |> List.head
+        let reference = PdfDictionary()
+        reference.Put(PdfName.Type, PdfName.OBJR) |> ignore
+        reference.Put(PdfName.Obj, link.GetPdfObject()) |> ignore
+        let kids = match first.Get(PdfName.K, true) with :? PdfArray as a -> a | kid -> PdfArray([| kid |])
+        kids.Add reference |> ignore
+        first.Put(PdfName.K, kids) |> ignore
+    let table = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+    let edit = rebuildEdit table [ cell "TH" 0 0; cell "TH" 0 1 ]
+
+    // Not rebuilt (holding something on another page, it isn't the table on page 1 alone), and said.
+    ElementEdits.unapplied input.Path [ edit ] |> List.exists (fun line -> line.Contains "wasn't applied") |> should be True
+    ElementEdits.pending input.Path [ edit ] |> should equal 0
+
+[<Fact>]
+let ``a review's rebuild is no problem, and a cell that isn't a TH or a TD is`` () =
+    let edit = { Page = 1; Tag = "Table"; Box = box 70.0 620.0 380.0 700.0; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [ cell "TH" 0 0; cell "TD" 1 0 ] }
+    let review = $"""{{ "version": 1, "edits": [ {System.Text.Json.JsonSerializer.Serialize(ReviewFile.ofElementEdit edit)} ] }}"""
+    ReviewFile.problems review |> should be Empty
+    ReviewFile.problems (review.Replace("\"TD\"", "\"P\"")) |> should equal [ "edits[0].cells[1] is a \"P\", not a header cell (TH) or a data cell (TD)." ]
