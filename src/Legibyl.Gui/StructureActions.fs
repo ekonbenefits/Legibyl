@@ -46,11 +46,13 @@ let isUntaggedText (node: StructureNode) = (string node.Content).StartsWith "tex
 /// it over real text would hide what the page says. Either needs the element's place on its
 /// page, which is how an edit finds it again.
 let editKinds (node: StructureNode) =
+    // (One of the PDF's own tag names by what its role map makes it: an Image mapped to Figure.)
+    let tag = match node.Role with NonNull role -> role | Null -> node.Tag
     match node.Geometry with
     | null -> []
     | _ ->
-        [ if node.Tag = "Link" then LinkDescription
-          elif node.Tag = "Figure" || node.Tag = "Formula" || not (isNull node.AlternateDescription) then AltText
+        [ if tag = "Link" then LinkDescription
+          elif tag = "Figure" || tag = "Formula" || not (isNull node.AlternateDescription) then AltText
           if not (isNull node.ActualText) then ReplacementText ]
 
 /// What editing it is called: on the selected element's buttons, and its block's right-click menu.
@@ -63,13 +65,21 @@ let editKindLabel (kind: EditKind) =
 /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
 let retagTags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
 
-/// Whether node can be given another tag: in a tagged PDF, a block of text; in a suggested
-/// layout, any region (it needs its place on its page, which is how the edit finds it again).
-let canRetag (suggested: bool) (node: StructureNode) =
-    // (One of the PDF's own tag names by what its role map makes it.)
-    let tag = match node.Role with NonNull role -> role | Null -> node.Tag
+/// The tag a screen reader hears for node: one of the PDF's own tag names by the standard tag
+/// chosen for it (roleMap, the Role map tab's), else by its role map's; a standard tag, itself.
+let heardTag (roleMap: Map<string, string>) (node: StructureNode) =
+    if RoleMaps.standardTags.Contains node.Tag then node.Tag
+    else roleMap.TryFind node.Tag |> Option.orElse (Option.ofObj node.Role) |> Option.defaultValue node.Tag
+
+/// Whether node, which a screen reader hears as heard, can be given another tag.
+let private canRetagAs (suggested: bool) (heard: string) (node: StructureNode) =
     not (isNull node.Geometry)
-    && (if suggested then node.Tag <> "Link" else tag = "H" || List.contains tag retagTags)
+    && (if suggested then node.Tag <> "Link" else heard = "H" || List.contains heard retagTags)
+
+/// Whether node can be given another tag: in a tagged PDF, a block of text (one of the PDF's own
+/// tag names by its role map's tag); in a suggested layout, any region (it needs its place on its
+/// page, which is how the edit finds it again).
+let canRetag (suggested: bool) (node: StructureNode) = canRetagAs suggested (heardTag Map.empty node) node
 
 /// The suggested regions in the selection: those selected, and those inside a selected list
 /// or document, to leave out or keep.
@@ -428,11 +438,14 @@ type TagChoice =
 /// decoration not read), several at once; a suggested structure's selected regions, several at
 /// once (Artifact for those not read).
 let tagChoice (needs: SelectionNeeds) : TagChoice option =
-    let figures = needs.Selected.Current |> List.filter (fun n -> n.Tag = "Figure" && not (isNull n.Geometry))
+    // What each is heard as: one of the PDF's own tag names by the tag chosen for it, else its map's.
+    let roleMap = if needs.Suggested then Map.empty else needs.RoleMap ()
+    let heard = heardTag roleMap
+    let figures = needs.Selected.Current |> List.filter (fun n -> heard n = "Figure" && not (isNull n.Geometry))
     let tagging =
         match needs.Selected.Current with
         | _ when needs.Suggested -> regionsIn needs.Selected.Current |> List.filter (canRetag true)
-        | [ single ] when canRetag false single -> [ single ]
+        | [ single ] when canRetagAs false (heard single) single -> [ single ]
         | chosen when not figures.IsEmpty && figures.Length = chosen.Length -> figures
         | _ -> []
     match tagging with
@@ -441,12 +454,9 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
         // One of the PDF's own tag names shows what it's mapped to: "Heading1 → H1", what a screen
         // reader hears.
         let named (node: StructureNode) =
-            if needs.Suggested || RoleMaps.standardTags.Contains node.Tag then
-                node.Tag
-            else
-                match needs.RoleMap () |> Map.tryFind node.Tag |> Option.orElse (Option.ofObj node.Role) with
-                | Some role -> $"{node.Tag} → {role}"
-                | None -> node.Tag
+            match heard node with
+            | tag when tag <> node.Tag -> $"{node.Tag} → {tag}"
+            | _ -> node.Tag
         let tagOf (node: StructureNode) = editFor needs.Edits.Current node |> Option.bind _.Retag |> Option.defaultValue (named node)
         // Their tag, when they share one.
         let tag =
@@ -457,7 +467,7 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
             // A table's cell is a header cell or a data cell: anything else would leave a hole in it.
             if needs.Suggested && targets |> List.forall (fun n -> TableGrid.isCell n.Tag) then [ "TH"; "TD" ]
             elif needs.Suggested then LayoutFile.tags
-            elif targets |> List.forall (fun n -> n.Tag = "Figure") then [ "Figure"; "Artifact" ]
+            elif targets |> List.forall (fun n -> heard n = "Figure") then [ "Figure"; "Artifact" ]
             else retagTags
         Some
             { Targets = targets
@@ -471,7 +481,7 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
               Tip =
                 (if needs.Suggested then
                      "The tag to give it: H1 (the title), H (a heading, given the next level under the title when tagged, since one page can't tell), H2 to H6, P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
-                 elif targets |> List.forall (fun n -> n.Tag = "Figure") then
+                 elif targets |> List.forall (fun n -> heard n = "Figure") then
                      "Figure, or Artifact for decoration a screen reader should skip, like a rule, a background or a border: on export, it's still drawn but marked as an artifact, and leaves the tags."
                  else
                      "Give this element another tag, e.g. a heading tagged as a paragraph.")

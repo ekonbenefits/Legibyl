@@ -18,13 +18,14 @@ open Legibyl.Validation
 /// The names in a structure that aren't tags: the root, the content outside the tags.
 let private notNames = set [ "StructTreeRoot"; "NotInTags"; "?" ]
 
-/// A tagged PDF's own tag names its elements use, in the order first used: each with how many
-/// use it, and the tag its role map gives it (null: none).
-let names (root: StructureNode) : (string * int * string option) list =
+/// A tagged PDF's own tag names its elements use, in the order first used, of those inRoleMap
+/// says its role map is for (not a PDF 2.0 file's names in another namespace, which its own map
+/// is for): each with how many use it, and the tag its role map gives it (null: none).
+let names (inRoleMap: string -> bool) (root: StructureNode) : (string * int * string option) list =
     let found = Collections.Generic.Dictionary<string, int * string option>()
     let order = ResizeArray<string>()
     let rec walk (node: StructureNode) =
-        if not (RoleMaps.standardTags.Contains node.Tag) && not (notNames.Contains node.Tag) then
+        if not (RoleMaps.standardTags.Contains node.Tag) && not (notNames.Contains node.Tag) && inRoleMap node.Tag then
             match found.TryGetValue node.Tag with
             | true, (uses, role) -> found[node.Tag] <- (uses + 1, role |> Option.orElse (Option.ofObj node.Role))
             | _ ->
@@ -47,6 +48,8 @@ let tags =
 /// made.
 type Needs =
     { Root: StructureNode
+      /// Whether a name is one the PDF's role map is for (see names).
+      InRoleMap: string -> bool
       Review: DocumentReview
       OnChanged: unit -> unit }
 
@@ -71,7 +74,7 @@ let view (needs: Needs) : IView =
                     needs.Review.RoleMap <- next
                     chosen.Set next
                     needs.OnChanged()
-            let rows = names needs.Root
+            let rows = names needs.InRoleMap needs.Root
             ScrollViewer.create [
                 ScrollViewer.content (
                     StackPanel.create [
@@ -111,7 +114,12 @@ let view (needs: Needs) : IView =
                                             ComboBox.minWidth 160.0
                                             ComboBox.verticalAlignment VerticalAlignment.Top
                                             ComboBox.dataItems items
-                                            ComboBox.selectedIndex (match current with Some tag -> 1 + List.findIndex ((=) tag) tags | None -> 0)
+                                            // (A hand-edited review's tag that isn't standard shows as not chosen.)
+                                            ComboBox.selectedIndex (
+                                                match current |> Option.bind (fun tag -> List.tryFindIndex ((=) tag) tags) with
+                                                | Some index -> 1 + index
+                                                | None -> 0
+                                            )
                                             AttrBuilder<ComboBox>.CreateProperty<string | null>(
                                                 Automation.AutomationProperties.NameProperty,
                                                 $"Standard tag for {name}",

@@ -1035,6 +1035,12 @@ module private StructureView =
                     ]
                 ]
 
+            // The names the PDF's role map is for, read from it (those an /NS puts in another
+            // namespace aren't); all of them if it can't be read.
+            let roleMapNames =
+                ctx.useStateLazy(fun () -> if isSuggested then None else try Some(RoleMaps.usedNamesIn sourceFilePath) with _ -> None).Current
+            let inRoleMap (name: string) = match roleMapNames with Some names -> names.ContainsKey name | None -> true
+
             /// Every edit for this PDF, and whether it's in the PDF yet (see StructureEditsTab).
             let editsTab =
                 StructureEditsTab.view
@@ -1275,10 +1281,12 @@ module private StructureView =
                                 TabItem.content editsTab
                             ]
                             // A tagged PDF's own tag names, when it uses any: what each is mapped to.
-                            if not isSuggested && not (StructureRoleMapTab.names root.Current).IsEmpty then
+                            if not isSuggested && not (StructureRoleMapTab.names inRoleMap root.Current).IsEmpty then
                                 TabItem.create [
                                     TabItem.header "Role map"
-                                    TabItem.content (StructureRoleMapTab.view { Root = root.Current; Review = review; OnChanged = onEditsChanged })
+                                    TabItem.content (
+                                        StructureRoleMapTab.view { Root = root.Current; InRoleMap = inRoleMap; Review = review; OnChanged = onEditsChanged }
+                                    )
                                 ]
                         ]
                     ]
