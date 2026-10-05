@@ -146,7 +146,8 @@ let view (needs: Needs) : IView =
                                         detailLine $"moved: after {name}" false
                                     | None -> ()
                                     match edit.Alt with
-                                    | Some alt when edit.Tag = "Link" -> detailLine $"description: \"{alt}\"" false
+                                    | Some alt when edit.Tag = "Link" || edit.Tag = "Annot" -> detailLine $"description: \"{alt}\"" false
+                                    | Some alt when edit.Tag = "Form" -> detailLine $"tooltip: \"{alt}\"" false
                                     | Some alt -> detailLine $"alt: \"{alt}\"" false
                                     | None -> ()
                                     match edit.Text with

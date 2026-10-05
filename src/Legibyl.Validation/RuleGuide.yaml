@@ -140,12 +140,12 @@ rules:
   - clause: "7.18.1"
     tests: [2]
     meaning: "An annotation has no description, so a screen reader can't say what it is."
-    whatToDo: "Give it a description (its Contents) in a PDF editor, or remove it if it isn't needed."
+    whatToDo: &describeAnnotation "In Structure…, select the annotation (its Annot tag, or Link for a link) and choose Edit Description… (F2): say what it's for, and Export… writes it. Or remove it in a PDF editor if it isn't needed."
 
   - clause: "7.18.1"
     tests: [3]
     meaning: "A form field has no tooltip, which is what a screen reader says when it's reached."
-    whatToDo: "Give the field a tooltip in a PDF editor's form tools, or in the tool that made the form."
+    whatToDo: &fieldTooltip "In Structure…, select the field (its Form tag) and choose Edit Tooltip… (F2), prefilled from the field's name: say what to fill in, and Export… writes it."
 
   - clause: "7.18.3"
     tests: [1]
@@ -384,7 +384,7 @@ pdfUa2Rules:
 
   - clauses: ["8.9.2.4.7", "8.9.2.4.8", "8.9.2.4.12", "8.9.2.4.19"]
     meaning: "An annotation has no description, so a screen reader can't say what it is."
-    whatToDo: "Give it a description (its Contents) in a PDF editor, or remove it if it isn't needed."
+    whatToDo: *describeAnnotation
 
   - clause: "8.9.2.4.11"
     meaning: "The PDF has a sound or movie annotation, which PDF/UA-2 doesn't allow."
@@ -401,7 +401,7 @@ pdfUa2Rules:
 
   - clause: "8.10.2.3"
     meaning: "A form field has no label or tooltip, which is what a screen reader says when it's reached."
-    whatToDo: "Give the field a tooltip in a PDF editor's form tools, or in the tool that made the form."
+    whatToDo: *fieldTooltip
 
   - clause: "8.11.1"
     tests: [1]
@@ -465,7 +465,7 @@ pdfUa2Rules:
 
   - clause: "8.10.3.5"
     meaning: "A signature is shown as a picture with no alt text, so a screen reader can't say who signed it."
-    whatToDo: "Sign it again with a signature appearance that has a description, or add alt text to the signature's picture in a PDF editor."
+    whatToDo: "In Structure…, select the signature (its Form tag) and choose Edit Tooltip… (F2): say whose it is, e.g. \"Signature of the applicant\"; Export… writes it as the field's tooltip and its tag's alt text. If its picture is a figure of its own in the tags, give that figure alt text instead; or sign it again with an appearance that has a description."
 
 # ISO 32005's rules for which tags may contain which, which PDF/UA-2 checks too. They're one
 # entry, for every one of its rules.

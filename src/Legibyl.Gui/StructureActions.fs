@@ -33,6 +33,10 @@ type EditKind =
     | ReplacementText
     /// A link's description (its annotation's /Contents).
     | LinkDescription
+    /// Another annotation's description (a comment's, a stamp's, a highlight's: its /Contents).
+    | Description
+    /// A form field's tooltip (its /TU): what a screen reader says when it reaches the field.
+    | Tooltip
 
 
 /// Whether it's a piece of what a page draws outside every tag.
@@ -52,6 +56,8 @@ let editKinds (node: StructureNode) =
     | null -> []
     | _ ->
         [ if tag = "Link" then LinkDescription
+          elif tag = "Annot" then Description
+          elif tag = "Form" then Tooltip
           elif tag = "Figure" || tag = "Formula" || not (isNull node.AlternateDescription) then AltText
           if not (isNull node.ActualText) then ReplacementText ]
 
@@ -61,6 +67,20 @@ let editKindLabel (kind: EditKind) =
     | AltText -> "Edit Alt Text…"
     | ReplacementText -> "Edit Replacement Text…"
     | LinkDescription -> "Edit Link Description…"
+    | Description -> "Edit Description…"
+    | Tooltip -> "Edit Tooltip…"
+
+/// A form field's name as a tooltip might say it: its last part, without an index, in words
+/// ("topmostSubform[0].Page1[0].first_name[0]" is "First name", "EmailAddress" "Email address").
+let fieldNameText (name: string) =
+    let last = name.Split('.') |> Array.last
+    let plain = Text.RegularExpressions.Regex.Replace(last, "\\[\\d+\\]$", "")
+    let spaced = Text.RegularExpressions.Regex.Replace(plain, "(?<=[a-z0-9])(?=[A-Z])", " ").Replace('_', ' ').Replace('-', ' ')
+    let words = spaced.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+    match List.ofArray words with
+    | [] -> ""
+    | first :: rest ->
+        String.Join(" ", (first.Substring(0, 1).ToUpperInvariant() + first.Substring(1).ToLowerInvariant()) :: (rest |> List.map _.ToLowerInvariant()))
 
 /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
 let retagTags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
@@ -214,9 +234,10 @@ let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
       | Some tag when tag <> node.Tag -> "tag", tag
       | _ -> ()
       match edit.Alt with
-      // A link's is its description.
-      | Some alt when node.Tag = "Link" && alt <> string node.LinkDescription -> "description", alt
-      | Some alt when node.Tag <> "Link" && alt <> string node.AlternateDescription -> "alt", alt
+      // A link's or another annotation's is its description; a form field's, its tooltip.
+      | Some alt when (node.Tag = "Link" || node.Tag = "Annot") && alt <> string node.LinkDescription -> "description", alt
+      | Some alt when node.Tag = "Form" && alt <> string node.FormFieldDescription -> "tooltip", alt
+      | Some alt when node.Tag <> "Link" && node.Tag <> "Annot" && node.Tag <> "Form" && alt <> string node.AlternateDescription -> "alt", alt
       | _ -> ()
       match edit.Text with
       | Some text when text <> string node.ActualText -> "text", text
@@ -411,10 +432,11 @@ let textActions (needs: SelectionNeeds) : Action list =
                   match kind with
                   | AltText -> single.AlternateDescription
                   | ReplacementText -> single.ActualText
-                  | LinkDescription -> single.LinkDescription
+                  | LinkDescription | Description -> single.LinkDescription
+                  | Tooltip -> single.FormFieldDescription
               let yours =
                   editFor needs.Edits.Current single
-                  |> Option.bind (fun e -> match kind with ReplacementText -> e.Text | AltText | LinkDescription -> e.Alt)
+                  |> Option.bind (fun e -> match kind with ReplacementText -> e.Text | AltText | LinkDescription | Description | Tooltip -> e.Alt)
               action
                   (editKindLabel kind)
                   (match yours, inPdf with

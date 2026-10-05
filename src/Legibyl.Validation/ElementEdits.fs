@@ -155,6 +155,21 @@ let private textOf (element: PdfDictionary) (key: PdfName) =
 /// /Contents, which is what readers announce, rather than the element's /Alt.
 let private isLink (edit: ElementEdit) = edit.Tag = "Link" || edit.Retag = "Link"
 
+/// Whether an edit is for another annotation's element (a comment, a stamp, a highlight), whose
+/// "alt text" is its description, its annotation's /Contents, as a link's is.
+let private isAnnotation (edit: ElementEdit) = edit.Tag = "Annot" || edit.Retag = "Annot"
+
+/// Whether an edit is for a form field's element, whose "alt text" is its tooltip: what a screen
+/// reader says when it reaches the field.
+let private isFormField (edit: ElementEdit) = edit.Tag = "Form" || edit.Retag = "Form"
+
+/// The field a widget annotation is for: the widget itself, where it's the field too (it has a
+/// name, or no parent), else its parent.
+let private fieldOf (widget: PdfDictionary) =
+    match widget.GetAsDictionary PdfName.Parent with
+    | NonNull parent when isNull (widget.Get PdfName.T) -> parent
+    | _ -> widget
+
 /// What edit changes on element: each dictionary, key and new value, where that differs from
 /// what it has.
 let private changes (edit: ElementEdit, element: PdfDictionary) =
@@ -162,9 +177,18 @@ let private changes (edit: ElementEdit, element: PdfDictionary) =
       | NonNull tag when (element.GetAsName PdfName.S |> Option.ofObj |> Option.map _.GetValue()) <> Some tag -> yield element, PdfName.S, tag
       | _ -> ()
       match edit.Alt with
-      | NonNull alt when isLink edit ->
+      | NonNull alt when isLink edit || isAnnotation edit ->
           for annotation in ownAnnotations element do
               if textOf annotation PdfName.Contents <> Some alt then yield annotation, PdfName.Contents, alt
+      | NonNull alt when isFormField edit ->
+          // Its field's tooltip (/TU, PDF/UA-1), and each widget's /Contents (PDF/UA-2's
+          // description of it); a signature's on its element too (its picture's alt text).
+          for widget in ownAnnotations element do
+              if PdfName.Widget.Equals(widget.GetAsName PdfName.Subtype) then
+                  let field = fieldOf widget
+                  if textOf field PdfName.TU <> Some alt then yield field, PdfName.TU, alt
+                  if textOf widget PdfName.Contents <> Some alt then yield widget, PdfName.Contents, alt
+                  if PdfName.Sig.Equals(field.GetAsName PdfName.FT) && textOf element PdfName.Alt <> Some alt then yield element, PdfName.Alt, alt
       | NonNull alt when textOf element PdfName.Alt <> Some alt -> yield element, PdfName.Alt, alt
       | _ -> ()
       match edit.Text with

@@ -165,9 +165,25 @@ let private referencedAnnotation (child: obj) (subtype: string) =
         | _ -> None
     | _ -> None
 
-/// A link's description: its annotation's /Contents, if it has one.
+/// The annotation (not a form field's widget) an object reference is to, if it is to one.
+let private referencedOtherAnnotation (child: obj) =
+    match child with
+    | :? PDOBJRDictionary as objr ->
+        match objr.getReferencedObject () with
+        | null -> None
+        | referenced when referenced.empty () -> None
+        | referenced when
+            (match atomValue (referenced.getNameKey(atom "Subtype")) with
+             | null | "Widget" -> false
+             | _ -> true)
+            ->
+            Some referenced
+        | _ -> None
+    | _ -> None
+
+/// A link's or another annotation's description: its /Contents, if it has one.
 let private readLinkDescription (child: obj) =
-    referencedAnnotation child "Link" |> Option.bind (fun referenced -> Option.ofObj (nullIfEmpty (referenced.getStringKey(atom "Contents"))))
+    referencedOtherAnnotation child |> Option.bind (fun referenced -> Option.ofObj (nullIfEmpty (referenced.getStringKey(atom "Contents"))))
 
 let private readFormFieldInfo (child: obj) (ownPage: int option) =
     referencedAnnotation child "Widget"
@@ -445,13 +461,13 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
                 | _ -> None)
     let contentTexts = contentInfos |> List.map _.Text |> List.filter (not << String.IsNullOrEmpty)
     let formField = leaves |> List.tryPick (fun child -> readFormFieldInfo child ownPage)
-    // A link holding only its annotation is where the annotation is.
+    // A link (or another annotation's element) holding only its annotation is where the annotation is.
     let linkRect =
         match ownPage with
         | Some page ->
             leaves
             |> List.tryPick (fun child ->
-                referencedAnnotation child "Link" |> Option.bind (fun referenced -> geometryFromCosRect page (referenced.getKey(atom "Rect"))))
+                referencedOtherAnnotation child |> Option.bind (fun referenced -> geometryFromCosRect page (referenced.getKey(atom "Rect"))))
         | None -> None
 
     let children = walkChildren elem context ownPage (depth + 1)
