@@ -47,3 +47,23 @@ let place (cells: StructureGeometry list) : Place list =
 
 /// Whether a tag is a table cell's: a header cell (TH) or a data cell (TD).
 let isCell (tag: string) = tag = "TH" || tag = "TD"
+
+/// The cell of cells (by index) a piece drawn at geometry belongs in: the one its middle is in,
+/// else the nearest; the first, for one with no place. As a table's rebuild puts it (see
+/// TableRebuild), and Structure… shows it before.
+let cellFor (cells: StructureGeometry list) (geometry: StructureGeometry option) =
+    match geometry with
+    | Some box ->
+        let x, y = (box.Left + box.Right) / 2.0, (box.Bottom + box.Top) / 2.0
+        let inside (c: StructureGeometry) = x >= c.Left && x <= c.Right && y >= c.Bottom && y <= c.Top
+        match cells |> List.tryFindIndex inside with
+        | Some index -> index
+        | None ->
+            cells
+            |> List.indexed
+            |> List.minBy (fun (_, c) ->
+                let dx = max 0.0 (max (c.Left - x) (x - c.Right))
+                let dy = max 0.0 (max (c.Bottom - y) (y - c.Top))
+                dx * dx + dy * dy)
+            |> fst
+    | None -> 0
