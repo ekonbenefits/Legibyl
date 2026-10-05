@@ -252,3 +252,28 @@ let ``a review's role map is read and written`` () =
     file.RoleMap |> nonNull |> Seq.map (fun kv -> kv.Key, kv.Value) |> List.ofSeq |> should equal [ "Zorp", "P" ]
     ReviewFile.isEmpty file |> should be False
     (ReviewFile.toJson file).Contains "\"roleMap\"" |> should be True
+
+[<Fact>]
+let ``names in another namespace aren't the role map's`` () =
+    use input = new TempPdf()
+    use namespaced = new TempPdf()
+    createTagged input.Path PdfVersion.PDF_2_0 [ "Heading 1", "Garden notes"; "Zorp", "The garden opens at 8." ] []
+    do
+        use document = new PdfDocument(new PdfReader(input.Path), new PdfWriter(namespaced.Path))
+        let ns = PdfDictionary()
+        ns.Put(PdfName.Type, PdfName "Namespace") |> ignore
+        ns.Put(PdfName "NS", PdfString "https://example.com/own-tags") |> ignore
+        let rec find (element: PdfDictionary) : PdfDictionary list =
+            let kids =
+                match element.Get(PdfName.K, true) with
+                | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> d | _ -> () ]
+                | :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> [ d ]
+                | _ -> []
+            (if PdfName("Zorp").Equals(element.GetAsName PdfName.S) then [ element ] else []) @ List.collect find kids
+        let root = document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot
+        for element in find root do
+            element.Put(PdfName.NS, ns.MakeIndirect document) |> ignore
+
+    let names = RoleMaps.usedNamesIn namespaced.Path
+    names.ContainsKey "Heading 1" |> should be True
+    names.ContainsKey "Zorp" |> should be False

@@ -130,3 +130,62 @@ let ``the Tag picker shows an element of the PDF's own tag name with what it's m
             window.Close()
 
             shown |> should equal "Heading1 → H1"))
+
+/// Selects the block of the element with tag, as Enter on it does.
+let private selectBlock (window: Window) (tag: string) =
+    let block = descendants<Border> window |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = tag | _ -> false)
+    block.Focus() |> ignore
+    block.RaiseEvent(Input.KeyEventArgs(RoutedEvent = Input.InputElement.KeyDownEvent, Key = Input.Key.Enter, Source = block))
+    pump ()
+
+[<Fact>]
+let ``a tag chosen in the Role map tab gives its elements the Tag picker, as what they'll be heard as`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show structure pdf
+            selectBlock window "Zorp"
+            let before = descendants<ComboBox> window |> List.exists (fun c -> string (Automation.AutomationProperties.GetName c) = "Tag for this <Zorp>")
+            selectTab window "Role map"
+            (picker window "Standard tag for Zorp").SelectedItem <- "P"
+            pump ()
+            selectTab window "Blocks"
+            selectBlock window "Zorp"
+            let shown = string (picker window "Tag for this <Zorp>").SelectedItem
+            window.Close()
+
+            before |> should be False
+            shown |> should equal "Zorp → P"))
+
+[<Fact>]
+let ``an element mapped to Figure is a figure: Figure or Artifact, and alt text`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show (node "StructTreeRoot" null null [ node "Document" null null [ node "Image" "Figure" (rect 700.0) [] ] ]) pdf
+            selectBlock window "Image"
+            let tag = picker window "Tag for this <Image>"
+            let choices = tag.Items |> Seq.map string |> List.ofSeq
+            let buttons =
+                descendants<Button> window
+                |> List.map (fun b -> match Automation.AutomationProperties.GetName b with null | "" -> string b.Content | name -> name)
+            window.Close()
+
+            choices |> should equal [ "Image → Figure"; "Figure"; "Artifact" ]
+            buttons |> should contain "Edit Alt Text…"))
+
+[<Fact>]
+let ``a review's choice of a tag that isn't standard shows as not chosen`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show structure pdf
+            window.Review.RoleMap <- Map.ofList [ "Zorp", "Paragraph" ]
+            selectTab window "Role map"
+            let shown = string (picker window "Standard tag for Zorp").SelectedItem
+            window.Close()
+
+            shown |> should equal "Not chosen"))
+
+[<Fact>]
+let ``only names the role map is for are listed`` () =
+    StructureRoleMapTab.names (fun name -> name <> "Zorp") structure
+    |> List.map (fun (name, uses, _) -> name, uses)
+    |> should equal [ "Heading1", 1; "Body Text", 2 ]

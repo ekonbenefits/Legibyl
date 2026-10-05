@@ -136,6 +136,12 @@ let usedNames (document: PdfDocument) : Map<string, int> =
         | _ -> ()
     counts |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
 
+/// The tag names the elements of the PDF at pdfPath use, in the PDF 1.7 namespace (see usedNames):
+/// the names its role map is for.
+let usedNamesIn (pdfPath: string) : Map<string, int> =
+    use document = new PdfDocument(new PdfReader(pdfPath))
+    usedNames document
+
 /// What repairing a role map did: the names mapped by what they say (each with the tag and how
 /// many elements it serves), the standard tags' mappings removed, the circles broken (each by its
 /// names), and the names
