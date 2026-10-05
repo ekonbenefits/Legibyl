@@ -396,9 +396,10 @@ module private StructureView =
                                 // Its text, without the icons, to start from.
                                 "Replacement Text",
                                 $"This text on page {page} uses icon characters a screen reader can't read (an icon font's: a phone, an envelope, a tick). "
-                                + "Say what it means, e.g. \"Phone: 555-0100\", or leave it empty if the icons are only decoration.",
+                                + "This replaces all of it, so keep its words: say what the icons mean, e.g. \"Phone: 555-0100\", or just the words if they're only decoration. "
+                                + "Leave it empty only if none of it should be read.",
                                 existing |> Option.bind _.Text |> Option.defaultValue (StructureActions.withoutIconCharacters (string node.Content)),
-                                "Nothing to read here (decoration)"
+                                "Nothing to read here (all decoration)"
                             | ReplacementText ->
                                 "Replacement Text",
                                 $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn.",
