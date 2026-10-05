@@ -63,6 +63,10 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
     if edited.Alt.IsNone && edited.Text.IsNone && edited.Retag.IsNone && not edited.Exclude && edited.Move.IsNone && edited.Cells.IsEmpty then others
     else others @ [ { edited with Box = box } ]
 
+/// A table's rows and cells rebuilt as cells (see TableRebuild); none to leave it.
+let setCells edits page tag box (cells: TableCell list) =
+    update edits page tag box (fun e -> { e with Cells = cells })
+
 /// A figure's alt text set, or removed if blank.
 let setAlt edits page tag box (alt: string) =
     update edits page tag box (fun e -> { e with Alt = (if String.IsNullOrWhiteSpace alt then None else Some alt) })

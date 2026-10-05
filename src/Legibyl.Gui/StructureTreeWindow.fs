@@ -427,6 +427,50 @@ module private StructureView =
                     }
                     |> ignore
 
+            /// A tagged table's rows and cells rebuilt from the page: found by the table-structure
+            /// model (the cells kept from before, if it was rebuilt already), shown for a person to
+            /// check, and kept as the table's edit.
+            let rebuildTable (node: StructureNode) =
+                match node.Geometry with
+                | null -> ()
+                | box ->
+                    task {
+                        let kept = editFor edits.Current node |> Option.map _.Cells |> Option.filter (not << List.isEmpty)
+                        let! found =
+                            match kept with
+                            | Some cells -> Task.FromResult(Some cells)
+                            | None ->
+                                Task.Run(fun () ->
+                                    if not (TableModel.isDownloaded ()) then
+                                        (TableModel.download (Progress<float>(ignore)) CancellationToken.None).Wait()
+                                    use suggester = new LayoutSuggester(sourceFilePath)
+                                    suggester.TableCells(box.PageNumber, box)
+                                    |> Option.map (List.map (fun (header, g) -> ({ Tag = (if header then "TH" else "TD"); Box = g }: TableCell))))
+                        match found with
+                        | Some cells when not cells.IsEmpty ->
+                            // The text drawn in each cell: what the table's elements draw there.
+                            let rec drawn (n: StructureNode) : (string * StructureGeometry) list =
+                                [ match n.Content, n.Geometry with
+                                  | NonNull text, NonNull g when text.Trim() <> "" -> text.Trim(), g
+                                  | _ -> ()
+                                  for child in n.Children do yield! drawn child ]
+                            let pieces = drawn node
+                            let texts =
+                                [ for cell in cells ->
+                                      pieces
+                                      |> List.filter (fun (_, g) ->
+                                          let x, y = (g.Left + g.Right) / 2.0, (g.Bottom + g.Top) / 2.0
+                                          x >= cell.Box.Left && x <= cell.Box.Right && y >= cell.Box.Bottom && y <= cell.Box.Top)
+                                      |> List.map fst
+                                      |> String.concat " " ]
+                            match! TableRebuildDialog.show window cells texts with
+                            | Some checkedCells -> do! saveEdits (RegionEdits.setCells edits.Current box.PageNumber node.Tag box checkedCells)
+                            | None -> ()
+                        | Some _ -> do! Dialogs.showMessage window "The table-structure model found no rows or cells in this table." "Rebuild Rows and Cells"
+                        | None -> do! Dialogs.showMessage window "The table-structure model isn't available, so the table's rows and cells can't be found." "Rebuild Rows and Cells"
+                    }
+                    |> ignore
+
             /// Selects the block for node, as clicking it does, opening collapsed blocks above it if
             /// it's in one, and scrolls it into view; then does after with its block. A node without
             /// a block of its own (a table's row, say) selects the nearest one above it that has.
@@ -743,7 +787,8 @@ module private StructureView =
                   SaveEdits = saveEdits
                   MarkAllLike = markAllLike
                   EditNode = editNode
-                  RoleMap = fun () -> review.RoleMap }
+                  RoleMap = fun () -> review.RoleMap
+                  RebuildTable = rebuildTable }
             /// A tagged PDF's selected element's moves in the reading order.
             let moves () = if isSuggested then [] else StructureActions.moveActions (orderNeeds ())
             menuFill.Value <-
