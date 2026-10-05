@@ -89,3 +89,65 @@ let ``a form field's tooltip is its /TU and its widget's /Contents, written from
     use document = new PdfDocument(new PdfReader(output.Path))
     let widget = document.GetPage(1).GetAnnotations() |> Seq.find (fun a -> PdfName.Widget.Equals(a.GetSubtype()))
     widget.GetContents().ToUnicodeString() |> should equal "First name"
+
+/// A tagged page with a text field shown twice: one field (its name on it) with two widgets,
+/// each tagged Form.
+let private createTwoWidgets (path: string) =
+    createTagged path (fun document page ->
+        let form = PdfFormCreator.GetAcroForm(document, true)
+        let field = TextFormFieldBuilder(document, "first_name").SetWidgetRectangle(Rectangle(72f, 640f, 200f, 20f)).CreateText()
+        let second = PdfWidgetAnnotation(Rectangle(72f, 600f, 200f, 20f))
+        field.AddKid second |> ignore
+        form.AddField field
+        page.AddAnnotation second |> ignore)
+
+[<Fact>]
+let ``a field shown twice is read from its field, and its tooltip given to both widgets`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTwoWidgets input.Path
+    let fields = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "Form")
+    // Its name is on the field, not the widgets.
+    fields |> List.map _.FormFieldName |> List.distinct |> should equal [ "first_name" ]
+
+    applyEdits input.Path output.Path [ edit "Form" (fields.Head.Geometry |> notNull) "First name" ] |> ignore
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    let widgets = document.GetPage(1).GetAnnotations() |> Seq.filter (fun a -> PdfName.Widget.Equals(a.GetSubtype())) |> List.ofSeq
+    widgets.Length |> should be (greaterThanOrEqualTo 2)
+    widgets |> List.map (fun w -> w.GetContents() |> Option.ofObj |> Option.map _.ToUnicodeString()) |> List.distinct |> should equal [ Some "First name" ]
+    VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "Form") |> List.map _.FormFieldDescription
+    |> List.distinct
+    |> should equal [ "First name" ]
+
+[<Fact>]
+let ``an element of the PDF's own name holding a field gets the field's tooltip`` () =
+    use input = new TempPdf()
+    use renamed = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path (fun document _ ->
+        let form = PdfFormCreator.GetAcroForm(document, true)
+        form.AddField(TextFormFieldBuilder(document, "first_name").SetWidgetRectangle(Rectangle(72f, 640f, 200f, 20f)).CreateText()))
+    // Its element named Field, mapped to Form.
+    do
+        use document = new PdfDocument(new PdfReader(input.Path), new PdfWriter(renamed.Path))
+        let root = document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot
+        let rec find (element: PdfDictionary) : PdfDictionary list =
+            let kids =
+                match element.Get(PdfName.K, true) with
+                | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> d | _ -> () ]
+                | :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> [ d ]
+                | _ -> []
+            (if PdfName.Form.Equals(element.GetAsName PdfName.S) then [ element ] else []) @ List.collect find kids
+        for element in find root do
+            element.Put(PdfName.S, PdfName "Field") |> ignore
+        let map = match root.GetAsDictionary PdfName.RoleMap with null -> PdfDictionary() | m -> m
+        map.Put(PdfName "Field", PdfName.Form) |> ignore
+        root.Put(PdfName.RoleMap, map) |> ignore
+    let field = element "Field" renamed.Path
+
+    applyEdits renamed.Path output.Path [ edit "Field" (field.Geometry |> notNull) "First name" ] |> ignore
+
+    let after = element "Field" output.Path
+    after.FormFieldDescription |> should equal "First name"
+    after.AlternateDescription |> should be Null
