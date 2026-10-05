@@ -43,6 +43,21 @@ type Ruler() as this =
     let mutable ticks: Tick list = []
     let mutable pending = false
     let mutable blocks: ScrollViewer | null = null
+    // Where the blocks' scroll bar's track is beside it (its top, and how tall): the thumb moves
+    // along that, not the scroll bar's whole height, which its arrow buttons take a part of when
+    // they show. None: the strip's own height.
+    let mutable track: (float * float) option = None
+
+    /// The span ticks are laid along: the scroll bar's track, else the whole strip.
+    let span () =
+        match track with
+        | Some(top, height) -> top, height
+        | None -> 0.0, this.Bounds.Height
+
+    /// Where a tick at at (0 to 1 down the blocks) is drawn: its top.
+    let tickTop (at: float) =
+        let top, height = span ()
+        top + at * (height - tickHeight)
 
     /// Where each mark's block is, once the blocks are laid out.
     let measure () =
@@ -64,6 +79,13 @@ type Ruler() as this =
                     | true, border -> Some border
                     | _ -> this.ParentOf node |> Option.bind blockOf
                 let extent = scroll.Extent.Height
+                // The vertical scroll bar's track (the thumb's run), as it's laid out now.
+                track <-
+                    scroll.GetVisualDescendants()
+                    |> Seq.tryPick (function
+                        | :? Primitives.Track as t when t.Orientation = Layout.Orientation.Vertical && t.IsEffectivelyVisible && t.Bounds.Height > 0.0 ->
+                            t.TranslatePoint(Point(0.0, 0.0), this) |> Option.ofNullable |> Option.map (fun p -> p.Y, t.Bounds.Height)
+                        | _ -> None)
                 ticks <-
                     [ for mark in this.Marks do
                           match blockOf mark.Node |> Option.bind (fun b -> Option.ofNullable (b.TranslatePoint(Point(0.0, 0.0), content))) with
@@ -82,9 +104,8 @@ type Ruler() as this =
     let onLayout = EventHandler(fun _ _ -> remeasure ())
 
     let tickAt (y: float) =
-        let height = this.Bounds.Height
         ticks
-        |> List.map (fun t -> t, abs (t.At * (height - tickHeight) + tickHeight / 2.0 - y))
+        |> List.map (fun t -> t, abs (tickTop t.At + tickHeight / 2.0 - y))
         |> List.filter (fun (_, distance) -> distance <= 6.0)
         // The nearest; a failure over a warning as near.
         |> List.sortBy (fun (t, distance) -> distance, not t.Mark.Failure)
@@ -102,6 +123,9 @@ type Ruler() as this =
     member val Go: StructureNode -> unit = ignore with get, set
     /// Where its ticks are (0 to 1, down the blocks) and what they mark, as last measured.
     member _.Ticks = ticks |> List.map (fun t -> t.At, t.Mark)
+    /// Where its ticks are laid along it: the top and height of the scroll bar's track beside it
+    /// (or its own, without one), as last measured.
+    member _.Span = span ()
     /// How a tick's block is said in its tooltip.
     member val Describe: StructureNode -> string = (fun n -> n.Tag) with get, set
 
@@ -141,7 +165,7 @@ type Ruler() as this =
         let failure, warning = brush Theme.Tokens.Danger, brush Theme.Tokens.Warning
         // Warnings first, so a failure at the same place is drawn over it.
         for tick in ticks |> List.sortBy _.Mark.Failure do
-            let y = tick.At * (height - tickHeight)
+            let y = tickTop tick.At
             context.FillRectangle((if tick.Mark.Failure then failure else warning), Rect(0.0, y, width, tickHeight), 1.0f)
 
     override this.OnPointerMoved(e) =
