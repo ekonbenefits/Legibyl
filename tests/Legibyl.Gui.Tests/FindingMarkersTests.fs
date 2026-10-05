@@ -486,3 +486,34 @@ let ``editing is on the right with a pencil (ordering by layout with the wand), 
             goesLeft |> should be True
             items |> should equal [ "Import Edits…"; "Export Structure as JSON…" ]
             footer |> should be Empty))
+
+[<Fact>]
+let ``the ticks are laid along the scroll bar's track, beside its arrows when they show`` () =
+    withTaggedPdf (fun pdf ->
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let structureWindow = openStructure window
+            // Short enough to scroll, and its scroll bar shown in full, arrows and all.
+            structureWindow.Height <- 360.0
+            let blocks = descendants<ScrollViewer> structureWindow |> List.find (fun s -> s.Name = FindingRuler.blocksName)
+            blocks.AllowAutoHide <- false
+            pump ()
+            let ruler = descendants<FindingRuler.Ruler> structureWindow |> List.exactlyOne
+            waitFor (fun () -> ruler.Ticks.Length = 2)
+            pump ()
+            let track =
+                descendants<Primitives.Track> blocks |> List.find (fun t -> t.Orientation = Avalonia.Layout.Orientation.Vertical && t.IsEffectivelyVisible)
+            let top = (track.TranslatePoint(Point(0.0, 0.0), ruler) |> Option.ofNullable |> Option.get).Y
+            let arrows =
+                descendants<RepeatButton> blocks |> List.filter (fun b -> b.IsEffectivelyVisible && b.Bounds.Height > 0.0) |> List.length
+            let span = ruler.Span
+            let rulerHeight = ruler.Bounds.Height
+            structureWindow.Close()
+            window.Close()
+
+            // The arrows take the track's ends: the ticks start and stop where the thumb does.
+            arrows |> should be (greaterThan 0)
+            top |> should be (greaterThan 0.0)
+            track.Bounds.Height |> should be (lessThan rulerHeight)
+            span |> should equal (top, track.Bounds.Height)))
