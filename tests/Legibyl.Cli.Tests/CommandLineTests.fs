@@ -149,6 +149,29 @@ let ``--edits gives a tagged PDF the review's title`` () =
         document.GetDocumentInfo().GetTitle() |> should equal "The Community Garden")
 
 [<Fact>]
+let ``--edits writes a review that only gives an attached file a description`` () =
+    withTaggedPdf (fun pdf ->
+        // The tagged PDF with notes.txt attached, without a description.
+        let attached = Path.ChangeExtension(pdf, ".attached.pdf") |> nonNull
+        do
+            use document = new PdfDocument(new PdfReader(pdf), new PdfWriter(attached))
+            let spec = iText.Kernel.Pdf.Filespec.PdfFileSpec.CreateEmbeddedFileSpec(document, Text.Encoding.UTF8.GetBytes "Bring gloves.", null, "notes.txt", null, null)
+            document.AddFileAttachment("notes.txt", spec)
+        File.Copy(attached, pdf, true)
+        let edits = Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>()
+        edits["the document: notes.txt"] <- { FileName = null; Description = "What to bring"; ContentType = null }
+        let review: ReviewFile.SavedFile =
+            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; RoleMap = null; Attachments = edits
+              Layout = null; Fixes = null; Validation = null; Checklist = null }
+        File.WriteAllText(ReviewFile.filePath pdf, ReviewFile.toJson review)
+        let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
+
+        let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
+
+        strings result.Value "applied" |> should contain "Wrote the attached file \"notes.txt\"'s Desc, as given."
+        Attachments.list copy |> List.map _.Description |> should equal [ Some "What to bring" ])
+
+[<Fact>]
 let ``--edits-from reads another review, such as an earlier version's`` () =
     withTaggedPdf (fun pdf ->
         let other = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "earlier.legibyl.json")

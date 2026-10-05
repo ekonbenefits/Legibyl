@@ -368,7 +368,14 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
         request.Fixes
         ||| (if request.Layout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
         ||| (match review with
-             | Some review when not (ReviewFile.edits review).IsEmpty || not (String.IsNullOrWhiteSpace review.Title) -> PdfFixOptions.ApplyEdits
+             | Some review when
+                 not (ReviewFile.edits review).IsEmpty
+                 || not (String.IsNullOrWhiteSpace review.Title)
+                 // (Its role map, and what's given its attachments, are edits too.)
+                 || (match review.RoleMap with NonNull map -> map.Count > 0 | Null -> false)
+                 || (match review.Attachments with NonNull edits -> edits.Count > 0 | Null -> false)
+                 ->
+                 PdfFixOptions.ApplyEdits
              | _ -> PdfFixOptions.None)
     if options = PdfFixOptions.None then
         let before = try Some(validator.Validate(file, profile)) with :? VeraPdfValidationException -> None

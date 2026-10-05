@@ -91,7 +91,7 @@ let view (needs: Needs) : IView =
                                     StackPanel.children [
                                         yield
                                             TextBlock.create [
-                                                TextBlock.text $"{attachment.Key}  ({kind}, {attachment.Where})"
+                                                TextBlock.text $"{attachment.Name}  ({kind}, {attachment.Where})"
                                                 TextBlock.fontWeight FontWeight.SemiBold
                                             ]
                                         for line in said attachment edit ->
@@ -113,8 +113,8 @@ let view (needs: Needs) : IView =
                                                                 (fun _ ->
                                                                     ask
                                                                         "File Name"
-                                                                        $"The name of the file attached as \"{attachment.Key}\", e.g. \"budget-2026.xlsx\"."
-                                                                        (named edit.FileName (attachment.FileName |> Option.orElse (Some attachment.Key)))
+                                                                        $"The name of the file attached as \"{attachment.Name}\", e.g. \"budget-2026.xlsx\"."
+                                                                        (named edit.FileName (attachment.FileName |> Option.orElse (Some attachment.Name)))
                                                                         "The file's name"
                                                                         (fun value e -> { e with FileName = value })
                                                                         attachment.Key),
@@ -130,7 +130,7 @@ let view (needs: Needs) : IView =
                                                                     let guess = attachment.FileName |> Option.bind contentTypeFor
                                                                     ask
                                                                         "Content Type"
-                                                                        $"What kind of media \"{attachment.Key}\" is, as a MIME type: video/mp4, audio/mpeg…"
+                                                                        $"What kind of media \"{attachment.Name}\" is, as a MIME type: video/mp4, audio/mpeg…"
                                                                         (named edit.ContentType (attachment.ContentType |> Option.orElse guess))
                                                                         "e.g. video/mp4"
                                                                         (fun value e -> { e with ContentType = value })
@@ -144,7 +144,7 @@ let view (needs: Needs) : IView =
                                                             (fun _ ->
                                                                 ask
                                                                     "Description"
-                                                                    $"What \"{attachment.Key}\" is, for someone who can't open it, e.g. \"The budget, as a spreadsheet\"."
+                                                                    $"What \"{attachment.Name}\" is, for someone who can't open it, e.g. \"The budget, as a spreadsheet\"."
                                                                     (named edit.Description attachment.Description)
                                                                     "What it is"
                                                                     (fun value e -> { e with Description = value })

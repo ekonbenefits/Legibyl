@@ -100,7 +100,7 @@ let ``text with icon characters offers replacement text, prefilled without them,
             let icons =
                 node "StructTreeRoot" null [
                     node "Document" null [
-                        { node "P" (rect 700.0) [] with Content = "Call  555-0100" }
+                        { node "P" (rect 700.0) [] with Content = "Call \uE001 555-0100" }
                         { node "P" (rect 650.0) [] with Content = "Plain text" }
                     ]
                 ]
@@ -115,7 +115,7 @@ let ``text with icon characters offers replacement text, prefilled without them,
             let prompt = window.OwnedWindows |> Seq.exactlyOne
             let box = descendants<TextBox> prompt |> List.exactlyOne
             let prefilled = box.Text
-            box.Text <- " Phone: 555-0100"
+            box.Text <- "\uE001 Phone: 555-0100"
             pump ()
             (descendants<Button> prompt |> List.find (fun b -> string b.Content = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
             pump ()
@@ -133,6 +133,8 @@ let ``a lone surrogate takes nothing else with it`` () =
     [ "Call \uE001 555"; "A \U000F0001 B"; String([| 'A'; ' '; char 0xDB80; 'B' |]) ]
     |> List.map StructureActions.withoutIconCharacters
     |> should equal [ "Call 555"; "A B"; "A B" ]
+
+[<Fact>]
 let ``the Attachments tab lists an attached file, and takes its file name and description`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
@@ -162,7 +164,7 @@ let ``the Attachments tab lists an attached file, and takes its file name and de
                 prefilled
             let namePrefill = answer "Edit File Name…" "notes.txt"
             let descriptionPrefill = answer "Edit Description…" "What to bring"
-            let edit = window.Review.Attachments |> Map.find "notes.txt"
+            let edit = window.Review.Attachments |> Map.find "the document: notes.txt"
             window.Close()
 
             shown |> should contain "notes.txt  (Attached file, the document)"
