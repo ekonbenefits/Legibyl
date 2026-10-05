@@ -137,12 +137,13 @@ let usedNames (document: PdfDocument) : Map<string, int> =
     counts |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
 
 /// What repairing a role map did: the names mapped by what they say (each with the tag and how
-/// many elements use it), the standard tags' mappings removed, the circles broken, and the names
+/// many elements it serves), the standard tags' mappings removed, the circles broken (each by its
+/// names), and the names
 /// still not mapped to a standard tag, which don't say which (each with how many use it).
 type Repair =
     { Mapped: (string * string * int) list
       Remapped: string list
-      Circles: string list
+      Circles: string list list
       Unknown: (string * int) list }
 
 /// Repairs a document's role map: removes a mapping of a standard tag (to another: a standard tag
@@ -173,8 +174,18 @@ let repair (document: PdfDocument) : Repair =
                 | Some next when not (visited.Contains next) && not (standardTags.Contains next) -> follow next (visited.Add next)
                 | _ -> false
             follow name (set [ name ])
-        let circles = [ for key in List.ofSeq (map.KeySet()) do if inCircle (key.GetValue()) then key.GetValue() ]
-        for name in circles do
+        let circling = [ for key in List.ofSeq (map.KeySet()) do if inCircle (key.GetValue()) then key.GetValue() ]
+        // Each circle, by its names (in order, from its first): one circle each, however many.
+        let circles =
+            circling
+            |> List.map (fun name ->
+                let rec round (current: string) (names: string list) =
+                    match target current with
+                    | Some next when next <> name -> round next (next :: names)
+                    | _ -> List.rev names
+                round name [ name ] |> List.sort)
+            |> List.distinct
+        for name in circling do
             match guess name with
             | Some tag -> map.Put(PdfName name, PdfName tag) |> ignore
             | None -> map.Remove(PdfName name) |> ignore
@@ -182,11 +193,10 @@ let repair (document: PdfDocument) : Repair =
         let rec ends (name: string) (depth: int) =
             if standardTags.Contains name || depth > 64 then name
             else match target name with Some next -> ends next (depth + 1) | None -> name
-        // Each name mapped, with its tag and how many elements it serves.
-        let mapped = Dictionary<string, string * int>()
+        // Each name mapped, with its tag.
+        let mapped = Dictionary<string, string>()
         let unknown = ResizeArray<string * int>()
-        let record (key: string) (tag: string) (uses: int) =
-            mapped[key] <- (tag, uses + (match mapped.TryGetValue key with | true, (_, n) -> n | _ -> 0))
+        let record (key: string) (tag: string) (_: int) = mapped[key] <- tag
         for KeyValue(name, uses) in used do
             let last = ends name 0
             if not (standardTags.Contains last) then
@@ -199,8 +209,14 @@ let repair (document: PdfDocument) : Repair =
                     map.Put(PdfName name, PdfName tag) |> ignore
                     record name tag uses
                 | None, None -> unknown.Add(name, uses)
-        if map.Size() > 0 && isNull (root.Get PdfName.RoleMap) then root.Put(PdfName.RoleMap, map) |> ignore
-        { Mapped = [ for KeyValue(name, (tag, uses)) in mapped -> name, tag, uses ] |> List.sort
+        // (A /RoleMap that isn't a dictionary is replaced.)
+        if map.Size() > 0 && isNull (root.GetAsDictionary PdfName.RoleMap) then root.Put(PdfName.RoleMap, map) |> ignore
+        // How many elements a mapping serves: those whose name's mapping, as it is now, goes through it.
+        let serves (key: string) =
+            let rec through (name: string) (depth: int) =
+                name = key || (depth < 64 && not (standardTags.Contains name) && match target name with Some next -> through next (depth + 1) | None -> false)
+            used |> Seq.sumBy (fun (KeyValue(name, uses)) -> if through name 0 then uses else 0)
+        { Mapped = [ for KeyValue(name, tag) in mapped -> name, tag, serves name ] |> List.sort
           Remapped = remapped
-          Circles = [ for name in circles -> name ]
+          Circles = circles
           Unknown = List.ofSeq unknown }
