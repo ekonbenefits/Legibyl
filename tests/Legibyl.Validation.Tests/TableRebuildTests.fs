@@ -53,7 +53,7 @@ let private rebuildEdit (table: StructureNode) (cells: TableCell list) =
 /// The rows of the table at path: each row's cells, as tag and text.
 let private rows (path: string) =
     let table = VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
-    [ for row in table.Children -> row.Tag, [ for c in row.Children -> c.Tag, (c.Children |> Seq.map _.Content |> Seq.append [ c.Content ] |> Seq.filter (not << isNull) |> String.concat " ") ] ]
+    [ for row in table.Children -> row.Tag, [ for c in row.Children -> c.Tag, (Seq.append [ c.Content ] (c.Children |> Seq.map _.Content) |> Seq.choose Option.ofObj |> String.concat " ") ] ]
 
 [<Fact>]
 let ``a table with cells outside rows is rebuilt as rows of the cells checked, its text in them, and passes`` () =

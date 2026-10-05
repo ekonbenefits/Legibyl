@@ -19,6 +19,7 @@
     <Compile Include="Theme.fs" />
     <Compile Include="Icons.fs" />
     <Compile Include="Dialogs.fs" />
+    <Compile Include="TableRebuildDialog.fs" />
     <Compile Include="StructureCache.fs" />
     <Compile Include="Dismissals.fs" />
     <Compile Include="RegionEdits.fs" />

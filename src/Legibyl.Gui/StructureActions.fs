@@ -268,7 +268,8 @@ let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
       | _ -> ()
       match edit.Text with
       | Some text when text <> string node.ActualText -> "text", text
-      | _ -> () ]
+      | _ -> ()
+      if not edit.Cells.IsEmpty then "rows and cells", $"rebuilt from the page ({edit.Cells.Length} cells)" ]
 
 /// What the reading-order buttons work on, from the window.
 type OrderBarNeeds =
@@ -447,7 +448,10 @@ type SelectionNeeds =
       /// Opens the prompt for an element's alt text, replacement text or link description.
       EditNode: StructureNode -> EditKind -> unit
       /// The standard tag chosen for each of the PDF's own tag names (the Role map tab).
-      RoleMap: unit -> Map<string, string> }
+      RoleMap: unit -> Map<string, string>
+      /// Rebuilds a tagged table's rows and cells from the page (the table-structure model), for
+      /// a person to check.
+      RebuildTable: StructureNode -> unit }
 
 /// What a screen reader says for the selected element (alt text, replacement text, a link's
 /// description): only those it has, for one element at a time. (F2 on its block opens the first.)
@@ -553,8 +557,19 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
 /// what's drawn outside every tag made decoration, or tagged as a figure or a paragraph; a tagged
 /// PDF's paragraphs, or a figure drawn in pieces, merged into one, or kept apart again.
 let otherActions (needs: SelectionNeeds) : Action list =
-    // (Not a table's cell: merged into its neighbour, it would leave a hole in the table.)
-    [ match (if needs.Suggested then regionsIn needs.Selected.Current |> List.filter (fun r -> not (TableGrid.isCell r.Tag)) else []) with
+    // A tagged table's rows and cells, rebuilt from how it looks (the wand: the model suggests them).
+    [ match needs.Selected.Current with
+      | [ single ] when not needs.Suggested && heardTag (needs.RoleMap ()) single = "Table" && not (isNull single.Geometry) ->
+          let rebuilt = editFor needs.Edits.Current single |> Option.exists (fun e -> not e.Cells.IsEmpty)
+          { action
+                (if rebuilt then "Check Rebuilt Rows and Cells…" else "Rebuild Rows and Cells from the Page…")
+                (if rebuilt then "The rows and cells this table is to be rebuilt as: check each cell is a header cell (TH) or a data cell (TD)."
+                 else "Finds the table's rows, columns, header and spanning cells from how it looks (the table-structure model), for you to check; Export… then tags it as those, each piece of it in the cell it's drawn in. For a table tagged wrongly: cells outside rows, rows of different lengths.")
+                (fun () -> needs.RebuildTable single) with
+              Icon = Icons.wand }
+      | _ -> ()
+      // (Not a table's cell: merged into its neighbour, it would leave a hole in the table.)
+      match (if needs.Suggested then regionsIn needs.Selected.Current |> List.filter (fun r -> not (TableGrid.isCell r.Tag)) else []) with
       | [] -> ()
       | regions ->
           let what = if regions.Length = 1 then "" else $" {regions.Length} Regions"

@@ -1138,6 +1138,20 @@ the same pass: Auto Fixes… then ticks Fix XMP metadata, and NEXT STEP, which
 asks for a title first, suggests it. The
 GUI's Auto Fixes dialog lists the same fixes, in the order they run.
 
+A tagged PDF's table that's tagged wrongly (cells outside rows, rows of different
+lengths, a table that's only paragraphs: PDF/UA's 7.2 table rules, 8.2.5.26) can be
+rebuilt from the page: select it in Structure… and choose **Rebuild Rows and Cells
+from the Page…** (the wand: the table-structure model finds its rows, columns, header
+and spanning cells from how it looks, as Suggest Structure does). The grid it finds is
+shown laid out as the table is, each cell with the text drawn in it and a picker to make
+it a header cell (TH) or a data cell (TD); OK keeps it as the table's edit (`cells` in
+the review, listed on the Edits tab, removed by Remove), and **Check Rebuilt Rows and
+Cells…** shows it again. Export… rewrites the table's tags (`TableRebuild.fs`): what it
+holds (its marked content, annotations, and the paragraphs or links its cells hold) is
+taken out through iText's tags, so the parent tree follows, and put in the cell it's
+drawn in, in rows of the cells checked, with their spans and header scope. A table that
+goes on to another page is left. What the page draws doesn't change, only the tags.
+
 Files attached to a tagged PDF, and its media clips (a video or a sound a Screen
 annotation plays), aren't in the page's tags, so Structure… lists them on an
 **Attachments** tab when it has any (`Attachments.fs`): each with what PDF/UA

@@ -532,7 +532,41 @@ type LayoutSuggester(pdfPath: string) =
             | text -> Some text
         | None -> None
 
+    /// The cells the table-structure model finds in a table's region on the page (rendered at
+    /// bitmap's ocrScale; crop the page's crop box), each a header cell or not and where it is,
+    /// in reading order: rows down the page, then across. None without the model.
+    let cellsIn (bitmap: SKBitmap) (crop: UglyToad.PdfPig.Core.PdfRectangle) (pageNumber: int) (g: StructureGeometry) =
+        match tables.Value with
+        | None -> None
+        | Some session ->
+            let framed = { g with Left = g.Left - tableMargin; Right = g.Right + tableMargin; Top = g.Top + tableMargin; Bottom = g.Bottom - tableMargin }
+            // Where the picture's top-left is in the page's rendering (as readRegions crops it).
+            let left = max 0 (int (Math.Round((framed.Left - crop.Left) * ocrScale)))
+            let top = max 0 (int (Math.Round((crop.Top - framed.Top) * ocrScale)))
+            match readRegions bitmap ocrScale crop [ Some(fun picture -> Some(TableStructure.grid (TableStructure.find session picture))), framed ] with
+            | [ Some cells ] ->
+                let geometry (box: SKRect) : StructureGeometry =
+                    { PageNumber = pageNumber
+                      Left = crop.Left + (float left + float box.Left) / ocrScale
+                      Right = crop.Left + (float left + float box.Right) / ocrScale
+                      Top = crop.Top - (float top + float box.Top) / ocrScale
+                      Bottom = crop.Top - (float top + float box.Bottom) / ocrScale }
+                Some(
+                    cells
+                    |> List.map (fun cell -> cell.Header, geometry cell.Box)
+                    |> List.sortBy (fun (_, g) -> -(Math.Round(g.Top, 1)), g.Left)
+                )
+            | _ -> Some []
+
     member _.PageCount = document.NumberOfPages
+
+    /// The cells the table-structure model finds in a table's region on pageNumber, each a header
+    /// cell (TH) or not, in reading order; None without the model (see TableModel).
+    member _.TableCells(pageNumber: int, region: StructureGeometry) : (bool * StructureGeometry) list option =
+        lock gate (fun () ->
+            let crop = (document.GetPage pageNumber).CropBox.Bounds
+            use bitmap = pages.Render(pageNumber, float32 ocrScale)
+            cellsIn bitmap crop pageNumber region)
 
     /// Detects pageNumber's regions. The model must be downloaded (see LayoutModel).
     member _.Suggest(pageNumber: int) : PageSuggestion =
@@ -641,26 +675,8 @@ type LayoutSuggester(pdfPath: string) =
                     [ for block in blocks do
                           yield block
                           if block.Tag = "Table" then
-                              let g = block.Geometry
-                              let framed = { g with Left = g.Left - tableMargin; Right = g.Right + tableMargin; Top = g.Top + tableMargin; Bottom = g.Bottom - tableMargin }
-                              // Where the picture's top-left is in the page's rendering (as readRegions crops it).
-                              let left = max 0 (int (Math.Round((framed.Left - crop.Left) * ocrScale)))
-                              let top = max 0 (int (Math.Round((crop.Top - framed.Top) * ocrScale)))
-                              let found =
-                                  readRegions bitmap ocrScale crop [ Some(fun picture -> Some(TableStructure.grid (TableStructure.find session picture))), framed ]
-                              match found with
-                              | [ Some cells ] when not cells.IsEmpty ->
-                                  let geometry (box: SKRect) : StructureGeometry =
-                                      { PageNumber = pageNumber
-                                        Left = crop.Left + (float left + float box.Left) / ocrScale
-                                        Right = crop.Left + (float left + float box.Right) / ocrScale
-                                        Top = crop.Top - (float top + float box.Top) / ocrScale
-                                        Bottom = crop.Top - (float top + float box.Bottom) / ocrScale }
-                                  // In reading order: rows down the page, then across.
-                                  let cells =
-                                      cells
-                                      |> List.map (fun cell -> cell.Header, geometry cell.Box)
-                                      |> List.sortBy (fun (_, g) -> -(Math.Round(g.Top, 1)), g.Left)
+                              match cellsIn bitmap crop pageNumber block.Geometry with
+                              | Some cells when not cells.IsEmpty ->
                                   let texts = LayoutSuggestions.assignText (List.map snd cells) words
                                   let read =
                                       if block.Text = "" then

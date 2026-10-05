@@ -150,6 +150,9 @@ let view (needs: Needs) : IView =
                                     | Some alt when edit.Tag = "Form" -> detailLine $"tooltip: \"{alt}\"" false
                                     | Some alt -> detailLine $"alt: \"{alt}\"" false
                                     | None -> ()
+                                    if not edit.Cells.IsEmpty then
+                                        let headers = edit.Cells |> List.filter (fun c -> c.Tag = "TH") |> List.length
+                                        detailLine $"rows and cells: rebuilt from the page, {edit.Cells.Length} cells ({headers} header)" false
                                     match edit.Text with
                                     | Some "" -> detailLine "text: (nothing to read)" false
                                     | Some text -> detailLine $"text: \"{text}\"" false

@@ -149,3 +149,79 @@ let ``tagging an untagged page from its layout tags its table with rows and cell
             |> Seq.map _.RuleId
             |> Set.ofSeq
         failed |> Set.filter (fun rule -> rule.StartsWith "7.5" || rule = "7.1-3") |> should be Empty)
+
+[<Fact>]
+let ``a table's cells are found from its region on the page, in points, for a rebuild`` () =
+    withTableModel (fun () ->
+        use pdf = new TempPdf()
+        createTable pdf.Path
+        use suggester = new LayoutSuggester(pdf.Path)
+        let region: Legibyl.Validation.StructureGeometry = { PageNumber = 1; Left = 72.0; Bottom = 576.0; Right = 520.0; Top = 696.0 }
+
+        let cells = suggester.TableCells(1, region) |> Option.get
+
+        cells |> List.length |> should equal 15
+        cells |> List.filter fst |> List.length |> should equal 3
+        // In points, inside the table (give or take its margin), the header first.
+        cells |> List.forall (fun (_, g) -> g.Left >= 60.0 && g.Right <= 532.0 && g.Bottom >= 564.0 && g.Top <= 708.0) |> should be True
+        cells |> List.take 3 |> List.forall fst |> should be True)
+
+[<Fact>]
+let ``a tagged table tagged wrongly is rebuilt from the cells the model finds, and passes`` () =
+    withTableModel (fun () ->
+        use plain = new TempPdf()
+        use input = new TempPdf()
+        use output = new TempPdf()
+        createTable plain.Path
+        // The same page tagged badly: the table's texts as TDs right in a Table, with no rows.
+        do
+            use reader = new PdfReader(plain.Path)
+            use document = new PdfDocument(new PdfWriter(input.Path))
+            document.SetTagged() |> ignore
+            document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+            let page = document.AddNewPage PageSize.LETTER
+            let canvas = PdfCanvas page
+            let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+            let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+            pointer.AddTag "Table" |> ignore
+            let rows =
+                [ [ "Plant"; "Sow"; "Harvest" ]; [ "Tomato"; "March"; "July" ]; [ "Lettuce"; "April"; "June" ]; [ "Carrot"; "April"; "August" ]; [ "Bean"; "May"; "August" ] ]
+            for r, row in List.indexed rows do
+                for x, value in List.zip [ 80.0; 230.0; 380.0 ] row do
+                    pointer.AddTag "TD" |> ignore
+                    canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(x, 680.0 - float r * 24.0).ShowText(value).EndText().CloseTag()
+                    |> ignore
+                    pointer.MoveToParent() |> ignore
+            pointer.MoveToParent() |> ignore
+            // Its rules, as decoration.
+            canvas.OpenTag(iText.Kernel.Pdf.Canvas.CanvasArtifact()) |> ignore
+            for r in 0..5 do canvas.MoveTo(72.0, 696.0 - float r * 24.0).LineTo(520.0, 696.0 - float r * 24.0).Stroke() |> ignore
+            for x in [ 72.0; 220.0; 370.0; 520.0 ] do canvas.MoveTo(x, 576.0).LineTo(x, 696.0).Stroke() |> ignore
+            canvas.CloseTag() |> ignore
+        use suggester = new LayoutSuggester(input.Path)
+        let cells =
+            suggester.TableCells(1, ({ PageNumber = 1; Left = 72.0; Bottom = 576.0; Right = 520.0; Top = 696.0 }: Legibyl.Validation.StructureGeometry))
+            |> Option.get
+            |> List.map (fun (header, g) -> ({ Tag = (if header then "TH" else "TD"); Box = g }: Legibyl.Validation.TableCell))
+        let rec nodes (node: Legibyl.Validation.StructureNode) : Legibyl.Validation.StructureNode list = node :: (node.Children |> Seq.collect nodes |> List.ofSeq)
+        let table = Legibyl.Validation.VeraPdfValidator().ReadStructureTree input.Path |> nonNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+        let edit: Legibyl.Validation.ElementEdit =
+            { Page = 1; Tag = "Table"; Box = table.Geometry |> nonNull; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = cells }
+        let failed (path: string) =
+            Legibyl.Validation.VeraPdfValidator().Validate(path, Legibyl.Validation.PdfProfile.PdfUa1).Findings
+            |> Seq.filter (fun f -> not f.Passed && f.Severity = Legibyl.Validation.FindingSeverity.Failure)
+            |> Seq.map _.RuleId
+            |> Set.ofSeq
+
+        Legibyl.Validation.VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, Legibyl.Validation.PdfProfile.PdfUa1, output.Path, Legibyl.Validation.PdfFixOptions.ApplyEdits) |> ignore
+
+        let rebuilt = Legibyl.Validation.VeraPdfValidator().ReadStructureTree output.Path |> nonNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+        [ for row in rebuilt.Children -> [ for c in row.Children -> c.Tag, c.Content ] ]
+        |> should
+            equal
+            [ [ "TH", "Plant"; "TH", "Sow"; "TH", "Harvest" ]
+              [ "TD", "Tomato"; "TD", "March"; "TD", "July" ]
+              [ "TD", "Lettuce"; "TD", "April"; "TD", "June" ]
+              [ "TD", "Carrot"; "TD", "April"; "TD", "August" ]
+              [ "TD", "Bean"; "TD", "May"; "TD", "August" ] ]
+        failed output.Path |> Set.filter (fun r -> r.StartsWith "7.2-") |> should be Empty)

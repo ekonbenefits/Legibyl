@@ -103,7 +103,7 @@ rules:
   - clause: "7.2"
     tests: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 36, 37, 38, 39, 41, 42, 43]
     meaning: "A table's tags are nested or shaped wrongly (a cell outside a row, rows of different lengths), so a screen reader can't move through it or say which header goes with a cell."
-    whatToDo: "Fix the table in the tool that made the PDF (mark its header row, avoid merged cells where you can) and export it again, or in a PDF editor's table tools."
+    whatToDo: &rebuildTable "In Structure…, select the table and choose Rebuild Rows and Cells from the Page…: it finds its rows, columns, header and spanning cells from how it looks, for you to check (each cell a header cell, TH, or a data cell, TD), and Export… tags it as those. Or fix the table in the tool that made the PDF (mark its header row, avoid merged cells where you can) and export it again."
 
   - clause: "7.3"
     tests: [1]
@@ -314,7 +314,7 @@ pdfUa2Rules:
 
   - clause: "8.2.5.26"
     meaning: "A table's tags are shaped wrongly (rows of different lengths, overlapping cells), or its header cells can't be matched to its cells, so a screen reader can't move through it or say which header goes with a cell."
-    whatToDo: "Fix the table in the tool that made the PDF (mark its header row, avoid merged cells where you can) and export it again, or in a PDF editor's table tools."
+    whatToDo: *rebuildTable
 
   - clause: "8.2.5.27"
     meaning: "A caption isn't the first or last thing in what it captions, so a screen reader may read it apart from its figure or table."
