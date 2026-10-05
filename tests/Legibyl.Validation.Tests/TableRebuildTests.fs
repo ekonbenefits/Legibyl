@@ -134,3 +134,132 @@ let ``a table tagged as paragraphs has them put in its cells, whole`` () =
     let after = failed output.Path
     after |> Set.filter (fun r -> r.StartsWith "7.2-") |> should be Empty
     Set.difference after before |> should be Empty
+
+/// The elements the structure tree reaches from its root, by object number.
+let private reachable (document: PdfDocument) =
+    let found = System.Collections.Generic.HashSet<int>()
+    let rec visit (obj: PdfObject | null) =
+        match obj with
+        | :? PdfIndirectReference as reference ->
+            if found.Add(reference.GetObjNumber()) then visit (reference.GetRefersTo())
+        | :? PdfDictionary as dictionary when not (isNull (dictionary.Get PdfName.S)) || PdfName.StructTreeRoot.Equals(dictionary.GetAsName PdfName.Type) ->
+            match dictionary.Get(PdfName.K, false) with
+            | :? PdfArray as kids -> for i in 0 .. kids.Size() - 1 do visit (kids.Get(i, false))
+            | kid -> visit kid
+        | _ -> ()
+    visit (document.GetCatalog().GetPdfObject().Get(PdfName.StructTreeRoot, false))
+    found
+
+/// The elements the parent tree says page 1's content belongs to: their object numbers and tags.
+let private parentTreeEntries (document: PdfDocument) =
+    let tree = document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot).GetAsDictionary PdfName.ParentTree
+    let key = document.GetPage(1).GetPdfObject().GetAsNumber(PdfName.StructParents).IntValue()
+    let rec find (node: PdfDictionary) : PdfArray option =
+        match node.GetAsArray PdfName.Nums with
+        | NonNull nums -> [ for i in 0..2 .. nums.Size() - 2 -> nums.GetAsNumber(i).IntValue(), nums.Get(i + 1) ] |> List.tryPick (fun (k, v) -> if k = key then (match v with :? PdfArray as a -> Some a | _ -> None) else None)
+        | Null ->
+            match node.GetAsArray PdfName.Kids with
+            | NonNull kids -> [ for i in 0 .. kids.Size() - 1 -> kids.GetAsDictionary i ] |> List.tryPick find
+            | Null -> None
+    let entries = find tree |> Option.get
+    [ for i in 0 .. entries.Size() - 1 do
+          match entries.Get(i, false) with
+          | :? PdfIndirectReference as reference -> reference.GetObjNumber(), (reference.GetRefersTo() :?> PdfDictionary).GetAsName(PdfName.S).GetValue()
+          | _ -> () ]
+
+[<Fact>]
+let ``after a rebuild the parent tree points at the new cells, all in the tree`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createBroken input.Path [ [ "Plant"; "Sow" ]; [ "Tomato"; "March" ] ]
+    let table = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+
+    VeraPdfValidator(Edits = [ rebuildEdit table [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+    |> ignore
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    let inTree = reachable document
+    let entries = parentTreeEntries document
+    entries |> List.map snd |> should equal [ "TH"; "TH"; "TD"; "TD" ]
+    entries |> List.forall (fun (number, _) -> inTree.Contains number) |> should be True
+
+[<Fact>]
+let ``a table's caption stays the table's, before its rows`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.SetTagged() |> ignore
+        document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+        let page = document.AddNewPage PageSize.LETTER
+        let canvas = PdfCanvas page
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+        let tagged (tag: string) (x: float) (y: float) (text: string) =
+            pointer.AddTag tag |> ignore
+            canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(x, y).ShowText(text).EndText().CloseTag() |> ignore
+            pointer.MoveToParent() |> ignore
+        pointer.AddTag "Table" |> ignore
+        tagged "Caption" 80.0 704.0 "Planting times"
+        tagged "TD" 80.0 680.0 "Plant"
+        tagged "TD" 230.0 680.0 "Sow"
+        pointer.MoveToParent() |> ignore
+    let table = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+
+    VeraPdfValidator(Edits = [ rebuildEdit table [ cell "TH" 0 0; cell "TH" 0 1 ] ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
+
+    let rebuilt = VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+    [ for kid in rebuilt.Children -> kid.Tag ] |> should equal [ "Caption"; "TR" ]
+    (rebuilt.Children[0]).Content |> should equal "Planting times"
+    rows output.Path |> List.tail |> should equal [ "TR", [ "TH", "Plant"; "TH", "Sow" ] ]
+
+[<Fact>]
+let ``a rebuild's other changes are made too`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createBroken input.Path [ [ "Plant"; "Sow" ] ]
+    let table = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+    let edit = { rebuildEdit table [ cell "TH" 0 0; cell "TH" 0 1 ] with Alt = "When to sow" }
+
+    VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
+
+    let rebuilt = VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+    rebuilt.AlternateDescription |> should equal "When to sow"
+    rows output.Path |> should equal [ "TR", [ "TH", "Plant"; "TH", "Sow" ] ]
+    ElementEdits.pending output.Path [ edit ] |> should equal 0
+
+[<Fact>]
+let ``an edit for an element with a page is its, not a wrapper's without one around it`` () =
+    use plain = new TempPdf()
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(plain.Path))
+        document.SetTagged() |> ignore
+        let page = document.AddNewPage PageSize.LETTER
+        let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+        pointer.AddTag("Sect").AddTag("Sect").AddTag "P" |> ignore
+        PdfCanvas(page).OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 11f).MoveText(80.0, 680.0).ShowText("Open at 8.").EndText().CloseTag()
+        |> ignore
+    // The inner Sect names its page; the outer one doesn't.
+    do
+        use document = new PdfDocument(new PdfReader(plain.Path), new PdfWriter(input.Path))
+        let rec sects (element: PdfDictionary) : PdfDictionary list =
+            let kids =
+                match element.Get(PdfName.K, true) with
+                | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> d | _ -> () ]
+                | :? PdfDictionary as d when not (isNull (d.Get PdfName.S)) -> [ d ]
+                | _ -> []
+            (if PdfName.Sect.Equals(element.GetAsName PdfName.S) then [ element ] else []) @ List.collect sects kids
+        match sects (document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot) with
+        | [ outer; inner ] ->
+            outer.Remove PdfName.Pg |> ignore
+            inner.Put(PdfName.Pg, document.GetPage(1).GetPdfObject()) |> ignore
+        | found -> failwith $"{found.Length} Sects"
+    let inner = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "Sect") |> List.last
+    let edit = { Page = 1; Tag = "Sect"; Box = inner.Geometry |> notNull; Alt = null; Text = null; MergeWith = []; Retag = "Div"; Exclude = false; Move = None; Cells = [] }
+
+    VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
+
+    VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.map _.Tag |> List.filter (fun t -> t = "Sect" || t = "Div")
+    |> should equal [ "Sect"; "Div" ]

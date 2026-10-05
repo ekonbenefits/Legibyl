@@ -317,7 +317,12 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
                 | _ -> None
         let cells =
             match saved.Cells with
-            | NonNull cells -> [ for cell in cells do match geometry cell.Box with Some box -> ({ Tag = cell.Tag; Box = box }: TableCell) | None -> () ]
+            // (A cell is a TH or a TD: one that isn't is left out, as is one without a box.)
+            | NonNull cells ->
+                [ for cell in cells do
+                      match geometry cell.Box with
+                      | Some box when cell.Tag = "TH" || cell.Tag = "TD" -> ({ Tag = cell.Tag; Box = box }: TableCell)
+                      | _ -> () ]
             | Null -> []
         if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude && move.IsNone && cells.IsEmpty then
             None

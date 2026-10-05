@@ -220,3 +220,12 @@ let ``a hairline's edit is found again, so choosing twice doesn't add it twice``
     RegionEdits.find twice 1 "Figure" rule |> Option.bind _.Retag |> should equal (Some "Artifact")
     // And read again, it goes.
     RegionEdits.setRetag twice 1 "Figure" rule "Figure" |> should be Empty
+
+[<Fact>]
+let ``moving a rebuilt table keeps its cells`` () =
+    let table: StructureGeometry = { PageNumber = 1; Left = 72.0; Bottom = 600.0; Right = 372.0; Top = 700.0 }
+    let cells = [ ({ Tag = "TH"; Box = table }: TableCell) ]
+    let rebuilt: RegionEdits.Edit list =
+        [ { Page = 1; Tag = "Table"; Box = table; Alt = None; Text = None; MergeWith = []; Retag = None; Exclude = false; Move = None; Cells = cells } ]
+    let moved = RegionEdits.setMove rebuilt 1 "Table" table (Some First)
+    moved |> List.map (fun e -> e.Cells, e.Move) |> should equal [ cells, Some First ]
