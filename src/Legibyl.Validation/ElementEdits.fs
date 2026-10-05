@@ -128,12 +128,13 @@ let private findIn (document: PdfDocument) context (boxes: ElementEdit -> Struct
                       [ match standardTag visit.Element context with NonNull tag -> tag.GetValue() | Null -> ()
                         match visit.Element.GetAsName PdfName.S with NonNull name -> name.GetValue() | Null -> () ]
                       |> List.distinct
-                  // Its page: its own (or an ancestor's), else that of what it holds, as a table's or
-                  // a list's, which often has none of its own.
+                  // Its page: its own (or an ancestor's), else, for a table (which often has none of
+                  // its own), that of what it holds. (Not for other tags: a wrapper without a page
+                  // would match as well as the element inside it, and come first.)
                   let page =
                       visit.Page
                       |> Option.orElseWith (fun () ->
-                          if names |> List.exists (fun name -> wanted |> Set.exists (fun (_, tag) -> tag = name)) then
+                          if List.contains "Table" names && wanted |> Set.exists (fun (_, tag) -> tag = "Table") then
                               subtreeGeometry visit.Element context None |> Option.map _.PageNumber
                           else
                               None)
@@ -382,6 +383,13 @@ let private moveElements (document: PdfDocument) context (moved: (ElementEdit * 
 
 /// Writes the edits that change something, merges first (joining paragraphs moves nothing else);
 /// says how many (and how many elements weren't found), or nothing if none changed anything.
+/// What table rebuilds change besides the rebuild: each as an edit without its cells, for those
+/// that change anything else.
+let private otherChanges (tables: ElementEdit list) =
+    [ for edit in tables do
+          if not (isNull edit.Alt && isNull edit.Text && isNull edit.Retag && edit.Move.IsNone && not edit.Exclude) then
+              { edit with Cells = [] } ]
+
 let internal apply (document: PdfDocument) context (edits: ElementEdit list) : string list =
     // Content outside every tag first: it looks up the elements drawn before it, as they are.
     let outside, edits = edits |> List.partition isUntagged
@@ -392,8 +400,10 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
             context
             [ for edit, piece in untaggedPieces document outside ->
                   piece, (if edit.Retag = "Artifact" then UntaggedContent.NotRead else UntaggedContent.TagAs(edit.Retag |> nonNull, edit.Alt)) ]
-    // Tables rebuilt from their page first: what's in them then moves with them.
+    // Tables rebuilt from their page first: what's in them then moves with them. What else their
+    // edits change (a tag, alt text, a move) is changed as any edit's is, after.
     let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
+    let edits = edits @ otherChanges tables
     let rebuilt =
         [ for edit, table in find document context tables do
               if TableRebuild.refusal table context edit.Page = None && not (TableRebuild.rebuilt table context edit.Page edit.Cells) then
@@ -491,6 +501,7 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
         let outside, edits = edits |> List.partition isUntagged
         let outsideFound = untaggedPieces document outside
         let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
+        let edits = edits @ otherChanges tables
         let tablesFound = find document context tables
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
         let found = findIn document context (boxesOf merges) edits
@@ -537,10 +548,15 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         let context = createContext document pdfPath
         let outside, edits = edits |> List.partition isUntagged
         let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
+        // A table's other changes are counted as an edit of their own, unless its rebuild is.
+        let rebuilding =
+            find document context tables
+            |> List.filter (fun (edit, table) -> TableRebuild.refusal table context edit.Page = None && not (TableRebuild.rebuilt table context edit.Page edit.Cells))
+            |> List.map fst
+        let edits =
+            edits @ (tables |> List.filter (fun t -> not (rebuilding |> List.exists (fun r -> obj.ReferenceEquals(r, t)))) |> otherChanges)
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
-        (find document context tables
-         |> List.filter (fun (edit, table) -> TableRebuild.refusal table context edit.Page = None && not (TableRebuild.rebuilt table context edit.Page edit.Cells))
-         |> List.length)
+        rebuilding.Length
         +
         // (Text asked to be made decoration never is.)
         (untaggedPieces document outside |> List.filter (fun (e, piece) -> not (piece.Kind = UntaggedContent.Text && e.Retag = "Artifact")) |> List.length)

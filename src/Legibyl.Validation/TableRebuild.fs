@@ -27,6 +27,8 @@ let private piecesOf (table: PdfStructElem) context (page: int) =
                 | :? PdfStructElem as child ->
                     let tag = match standardTag (child.GetPdfObject()) context with NonNull tag -> tag.GetValue() | Null -> ""
                     if tableTags.Contains tag then walk child (depth + 1)
+                    // (A table's caption is the table's, not a cell's: it stays where it is.)
+                    elif tag = "Caption" && depth = 0 then ()
                     else add child (subtreeGeometry (child.GetPdfObject()) context (Some page))
                 | :? PdfObjRef as reference ->
                     let rect =
@@ -113,16 +115,21 @@ let rebuild (document: PdfDocument) context (tableDictionary: PdfDictionary) (pa
     let pieces = piecesOf table context page
     // Out of where they are (last first, so the earlier ones' places hold).
     let taken =
-        [ for parent, index, node, geometry in List.rev pieces ->
-              let removed =
-                  match node with
-                  | :? PdfMcr -> parent.RemoveKid(index, true)
-                  | _ -> parent.RemoveKid index
-              removed, geometry ]
+        [ for parent, index, _, geometry in List.rev pieces -> parent.RemoveKid index, geometry ]
         |> List.rev
-    // The old rows, empty now.
+    // The old rows, empty now; its captions kept, before the rows or after them as they were.
+    let tagOf (element: PdfStructElem) = match standardTag (element.GetPdfObject()) context with NonNull tag -> tag.GetValue() | Null -> ""
+    let kids = List.ofSeq (table.GetKids())
+    let firstRow = kids |> List.tryFindIndex (function :? PdfStructElem as e -> tableTags.Contains(tagOf e) | _ -> false) |> Option.defaultValue kids.Length
+    let captions =
+        [ for i, kid in List.indexed kids do
+              match kid with
+              | :? PdfStructElem as e when tagOf e = "Caption" -> (i < firstRow), e.GetPdfObject()
+              | _ -> () ]
     while table.GetKids().Count > 0 do
         table.RemoveKid 0 |> ignore
+    for before, caption in captions do
+        if before then table.AddKid(PdfStructElem caption) |> ignore
     let places = TableGrid.place [ for cell in cells -> cell.Box ]
     let rowCount = places |> List.map (fun p -> p.Row + p.RowSpan) |> List.max
     let rows =
@@ -141,10 +148,16 @@ let rebuild (document: PdfDocument) context (tableDictionary: PdfDictionary) (pa
         element.GetPdfObject().Put(PdfName.A, attributes) |> ignore
         rows[place.Row].AddKid element |> ignore
         cellElements[index] <- element
+    for before, caption in captions do
+        if not before then table.AddKid(PdfStructElem caption) |> ignore
+    // Each piece in its cell, the parent tree pointed at the cell (as a new reference to it: the
+    // one taken out still names the cell it came from, and iText writes the parent tree from that).
     for node, geometry in taken do
         let cell = cellElements[cellFor cells geometry]
         match node with
         | :? PdfStructElem as element -> cell.AddKid element |> ignore
-        | :? PdfMcr as mcr -> cell.AddKid mcr |> ignore
+        | :? PdfObjRef as reference -> cell.AddKid(PdfObjRef(reference.GetPdfObject() :?> PdfDictionary, cell)) |> ignore
+        | :? PdfMcrNumber as mcid -> cell.AddKid(PdfMcrNumber(mcid.GetPdfObject() :?> PdfNumber, cell)) |> ignore
+        | :? PdfMcrDictionary as reference -> cell.AddKid(PdfMcrDictionary(reference.GetPdfObject() :?> PdfDictionary, cell)) |> ignore
         | _ -> ()
     pieces.Length

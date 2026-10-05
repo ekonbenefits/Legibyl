@@ -74,7 +74,7 @@ let setAltAgainst edits page tag box (prefilled: string) (alt: string) =
 
 /// An element moved among its siblings (to move), or back where it was read (None).
 let setMove edits page tag box (move: ElementMove option) =
-    update edits page tag box (fun e -> { e with Move = move; Cells = [] })
+    update edits page tag box (fun e -> { e with Move = move })
 
 /// A region's OCR text corrected, recorded only if it differs from what OCR read.
 let setText edits page tag box (ocr: string) (text: string) =
