@@ -326,7 +326,7 @@ pdfUa2Rules:
 
   - clauses: ["8.4.3", "8.6"]
     meaning: "Some text uses private characters (from Unicode's Private Use Area) that mean nothing to a screen reader, and has no replacement text to read instead."
-    whatToDo: &privateCharacters "In Structure…, select the text and choose Edit Replacement Text… (F2): say what its icons mean, e.g. \"Phone: 555-0100\", or leave it empty if they're only decoration; Export… writes it. Or use standard characters where the PDF was made (a symbol font's icons often cause this)."
+    whatToDo: &privateCharacters "In Structure…, select the text and choose Edit Replacement Text… (F2): it replaces all of the text, so keep its words and say what the icons mean, e.g. \"Phone: 555-0100\" (just the words, if the icons are only decoration); leave it empty only if none of it should be read. Export… writes it. Or use standard characters where the PDF was made (a symbol font's icons often cause this)."
 
   - clause: "8.4.4"
     tests: [1]

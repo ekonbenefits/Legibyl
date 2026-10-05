@@ -57,13 +57,14 @@ let hasIconCharacters (text: string | null) =
     | NonNull text -> text |> Seq.exists isIconUnit
     | Null -> false
 
-/// text without its icon characters (and the low surrogates of those above the Basic plane).
+/// text without its icon characters (and the low surrogate after one above the Basic plane,
+/// where there is one: a lone high surrogate goes alone).
 let withoutIconCharacters (text: string) =
     let kept = Text.StringBuilder()
     let mutable i = 0
     while i < text.Length do
         let c = text[i]
-        if c >= '\uDB80' && c <= '\uDBFF' then i <- i + 2
+        if c >= '\uDB80' && c <= '\uDBFF' then i <- i + (if i + 1 < text.Length && Char.IsLowSurrogate text[i + 1] then 2 else 1)
         elif isIconUnit c then i <- i + 1
         else
             kept.Append c |> ignore

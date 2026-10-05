@@ -126,3 +126,10 @@ let ``text with icon characters offers replacement text, prefilled without them,
             plain |> should be Empty
             prefilled |> should equal "Call 555-0100"
             edits |> should equal [ "P", Some "Phone: 555-0100" ]))
+
+[<Fact>]
+let ``a lone surrogate takes nothing else with it`` () =
+    // (A lone surrogate can't be a literal: the compiler makes it U+FFFD.)
+    [ "Call \uE001 555"; "A \U000F0001 B"; String([| 'A'; ' '; char 0xDB80; 'B' |]) ]
+    |> List.map StructureActions.withoutIconCharacters
+    |> should equal [ "Call 555"; "A B"; "A B" ]
