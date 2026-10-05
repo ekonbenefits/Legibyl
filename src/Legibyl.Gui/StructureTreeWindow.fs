@@ -371,6 +371,27 @@ module private StructureView =
                                 $"What a screen reader announces for this link on page {page}{target}: where it goes, e.g. \"Apply for benefits (example.com)\".",
                                 existing |> Option.bind _.Alt |> Option.defaultValue (string node.LinkDescription),
                                 "Where the link goes"
+                            | Description ->
+                                // A highlight's text, say, to start from.
+                                let covered = node.Content |> Option.ofObj |> Option.map _.Trim() |> Option.filter ((<>) "")
+                                "Description",
+                                $"What a screen reader announces for this annotation on page {page} (a comment, a stamp, a highlight…): what it's for, e.g. \"Reviewer's note: check the dates\".",
+                                existing
+                                |> Option.bind _.Alt
+                                |> Option.orElse (Option.ofObj node.LinkDescription)
+                                |> Option.orElse covered
+                                |> Option.defaultValue "",
+                                "What the annotation is for"
+                            | Tooltip ->
+                                let signature = if node.FormFieldType = "Sig" then " For a signature, say whose it is, e.g. \"Signature of the applicant\"." else ""
+                                "Tooltip",
+                                $"What a screen reader says when it reaches this form field on page {page} (its tooltip): what to fill in, e.g. \"First name\".{signature}",
+                                existing
+                                |> Option.bind _.Alt
+                                |> Option.orElse (Option.ofObj node.FormFieldDescription)
+                                |> Option.orElse (Option.ofObj node.FormFieldName |> Option.map StructureActions.fieldNameText |> Option.filter ((<>) ""))
+                                |> Option.defaultValue "",
+                                "What to fill in"
                             | ReplacementText ->
                                 "Replacement Text",
                                 $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn.",
@@ -385,6 +406,10 @@ module private StructureView =
                                 | AltText -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.AlternateDescription) text
                                 | LinkDescription when String.IsNullOrWhiteSpace text -> RegionEdits.setAlt edits.Current page node.Tag box ""
                                 | LinkDescription -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.LinkDescription) text
+                                | Description when String.IsNullOrWhiteSpace text -> RegionEdits.setAlt edits.Current page node.Tag box ""
+                                | Description -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.LinkDescription) text
+                                | Tooltip when String.IsNullOrWhiteSpace text -> RegionEdits.setAlt edits.Current page node.Tag box ""
+                                | Tooltip -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.FormFieldDescription) text
                                 | ReplacementText -> RegionEdits.setText edits.Current page node.Tag box (string node.ActualText) text
                             do! saveEdits next
                         | None -> ()

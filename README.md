@@ -593,7 +593,13 @@ already have `/ActualText`, like OCR'd text, since writing it over real text
 would hide what the page says) or **Edit Link Description…** (a link: what a
 screen reader announces for it, written as its annotation's `/Contents`, the
 same edit made on an untagged PDF's suggested structure; blocks show
-a link's description, and structure output has it as `linkDescription`). An
+a link's description, and structure output has it as `linkDescription`) or
+**Edit Description…** (another annotation, a comment, stamp or highlight, tagged
+`Annot`: its `/Contents`, which structure output also has as `linkDescription`)
+or **Edit Tooltip…** (a form field, tagged `Form`: what a screen reader says when
+it reaches it, prefilled from the field's name, `first_name` as "First name";
+written as the field's `/TU` and its widgets' `/Contents`, and for a signature as
+its tag's `/Alt` too). An
 edit is saved with the rest of the review
 (`<name>.pdf.legibyl.json`, and inside copies Legibyl saves), keyed by page,
 tag and box like the edits on a suggested structure, and the block shows it as not
