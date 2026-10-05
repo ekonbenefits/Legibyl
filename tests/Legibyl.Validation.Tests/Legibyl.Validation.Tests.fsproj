@@ -44,6 +44,7 @@
     <Compile Include="FontEmbeddingTests.fs" />
     <Compile Include="RoleMapTests.fs" />
     <Compile Include="DescriptionEditsTests.fs" />
+    <Compile Include="IconTextTests.fs" />
     <Compile Include="TableHeaderScopeTests.fs" />
     <Compile Include="DocumentLanguageTests.fs" />
     <Compile Include="MetadataAndFontFixTests.fs" />

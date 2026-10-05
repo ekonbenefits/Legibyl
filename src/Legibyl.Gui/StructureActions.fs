@@ -45,10 +45,36 @@ let isUntagged (node: StructureNode) = node.Tag = "Untagged"
 /// Whether a piece outside the tags is text, which is never made decoration.
 let isUntaggedText (node: StructureNode) = (string node.Content).StartsWith "text "
 
+/// Whether a character (by its UTF-16 unit) is in one of Unicode's private use areas, as an icon
+/// font's characters often are: the Basic one (U+E000 to U+F8FF), or the planes above (by their
+/// surrogates).
+let private isIconUnit (c: char) = (c >= '\uE000' && c <= '\uF8FF') || (c >= '\uDB80' && c <= '\uDBFF')
+
+/// Whether text uses icon characters (Unicode's private use areas), which mean nothing to a
+/// screen reader without replacement text.
+let hasIconCharacters (text: string | null) =
+    match text with
+    | NonNull text -> text |> Seq.exists isIconUnit
+    | Null -> false
+
+/// text without its icon characters (and the low surrogates of those above the Basic plane).
+let withoutIconCharacters (text: string) =
+    let kept = Text.StringBuilder()
+    let mutable i = 0
+    while i < text.Length do
+        let c = text[i]
+        if c >= '\uDB80' && c <= '\uDBFF' then i <- i + 2
+        elif isIconUnit c then i <- i + 1
+        else
+            kept.Append c |> ignore
+            i <- i + 1
+    Text.RegularExpressions.Regex.Replace(kept.ToString(), "\\s+", " ").Trim()
+
 /// The edits an element can take. Alt text: figures and formulas, and anything that already
-/// has alt text. Replacement text: only what already has it (like OCR'd text), since writing
-/// it over real text would hide what the page says. Either needs the element's place on its
-/// page, which is how an edit finds it again.
+/// has alt text. Replacement text: what already has it (like OCR'd text), and text that uses
+/// icon characters a screen reader can't read; not other text, since writing it over real text
+/// would hide what the page says. Either needs the element's place on its page, which is how an
+/// edit finds it again.
 let editKinds (node: StructureNode) =
     // (One of the PDF's own tag names by what its role map makes it: an Image mapped to Figure.)
     let tag = match node.Role with NonNull role -> role | Null -> node.Tag
@@ -59,7 +85,7 @@ let editKinds (node: StructureNode) =
           elif tag = "Annot" then Description
           elif tag = "Form" then Tooltip
           elif tag = "Figure" || tag = "Formula" || not (isNull node.AlternateDescription) then AltText
-          if not (isNull node.ActualText) then ReplacementText ]
+          if not (isNull node.ActualText) || hasIconCharacters node.Content then ReplacementText ]
 
 /// What editing it is called: on the selected element's buttons, and its block's right-click menu.
 let editKindLabel (kind: EditKind) =
