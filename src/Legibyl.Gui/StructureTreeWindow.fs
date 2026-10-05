@@ -392,6 +392,13 @@ module private StructureView =
                                 |> Option.orElse (Option.ofObj node.FormFieldName |> Option.map StructureActions.fieldNameText |> Option.filter ((<>) ""))
                                 |> Option.defaultValue "",
                                 "What to fill in"
+                            | ReplacementText when isNull node.ActualText && StructureActions.hasIconCharacters node.Content ->
+                                // Its text, without the icons, to start from.
+                                "Replacement Text",
+                                $"This text on page {page} uses icon characters a screen reader can't read (an icon font's: a phone, an envelope, a tick). "
+                                + "Say what it means, e.g. \"Phone: 555-0100\", or leave it empty if the icons are only decoration.",
+                                existing |> Option.bind _.Text |> Option.defaultValue (StructureActions.withoutIconCharacters (string node.Content)),
+                                "Nothing to read here (decoration)"
                             | ReplacementText ->
                                 "Replacement Text",
                                 $"What a screen reader reads for this <{node.Tag}> on page {page} (its /ActualText), in place of what's drawn.",
@@ -410,7 +417,10 @@ module private StructureView =
                                 | Description -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.LinkDescription) text
                                 | Tooltip when String.IsNullOrWhiteSpace text -> RegionEdits.setAlt edits.Current page node.Tag box ""
                                 | Tooltip -> RegionEdits.setAltAgainst edits.Current page node.Tag box (string node.FormFieldDescription) text
-                                | ReplacementText -> RegionEdits.setText edits.Current page node.Tag box (string node.ActualText) text
+                                // (Without icon characters: replacement text mustn't have them, 8.4.3.)
+                                | ReplacementText ->
+                                    let text = if StructureActions.hasIconCharacters text then StructureActions.withoutIconCharacters text else text
+                                    RegionEdits.setText edits.Current page node.Tag box (string node.ActualText) text
                             do! saveEdits next
                         | None -> ()
                     }

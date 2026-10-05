@@ -588,8 +588,11 @@ reopening the window for the same, unchanged file is immediate.
 
 Alt text and replacement text can be edited there: right-click a block in
 the **Blocks** tab for **Edit Alt Text…** (figures, formulas, and anything
-that already has alt text) or **Edit Replacement Text…** (only elements that
-already have `/ActualText`, like OCR'd text, since writing it over real text
+that already has alt text) or **Edit Replacement Text…** (elements that
+already have `/ActualText`, like OCR'd text, and text that uses icon characters,
+from Unicode's private use areas, which a screen reader can't read (PDF/UA-2's
+8.4.3): prefilled with the text without them, an empty answer meaning nothing
+to read, and saved without them; not other text, since writing it over real text
 would hide what the page says) or **Edit Link Description…** (a link: what a
 screen reader announces for it, written as its annotation's `/Contents`, the
 same edit made on an untagged PDF's suggested structure; blocks show

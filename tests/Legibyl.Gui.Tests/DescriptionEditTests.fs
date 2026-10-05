@@ -92,3 +92,37 @@ let ``a field's name is said as a tooltip would`` () =
     [ "first_name"; "EmailAddress"; "topmostSubform[0].Page1[0].dateOfBirth[0]"; "Phone-2" ]
     |> List.map StructureActions.fieldNameText
     |> should equal [ "First name"; "Email address"; "Date of birth"; "Phone 2" ]
+
+[<Fact>]
+let ``text with icon characters offers replacement text, prefilled without them, and saves none`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let icons =
+                node "StructTreeRoot" null [
+                    node "Document" null [
+                        { node "P" (rect 700.0) [] with Content = "Call  555-0100" }
+                        { node "P" (rect 650.0) [] with Content = "Plain text" }
+                    ]
+                ]
+            let window = StructureTreeWindow(icons, pdf, Width = 900.0, Height = 700.0)
+            window.Show()
+            pump ()
+            let blocks = descendants<Border> window |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "P" | _ -> false)
+            let items (block: Border) = menuItems block |> List.map fst |> List.filter (fun t -> t.StartsWith "Edit ")
+            let withIcons, plain = items blocks[0], items blocks[1]
+            (menuItems blocks[0] |> List.find (fst >> (=) "Edit Replacement Text…") |> snd).RaiseEvent(RoutedEventArgs MenuItem.ClickEvent)
+            pump ()
+            let prompt = window.OwnedWindows |> Seq.exactlyOne
+            let box = descendants<TextBox> prompt |> List.exactlyOne
+            let prefilled = box.Text
+            box.Text <- " Phone: 555-0100"
+            pump ()
+            (descendants<Button> prompt |> List.find (fun b -> string b.Content = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let edits = window.Review.Edits |> List.map (fun e -> e.Tag, e.Text)
+            window.Close()
+
+            withIcons |> should equal [ "Edit Replacement Text…" ]
+            plain |> should be Empty
+            prefilled |> should equal "Call 555-0100"
+            edits |> should equal [ "P", Some "Phone: 555-0100" ]))
