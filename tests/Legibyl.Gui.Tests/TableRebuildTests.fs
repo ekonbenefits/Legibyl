@@ -118,3 +118,22 @@ let ``a tagged table offers its rows and cells rebuilt; one rebuilt shows its gr
             shown |> should contain "March"
             kept |> should equal [ "TH"; "TH"; "TD"; "TD" ]
             editsTab |> List.exists (fun t -> t.Contains "rows and cells: rebuilt from the page, 4 cells (2 header)") |> should be True))
+
+[<Fact>]
+let ``a rebuild that fails says so, rather than doing nothing`` () =
+    if not (Legibyl.Layout.TableModel.isDownloaded ()) then
+        Assert.Skip "The table model isn't downloaded; open Suggest Structure in the app to fetch it."
+    onUiThread (fun () ->
+        // No PDF there to find the table's cells in.
+        withPdf (fun pdf ->
+            let window = StructureTreeWindow(structure, pdf, Width = 900.0, Height = 700.0)
+            window.Show()
+            pump ()
+            selectTable window
+            (buttonNamed window "Rebuild Rows and Cells from the Page…" |> Option.get).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> not (Seq.isEmpty window.OwnedWindows)) |> ignore
+            let message = window.OwnedWindows |> Seq.tryHead |> Option.map (fun w -> descendants<TextBlock> w |> List.map (fun t -> string t.Text) |> String.concat " ")
+            for owned in List.ofSeq window.OwnedWindows do owned.Close()
+            window.Close()
+
+            message |> Option.exists (fun text -> text.Contains "The table's rows and cells couldn't be found") |> should be True))
