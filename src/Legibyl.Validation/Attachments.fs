@@ -15,11 +15,15 @@ type Kind =
     | File
     | Media
 
-/// An attached file or media clip, as found: what an edit is for it by (Key: an attached file's
-/// name in the PDF's list of them, else its file name; a media clip's name, else its file's),
-/// what it is, and what it has.
+/// An attached file or media clip, as found: what an edit is for it by (Key: where it is, so no
+/// two have one: an attached file in the PDF's list of them by its name there, one on a page, or
+/// a media clip, by its annotation's place on its page), what it's called, what it is, and what
+/// it has.
 type Attachment =
     { Key: string
+      /// What it's called: an attached file's name in the PDF's list, else its file name; a media
+      /// clip's name, else its file's.
+      Name: string
       Kind: Kind
       /// Its file name: /UF, else /F (an attached file's, or a media clip's data's).
       FileName: string option
@@ -75,10 +79,11 @@ let private altOf (clip: PdfDictionary) =
 /// media clips (played by pages' Screen annotations) in document, each with its dictionary.
 let private findIn (document: PdfDocument) : (Attachment * PdfDictionary) list =
     let seen = Collections.Generic.HashSet<PdfDictionary>(HashIdentity.Reference)
-    let file (key: string) (where: string) (spec: PdfDictionary) =
+    let file (key: string) (name: string) (where: string) (spec: PdfDictionary) =
         if seen.Add spec then
             Some(
                 { Key = key
+                  Name = name
                   Kind = File
                   FileName = fileNameOf spec
                   Named = (text spec PdfName.F).IsSome && (text spec PdfName.UF).IsSome
@@ -94,9 +99,9 @@ let private findIn (document: PdfDocument) : (Attachment * PdfDictionary) list =
               match spec with
               | :? PdfIndirectReference as reference ->
                   match reference.GetRefersTo() with
-                  | :? PdfDictionary as spec -> yield! Option.toList (file (name.ToUnicodeString()) "the document" spec)
+                  | :? PdfDictionary as spec -> yield! Option.toList (file $"the document: {name.ToUnicodeString()}" (name.ToUnicodeString()) "the document" spec)
                   | _ -> ()
-              | :? PdfDictionary as spec -> yield! Option.toList (file (name.ToUnicodeString()) "the document" spec)
+              | :? PdfDictionary as spec -> yield! Option.toList (file $"the document: {name.ToUnicodeString()}" (name.ToUnicodeString()) "the document" spec)
               | _ -> () ]
     let onPages =
         [ for number in 1 .. document.GetNumberOfPages() do
@@ -107,30 +112,42 @@ let private findIn (document: PdfDocument) : (Attachment * PdfDictionary) list =
                   | subtype when PdfName.FileAttachment.Equals subtype ->
                       match dictionary.GetAsDictionary PdfName.FS with
                       | NonNull spec ->
-                          let key = fileNameOf spec |> Option.defaultValue $"{where}, attachment {i + 1}"
-                          yield! Option.toList (file key where spec)
+                          let name = fileNameOf spec |> Option.defaultValue $"attachment {i + 1}"
+                          yield! Option.toList (file $"{where}, attachment {i + 1}" name where spec)
                       | Null -> ()
                   | subtype when PdfName.Screen.Equals subtype ->
-                      match dictionary.GetAsDictionary PdfName.A with
-                      | NonNull action ->
-                          match action.GetAsDictionary PdfName.R with
-                          | NonNull rendition ->
-                              match rendition.GetAsDictionary PdfName.C with
-                              | NonNull clip when seen.Add clip ->
-                                  let name = text clip PdfName.N
-                                  let dataName = fileNameOf (clip.Get(PdfName.D, true))
-                                  yield
-                                      { Key = name |> Option.orElse dataName |> Option.defaultValue $"{where}, media {i + 1}"
-                                        Kind = Media
-                                        FileName = dataName
-                                        Named = true
-                                        Description = altOf clip
-                                        ContentType = text clip PdfName.CT
-                                        Where = where },
-                                      clip
-                              | _ -> ()
-                          | Null -> ()
-                      | Null -> ()
+                      // Its rendition actions: its own (/A), those its events start (/AA), and
+                      // those either goes on to (/Next).
+                      let rec actions (action: PdfObject | null) (depth: int) : PdfDictionary list =
+                          match action with
+                          | :? PdfDictionary as action when depth < 16 ->
+                              action :: actions (action.Get(PdfName.Next, true)) (depth + 1)
+                          | :? PdfArray as next when depth < 16 -> [ for j in 0 .. next.Size() - 1 do yield! actions (next.Get(j, true)) (depth + 1) ]
+                          | _ -> []
+                      let started =
+                          actions (dictionary.Get(PdfName.A, true)) 0
+                          @ (match dictionary.GetAsDictionary PdfName.AA with
+                             | NonNull events -> [ for key in events.KeySet() do yield! actions (events.Get(key, true)) 0 ]
+                             | Null -> [])
+                      let clips =
+                          [ for action in started do
+                                match action.GetAsDictionary PdfName.R |> Option.ofObj |> Option.bind (fun r -> Option.ofObj (r.GetAsDictionary PdfName.C)) with
+                                | Some clip when seen.Add clip -> clip
+                                | _ -> () ]
+                      for k, clip in List.indexed clips do
+                          let name = text clip PdfName.N
+                          let dataName = fileNameOf (clip.Get(PdfName.D, true))
+                          let place = if k = 0 then $"{where}, media {i + 1}" else $"{where}, media {i + 1}.{k + 1}"
+                          yield
+                              { Key = place
+                                Name = name |> Option.orElse dataName |> Option.defaultValue $"media {i + 1}"
+                                Kind = Media
+                                FileName = dataName
+                                Named = true
+                                Description = altOf clip
+                                ContentType = text clip PdfName.CT
+                                Where = where },
+                              clip
                   | _ -> () ]
     listed @ onPages
 
@@ -172,7 +189,7 @@ let apply (document: PdfDocument) (edits: Map<string, AttachmentEdit>) : string 
                       dictionary.Put(key, value) |> ignore
                   if not changed.IsEmpty then
                       let what = if attachment.Kind = File then "attached file" else "media clip"
-                      yield $"Wrote the {what} \"{attachment.Key}\"'s " + String.Join(" and ", changed |> List.map (fun (key, _) -> key.GetValue()) |> List.distinct) + ", as given."
+                      yield $"Wrote the {what} \"{attachment.Name}\"'s " + String.Join(" and ", changed |> List.map (fun (key, _) -> key.GetValue()) |> List.distinct) + ", as given."
               | None -> () ]
 
 /// How many of the edits the PDF at pdfPath doesn't have yet.

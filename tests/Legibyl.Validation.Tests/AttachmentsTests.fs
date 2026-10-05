@@ -56,11 +56,11 @@ let ``an attached file and a media clip are found, with what they have`` () =
     use input = new TempPdf()
     create input.Path PdfVersion.PDF_1_7 (fun spec -> spec.Remove PdfName.UF |> ignore) [ PdfName.N, PdfString "Garden tour" ]
 
-    let found = Attachments.list input.Path |> List.map (fun a -> a.Key, a.Kind, a.FileName, a.Named, a.Description, a.ContentType, a.Where)
+    let found = Attachments.list input.Path |> List.map (fun a -> a.Key, a.Name, a.Kind, a.FileName, a.Named, a.Description, a.ContentType, a.Where)
 
     let expected =
-        [ "notes.txt", File, Some "notes.txt", false, (None: string option), (None: string option), "the document"
-          "Garden tour", Media, Some "tour.mp4", true, None, None, "page 1" ]
+        [ "the document: notes.txt", "notes.txt", File, Some "notes.txt", false, (None: string option), (None: string option), "the document"
+          "page 1, media 1", "Garden tour", Media, Some "tour.mp4", true, None, None, "page 1" ]
     found = expected |> should be True
 
 [<Fact>]
@@ -72,7 +72,7 @@ let ``an attached file is given its file names and a description`` () =
     before |> should contain "8.14.1-1"
 
     let result =
-        fix input.Path output.Path PdfProfile.PdfUa2 [ "notes.txt", { FileName = "notes.txt"; Description = "What to bring"; ContentType = null } ]
+        fix input.Path output.Path PdfProfile.PdfUa2 [ "the document: notes.txt", { FileName = "notes.txt"; Description = "What to bring"; ContentType = null } ]
 
     failed PdfProfile.PdfUa2 output.Path |> should not' (contain "8.14.1-1")
     let file = Attachments.list output.Path |> List.find (fun a -> a.Kind = File)
@@ -87,7 +87,7 @@ let ``an attached file without its file names fails PDF/UA-1, and passes with th
     create input.Path PdfVersion.PDF_1_7 (fun spec -> spec.Remove PdfName.UF |> ignore) [ PdfName.N, PdfString "Garden tour"; PdfName.CT, PdfString "video/mp4" ]
     failed PdfProfile.PdfUa1 input.Path |> should contain "7.11-1"
 
-    fix input.Path output.Path PdfProfile.PdfUa1 [ "notes.txt", { FileName = "notes.txt"; Description = null; ContentType = null } ] |> ignore
+    fix input.Path output.Path PdfProfile.PdfUa1 [ "the document: notes.txt", { FileName = "notes.txt"; Description = null; ContentType = null } ] |> ignore
 
     failed PdfProfile.PdfUa1 output.Path |> should not' (contain "7.11-1")
 
@@ -100,7 +100,7 @@ let ``a media clip is given its content type and a description`` () =
     before |> should contain "7.18.6.2-1"
     before |> should contain "7.18.6.2-2"
 
-    fix input.Path output.Path PdfProfile.PdfUa1 [ "Garden tour", { FileName = null; Description = "A walk round the garden in spring"; ContentType = "video/mp4" } ]
+    fix input.Path output.Path PdfProfile.PdfUa1 [ "page 1, media 1", { FileName = null; Description = "A walk round the garden in spring"; ContentType = "video/mp4" } ]
     |> ignore
 
     let after = failed PdfProfile.PdfUa1 output.Path
@@ -110,3 +110,32 @@ let ``a media clip is given its content type and a description`` () =
     (clip.ContentType, clip.Description) |> should equal (Some "video/mp4", Some "A walk round the garden in spring")
     Attachments.contentTypeFor "tour.MP4" |> should equal (Some "video/mp4")
     Attachments.contentTypeFor "notes.txt" |> should equal None
+
+[<Fact>]
+let ``attachments of the same name, and media started by an event, are each their own`` () =
+    use input = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        // Two file attachment annotations attaching files of the same name.
+        for y in [ 700f; 650f ] do
+            let spec = PdfFileSpec.CreateEmbeddedFileSpec(document, System.Text.Encoding.UTF8.GetBytes "Bring gloves.", null, "notes.txt", null, null)
+            page.AddAnnotation(PdfFileAttachmentAnnotation(Rectangle(72f, y, 20f, 20f), spec)) |> ignore
+        // A Screen annotation whose clip plays when the page opens (/AA /PO), not on a click (/A).
+        let clip = PdfDictionary()
+        clip.Put(PdfName.Type, PdfName.MediaClip) |> ignore
+        clip.Put(PdfName.S, PdfName.MCD) |> ignore
+        clip.Put(PdfName.N, PdfString "notes.txt") |> ignore
+        let rendition = PdfDictionary()
+        rendition.Put(PdfName.S, PdfName.MR) |> ignore
+        rendition.Put(PdfName.C, clip) |> ignore
+        let action = PdfDictionary()
+        action.Put(PdfName.S, PdfName.Rendition) |> ignore
+        action.Put(PdfName.R, rendition) |> ignore
+        let screen = PdfScreenAnnotation(Rectangle(72f, 400f, 200f, 120f))
+        screen.GetPdfObject().Put(PdfName.AA, PdfDictionary(dict [ PdfName.PO, action :> PdfObject ])) |> ignore
+        page.AddAnnotation screen |> ignore
+
+    let found = Attachments.list input.Path |> List.map (fun a -> a.Key, a.Name)
+
+    found = [ "page 1, attachment 1", "notes.txt"; "page 1, attachment 2", "notes.txt"; "page 1, media 3", "notes.txt" ] |> should be True
