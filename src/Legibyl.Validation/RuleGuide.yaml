@@ -214,7 +214,7 @@ rules:
 
   - clause: "7.11"
     meaning: "A file attached to the PDF is missing the file name PDF/UA asks for, so a screen reader can't say what it is."
-    whatToDo: "Attach the file again in a PDF editor's attachments panel, which writes its file name."
+    whatToDo: "In Structure…'s Attachments tab, choose Edit File Name… for it (prefilled from what it has), and Export… writes it as PDF/UA asks; or attach the file again in a PDF editor's attachments panel."
 
   - clause: "7.15"
     meaning: "The PDF is a dynamic XFA form: its pages are built by a script as it's opened, which most readers and assistive technology can't read at all."
@@ -230,7 +230,7 @@ rules:
 
   - clause: "7.18.6.2"
     meaning: "A media clip (a video or sound) in the PDF doesn't say what kind it is, or has no description, so a screen reader can't say what it is."
-    whatToDo: "In a PDF editor, give the media its content type and a description (its alternate text)."
+    whatToDo: "In Structure…'s Attachments tab, choose Edit Content Type… (guessed from its file name, e.g. video/mp4) and Edit Description… for it, and Export… writes them."
 
   - clause: "7.18.8"
     meaning: "A printer's mark in the PDF isn't marked as decoration, so a screen reader may read it as if it were content."
@@ -419,7 +419,7 @@ pdfUa2Rules:
 
   - clause: "8.14.1"
     meaning: "A file attached to the PDF has no description, so a screen reader can only say its file name."
-    whatToDo: "Give the attachment a description in a PDF editor's attachments panel."
+    whatToDo: "In Structure…'s Attachments tab, choose Edit Description… for it: say what it is, e.g. \"The budget, as a spreadsheet\", and Export… writes it."
 
   - clause: "8.2.5.23"
     meaning: "Ruby text (the small reading aids set beside East Asian characters) is tagged in a way a screen reader can't follow, so the reading and the characters may be read out of step."

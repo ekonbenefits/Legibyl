@@ -161,6 +161,11 @@ type SavedFile =
       [<JsonPropertyName "roleMap">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       RoleMap: Collections.Generic.Dictionary<string, string> | null
+      /// What a person gave the files attached to the PDF and its media clips (Structure…'s
+      /// Attachments), by each one's key (see Attachments): a file name, a description, a content type.
+      [<JsonPropertyName "attachments">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Attachments: Collections.Generic.Dictionary<string, Attachments.AttachmentEdit> | null
       /// For an untagged PDF: its layout as reviewed (see LayoutFile), the pages reviewed so far;
       /// tagging takes it, and the layout model for the others.
       [<JsonPropertyName "layout">]
@@ -267,6 +272,7 @@ let isEmpty (file: SavedFile) =
     // Fixes chosen as none is still a choice, as is none dismissed (over a review carried inside
     // the PDF that has some).
     isNull file.DismissedWarnings && none file.Edits && isNull file.Title && (match file.RoleMap with null -> true | map -> map.Count = 0)
+    && (match file.Attachments with null -> true | edits -> edits.Count = 0)
     && isNull file.Layout && isNull file.Fixes && isNull file.Validation && isNull file.Checklist
 
 /// Writes file next to pdfPath, or deletes it when there's nothing in it. Throws

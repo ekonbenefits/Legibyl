@@ -1138,6 +1138,17 @@ the same pass: Auto Fixes… then ticks Fix XMP metadata, and NEXT STEP, which
 asks for a title first, suggests it. The
 GUI's Auto Fixes dialog lists the same fixes, in the order they run.
 
+Files attached to a tagged PDF, and its media clips (a video or a sound a Screen
+annotation plays), aren't in the page's tags, so Structure… lists them on an
+**Attachments** tab when it has any (`Attachments.fs`): each with what PDF/UA
+asks of it, an attached file's file name as both `/F` and `/UF` (7.11) and a
+description, `/Desc` (PDF/UA-2's 8.14.1), a media clip's content type, `/CT`, and
+description, `/Alt` (7.18.6.2), and **Edit File Name…**, **Edit Content Type…**
+(guessed from its file name) and **Edit Description…**. They're kept in the
+review as `attachments`, by each one's key (its name in the PDF's list of
+attached files, else its file name; a media clip's name), and Export… writes
+them.
+
 `role-map` maps the PDF's own tag names (Word's `Heading 1`, `Body Text`, `InlineShape`,
 LibreOffice's `Text body`…) to the standard tags they say they are, in the structure tree
 root's role map, so a screen reader can tell a heading from a paragraph (7.1-5; 8.2.4-1),

@@ -133,3 +133,40 @@ let ``a lone surrogate takes nothing else with it`` () =
     [ "Call \uE001 555"; "A \U000F0001 B"; String([| 'A'; ' '; char 0xDB80; 'B' |]) ]
     |> List.map StructureActions.withoutIconCharacters
     |> should equal [ "Call 555"; "A B"; "A B" ]
+let ``the Attachments tab lists an attached file, and takes its file name and description`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            do
+                use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf))
+                document.AddNewPage() |> ignore
+                let spec =
+                    iText.Kernel.Pdf.Filespec.PdfFileSpec.CreateEmbeddedFileSpec(document, Text.Encoding.UTF8.GetBytes "Bring gloves.", null, "notes.txt", null, null)
+                document.AddFileAttachment("notes.txt", spec)
+            let window = StructureTreeWindow(structure, pdf, Width = 900.0, Height = 700.0)
+            window.Show()
+            pump ()
+            let tabs = descendants<TabControl> window |> List.head
+            tabs.SelectedItem <- tabs.Items |> Seq.cast<TabItem> |> Seq.find (fun t -> string t.Header = "Attachments")
+            pump ()
+            let shown = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
+            let answer (button: string) (text: string) =
+                (descendants<Button> window |> List.find (fun b -> string (Automation.AutomationProperties.GetName b) = button)).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+                pump ()
+                let prompt = window.OwnedWindows |> Seq.exactlyOne
+                let box = descendants<TextBox> prompt |> List.exactlyOne
+                let prefilled = box.Text
+                box.Text <- text
+                pump ()
+                (descendants<Button> prompt |> List.find (fun b -> string b.Content = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+                pump ()
+                prefilled
+            let namePrefill = answer "Edit File Name…" "notes.txt"
+            let descriptionPrefill = answer "Edit Description…" "What to bring"
+            let edit = window.Review.Attachments |> Map.find "notes.txt"
+            window.Close()
+
+            shown |> should contain "notes.txt  (Attached file, the document)"
+            shown |> should contain "No description: a screen reader can only say its file name"
+            namePrefill |> should equal "notes.txt"
+            descriptionPrefill |> should equal ""
+            (edit.FileName, edit.Description) |> should equal ("notes.txt", "What to bring")))
