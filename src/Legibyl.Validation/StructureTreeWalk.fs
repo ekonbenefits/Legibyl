@@ -188,14 +188,26 @@ let private readLinkDescription (child: obj) =
 let private readFormFieldInfo (child: obj) (ownPage: int option) =
     referencedAnnotation child "Widget"
     |> Option.map (fun referenced ->
+        // The widget and the fields above it (its /Parent, and theirs): a widget that isn't a
+        // field itself has its field's name, tooltip, type and value there, and type and value
+        // can be inherited from further up.
+        let chain =
+            let rec up (node: COSObject) (depth: int) =
+                [ yield node
+                  match node.getKey (atom "Parent") with
+                  | NonNull parent when depth < 32 && not (parent.empty ()) -> yield! up parent (depth + 1)
+                  | _ -> () ]
+            up referenced 0
+        let first (read: COSObject -> string | null) = chain |> List.tryPick (fun node -> Option.ofObj (read node)) |> Option.toObj
         let value =
-            match nullIfEmpty (referenced.getStringKey(atom "V")) with
-            | null -> atomValue (referenced.getNameKey(atom "V"))
-            | value -> value
+            first (fun node ->
+                match nullIfEmpty (node.getStringKey(atom "V")) with
+                | null -> atomValue (node.getNameKey(atom "V"))
+                | value -> value)
 
-        { Name = nullIfEmpty (referenced.getStringKey(atom "T"))
-          Description = nullIfEmpty (referenced.getStringKey(atom "TU"))
-          Type = atomValue (referenced.getNameKey(atom "FT"))
+        { Name = first (fun node -> nullIfEmpty (node.getStringKey(atom "T")))
+          Description = first (fun node -> nullIfEmpty (node.getStringKey(atom "TU")))
+          Type = first (fun node -> atomValue (node.getNameKey(atom "FT")))
           Value = value
           Geometry =
             match ownPage with
