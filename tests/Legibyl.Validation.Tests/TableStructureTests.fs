@@ -225,3 +225,15 @@ let ``a tagged table tagged wrongly is rebuilt from the cells the model finds, a
               [ "TD", "Carrot"; "TD", "April"; "TD", "August" ]
               [ "TD", "Bean"; "TD", "May"; "TD", "August" ] ]
         failed output.Path |> Set.filter (fun r -> r.StartsWith "7.2-") |> should be Empty)
+
+[<Fact>]
+let ``a turned page's table cells aren't looked for, and it's said why`` () =
+    use pdf = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(pdf.Path))
+        document.AddNewPage(PageSize.LETTER).SetRotation 90 |> ignore
+    use suggester = new LayoutSuggester(pdf.Path)
+    let region: Legibyl.Validation.StructureGeometry = { PageNumber = 1; Left = 72.0; Bottom = 576.0; Right = 520.0; Top = 696.0 }
+
+    (fun () -> suggester.TableCells(1, region) |> ignore)
+    |> should (throwWithMessage "its page is turned (rotated), which finding a table's cells doesn't handle yet") typeof<InvalidOperationException>

@@ -564,7 +564,12 @@ type LayoutSuggester(pdfPath: string) =
     /// cell (TH) or not, in reading order; None without the model (see TableModel).
     member _.TableCells(pageNumber: int, region: StructureGeometry) : (bool * StructureGeometry) list option =
         lock gate (fun () ->
-            let crop = (document.GetPage pageNumber).CropBox.Bounds
+            let page = document.GetPage pageNumber
+            // A turned page is drawn turned: its region isn't where the crop box says (Suggest
+            // passes them over too).
+            if page.Rotation.Value % 360 <> 0 then
+                raise (InvalidOperationException "its page is turned (rotated), which finding a table's cells doesn't handle yet")
+            let crop = page.CropBox.Bounds
             use bitmap = pages.Render(pageNumber, float32 ocrScale)
             cellsIn bitmap crop pageNumber region)
 
