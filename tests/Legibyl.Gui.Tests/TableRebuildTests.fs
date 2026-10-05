@@ -50,6 +50,8 @@ let private structure =
                 node "TD" "Sow" (rect 230.0 676.0 250.0 688.0) []
                 node "TD" "Tomato" (rect 80.0 652.0 120.0 664.0) []
                 node "TD" "March" (rect 230.0 652.0 265.0 664.0) []
+                // Drawn outside every cell found: the nearest one's.
+                node "TD" "(dry)" (rect 380.0 652.0 400.0 664.0) []
             ]
         ]
     ]
@@ -115,7 +117,7 @@ let ``a tagged table offers its rows and cells rebuilt; one rebuilt shows its gr
 
             offered |> should be True
             shown |> should contain "Plant"
-            shown |> should contain "March"
+            shown |> should contain "March (dry)"
             kept |> should equal [ "TH"; "TH"; "TD"; "TD" ]
             editsTab |> List.exists (fun t -> t.Contains "rows and cells: rebuilt from the page, 4 cells (2 header)") |> should be True))
 

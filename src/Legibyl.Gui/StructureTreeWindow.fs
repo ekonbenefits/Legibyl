@@ -469,15 +469,12 @@ module private StructureView =
                                       | NonNull text, NonNull g when text.Trim() <> "" -> text.Trim(), g
                                       | _ -> ()
                                       for child in n.Children do yield! drawn child ]
-                                let pieces = drawn node
+                                // Each piece in the cell a rebuild puts it in (its middle's, else the nearest).
+                                let boxes = [ for cell in cells -> cell.Box ]
+                                let placed = drawn node |> List.map (fun (text, g) -> TableGrid.cellFor boxes (Some g), text)
                                 let texts =
-                                    [ for cell in cells ->
-                                          pieces
-                                          |> List.filter (fun (_, g) ->
-                                              let x, y = (g.Left + g.Right) / 2.0, (g.Bottom + g.Top) / 2.0
-                                              x >= cell.Box.Left && x <= cell.Box.Right && y >= cell.Box.Bottom && y <= cell.Box.Top)
-                                          |> List.map fst
-                                          |> String.concat " " ]
+                                    [ for index in 0 .. cells.Length - 1 ->
+                                          placed |> List.filter (fst >> (=) index) |> List.map snd |> String.concat " " ]
                                 match! TableRebuildDialog.show window cells texts with
                                 | Some checkedCells -> do! saveEdits (RegionEdits.setCells edits.Current box.PageNumber node.Tag box checkedCells)
                                 | None -> ()
