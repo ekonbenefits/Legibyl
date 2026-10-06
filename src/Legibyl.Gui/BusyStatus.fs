@@ -12,6 +12,8 @@ type BusyProgress =
     | DownloadingLayoutModel of float
     /// Fixing: which step, and the page within it where there are pages.
     | Fixing of FixProgress
+    /// Appending PDFs (see Append.run): what it's doing, "Validating garden.pdf…".
+    | Appending of stage: string
 
 /// What the progress row says is happening: always the activity first ("Validating: page 3
 /// of 10", "Fixing, step 2 of 4: …").
@@ -32,6 +34,7 @@ let statusText (progress: BusyProgress) : string =
             | _ -> "Reading the structure: building the tree…"
         status
     | DownloadingLayoutModel fraction -> $"Downloading the layout model: {fraction:P0}"
+    | Appending stage -> $"Appending: {stage}"
     | Fixing progress ->
         let step = $"Fixing, step {progress.Step} of {progress.Steps}: "
         let pages = progress.Page > 0 && progress.PageCount > 0

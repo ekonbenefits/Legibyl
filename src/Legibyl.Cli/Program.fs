@@ -600,6 +600,100 @@ let private runStructure (args: StructureArgs) =
         else ExitCodes.Success)
     |> worst
 
+// ---- append ----
+
+type private AppendArgs =
+    { Files: string array
+      Output: string option
+      Title: string option
+      Lang: string option
+      PartTag: string option
+      Format: string
+      Report: string option
+      Verbose: bool }
+
+let private appendText (r: AppendOutcome) =
+    let sb = StringBuilder()
+    let line (text: string) = sb.AppendLine text |> ignore
+    match r.Status, r.After with
+    | AppendStatus.Refused, _ -> line "Nothing was written:"
+    | _, NonNull after ->
+        let standing = if after.IsCompliant then "PASS" else $"FAIL, {after.FailedCount} failed"
+        let structure = if r.StructureDifferences.Count = 0 then "structure as the files'" else $"{r.StructureDifferences.Count} structure difference(s)"
+        line $"joined {r.Inputs.Count} files → {r.OutputPath} ({r.Standard}: {standing}; {structure})"
+    | status, _ -> line status
+    for refusal in r.Refusals do
+        match refusal.File with
+        | NonNull file -> line $"  ! {file}: {refusal.Reason}"
+        | Null -> line $"  ! {refusal.Reason}"
+    for note in r.Notes do
+        line $"  - {note}"
+    for prefix, items in [ "", r.Failures; "WARNING ", r.Warnings ] do
+        for f in items do
+            line $"  {prefix}[{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}"
+            match f.Location with
+            | NonNull location -> line $"    where: {location}"
+            | Null -> ()
+    for difference in r.StructureDifferences do
+        line $"  ≠ {difference}"
+    sb.ToString().TrimEnd('\n', '\r')
+
+let private runAppend (args: AppendArgs) =
+    use _ = printingLog args.Verbose
+    let files = List.ofArray args.Files
+    if files.Length < 2 then
+        usageError "Name two or more PDFs to join."
+    else
+        let profile, _ = PdfUaTarget.detect files.Head
+        match args.PartTag with
+        | Some tag when not (List.contains tag (Append.partTags profile)) ->
+            usageError $"""--part-tag for {PdfUaTarget.displayName profile} is one of {String.Join(", ", Append.partTags profile)}, not '{tag}'."""
+        | _ ->
+            let output = args.Output |> Option.defaultWith (fun () -> nextVersion files.Head)
+            let options: Append.Options = { Title = args.Title; Language = args.Lang; PartTag = args.PartTag }
+            match
+                (try Ok(Append.run (VeraPdfValidator()) files output options (fun stage -> if args.Verbose then eprintfn $"{stage}")) with
+                 | :? VeraPdfValidationException
+                 | :? IOException
+                 | :? UnauthorizedAccessException
+                 | :? InvalidOperationException
+                 | :? iText.Commons.Exceptions.ITextException as ex -> Error ex.Message)
+            with
+            | Error message ->
+                eprintfn $"error: the PDFs couldn't be joined: {message}"
+                ExitCodes.ToolError
+            | Ok outcome ->
+                let warnings, failures =
+                    match outcome.After with
+                    | Some after -> after.Assertions |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning) |> List.ofSeq, List.ofSeq after.FailedAssertions
+                    | None -> [], []
+                let result =
+                    { Status =
+                        if outcome.Joined.IsNone then AppendStatus.Refused
+                        elif outcome.Passes then AppendStatus.Joined
+                        else AppendStatus.Fails
+                      OutputPath = outcome.Joined |> Option.map _.Output |> Option.toObj
+                      Standard = outcome.Joined |> Option.map (fun joined -> PdfUaTarget.displayName joined.Profile) |> Option.toObj
+                      Title = outcome.Joined |> Option.map _.Title |> Option.toObj
+                      Language = outcome.Joined |> Option.bind _.Language |> Option.toObj
+                      Inputs =
+                        [| for file, report in outcome.Inputs ->
+                               { File = file
+                                 Standard = PdfUaTarget.displayName report.Profile
+                                 IsCompliant = report.IsCompliant
+                                 FailedCount = report.FailedCount } |]
+                      Refusals = [| for refusal in outcome.Refusals -> { File = refusal.File; Reason = refusal.Reason } |]
+                      Notes = outcome.Joined |> Option.map (_.Notes >> Array.ofList) |> Option.defaultValue [||]
+                      After = outcome.After |> Option.map compliance |> Option.toObj
+                      Failures = failures |> List.map FailureDetail.Of |> Array.ofList
+                      Warnings = warnings |> List.map FailureDetail.Of |> Array.ofList
+                      StructureDifferences = Array.ofList outcome.Differences }
+                write args.Report (if args.Format = "json" then toJson result else appendText result)
+                match result.Status with
+                | AppendStatus.Joined -> ExitCodes.Success
+                | AppendStatus.Fails -> ExitCodes.DocumentProblem
+                | _ -> ExitCodes.ToolError
+
 // ---- layout suggest and layout apply ----
 
 type private SuggestArgs = { File: string; Output: string option; FigureImages: bool }
@@ -721,6 +815,7 @@ EXAMPLES:
   legibyl fix document.pdf --fixes safe,lists,headings-from-toc
   legibyl fix flyer.v3.pdf --edits-from flyer.v2.pdf --output flyer.v4.pdf
   legibyl structure document.pdf --output structure.json
+  legibyl append intro.pdf newsletter.pdf plan-summary.pdf --output packet.pdf
   legibyl layout suggest scan.pdf --output scan.layout.json --figure-images
   legibyl layout apply scan.pdf --layout scan.layout.json --edits-from scan.edits.json --fixes safe,qr-links
   legibyl list fixes --format json
@@ -818,6 +913,46 @@ let private structureCommand =
             }
         )
         setAction runStructure
+    }
+
+let private appendCommand =
+    command "append" {
+        description
+            "Join PDFs that pass PDF/UA into one, in the order given, keeping each one's tags as they are (each becomes a \
+             part of the joined file), and check the result: veraPDF, Legibyl's warnings, and each part's structure \
+             against its file's. No fixes are run. If any file fails PDF/UA or can't be joined (a form, layers, \
+             attached files), nothing is written."
+        inputs (
+            input {
+                let! files = filesArgument ()
+                and! output =
+                    optionMaybe "--output"
+                    |> desc "The joined file's path. Default: the first file's next version (\"<name>.v2.pdf\")."
+                    |> helpName "path"
+                and! title = optionMaybe "--title" |> desc "The joined file's title. Default: the first file's." |> helpName "text"
+                and! lang =
+                    optionMaybe "--lang"
+                    |> desc "The joined file's language, e.g. en-US. Default: the first file's. A part in another language says so."
+                    |> helpName "tag"
+                and! partTag =
+                    optionMaybe "--part-tag"
+                    |> desc "The tag each file's part gets: Sect or Part for PDF/UA-1 (default Sect); DocumentFragment, Sect or Part for PDF/UA-2 (default DocumentFragment)."
+                    |> helpName "tag"
+                and! format = formatOption ()
+                and! report = reportOption ()
+                and! verbose = verboseOption ()
+                return
+                    { Files = files
+                      Output = output
+                      Title = title
+                      Lang = lang
+                      PartTag = partTag
+                      Format = format
+                      Report = report
+                      Verbose = verbose }
+            }
+        )
+        setAction runAppend
     }
 
 let private suggestCommand =
@@ -918,6 +1053,7 @@ let main argv =
             addCommand validateCommand
             addCommand fixCommand
             addCommand structureCommand
+            addCommand appendCommand
             addCommand layoutCommand
             addCommand listCommand
         }
@@ -942,7 +1078,7 @@ let main argv =
     let parseResult = root.Parse(argv, ParserConfiguration(ResponseFileTokenReplacer = null))
     match parseResult.Action with
     | :? ParseErrorAction -> reportParseError parseResult
-    | _ when argv.Length = 0 -> usageError "Name a command: validate, fix, structure, layout or list."
+    | _ when argv.Length = 0 -> usageError "Name a command: validate, fix, structure, append, layout or list."
     | _ ->
         // Let unexpected exceptions crash rather than exit with a code that means something else.
         parseResult.Invoke(InvocationConfiguration(EnableDefaultExceptionHandler = false))

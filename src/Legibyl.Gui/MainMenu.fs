@@ -1,4 +1,4 @@
-/// The menus: File (Open…, Open Recent, Close Window, Save, Export…), in the menu bar on macOS with
+/// The menus: File (Open…, Open Recent, Append PDFs…, Close Window, Save, Export…), in the menu bar on macOS with
 /// its ⌘ shortcuts, and at the top of the window elsewhere, with Ctrl shortcuts and a Help menu
 /// (About; on macOS it's in the application menu, see App).
 module Legibyl.Gui.MainMenu
@@ -47,7 +47,9 @@ type Actions =
       Save: unit -> unit
       /// Whether Export… can run now (not while busy).
       CanExport: unit -> bool
-      Export: unit -> unit }
+      Export: unit -> unit
+      /// Joins PDFs into one (see AppendDialog), if it can run now (not while busy).
+      Append: unit -> unit }
 
 /// Puts the menus on window; returns its Save and Export… items, to enable as the buttons are.
 let install (window: Window) (actions: Actions) : NativeMenuItem * NativeMenuItem =
@@ -79,6 +81,9 @@ let install (window: Window) (actions: Actions) : NativeMenuItem * NativeMenuIte
     let file = NativeMenu()
     file.Items.Add(item "Open…" Key.O actions.Open)
     file.Items.Add(NativeMenuItem("Open Recent", Menu = recent))
+    let append = NativeMenuItem("Append PDFs…", Command = command actions.Append)
+    append.ToolTip <- "Joins PDFs that pass PDF/UA into one, keeping each one's tags, and checks the result."
+    file.Items.Add append
     file.Items.Add(NativeMenuItemSeparator())
     file.Items.Add(item "Close Window" Key.W (fun () -> window.Close()))
     file.Items.Add(save)

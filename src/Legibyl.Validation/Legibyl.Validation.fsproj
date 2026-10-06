@@ -64,6 +64,7 @@
     <Compile Include="VeraPdfValidator.fs" />
     <Compile Include="BuildInfo.fs" />
     <Compile Include="SavedResults.fs" />
+    <Compile Include="Append.fs" />
   </ItemGroup>
 
   <ItemGroup>
