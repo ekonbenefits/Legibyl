@@ -19,8 +19,8 @@
 /// table-of-contents heading checks, Structure-3 to 5; lists tagged as paragraphs, Structure-6;
 /// missing bookmarks, Structure-7; the parent tree, Structure-9; figures in pieces, Structure-10;
 /// figures that draw nothing, Structure-11; pages read out of order, Structure-12; and pages whose
-/// text couldn't be read, Structure-13) are added in `run` directly, and their messages to
-/// messageFor.
+/// text couldn't be read, Structure-13; and words split across Span boundaries, Structure-14) are
+/// added in `run` directly, and their messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -84,6 +84,12 @@ let private splitParagraph context (visit: StructElemVisit) =
         else
             None
     | _ -> None
+
+// ---- Structure-14: a word split across adjacent Span tags ----
+
+[<Literal>]
+let private SplitWordSpansMessage =
+    "Adjacent Span tags split a word inside this text block. This is not a PDF/UA failure, but structure-based text extraction may present fragments separately. An auto fix can set the block's replacement text when every span's text is recoverable."
 
 // ---- The checks ----
 
@@ -364,6 +370,16 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! readingJumpFindings document context
           yield! missingBookmarkFindings document context
           yield! unreadableTextFindings context ]
+          for candidate in SplitWordSpans.find context visits do
+              let page = candidate.Page |> Option.map string |> Option.defaultValue "unknown"
+              warning
+                  SplitWordSpansMessage
+                  $"Page {page}: \"{candidate.Text}\"."
+                  candidate.Path
+                  14
+                  PdfFixOptions.JoinSplitWords
+                  (Option.toObj candidate.Geometry)
+          yield! missingBookmarkFindings document context ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
 let messageFor (testNumber: int) : string option =
@@ -382,6 +398,7 @@ let messageFor (testNumber: int) : string option =
         | 11 -> Some EmptyFigureMessage
         | 12 -> Some ReadingJumpMessage
         | 13 -> Some UnreadableTextMessage
+        | 14 -> Some SplitWordSpansMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

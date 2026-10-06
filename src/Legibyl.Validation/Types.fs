@@ -88,7 +88,10 @@ type PdfFixOptions =
     /// is H1, Body Text P, Image Figure; see RoleMaps), and repairs a broken map: a standard tag
     /// mapped, or a circle. A name that doesn't say is left, and reported.
     | RoleMap = 16777216
-    | All = 33554431
+    /// Gives a text block replacement text assembled from its Span children when their boundary
+    /// splits a word; only applies where every span's text can be recovered exactly.
+    | JoinSplitWords = 33554432
+    | All = 67108863
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.
