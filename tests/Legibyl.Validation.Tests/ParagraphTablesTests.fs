@@ -94,3 +94,18 @@ let ``paragraphs in separate columns without aligned rows are not reported`` () 
           300.0, 650.0, "Second column, first paragraph."
           300.0, 625.0, "Second column, second paragraph." ]
     |> should be Empty
+
+[<Fact>]
+let ``a left-aligned label column beside a right-aligned value column is reported`` () =
+    // The labels share only their left edges, and the values only their right edges.
+    let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA)
+    let value (y: float) (text: string) = 400.0 - float (font.GetWidth(text, 12f)), y, text
+    warnings
+        [ 72.0, 700.0, "Name"
+          value 700.0 "Jordan Lee"
+          72.0, 675.0, "Date of birth"
+          value 675.0 "4/1/90"
+          72.0, 650.0, "Plan"
+          value 650.0 "Gold PPO plus" ]
+    |> List.map _.ErrorMessage
+    |> should equal [ "Page 1: 6 paragraphs in a repeated-row layout." ]

@@ -97,17 +97,21 @@ let private anchor alignment (box: StructureGeometry) =
     | Right -> box.Right
     | Centre -> (box.Left + box.Right) / 2.0
 
-/// At least two horizontal alignments recur in at least two distinct rows.
+/// At least two columns recur in at least two of the same rows. A column is where cells line
+/// up: their left edges, right edges or centres (a left-aligned label column beside a
+/// right-aligned value column, say). Two columns are separate when no cell's box is in both, so
+/// one cell's left edge and right edge don't count as two columns; columns lined up the same way
+/// are also at least minimumColumnGap apart.
 let private hasRepeatedColumns (rows: (int * StructureGeometry * Paragraph list) list) =
     let tolerance = 6.0
     let minimumColumnGap = 12.0
-    let repeatedClusters alignment =
-        let entries =
-            [ for row, _, cells in rows do
-                  for cell in cells do
-                      for box in joinedFragments cell -> anchor alignment box, row ]
-            |> List.sortBy fst
-        let rec group (current: (float * int) list) (entries: (float * int) list) : (float * int) list list =
+    // Each cell box, by its row and its place among the row's boxes.
+    let boxes =
+        [ for row, _, cells in rows do
+              for i, box in cells |> List.collect joinedFragments |> List.indexed -> (row, i), box ]
+    let columns alignment =
+        let entries = boxes |> List.map (fun (cell, box) -> anchor alignment box, cell) |> List.sortBy fst
+        let rec group (current: (float * (int * int)) list) (entries: (float * (int * int)) list) =
             match entries with
             | [] -> if current.IsEmpty then [] else [ current ]
             | ((position, _) as entry) :: rest ->
@@ -119,20 +123,20 @@ let private hasRepeatedColumns (rows: (int * StructureGeometry * Paragraph list)
         |> group []
         |> List.map (fun cluster ->
             let positions = cluster |> List.map fst
-            let rowIndexes = cluster |> List.map snd |> Set.ofList
-            (List.min positions + List.max positions) / 2.0, rowIndexes)
-        |> List.filter (fun (_, rowIndexes) -> rowIndexes.Count >= 2)
-    [ Left; Right; Centre ]
-    |> List.exists (fun alignment ->
-        let clusters = repeatedClusters alignment
-        clusters
-        |> List.indexed
-        |> List.exists (fun (index, (position, rowIndexes)) ->
-            clusters
-            |> List.skip (index + 1)
-            |> List.exists (fun (otherPosition, otherRows) ->
-                otherPosition - position >= minimumColumnGap
-                && (Set.intersect rowIndexes otherRows |> Set.count) >= 2)))
+            let cells = cluster |> List.map snd |> Set.ofList
+            alignment, (List.min positions + List.max positions) / 2.0, cells)
+        |> List.filter (fun (_, _, cells) -> (cells |> Set.map fst).Count >= 2)
+    let all = [ Left; Right; Centre ] |> List.collect columns
+    let rowsOf (cells: Set<int * int>) = cells |> Set.map fst
+    all
+    |> List.indexed
+    |> List.exists (fun (index, (alignment, position, cells)) ->
+        all
+        |> List.skip (index + 1)
+        |> List.exists (fun (otherAlignment, otherPosition, otherCells) ->
+            Set.isEmpty (Set.intersect cells otherCells)
+            && (alignment <> otherAlignment || abs (otherPosition - position) >= minimumColumnGap)
+            && (Set.intersect (rowsOf cells) (rowsOf otherCells)).Count >= 2))
 
 let private tableRows (paragraphs: Paragraph list) =
     let rows =
