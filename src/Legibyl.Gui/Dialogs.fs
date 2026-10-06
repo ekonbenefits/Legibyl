@@ -35,7 +35,7 @@ let private screenLimit (owner: Window) =
     | NonNull screen -> float screen.WorkingArea.Height / screen.Scaling * 0.9
     | Null -> 700.0
 
-let private dialogWindow (title: string) (width: float) =
+let internal dialogWindow (title: string) (width: float) =
     HostWindow(
         Title = title,
         Width = width,

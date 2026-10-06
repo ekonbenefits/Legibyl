@@ -16,6 +16,7 @@
     <Compile Include="FixNamesTests.fs" />
     <Compile Include="CommandLineTests.fs" />
     <Compile Include="LayoutFileTests.fs" />
+    <Compile Include="AppendCommandTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

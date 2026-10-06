@@ -811,6 +811,57 @@ module private MainView =
                 }
                 |> ignore
 
+            /// File › Append PDFs…: joins the PDFs chosen (the one open first, if any) into a file
+            /// chosen, then opens it, and says how it went.
+            let appendPdfs () =
+                task {
+                    if not isBusy.Current then
+                        match! AppendDialog.choose window selectedFile.Current with
+                        | None -> ()
+                        | Some choice ->
+                            let first = choice.Files.Head
+                            let! outputPath =
+                                Dialogs.pickSavePath
+                                    window
+                                    (FilePickerSaveOptions(
+                                        Title = "Save the joined PDF",
+                                        SuggestedFileName = CopyNames.nextVersion first,
+                                        DefaultExtension = "pdf",
+                                        FileTypeChoices = [ pdfFileType; FilePickerFileTypes.All ]
+                                    ))
+                                    first
+                            match outputPath with
+                            | None -> ()
+                            | Some outputPath ->
+                                isBusy.Set true
+                                let stage (text: string) = Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> busyProgress.Set(Some(Appending text)))
+                                let! outcome =
+                                    task {
+                                        try
+                                            try
+                                                let! outcome =
+                                                    Task.Run(fun () ->
+                                                        Append.run validator choice.Files outputPath { Append.Options.Default with Title = choice.Title } stage)
+                                                return Ok outcome
+                                            with
+                                            | :? VeraPdfValidationException
+                                            | :? IOException
+                                            | :? UnauthorizedAccessException
+                                            | :? InvalidOperationException as ex -> return Error ex.Message
+                                            | :? iText.Commons.Exceptions.ITextException as ex -> return Error ex.Message
+                                        finally
+                                            busyProgress.Set None
+                                            isBusy.Set false
+                                    }
+                                match outcome with
+                                | Error message -> do! Dialogs.showMessage window $"The PDFs couldn't be joined: {message}" "Append PDFs"
+                                | Ok outcome when outcome.Joined.IsNone -> do! Dialogs.showMessage window (AppendDialog.summary outcome) "Append PDFs"
+                                | Ok outcome ->
+                                    let! shownIn, _ = openElsewhere outputPath true
+                                    do! Dialogs.showMessage shownIn (AppendDialog.summary outcome) "Append PDFs"
+                }
+                |> ignore
+
             // The menus (see MainMenu), once: the File menu's Save and Export… follow the buttons.
             let menuItems = ctx.useState ((None: (NativeMenuItem * NativeMenuItem) option), false)
             ctx.useEffect (
@@ -824,7 +875,8 @@ module private MainView =
                                   CanSave = fun () -> not isBusy.Current && edited.Current
                                   Save = fun () -> saveReview () |> ignore
                                   CanExport = fun () -> not isBusy.Current
-                                  Export = fun () -> export () }
+                                  Export = fun () -> export ()
+                                  Append = appendPdfs }
                         )
                     )),
                 [ EffectTrigger.AfterInit ]

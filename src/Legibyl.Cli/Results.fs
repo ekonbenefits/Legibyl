@@ -171,3 +171,48 @@ type LayoutSuggestion =
       Images: string | null
       Pages: int
       Regions: int }
+
+/// What `append` did.
+module AppendStatus =
+    /// The joined file was written, and passes: PDF/UA, and each part's structure as its file's.
+    [<Literal>]
+    let Joined = "joined"
+
+    /// The joined file was written, but fails (After, StructureDifferences say why); it's kept.
+    [<Literal>]
+    let Fails = "fails"
+
+    /// Nothing was written: the files can't be joined, or one fails PDF/UA (Refusals say why).
+    [<Literal>]
+    let Refused = "refused"
+
+/// One file `append` was given, as it was validated before joining.
+type AppendInput =
+    { File: string
+      Standard: string
+      IsCompliant: bool
+      FailedCount: int }
+
+/// Why `append` refused: one file (File), or the set of them (File null).
+type AppendRefusal = { File: string | null; Reason: string }
+
+/// `append`'s result.
+type AppendOutcome =
+    { /// One of AppendStatus.
+      Status: string
+      /// The joined file, if one was written.
+      OutputPath: string | null
+      /// The standard it's joined for and checked against: "PDF/UA-1" or "PDF/UA-2".
+      Standard: string | null
+      Title: string | null
+      Language: string | null
+      Inputs: IReadOnlyList<AppendInput>
+      Refusals: IReadOnlyList<AppendRefusal>
+      /// What was renamed (tags, classes, IDs, named destinations) and what wasn't carried over.
+      Notes: IReadOnlyList<string>
+      /// The joined file, validated; null when none was written.
+      After: Compliance | null
+      Failures: IReadOnlyList<FailureDetail>
+      Warnings: IReadOnlyList<FailureDetail>
+      /// Where a part's structure doesn't read as its file's did.
+      StructureDifferences: IReadOnlyList<string> }

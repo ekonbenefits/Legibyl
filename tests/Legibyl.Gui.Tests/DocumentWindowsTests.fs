@@ -67,7 +67,7 @@ let ``the File menu opens, closes, saves and exports, in step with the buttons``
             let saveAtFirst, exportAtFirst = enabled "Save", enabled "Export…"
             window.Close()
 
-            items |> List.map fst |> should equal [ "Open…"; "Open Recent"; "Close Window"; "Save"; "Export…" ]
+            items |> List.map fst |> should equal [ "Open…"; "Open Recent"; "Append PDFs…"; "Close Window"; "Save"; "Export…" ]
             // The validation just run is kept by Save (see SavedResults); nothing to export until
             // there's a change or a fix chosen.
             saveAtFirst |> should be True

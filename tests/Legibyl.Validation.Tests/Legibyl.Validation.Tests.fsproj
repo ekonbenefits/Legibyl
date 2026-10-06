@@ -60,6 +60,7 @@
     <Compile Include="RuleGuideTests.fs" />
     <Compile Include="UntaggedContentTests.fs" />
     <Compile Include="UnreadablePagesTests.fs" />
+    <Compile Include="AppendTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
