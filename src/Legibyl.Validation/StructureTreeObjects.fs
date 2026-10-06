@@ -193,8 +193,10 @@ let rec private collectGeometries (obj: PdfObject | null) context (inheritedPage
         // An object reference (/OBJR), e.g. a link's or form field's annotation.
         | NonNull annotation, Some page -> rectGeometry page annotation |> Option.toList
         | NonNull _, None -> []
-        // A marked-content reference (/MCR) names its MCID in /K (and possibly its own /Pg),
-        // so the same recursion covers it and nested structure elements.
+        // A marked-content reference (/MCR) names its MCID in /MCID (some writers put it in
+        // /K), and possibly its own /Pg; /K recurses into nested structure elements too.
+        | Null, Some page when not (isNull (dictionary.GetAsNumber PdfName.MCID)) ->
+            markedContent context (dictionary.GetAsNumber PdfName.MCID) page |> Option.bind _.Geometry |> Option.toList
         | Null, _ -> collectGeometries (dictionary.Get(PdfName.K)) context page
     | _ -> []
 
@@ -208,7 +210,11 @@ let rec private collectTextGeometries (obj: PdfObject | null) context (inherited
     | :? PdfNumber as mcid when inheritedPage.IsSome ->
         markedContent context mcid inheritedPage.Value |> Option.bind _.Geometry |> Option.toList
     | :? PdfDictionary as dictionary when isNull (dictionary.GetAsDictionary(PdfName.Obj)) ->
-        collectTextGeometries (dictionary.Get(PdfName.K)) context (structElemPage dictionary context inheritedPage)
+        let page = structElemPage dictionary context inheritedPage
+        match dictionary.GetAsNumber PdfName.MCID, page with
+        // A marked-content reference (/MCR) with its MCID in /MCID.
+        | NonNull mcid, Some page -> markedContent context mcid page |> Option.bind _.Geometry |> Option.toList
+        | _ -> collectTextGeometries (dictionary.Get(PdfName.K)) context page
     | _ -> []
 
 /// Like subtreeGeometry, but only what's drawn: annotation rectangles (/OBJR) are left out,

@@ -11,11 +11,22 @@ type Candidate =
     { Element: PdfDictionary
       Path: string
       Page: int option
+      /// The block's text from its spans: all of it when Fixable, else the spans' that are known.
       Text: string
-      Geometry: StructureGeometry option }
+      Geometry: StructureGeometry option
+      /// Whether the fix can write Text as the block's replacement text: every child is a Span
+      /// whose text is known and that carries nothing replacement text would hide (/Lang, /Alt…).
+      Fixable: bool }
 
 let private actualText (dictionary: PdfDictionary) =
     dictionary.GetAsString(PdfName.ActualText) |?> _.ToUnicodeString()
+
+let private contentText (context: Context) (page: int option) (mcid: PdfNumber) =
+    match page with
+    | Some page ->
+        lookup context.MarkedContent (page, mcid.IntValue())
+        |> Option.bind (fun content -> if content.Text = "" && content.Geometry.IsSome then None else Some content.Text)
+    | None -> None
 
 let rec private exactText (obj: PdfObject | null) (context: Context) (inheritedPage: int option) : string option =
     match resolve obj with
@@ -23,18 +34,21 @@ let rec private exactText (obj: PdfObject | null) (context: Context) (inheritedP
     | :? PdfArray as array ->
         let parts = [ for i in 0 .. array.Size() - 1 -> exactText (array.Get i) context inheritedPage ]
         if parts |> List.forall Option.isSome then Some(parts |> List.choose id |> String.concat "") else None
-    | :? PdfNumber as mcid when inheritedPage.IsSome ->
-        lookup context.MarkedContent (inheritedPage.Value, mcid.IntValue())
-        |> Option.bind (fun content ->
-            if content.Text = "" && content.Geometry.IsSome then None else Some content.Text)
+    | :? PdfNumber as mcid -> contentText context inheritedPage mcid
     | :? PdfDictionary as dictionary ->
         match actualText dictionary with
         | NonNull text -> Some text
         | Null ->
             let page = structElemPage dictionary context inheritedPage
-            match dictionary.Get(PdfName.K) with
-            | null -> None
-            | kids -> exactText kids context page
+            match dictionary.GetAsNumber PdfName.MCID, dictionary.Get PdfName.Stm with
+            // A marked-content reference (/MCR) on a page; one into a Form XObject's stream
+            // isn't in the page's text.
+            | NonNull mcid, null -> contentText context page mcid
+            | NonNull _, _ -> None
+            | Null, _ ->
+                match dictionary.Get(PdfName.K) with
+                | null -> None
+                | kids -> exactText kids context page
     | _ -> None
 
 let private isTextBlock (tag: PdfName) =
@@ -51,13 +65,27 @@ let private splitsWord (left: string) (right: string) =
     && Char.IsLetterOrDigit left[left.Length - 1]
     && Char.IsLetterOrDigit right[0]
 
+/// Whether right's text starts where left's ends on the page: on the same line, with no more
+/// room between them than letters have (a word space is about a quarter of the type's height).
+/// The page's text has no space between separate spans' content, so text alone can't tell a
+/// split word from two words drawn apart.
+let private continues (left: StructureGeometry option) (right: StructureGeometry option) =
+    match left, right with
+    | Some left, Some right when left.PageNumber = right.PageNumber ->
+        let height = min (left.Top - left.Bottom) (right.Top - right.Bottom)
+        let overlap = min left.Top right.Top - max left.Bottom right.Bottom
+        let gap = right.Left - left.Right
+        height > 0.0 && overlap >= height * 0.5 && gap <= height * 0.15 && gap >= -height * 0.5
+    | _ -> false
+
 let private canFlattenSpan (span: PdfDictionary) =
     [ PdfName.Alt; PdfName.E; PdfName.ID; PdfName.Lang; PdfName.A ]
     |> List.forall (fun key -> isNull (span.Get key))
 
-/// Only handles blocks made entirely of Span children with known text and no existing
-/// replacement text or alternate description. That keeps the fix from overriding richer
-/// structure or inventing text for content it cannot extract.
+/// Text blocks with no replacement text or alternate description of their own, where two
+/// adjacent Span children's text (known, and drawn one straight after the other) splits a word.
+/// Each is fixable only when the whole block can be given its text back (see Candidate.Fixable),
+/// so the fix doesn't override richer structure or invent text for content it can't extract.
 let find (context: Context) (visits: StructElemVisit list) =
     [ for visit in visits do
           let element = visit.Element
@@ -66,45 +94,48 @@ let find (context: Context) (visits: StructElemVisit list) =
           | NonNull tag when
               isTextBlock tag
               && not (isNull kids)
+              && kids.Size() > 0
               && isNull (element.Get(PdfName.ActualText))
               && isNull (element.Get(PdfName.Alt))
               && isNull (element.Get(PdfName.E)) ->
+              let page = structElemPage element context visit.Page
+              // Each child: whether it's a Span, then its text and where it's drawn, if known.
               let children =
-                  [ for i in 0 .. kids.Size() - 1 do
+                  [ for i in 0 .. kids.Size() - 1 ->
                         match resolve (kids.Get i) with
-                        | :? PdfDictionary as child when
-                            PdfName.Span.Equals(standardTag child context)
-                            && canFlattenSpan child ->
-                            yield child, exactText child context visit.Page
-                        | _ -> () ]
-              let allChildrenAreSpans =
-                  kids.Size() > 0
-                  && children.Length = kids.Size()
-                  && (seq { 0 .. kids.Size() - 1 }
-                      |> Seq.forall (fun i ->
-                          match resolve (kids.Get i) with
-                          | :? PdfDictionary as child -> PdfName.Span.Equals(standardTag child context)
-                          | _ -> false))
-              let texts = children |> List.choose snd
+                        | :? PdfDictionary as child when PdfName.Span.Equals(standardTag child context) ->
+                            Some child, exactText child context page, textGeometry child context page
+                        | _ -> None, None, None ]
               let split =
-                  texts
-                  |> List.filter (String.IsNullOrEmpty >> not)
+                  children
+                  |> List.choose (fun (span, text, geometry) ->
+                      match span, text with
+                      | Some _, Some text when text <> "" -> Some(text, geometry)
+                      | _ -> None)
                   |> List.pairwise
-                  |> List.exists (fun (left, right) -> splitsWord left right)
-              if allChildrenAreSpans && texts.Length = children.Length && split then
+                  |> List.exists (fun ((left, leftGeometry), (right, rightGeometry)) ->
+                      splitsWord left right && continues leftGeometry rightGeometry)
+              if split then
+                  let fixable =
+                      children
+                      |> List.forall (fun (span, text, _) ->
+                          match span, text with
+                          | Some span, Some _ -> canFlattenSpan span
+                          | _ -> false)
                   yield
                       { Element = element
                         Path = visit.Path
                         Page = visit.Page
-                        Text = String.concat "" texts
-                        Geometry = subtreeGeometry element context visit.Page }
+                        Text = children |> List.choose (fun (_, text, _) -> text) |> String.concat ""
+                        Geometry = subtreeGeometry element context visit.Page
+                        Fixable = fixable }
           | _ -> () ]
 
 let apply (document: PdfDocument) (context: Context) =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
     | root ->
-        let candidates = find context (walk root context |> List.ofSeq)
+        let candidates = find context (walk root context |> List.ofSeq) |> List.filter _.Fixable
         for candidate in candidates do
             candidate.Element.Put(PdfName.ActualText, PdfString(candidate.Text, iText.IO.Font.PdfEncodings.UNICODE_BIG)) |> ignore
         match candidates.Length with

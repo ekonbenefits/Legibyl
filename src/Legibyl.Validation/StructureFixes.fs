@@ -1224,6 +1224,7 @@ let private readsText =
           PdfFixOptions.EmptyParagraphs
           PdfFixOptions.EmptyTocEntries
           PdfFixOptions.JoinSplitParagraphs
+          PdfFixOptions.JoinSplitWords
           PdfFixOptions.Lists
           PdfFixOptions.Bookmarks
           PdfFixOptions.LinkContents ]

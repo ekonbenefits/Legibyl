@@ -89,7 +89,7 @@ let private splitParagraph context (visit: StructElemVisit) =
 
 [<Literal>]
 let private SplitWordSpansMessage =
-    "Adjacent Span tags split a word inside this text block. This is not a PDF/UA failure, but structure-based text extraction may present fragments separately. An auto fix can set the block's replacement text when every span's text is recoverable."
+    "Adjacent Span tags split a word inside this text block. This is not a PDF/UA failure, but structure-based text extraction may present fragments separately. An auto fix can set the block's replacement text when every span's text is recoverable and none carries a language, alt text or other attributes it would hide."
 
 // ---- The checks ----
 
@@ -369,7 +369,7 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! emptyFigureFindings document context
           yield! readingJumpFindings document context
           yield! missingBookmarkFindings document context
-          yield! unreadableTextFindings context ]
+          yield! unreadableTextFindings context
           for candidate in SplitWordSpans.find context visits do
               let page = candidate.Page |> Option.map string |> Option.defaultValue "unknown"
               warning
@@ -377,9 +377,8 @@ let run (document: PdfDocument) context : RuleViolation list =
                   $"Page {page}: \"{candidate.Text}\"."
                   candidate.Path
                   14
-                  PdfFixOptions.JoinSplitWords
-                  (Option.toObj candidate.Geometry)
-          yield! missingBookmarkFindings document context ]
+                  (if candidate.Fixable then PdfFixOptions.JoinSplitWords else PdfFixOptions.None)
+                  (Option.toObj candidate.Geometry) ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
 let messageFor (testNumber: int) : string option =
