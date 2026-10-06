@@ -50,15 +50,10 @@ let pageList (pages: int seq) =
     | last :: rest -> $"""{String.Join(", ", List.rev rest)} and {last}"""
 
 let createContext (document: PdfDocument) (pdfPath: string) =
-    let markedContent = MarkedContentTextIndex.build pdfPath
-    let notes = List<string>()
-    if markedContent.Unreadable.Count > 0 then
-        notes.Add
-            $"The text of page(s) {pageList markedContent.Unreadable} couldn't be read, so fixes that go by what a page says left what's there as it was."
     { PageNumberByObject = pageNumberIndex document
-      MarkedContent = markedContent
+      MarkedContent = MarkedContentTextIndex.build pdfPath
       RoleMap = roleMap document
-      Notes = notes }
+      Notes = List<string>() }
 
 /// Unions geometries that are all on one page; None if there are none or they span pages.
 let unionGeometry (geometries: StructureGeometry seq) =
