@@ -320,6 +320,19 @@ let private readingJumpFindings (document: PdfDocument) context =
               PdfFixOptions.None
               box ]
 
+/// Pages whose text couldn't be read: the checks that go by what a page says skipped them.
+let private unreadableTextFindings context =
+    match context.MarkedContent.Unreadable with
+    | pages when pages.Count > 0 ->
+        [ warning
+              $"The text of page(s) {pageList pages} couldn't be read, so Legibyl's checks of what they say skipped them."
+              (Option.toObj context.MarkedContent.UnreadableReason)
+              "StructTreeRoot"
+              0
+              PdfFixOptions.None
+              null ]
+    | _ -> []
+
 /// Runs every check in `all` over the document's structure tree, then the document-wide ones.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
@@ -338,7 +351,8 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! splitFigureFindings document context
           yield! emptyFigureFindings document context
           yield! readingJumpFindings document context
-          yield! missingBookmarkFindings document context ]
+          yield! missingBookmarkFindings document context
+          yield! unreadableTextFindings context ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
 let messageFor (testNumber: int) : string option =

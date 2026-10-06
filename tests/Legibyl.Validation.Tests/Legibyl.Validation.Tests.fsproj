@@ -57,6 +57,7 @@
     <Compile Include="SavedResultsTests.fs" />
     <Compile Include="RuleGuideTests.fs" />
     <Compile Include="UntaggedContentTests.fs" />
+    <Compile Include="UnreadablePagesTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

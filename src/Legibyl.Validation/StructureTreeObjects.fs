@@ -42,11 +42,23 @@ let private roleMap (document: PdfDocument) : IReadOnlyDictionary<PdfName, PdfNa
                 | role -> map[key] <- role
     map
 
+/// Pages as a list for a message: "3", "3, 5 and 8".
+let pageList (pages: int seq) =
+    match List.ofSeq pages |> List.map string |> List.rev with
+    | [] -> ""
+    | [ one ] -> one
+    | last :: rest -> $"""{String.Join(", ", List.rev rest)} and {last}"""
+
 let createContext (document: PdfDocument) (pdfPath: string) =
+    let markedContent = MarkedContentTextIndex.build pdfPath
+    let notes = List<string>()
+    if markedContent.Unreadable.Count > 0 then
+        notes.Add
+            $"The text of page(s) {pageList markedContent.Unreadable} couldn't be read, so fixes that go by what a page says left what's there as it was."
     { PageNumberByObject = pageNumberIndex document
-      MarkedContent = MarkedContentTextIndex.build pdfPath
+      MarkedContent = markedContent
       RoleMap = roleMap document
-      Notes = List<string>() }
+      Notes = notes }
 
 /// Unions geometries that are all on one page; None if there are none or they span pages.
 let unionGeometry (geometries: StructureGeometry seq) =
@@ -124,9 +136,11 @@ let rec isSubtreeEmpty (obj: PdfObject | null) context (inheritedPage: int optio
     match resolve obj with
     | null -> true
     | :? PdfArray as array -> Seq.init (array.Size()) array.Get |> Seq.forall (fun kid -> isSubtreeEmpty kid context inheritedPage)
+    // (On a page whose text couldn't be read, what it draws is unknown: not empty.)
     | :? PdfNumber as mcid when inheritedPage.IsSome ->
-        markedContent context mcid inheritedPage.Value
-        |> Option.forall (fun content -> String.IsNullOrWhiteSpace content.Text)
+        not (context.MarkedContent.Unreadable.Contains inheritedPage.Value)
+        && markedContent context mcid inheritedPage.Value
+           |> Option.forall (fun content -> String.IsNullOrWhiteSpace content.Text)
     | :? PdfDictionary as dictionary ->
         if not (PdfName.StructElem.Equals(dictionary.GetAsName(PdfName.Type))) && isNull (dictionary.GetAsName(PdfName.S)) then
             false
