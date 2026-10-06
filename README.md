@@ -662,6 +662,7 @@ needed): on a page where something spanning columns (across two elements side by
 side, above them, like a masthead) is read after content below it and under it.
 Reading the right column after the left isn't one, and running headers and
 footers (short, in the top or bottom tenth of the page) don't count either way.
+It points to Order Page N by Layout and Move Up / Move Down; there's no auto fix.
 
 Legibyl also looks for likely tables tagged as paragraphs (Structure-15,
 `ParagraphTables.fs`, no model needed): consecutive sibling paragraphs whose
@@ -669,7 +670,6 @@ text boxes repeat in at least two horizontal positions across multiple aligned
 rows. This is a review hint, not proof of a table—aligned text can also trigger
 it, and a table whose cells are not individually tagged as paragraphs may not
 be detected. Check the page before retagging; there is no automatic fix.
-It points to Order Page N by Layout and Move Up / Move Down; there's no auto fix.
 
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
