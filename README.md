@@ -404,6 +404,7 @@ new one. All of them:
 | Structure-12 | A page read out of order by a big jump | — (Order Page N by Layout, Move Up / Move Down) |
 | Structure-13 | Pages whose text couldn't be read (a font the page names but doesn't have), so the checks that go by text skipped them | — |
 | Structure-14 | Adjacent Span tags that split a word inside a text block | `join-split-words`, when the block's text is recoverable |
+| Structure-15 | Paragraphs arranged in repeated rows and columns, possibly a table tagged as paragraphs | — (review the page; aligned text can also match) |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -662,6 +663,12 @@ side, above them, like a masthead) is read after content below it and under it.
 Reading the right column after the left isn't one, and running headers and
 footers (short, in the top or bottom tenth of the page) don't count either way.
 
+Legibyl also looks for likely tables tagged as paragraphs (Structure-15,
+`ParagraphTables.fs`, no model needed): consecutive sibling paragraphs whose
+text boxes repeat in at least two horizontal positions across multiple aligned
+rows. This is a review hint, not proof of a table—aligned text can also trigger
+it, and a table whose cells are not individually tagged as paragraphs may not
+be detected. Check the page before retagging; there is no automatic fix.
 It points to Order Page N by Layout and Move Up / Move Down; there's no auto fix.
 
 What a tagged page draws outside every tag (a page's background, rules under
