@@ -352,3 +352,66 @@ let ``the joined file can't be written over one of the files`` () =
     outcome.Joined |> should equal None
     outcome.Refusals |> List.map _.Reason |> should equal [ "The joined file would be written over it: save the joined file somewhere else." ]
     File.ReadAllBytes jardin |> should equal before
+
+[<Fact>]
+let ``text in a page's content that reads like the catalog's structure tree entry is left as it is`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput (folder.File "g.pdf") "Garden" "en-US" "P"
+    createInput jardin "Jardin" "es-ES" "P"
+    // A comment in the page's content, written uncompressed, as the catalog's entry would read.
+    let comment = "% /StructTreeRoot 1 0 R\n"
+    do
+        use document = new PdfDocument(new PdfReader(folder.File "g.pdf"), new PdfWriter(garden))
+        let stream = document.GetPage(1).NewContentStreamAfter()
+        stream.SetData(Text.Encoding.ASCII.GetBytes comment)
+        stream.SetCompressionLevel CompressionConstants.NO_COMPRESSION
+    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    outcome.Passes |> should equal true
+    use document = new PdfDocument(new PdfReader(joined))
+    let page = document.GetPage 1
+    [ for i in 0 .. page.GetContentStreamCount() - 1 -> Text.Encoding.ASCII.GetString(page.GetContentStream(i).GetBytes()) ]
+    |> should contain comment
+
+[<Fact>]
+let ``a named destination a page's own action goes to is renamed with the rest`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput (folder.File "g.pdf") "Garden" "en-US" "P"
+    createInput (folder.File "j.pdf") "Jardin" "es-ES" "P"
+    decorate (folder.File "g.pdf") garden "Block" 2
+    // The jardin's first page goes to its "top" as it opens (/AA /O).
+    do
+        use document = new PdfDocument(new PdfReader(folder.File "j.pdf"), new PdfWriter(folder.File "j2.pdf"))
+        document.AddNamedDestination("top", array [ document.GetPage(2).GetPdfObject(); PdfName.Fit ])
+        let action = PdfDictionary()
+        action.Put(PdfName.S, PdfName.GoTo) |> ignore
+        action.Put(PdfName.D, PdfString "top") |> ignore
+        let events = PdfDictionary()
+        events.Put(PdfName.O, action) |> ignore
+        document.GetPage(1).GetPdfObject().Put(PdfName.AA, events) |> ignore
+    File.Move(folder.File "j2.pdf", jardin)
+    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    outcome.Passes |> should equal true
+    use document = new PdfDocument(new PdfReader(joined))
+    let destination = document.GetPage(3).GetPdfObject().GetAsDictionary(PdfName.AA).GetAsDictionary(PdfName.O).GetAsString(PdfName.D).ToUnicodeString()
+    destination |> should equal "top-2"
+    let target = document.GetCatalog().GetNameTree(PdfName.Dests).GetNames()[PdfString destination] :?> PdfArray
+    document.GetPageNumber(target.GetAsDictionary 0) |> should equal 4
+
+[<Fact>]
+let ``a file already where the joined one goes is replaced only once it's written and checked, with nothing left beside it`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput garden "Garden" "en-US" "P"
+    createInput jardin "Jardin" "es-ES" "P"
+    File.WriteAllText(joined, "an older packet")
+    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    outcome.Passes |> should equal true
+    outcome.Joined.Value.Output |> should equal joined
+    outcome.After.Value.FilePath |> should equal joined
+    File.ReadAllText(joined).StartsWith "%PDF" |> should equal true
+    Directory.GetFiles(Path.GetDirectoryName joined |> nonNull)
+    |> Array.map (Path.GetFileName >> string)
+    |> Array.filter (fun name -> name.StartsWith ".")
+    |> should be Empty
