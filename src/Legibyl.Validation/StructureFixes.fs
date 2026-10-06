@@ -1215,6 +1215,18 @@ let orderedFixes
 /// document that already had a given fix applied reports nothing for it; the fixes asked
 /// for that found nothing to change (nor anything to note); and what they found and couldn't
 /// change.
+/// The fixes that go by what a page says (its text, through MarkedContentTextIndex).
+let private readsText =
+    set
+        [ PdfFixOptions.Language
+          PdfFixOptions.HeadingsFromToc
+          PdfFixOptions.EmptyParagraphs
+          PdfFixOptions.EmptyTocEntries
+          PdfFixOptions.JoinSplitParagraphs
+          PdfFixOptions.Lists
+          PdfFixOptions.Bookmarks
+          PdfFixOptions.LinkContents ]
+
 let applyFixes
     (inputPath: string)
     (outputPath: string)
@@ -1230,12 +1242,21 @@ let applyFixes
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath
+    // On pages whose text couldn't be read, the fixes that go by it leave what's there: said
+    // once, and not as "nothing needed it".
+    let unreadable = context.MarkedContent.Unreadable
+    let mutable unreadableNoted = false
     let results =
         [ for option, apply in orderedFixes titles layout edits title roleMap attachments do
               if options.HasFlag option then
                   let notes = context.Notes.Count
                   let lines = apply document context
-                  yield option, lines, context.Notes.Count > notes ]
+                  let skipped = unreadable.Count > 0 && readsText.Contains option
+                  if skipped && not unreadableNoted then
+                      context.Notes.Add
+                          $"The text of page(s) {pageList unreadable} couldn't be read, so fixes that go by what a page says left what's on them as it was."
+                      unreadableNoted <- true
+                  yield option, lines, skipped || context.Notes.Count > notes ]
     // What each did, those asked for that found nothing to change, and what they noted.
     [ for _, lines, _ in results do yield! lines ],
     [ for option, lines, noted in results do if lines.IsEmpty && not noted then option ],

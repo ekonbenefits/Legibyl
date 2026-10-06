@@ -135,9 +135,12 @@ let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
     for pageNumber in 1..pageCount do
         onPage pageNumber pageCount
         // A page PdfPig can't read is left out, and said to be, rather than ending the reading of
-        // every page after it.
-        match (try Ok((document.GetPage pageNumber).GetMarkedContents()) with ex -> Error ex.Message) with
-        | Ok contents -> indexMarkedContent pageNumber contents index
+        // every page after it; it's read into one of its own first, so none of it is kept.
+        let page = Index()
+        match (try Ok(indexMarkedContent pageNumber ((document.GetPage pageNumber).GetMarkedContents()) page) with ex -> Error ex.Message) with
+        | Ok() ->
+            for KeyValue(key, info) in page do
+                index[key] <- info
         | Error reason ->
             index.Unreadable.Add pageNumber |> ignore
             if index.UnreadableReason.IsNone then index.UnreadableReason <- Some reason

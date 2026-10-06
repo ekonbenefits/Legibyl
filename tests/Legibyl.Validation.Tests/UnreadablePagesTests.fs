@@ -75,10 +75,9 @@ let ``Validate warns that a page's text couldn't be read`` () =
 
     let report = VeraPdfValidator().Validate(pdf.Path, PdfProfile.PdfUa1)
 
-    report.Assertions
-    |> Seq.filter (fun a -> a.Message.Contains("The text of page(s) 1 couldn't be read", StringComparison.Ordinal))
-    |> Seq.length
-    |> should equal 1
+    let warning = report.Assertions |> single (fun a -> a.Specification = "Legibyl" && a.TestNumber = 13)
+    warning.Message |> should equal "The text of some pages couldn't be read, so Legibyl's checks of what they say skipped them."
+    warning.ErrorMessage |> notNull |> should startWith "Page(s) 1: "
 
 [<Fact>]
 let ``A paragraph on a page whose text couldn't be read isn't taken for empty`` () =
@@ -92,4 +91,6 @@ let ``A paragraph on a page whose text couldn't be read isn't taken for empty`` 
     let result = VeraPdfValidator().Fix(pdf.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyParagraphs)
 
     result.WasFixed |> should be False
-    result.NotApplied |> Seq.exists (fun note -> note.Contains("page(s) 1 couldn't be read", StringComparison.Ordinal)) |> should be True
+    result.NotApplied |> Seq.filter (fun note -> note.Contains("page(s) 1 couldn't be read", StringComparison.Ordinal)) |> Seq.length |> should equal 1
+    // (Not also "nothing in this PDF needed it": what page 1 has is unknown.)
+    result.NotApplied |> Seq.exists (fun note -> note.Contains("nothing in this PDF needed it", StringComparison.Ordinal)) |> should be False

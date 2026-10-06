@@ -320,15 +320,21 @@ let private readingJumpFindings (document: PdfDocument) context =
               PdfFixOptions.None
               box ]
 
+// ---- Structure-13: pages whose text couldn't be read ----
+
+[<Literal>]
+let private UnreadableTextMessage = "The text of some pages couldn't be read, so Legibyl's checks of what they say skipped them."
+
 /// Pages whose text couldn't be read: the checks that go by what a page says skipped them.
 let private unreadableTextFindings context =
     match context.MarkedContent.Unreadable with
     | pages when pages.Count > 0 ->
+        let reason = context.MarkedContent.UnreadableReason |> Option.map (fun r -> $": {r}") |> Option.defaultValue ""
         [ warning
-              $"The text of page(s) {pageList pages} couldn't be read, so Legibyl's checks of what they say skipped them."
-              (Option.toObj context.MarkedContent.UnreadableReason)
+              UnreadableTextMessage
+              $"Page(s) {pageList pages}{reason}"
               "StructTreeRoot"
-              0
+              13
               PdfFixOptions.None
               null ]
     | _ -> []
@@ -370,6 +376,7 @@ let messageFor (testNumber: int) : string option =
         | 10 -> Some SplitFiguresMessage
         | 11 -> Some EmptyFigureMessage
         | 12 -> Some ReadingJumpMessage
+        | 13 -> Some UnreadableTextMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
