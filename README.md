@@ -402,6 +402,7 @@ new one. All of them:
 | Structure-10 | Small figures side by side: one picture tagged in pieces | — (merge them in Structure…) |
 | Structure-11 | A figure tag that draws nothing | `empty-figures` |
 | Structure-12 | A page read out of order by a big jump | — (Order Page N by Layout, Move Up / Move Down) |
+| Structure-13 | Pages whose text couldn't be read (a font the page names but doesn't have), so the checks that go by text skipped them | — |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
