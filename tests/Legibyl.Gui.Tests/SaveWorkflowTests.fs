@@ -336,26 +336,81 @@ let ``checklist ticks a fixed copy doesn't carry still ask; a copy carrying the 
 /// or one carrying only the steps checked.
 let private carried (review: DocumentReview) (pdf: string) (checkedCopy: bool) =
     if checkedCopy then
-        let copy = Path.ChangeExtension(pdf, ".copy.pdf")
+        let copy = Path.ChangeExtension(pdf, ".copy.pdf") |> nonNull
         review.WriteCheckedCopy(pdf, copy, "hash")
         ReviewFile.readFor copy |> Option.get
     else
         review.ForCopy(pdf).Invoke(Collections.Generic.List<TaggedRegion>()) |> nonNull |> ReviewFile.parse |> Option.get
 
+/// A review with every decision Export carries made: a warning dismissed, an edit, a title, a
+/// role map, an attachment's description and the auto fixes; and a step ticked.
+let private decided () =
+    let review = DocumentReview(DateTime.Now)
+    review.Dismissed <- Map [ { Dismissals.Key.Rule = "Legibyl Structure-2"; Location = "*" }, "Split paragraph" ]
+    review.Edits <- RegionEdits.setAlt [] 1 "Figure" (rect (70.0, 548.0, 175.0, 652.0)) "The garden's logo"
+    review.Title <- Some "Garden newsletter"
+    review.RoleMap <- Map [ "Heading 1", "H1" ]
+    review.Attachments <- Map [ "the document: notes.txt", { FileName = null; Description = "Planting notes"; ContentType = null } ]
+    review.AutoFixes <- Some(PdfFixOptions.Title ||| PdfFixOptions.Metadata)
+    review.Checklist <- Some("hash", set [ "reading-order" ])
+    review
+
 [<Theory>]
 [<InlineData(false)>]
 [<InlineData(true)>]
-let ``what a copy carries is what Export takes as exported: the decisions, and the checklist only in a copy of the steps checked`` (checkedCopy: bool) =
+let ``what a copy carries is what Export takes as exported: every decision, and the checklist only in a copy of the steps checked`` (checkedCopy: bool) =
     withPdf false (fun pdf ->
-        let review = DocumentReview(DateTime.Now)
-        review.Title <- Some "Garden newsletter"
-        review.Checklist <- Some("hash", set [ "reading-order" ])
+        let review = decided ()
 
         let copy = carried review pdf checkedCopy
 
-        // The decisions, always.
+        // Every decision, always.
+        copy.DismissedWarnings |> nonNull |> Array.map _.Rule |> should equal [| "Legibyl Structure-2" |]
+        copy.Edits |> nonNull |> Array.map _.Alt |> should equal [| "The garden's logo" |]
         copy.Title |> should equal "Garden newsletter"
+        let roleMap = nonNull copy.RoleMap
+        roleMap["Heading 1"] |> should equal "H1"
+        let attachments = nonNull copy.Attachments
+        attachments["the document: notes.txt"].Description |> should equal "Planting notes"
+        copy.Fixes |> nonNull |> Set.ofArray |> should equal (set [ "title"; "metadata" ])
         // The checklist only when Export says the copy carries it.
         (not (isNull copy.Checklist)) |> should equal checkedCopy
         // Never the original's validation: leaving after an export doesn't ask about it.
-        copy.Validation |> should be Null)
+        copy.Validation |> should be Null
+
+        // Leaving then asks only for what it didn't carry (a fixed copy, the step ticked), and
+        // asks again for any decision changed after it.
+        (review.Exporting checkedCopy) ()
+        review.NeedsSaving |> should equal (not checkedCopy)
+        review.RoleMap <- Map.empty
+        review.NeedsSaving |> should be True)
+
+[<Fact>]
+let ``Save after an export is what leaving compares with: changing back to the export asks`` () =
+    withPdf false (fun pdf ->
+        let review = DocumentReview(DateTime.Now)
+        review.Title <- Some "Garden newsletter"
+        (review.Exporting false) ()
+        review.Title <- Some "Garden newsletter, spring"
+        review.Save pdf
+
+        // Back to what was exported, but the file next to the PDF has the later title.
+        review.Title <- Some "Garden newsletter"
+
+        review.NeedsSaving |> should be True)
+
+[<Fact>]
+let ``a PDF left without asking after an export is read again when it changes`` () =
+    withPdf false (fun pdf ->
+        let reviews = DocumentReviews()
+        let review = reviews.For pdf
+        review.Title <- Some "Garden newsletter"
+        File.SetLastWriteTime(pdf, DateTime.Now.AddMinutes 1.0)
+        // Not exported: its changes are only here, so they're kept.
+        obj.ReferenceEquals(reviews.For pdf, review) |> should be True
+
+        (review.Exporting false) ()
+        File.SetLastWriteTime(pdf, DateTime.Now.AddMinutes 2.0)
+
+        // Exported: they're in the copy, so the PDF as it is now is read again.
+        obj.ReferenceEquals(reviews.For pdf, review) |> should be False)

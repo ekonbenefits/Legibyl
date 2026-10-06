@@ -145,6 +145,8 @@ type DocumentReview(modified: DateTime) =
         ReviewFile.writeFile pdfPath file
         this.LayoutKept <- not (isNull file.Layout)
         this.MarkSaved()
+        // Saved is what leaving compares with now, not a copy exported before.
+        this.Exported <- None
 
     /// The review a copy of pdfPath carries (see VeraPdfValidator.Review): this one, saved or not,
     /// with the edits carried inside pdfPath under its own; its edits moved to the elements tagging
@@ -185,8 +187,8 @@ type DocumentReview(modified: DateTime) =
     member private this.Decisions = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes)
 
     /// What was last exported: the decisions as they were when a copy carrying them was written,
-    /// and the checklist too if the copy carried it (one carrying only the steps checked does; a
-    /// fixed copy doesn't).
+    /// and the checklist too if the copy carried it (one carrying only the steps checked carries
+    /// those checked for the file as it is; a fixed copy carries none).
     member val private Exported:
         ((Dismissals.Dismissed
           * RegionEdits.Edit list
@@ -196,9 +198,9 @@ type DocumentReview(modified: DateTime) =
           * PdfFixOptions option)
          * (string * Set<string>) option option) option = None with get, set
 
-    /// Starts an export of the review as it is now (carriesChecklist: whether the copy carries
-    /// the checklist): the function it gives takes that as exported, once the copy carrying it is
-    /// written (changes made meanwhile aren't in it).
+    /// The review as a copy reads it now (carriesChecklist: whether the copy carries the
+    /// checklist), to call as the copy reads it: the function it gives takes that as exported,
+    /// once the copy is written (changes made after aren't in it).
     member this.Exporting(carriesChecklist: bool) =
         let now = this.Decisions, (if carriesChecklist then Some this.Checklist else None)
         fun () -> this.Exported <- Some now
@@ -297,7 +299,7 @@ type DocumentReviews() =
         reviews.AddOrUpdate(
             fullPath,
             (fun _ -> fresh ()),
-            (fun _ existing -> if existing.Modified = modified || existing.IsEdited then existing else fresh ())
+            (fun _ existing -> if existing.Modified = modified || existing.NeedsSaving then existing else fresh ())
         )
 
 /// Finds every page's layout in the background, one page at a time (each takes seconds): the
