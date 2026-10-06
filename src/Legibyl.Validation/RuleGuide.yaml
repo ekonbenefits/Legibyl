@@ -279,7 +279,7 @@ pdfUa2Rules:
 
   - clause: "8.2.5.2"
     meaning: "The tags don't start with a single Document tag (from PDF 2.0's tag set), which PDF/UA-2 needs for a screen reader to find its way in."
-    whatToDo: *inTheSource
+    whatToDo: &documentRoot "Choose One Document tag at the top in Auto Fixes…: it puts the tags at the top (a Part, say, or several) under a single Document tag, in PDF 2.0's tag set; nothing else moves. Or fix it where the PDF was made, and export it again with tags, or in a PDF editor's tags panel."
 
   - clause: "8.2.5.8"
     meaning: "An entry in the table of contents doesn't say which part of the document it points to, so a screen reader can't follow it."
@@ -472,4 +472,4 @@ pdfUa2Rules:
 tagNestingRules:
 
   - meaning: "A tag is inside one it can't be in under PDF 2.0's rules (a paragraph straight under the structure's root, say, or a link inside a link), so a screen reader may misreport or skip it."
-    whatToDo: "Fix it where the PDF was made, and export it again with tags, or move the tag in a PDF editor's tags panel."
+    whatToDo: "Fix it where the PDF was made, and export it again with tags, or move the tag in a PDF editor's tags panel. For a tag straight under the structure's root (anything but a single Document there), choose One Document tag at the top in Auto Fixes…: it puts them under one."

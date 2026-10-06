@@ -405,6 +405,7 @@ new one. All of them:
 | Structure-13 | Pages whose text couldn't be read (a font the page names but doesn't have), so the checks that go by text skipped them | — |
 | Structure-14 | Adjacent Span tags that split a word inside a text block | `join-split-words`, when the block's text is recoverable |
 | Structure-15 | Paragraphs arranged in repeated rows and columns, possibly a table tagged as paragraphs | — (review the page; aligned text can also match) |
+| Structure-16 | Tags that don't start with a single Document tag (a PDF before 2.0; in PDF 2.0 it's veraPDF's 8.2.5.2) | `document-root` |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -1073,6 +1074,7 @@ keeps this table in step with it):
 | `tag-from-layout` | Tag an untagged document from each page's layout | uses the layout models |
 | `qr-links` | Link QR codes to the web addresses they encode | with tag-from-layout |
 | `parent-tree` | Rebuild the parent tree, so the tags are found for the content they hold | safe |
+| `document-root` | Put the tags under a single Document tag at the top of the structure | safe |
 | `role-map` | Map the PDF's own tag names to standard tags, and fix a broken role map |  |
 | `language` | Declare the document's language, detected from its text |  |
 | `headings-from-toc` | Tag headings the table of contents lists (H1–H6) and point its links at them |  |

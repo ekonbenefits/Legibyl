@@ -24,6 +24,7 @@
     <Compile Include="SplitWordSpans.fs" />
     <Compile Include="ParentTree.fs" />
     <Compile Include="RoleMaps.fs" />
+    <Compile Include="DocumentRoot.fs" />
     <Compile Include="Attachments.fs" />
     <Compile Include="TocHeadings.fs" />
     <Compile Include="ParagraphLists.fs" />

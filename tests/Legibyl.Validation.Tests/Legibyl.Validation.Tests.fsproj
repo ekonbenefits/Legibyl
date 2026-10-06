@@ -61,6 +61,7 @@
     <Compile Include="UntaggedContentTests.fs" />
     <Compile Include="UnreadablePagesTests.fs" />
     <Compile Include="AppendTests.fs" />
+    <Compile Include="DocumentRootTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

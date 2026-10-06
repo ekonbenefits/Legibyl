@@ -12,6 +12,7 @@ module PdfFixDescriptions =
           PdfFixOptions.QrLinks, "Link QR codes to the web addresses they encode"
           PdfFixOptions.ParentTree, "Rebuild the parent tree, so the tags are found for the content they hold"
           PdfFixOptions.RoleMap, "Map the PDF's own tag names to standard tags, and fix a broken role map"
+          PdfFixOptions.DocumentRoot, "Put the tags under a single Document tag at the top of the structure"
           PdfFixOptions.Language, "Declare the document's language, detected from its text"
           PdfFixOptions.Metadata, "Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP)"
           PdfFixOptions.EmbedFonts, "Embed fonts that aren't embedded, from open fonts made to the same measure, or this computer's own copy"

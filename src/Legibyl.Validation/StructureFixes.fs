@@ -590,7 +590,9 @@ let private setLanguageFromText (document: PdfDocument) context =
 /// line per change it made. The order matters where one fix changes what another sees:
 ///
 ///   0. The parent tree first, where it's missing: until it's rebuilt, every tag reads as
-///      untagged. Then the document's language: it only sets /Lang, and bookmarks need it.
+///      untagged. Then a single Document tag at the top, so the fixes after it see the tree as
+///      it'll be (it moves nothing else). Then the document's language: it only sets /Lang, and
+///      bookmarks need it.
 ///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list fix could take it for a list item.
@@ -1181,6 +1183,7 @@ let orderedFixes
     (attachments: Map<string, Attachments.AttachmentEdit>)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
     [ PdfFixOptions.ParentTree, ParentTree.rebuild
+      PdfFixOptions.DocumentRoot, DocumentRoot.apply
       // A person's role map first: the RoleMap fix maps what's left.
       PdfFixOptions.ApplyEdits, chooseRoles roleMap
       PdfFixOptions.RoleMap, mapRoles

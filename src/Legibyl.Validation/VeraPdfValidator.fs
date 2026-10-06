@@ -145,6 +145,9 @@ module internal VeraPdf =
               ua2 "8.2.4-2" PdfFixOptions.RoleMap
               ua2 "8.2.4-3" PdfFixOptions.RoleMap
               ua2 "8.2.4-4" PdfFixOptions.RoleMap
+              // A single Document tag at the top of the structure, in PDF 2.0's namespace.
+              ua2 "8.2.5.2-1" PdfFixOptions.DocumentRoot
+              ua2 "8.2.5.2-2" PdfFixOptions.DocumentRoot
               ua1 "7.5-1" PdfFixOptions.TableHeaderScope
               ua2 "8.2.5.26-5" PdfFixOptions.TableHeaderScope ]
 
@@ -162,6 +165,13 @@ module internal VeraPdf =
     let private determineFixOptions (assertion: RuleViolation) =
         match PdfUaTarget.ofSpecification assertion.Specification with
         | Some standard -> fixesByRule |> Map.tryFind (standard, assertion.RuleId) |> Option.defaultValue PdfFixOptions.None
+        // ISO 32005's rows for what the structure tree root may hold ("Table 5. StructTreeRoot-Part"):
+        // a single Document at the top is what they ask for.
+        | None when
+            assertion.Specification.StartsWith("ISO 32005", StringComparison.Ordinal)
+            && assertion.Clause.StartsWith("Table 5. StructTreeRoot-", StringComparison.Ordinal)
+            ->
+            PdfFixOptions.DocumentRoot
         | None -> PdfFixOptions.None
 
     /// Legibyl's own read of the file (iText and PdfPig): its structure-tree warnings, plus
