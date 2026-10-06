@@ -775,3 +775,37 @@ let ``Fix document title keeps a title the document already has`` () =
 
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetDocumentInfo().GetTitle() |> should equal "The Real Title"
+
+/// A copy of the passing PDF/UA-1 sample whose header is header (its first 8 bytes and the end of
+/// line after them, rewritten byte for byte so nothing else in the file moves).
+let private withHeader (path: string) (header: string) =
+    let bytes = File.ReadAllBytes(corpusFile "pdfua1-pass.pdf")
+    let replacement = Text.Encoding.ASCII.GetBytes header
+    Array.blit replacement 0 bytes 0 replacement.Length
+    File.WriteAllBytes(path, bytes)
+
+[<Fact>]
+let ``Fix writes a header with something after its version again, clearing 6.1`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    withHeader input.Path "%PDF-1.7 "
+    let validator = VeraPdfValidator()
+    let failedRules (path: string) = validator.Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    failedRules input.Path |> should contain "6.1-1"
+
+    let result = validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, FixNames.safe)
+
+    result.WasFixed |> should be True
+    failedRules output.Path |> should not' (contain "6.1-1")
+
+[<Fact>]
+let ``Fix can't open a header whose version is past 1.7, so 6.1 needs the file saved again`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    withHeader input.Path "%PDF-1.9"
+    let validator = VeraPdfValidator()
+    validator.Validate(input.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> should contain "6.1-1"
+
+    (fun () -> validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, FixNames.safe) |> ignore)
+    |> should throw typeof<VeraPdfValidationException>
+    File.Exists output.Path |> should be False
