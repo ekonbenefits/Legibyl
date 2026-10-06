@@ -408,13 +408,24 @@ let private prepare (taken: Taken) (index: int) (input: Input) : Prepared =
                             renameAction (nexts.GetAsDictionary i) (depth + 1)
                     | _ -> ()
                 | _ -> ()
+            // The actions for events (/AA: a page opening, an annotation entered, the document
+            // closing…), by event.
+            let renameEvents (holder: PdfDictionary) =
+                match holder.GetAsDictionary PdfName.AA with
+                | null -> ()
+                | events ->
+                    for key in events.KeySet() do
+                        renameAction (events.GetAsDictionary key) 0
             let renameIn (holder: PdfDictionary) =
                 renameDest holder PdfName.Dest
                 renameAction (holder.GetAsDictionary PdfName.A) 0
+                renameEvents holder
             for page in 1 .. document.GetNumberOfPages() do
+                renameEvents (document.GetPage(page).GetPdfObject())
                 for annotation in document.GetPage(page).GetAnnotations() do
                     renameIn (annotation.GetPdfObject())
             renameAction (document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.OpenAction) 0
+            renameEvents (document.GetCatalog().GetPdfObject())
             let rec renameOutlines (item: PdfDictionary | null) depth =
                 match item with
                 | NonNull item when depth < 10000 ->
@@ -538,19 +549,30 @@ let private outlineParts (document: PdfDocument) (profile: PdfProfile) (parts: (
 // saves one, and the merge leaves what it registered of the content tagged inside Form XObjects
 // wrong (see rebuildParentTree). So the joined file is finished with its structure tree hidden from
 // iText: under a key of the catalog's own, the same length as /StructTreeRoot so it can be renamed
-// in the merge's output as it's written, and put back after.
+// in the merge's output where it's written, and put back after.
 
 let private hiddenRoot = PdfName "LBYL_StrucTree"
 
-/// The merge's output with its catalog's /StructTreeRoot renamed to hiddenRoot. The merge writes
-/// the catalog as it is, not in an object stream: "/StructTreeRoot n 0 R" is there to rename,
-/// and nowhere else (the root's own /Type is a name, not a reference).
+/// The merge's output with its catalog's /StructTreeRoot renamed to hiddenRoot, in the catalog
+/// object only: found by where the file's cross-reference table says it is, and not in an object
+/// stream (the merge writes it as it is). Its "/StructTreeRoot n 0 R" keeps its length, so every
+/// other object stays where the table says it is.
 let private hideStructure (bytes: byte array) =
+    let catalog =
+        use document = new PdfDocument(new PdfReader(new MemoryStream(bytes)))
+        nonNull (document.GetCatalog().GetPdfObject().GetIndirectReference())
     let text = Encoding.Latin1.GetString bytes
-    let renamed = RegularExpressions.Regex.Replace(text, @"/StructTreeRoot(\s+\d+\s+\d+\s+R)", "/" + hiddenRoot.GetValue() + "$1")
-    if renamed = text || String.length renamed <> text.Length then
-        invalidOp "The joined file's structure tree couldn't be found to finish it."
-    Encoding.Latin1.GetBytes renamed
+    let start = int (catalog.GetOffset())
+    let finish = if catalog.GetObjStreamNumber() = 0 && start > 0 then text.IndexOf("endobj", start, StringComparison.Ordinal) else -1
+    let entry =
+        if finish < 0 then null
+        else RegularExpressions.Regex(@"/StructTreeRoot(?=\s+\d+\s+\d+\s+R)").Match(text, start, finish - start)
+    match entry with
+    | NonNull entry when entry.Success ->
+        let renamed = Array.copy bytes
+        Encoding.Latin1.GetBytes("/" + hiddenRoot.GetValue()).CopyTo(renamed, entry.Index)
+        renamed
+    | _ -> invalidOp "The joined file's structure tree couldn't be found to finish it."
 
 /// The structure tree's root, hidden from iText (see hideStructure).
 let private structRoot (document: PdfDocument) = document.GetCatalog().GetPdfObject().GetAsDictionary hiddenRoot |> nonNull
@@ -676,8 +698,11 @@ let private wrapParts (document: PdfDocument) (tag: string) (languages: string o
             part.Put(PdfName.K, kids) |> ignore
             part.MakeIndirect document |> ignore
             index, (part, items |> List.map snd))
-    let partFor = partOf |> List.collect (fun (_, (part, items)) -> items |> List.map (fun item -> item, part))
-    let find (element: PdfDictionary) = partFor |> List.tryFind (fun (item, _) -> Object.ReferenceEquals(item, element)) |> Option.map snd
+    let partFor = Dictionary<PdfDictionary, PdfDictionary>(HashIdentity.Reference)
+    for _, (part, items) in partOf do
+        for item in items do
+            partFor[item] <- part
+    let find (element: PdfDictionary) = match partFor.TryGetValue element with | true, part -> Some part | _ -> None
     // The container's kids, each part in place of its first element and the rest left out.
     let kids = PdfArray()
     let added = HashSet<PdfDictionary>(HashIdentity.Reference)
@@ -896,8 +921,8 @@ let differences (part: Part) (index: int) (input: StructureNode) (joined: Struct
             check "the replacement text" a.ActualText b.ActualText
             check "the link" a.LinkUri b.LinkUri
             check "the link's description" a.LinkDescription b.LinkDescription
-            if a.PageNumber.HasValue && b.PageNumber.HasValue && a.PageNumber.Value + part.FirstPage - 1 <> b.PageNumber.Value then
-                say here "the page" (string (a.PageNumber.Value + part.FirstPage - 1)) (string b.PageNumber.Value)
+            let page (number: Nullable<int>) (offset: int) : string | null = if number.HasValue then string (number.Value + offset) else null
+            check "the page" (page a.PageNumber (part.FirstPage - 1)) (page b.PageNumber 0)
             compare here (children a) (children b)
     compare $"part {index + 1}" (ownParts input) joinedPart
     List.ofSeq found
@@ -925,7 +950,9 @@ type Outcome =
 let run (validator: VeraPdfValidator) (files: string list) (output: string) (options: Options) (stage: string -> unit) : Outcome =
     let none = { Refusals = []; Inputs = []; Joined = None; After = None; Differences = [] }
     stage "Reading the files…"
-    let same (a: string) (b: string) = String.Equals(Path.GetFullPath a, Path.GetFullPath b, StringComparison.OrdinalIgnoreCase)
+    // As the app's other path checks: case matters on Linux only.
+    let comparison = if OperatingSystem.IsLinux() then StringComparison.Ordinal else StringComparison.OrdinalIgnoreCase
+    let same (a: string) (b: string) = String.Equals(Path.GetFullPath a, Path.GetFullPath b, comparison)
     let overwritten =
         [ for file in files |> List.distinct do
               if same file output then
@@ -952,24 +979,30 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
             { none with Refusals = failing; Inputs = inputs }
         else
             stage "Joining…"
-            let joined =
-                try
-                    join files output options
-                with _ ->
-                    // Not a joined file half written.
-                    if File.Exists output then File.Delete output
-                    reraise ()
-            stage $"Validating {Path.GetFileName output}…"
-            let after = validator.Validate(output, joined.Profile)
-            stage "Comparing the structure with the files'…"
-            let differences =
-                match validator.ReadStructureTree output with
-                | Null -> [ "The joined file has no structure tree." ]
-                | NonNull tree ->
-                    joined.Parts
-                    |> List.indexed
-                    |> List.collect (fun (index, part) ->
-                        match validator.ReadStructureTree part.File with
-                        | NonNull input -> differences part index input tree
-                        | Null -> [])
-            { none with Inputs = inputs; Joined = Some joined; After = Some after; Differences = differences }
+            // Joined and checked beside output, which it then replaces: a file already there
+            // stays as it was if anything goes wrong on the way.
+            let folder = Path.GetDirectoryName(Path.GetFullPath output) |> nonNull
+            let scratch = Path.Combine(folder, $".{Path.GetFileNameWithoutExtension output}.{Guid.NewGuid():N}.pdf")
+            try
+                let joined = join files scratch options
+                stage $"Validating {Path.GetFileName output}…"
+                let after = validator.Validate(scratch, joined.Profile)
+                stage "Comparing the structure with the files'…"
+                let differences =
+                    match validator.ReadStructureTree scratch with
+                    | Null -> [ "The joined file has no structure tree." ]
+                    | NonNull tree ->
+                        joined.Parts
+                        |> List.indexed
+                        |> List.collect (fun (index, part) ->
+                            match validator.ReadStructureTree part.File with
+                            | NonNull input -> differences part index input tree
+                            | Null -> [])
+                File.Move(scratch, output, true)
+                { none with
+                    Inputs = inputs
+                    Joined = Some { joined with Output = output }
+                    After = Some { after with FilePath = output }
+                    Differences = differences }
+            finally
+                if File.Exists scratch then File.Delete scratch
