@@ -18,10 +18,10 @@
 /// Checks that look at the document as a whole rather than one element at a time (the
 /// table-of-contents heading checks, Structure-3 to 5; lists tagged as paragraphs, Structure-6;
 /// missing bookmarks, Structure-7; the parent tree, Structure-9; figures in pieces, Structure-10;
-/// figures that draw nothing, Structure-11; pages read out of order, Structure-12; and pages whose
-/// text couldn't be read, Structure-13; words split across Span boundaries, Structure-14; and
-/// tables tagged as aligned paragraphs, Structure-15) are added in `run` directly, and their
-/// messages to messageFor.
+/// figures that draw nothing, Structure-11; pages read out of order, Structure-12; pages whose
+/// text couldn't be read, Structure-13; words split across Span boundaries, Structure-14; tables
+/// tagged as aligned paragraphs, Structure-15; and no single Document tag at the top,
+/// Structure-16) are added in `run` directly, and their messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -338,6 +338,25 @@ let private readingJumpFindings (document: PdfDocument) context =
               PdfFixOptions.None
               box ]
 
+// ---- Structure-16: no single Document tag at the top ----
+
+[<Literal>]
+let private DocumentRootMessage =
+    "The tags don't start with a single Document tag, a screen reader's way into them, which checkers like PAC look for; an auto fix can put them under one."
+
+/// A PDF before 2.0 whose structure doesn't start with a single Document tag. (A PDF 2.0 file's is a
+/// failure veraPDF reports: PDF/UA-2's 8.2.5.2.)
+let private documentRootFindings (document: PdfDocument) context =
+    if document.GetPdfVersion().CompareTo(PdfVersion.PDF_2_0) >= 0 then
+        []
+    else
+        match DocumentRoot.find document context with
+        | Some(DocumentRoot.Wrap tags) ->
+            [ warning DocumentRootMessage $"""At the top: {String.Join(", ", tags)}.""" "StructTreeRoot" 16 PdfFixOptions.DocumentRoot null ]
+        | Some(DocumentRoot.Left reason) ->
+            [ warning DocumentRootMessage $"Not fixable here: {reason}." "StructTreeRoot" 16 PdfFixOptions.None null ]
+        | _ -> []
+
 // ---- Structure-13: pages whose text couldn't be read ----
 
 [<Literal>]
@@ -393,7 +412,8 @@ let run (document: PdfDocument) context : RuleViolation list =
                   candidate.Path
                   15
                   PdfFixOptions.None
-                  (Option.toObj candidate.Geometry) ]
+                  (Option.toObj candidate.Geometry)
+          yield! documentRootFindings document context ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
 let messageFor (testNumber: int) : string option =
@@ -414,6 +434,7 @@ let messageFor (testNumber: int) : string option =
         | 13 -> Some UnreadableTextMessage
         | 14 -> Some SplitWordSpansMessage
         | 15 -> Some ParagraphTableMessage
+        | 16 -> Some DocumentRootMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

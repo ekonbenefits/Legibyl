@@ -173,7 +173,10 @@ let ``Fix annotation tabs and empty paragraphs applies selected structural fixes
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetPage(1).GetPdfObject().GetAsName(PdfName.Tabs) |> should equal PdfName.S
 
-    let kids = (structTreeRootOf document).GetAsArray(PdfName.K) |> notNull
+    // (All includes putting the tags under a single Document.)
+    let documentElement = (structTreeRootOf document).GetAsDictionary(PdfName.K) |> notNull
+    documentElement.GetAsName(PdfName.S) |> should equal PdfName.Document
+    let kids = documentElement.GetAsArray(PdfName.K) |> notNull
     kids.Size() |> should equal 1
     let remainingParagraph = kids.GetAsDictionary 0 |> notNull
     remainingParagraph.GetAsName(PdfName.S) |> should equal PdfName.P
@@ -253,7 +256,8 @@ let ``Validate empty paragraph adds fixable warning`` () =
 
     let report = validator.Validate(input.Path, PdfProfile.PdfUa1)
 
-    let warning = report.Assertions |> single (fun a -> a.Severity = FindingSeverity.Warning)
+    // (Its paragraph is straight under the root, so it's also warned of no Document there: Structure-16.)
+    let warning = report.Assertions |> single (fun a -> a.Severity = FindingSeverity.Warning && a.TestNumber = 1)
     warning.Passed |> should be True
     warning.FixOptions |> should equal PdfFixOptions.EmptyParagraphs
     warning.IsFixable |> should be True

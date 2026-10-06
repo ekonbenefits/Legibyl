@@ -8,6 +8,7 @@ let order =
     [ PdfFixOptions.TagFromLayout
       PdfFixOptions.QrLinks
       PdfFixOptions.ParentTree
+      PdfFixOptions.DocumentRoot
       PdfFixOptions.RoleMap
       PdfFixOptions.Language
       PdfFixOptions.HeadingsFromToc
@@ -44,6 +45,7 @@ let names = [ for option in order -> nameOf option, option ]
 /// title the author did write, in Info or in XMP; a title is never invented from the file name.
 let safe =
     PdfFixOptions.ParentTree
+    ||| PdfFixOptions.DocumentRoot
     ||| PdfFixOptions.Metadata
     ||| PdfFixOptions.Tabs
     ||| PdfFixOptions.LinkContents

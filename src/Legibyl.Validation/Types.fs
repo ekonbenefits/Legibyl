@@ -91,7 +91,10 @@ type PdfFixOptions =
     /// Gives a text block replacement text assembled from its Span children when their boundary
     /// splits a word; only applies where every span's text can be recovered exactly.
     | JoinSplitWords = 33554432
-    | All = 67108863
+    /// Puts the tags at the top of the structure under a single Document tag, the way into them PDF
+    /// 2.0 asks for (and checkers like PAC look for); nothing else moves. See DocumentRoot.
+    | DocumentRoot = 67108864
+    | All = 134217727
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.
