@@ -675,7 +675,8 @@ For a real table, select its consecutive paragraph rows in Structure… and choo
 selected region; check the cells and their TH/TD roles before keeping the edit.
 Export then replaces the paragraph tags with table, row and cell tags, distributing
 each paragraph's marked content by its position on the page. Nonconsecutive
-paragraphs and content whose location can't be established are refused.
+paragraphs are refused; so is a tagged text container that spans multiple detected
+cells or rows, since it can't be split without changing the content's structure.
 
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
