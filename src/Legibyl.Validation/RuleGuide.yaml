@@ -206,7 +206,7 @@ rules:
 
   - clause: "6.1"
     meaning: "The file doesn't start the way a PDF 1.x file must, so some readers and assistive technology may not open it, or read it wrongly."
-    whatToDo: "If its first line has something after the version (\"%PDF-1.7 …\"), Export… writes it again as it should be. A version past 1.7 (1.8, 1.9) Legibyl can't open to fix: save or export it again from the tool that made it, or from a PDF editor. A PDF 2.0 file is checked as PDF/UA-2, which has no such rule. A file damaged in transfer may need getting again."
+    whatToDo: "If its first line has something after the version (\"%PDF-1.7 …\"), a copy Export… writes with another change in it (a fix from Auto Fixes…, or an edit) has it written again as it should be; Legibyl has no fix of its own for it, so with nothing else to change, save or export it again from the tool that made it, or from a PDF editor. A version past 1.7 (1.8, 1.9) Legibyl can't open to fix: save it again the same way. A PDF 2.0 file is checked as PDF/UA-2 unless PDF/UA-1 is chosen, and PDF/UA-2 has no such rule. A file damaged in transfer may need getting again."
 
   - clause: "7.10"
     meaning: "The PDF has layers (optional content) set up in a way PDF/UA doesn't allow, so what a screen reader reads may not match what's shown."

@@ -784,8 +784,9 @@ let private withHeader (path: string) (header: string) =
     Array.blit replacement 0 bytes 0 replacement.Length
     File.WriteAllBytes(path, bytes)
 
+/// (6.1 has no fix of its own: the copy is written for the sample's metadata, which the safe fixes change.)
 [<Fact>]
-let ``Fix writes a header with something after its version again, clearing 6.1`` () =
+let ``A fixed copy has a header with something after its version written again, clearing 6.1`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
     withHeader input.Path "%PDF-1.7 "
