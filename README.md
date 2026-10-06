@@ -671,7 +671,13 @@ Legibyl also looks for likely tables tagged as paragraphs (Structure-15,
 text boxes repeat in at least two horizontal positions across multiple aligned
 rows. This is a review hint, not proof of a table—aligned text can also trigger
 it, and a table whose cells are not individually tagged as paragraphs may not
-be detected. Check the page before retagging; there is no automatic fix.
+be detected. Check the page before changing its tags; it is not an automatic fix.
+For a real table, select its consecutive paragraph rows in Structure… and choose
+**Convert N Paragraphs to Table…**. The table-structure model finds a grid for the
+selected region; check the cells and their TH/TD roles before keeping the edit.
+Export then replaces the paragraph tags with table, row and cell tags, distributing
+each paragraph's marked content by its position on the page. Nonconsecutive
+paragraphs and content whose location can't be established are refused.
 
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after

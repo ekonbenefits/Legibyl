@@ -225,15 +225,27 @@ let mergeLine (edits: RegionEdits.Edit list) (node: StructureNode) =
     | NonNull box when node.Tag = "P" || node.Tag = "Figure" ->
         let noun = if node.Tag = "P" then "paragraph" else "figure"
         match RegionEdits.findMerge edits box.PageNumber box with
+        | Some merge when merge.Retag = Some "Table" && not merge.Cells.IsEmpty ->
+            Some $"✎ converting {merge.MergeWith.Length + 1} paragraphs to a table, not in the PDF yet"
         | Some merge ->
             let others = merge.MergeWith.Length
             Some(if others = 1 then $"✎ merged with the next {noun}, not in the PDF yet" else $"✎ merged with the next {others} {noun}s, not in the PDF yet")
         | None ->
-            let merged =
+            let converted =
                 edits
                 |> List.exists (fun e ->
-                    e.Page = box.PageNumber && e.MergeWith |> List.exists (fun other -> Boxes.overlap other box >= RegionEdits.SameRegionOverlap))
-            if merged then Some $"✎ merged into the {noun} before, not in the PDF yet" else None
+                    e.Page = box.PageNumber
+                    && e.Retag = Some "Table"
+                    && not e.Cells.IsEmpty
+                    && e.MergeWith |> List.exists (fun other -> Boxes.overlap other box >= RegionEdits.SameRegionOverlap))
+            if converted then Some "✎ included in a table conversion, not in the PDF yet"
+            else
+                let merged =
+                    edits
+                    |> List.exists (fun e ->
+                        e.Page = box.PageNumber
+                        && e.MergeWith |> List.exists (fun other -> Boxes.overlap other box >= RegionEdits.SameRegionOverlap))
+                if merged then Some $"✎ merged into the {noun} before, not in the PDF yet" else None
     | _ -> None
 
 /// The selected blocks, if they're paragraphs or figures that can be merged: two or more of
@@ -269,7 +281,9 @@ let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
       match edit.Text with
       | Some text when text <> string node.ActualText -> "text", text
       | _ -> ()
-      if not edit.Cells.IsEmpty then "rows and cells", $"rebuilt from the page ({edit.Cells.Length} cells)" ]
+      if not edit.Cells.IsEmpty then
+          if edit.Tag = "P" && edit.Retag = Some "Table" then "table conversion", $"checked grid ({edit.Cells.Length} cells)"
+          else "rows and cells", $"rebuilt from the page ({edit.Cells.Length} cells)" ]
 
 /// What the reading-order buttons work on, from the window.
 type OrderBarNeeds =
@@ -451,7 +465,9 @@ type SelectionNeeds =
       RoleMap: unit -> Map<string, string>
       /// Rebuilds a tagged table's rows and cells from the page (the table-structure model), for
       /// a person to check.
-      RebuildTable: StructureNode -> unit }
+      RebuildTable: StructureNode -> unit
+      /// Converts selected sibling paragraphs into a table after its detected cells are checked.
+      ConvertParagraphsToTable: StructureNode list -> unit }
 
 /// What a screen reader says for the selected element (alt text, replacement text, a link's
 /// description): only those it has, for one element at a time. (F2 on its block opens the first.)
@@ -559,6 +575,26 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
 let otherActions (needs: SelectionNeeds) : Action list =
     // A tagged table's rows and cells, rebuilt from how it looks (the wand: the model suggests them).
     [ match needs.Selected.Current with
+      | _ when not needs.Suggested ->
+          match mergeable needs.Selected.Current with
+          | Some (first :: _ :: _ as nodes) when first.Tag = "P" ->
+              let savedConversion =
+                  match first.Geometry with
+                  | NonNull box ->
+                      RegionEdits.findMerge needs.Edits.Current box.PageNumber box
+                      |> Option.exists (fun edit -> edit.Retag = Some "Table" && not edit.Cells.IsEmpty && edit.MergeWith.Length = nodes.Length - 1)
+                  | Null -> false
+              { action
+                    (if savedConversion then "Check Table Conversion…" else $"Convert {nodes.Length} Paragraphs to Table…")
+                    (if savedConversion then
+                         "Review the grid and header choices saved for these paragraphs, or revise them before Export."
+                     else
+                         "Finds the rows and cells in these paragraphs' page region (the table-structure model), for you to check. Export then replaces the paragraph tags with a semantic table.")
+                    (fun () -> needs.ConvertParagraphsToTable nodes) with
+                  Icon = Icons.wand }
+          | _ -> ()
+      | _ -> ()
+      match needs.Selected.Current with
       | [ single ] when not needs.Suggested && heardTag (needs.RoleMap ()) single = "Table" && not (isNull single.Geometry) ->
           let rebuilt = editFor needs.Edits.Current single |> Option.exists (fun e -> not e.Cells.IsEmpty)
           { action
@@ -627,9 +663,18 @@ let otherActions (needs: SelectionNeeds) : Action list =
           | Some(first :: rest) ->
               let box = nonNull first.Geometry
               RegionEdits.findMerge needs.Edits.Current box.PageNumber box
-              |> Option.filter (fun m -> m.MergeWith.Length = rest.Length)
+              |> Option.filter (fun m -> m.MergeWith.Length = rest.Length && (m.Retag <> Some "Table" || m.Cells.IsEmpty))
           | _ -> None
       match mergeable needs.Selected.Current, pendingMerge with
+      | Some(first :: rest), None when needs.Edits.Current |> List.exists (fun edit ->
+              edit.Page = (nonNull first.Geometry).PageNumber
+              && edit.Retag = Some "Table"
+              && not edit.Cells.IsEmpty
+              && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap
+              && edit.MergeWith.Length = rest.Length) ->
+          action "Don't Convert to Table" "Drop this conversion: the selected paragraphs stay separate." (fun () ->
+              needs.SaveEdits (needs.Edits.Current |> List.filter (fun edit ->
+                  not (edit.Retag = Some "Table" && edit.Page = (nonNull first.Geometry).PageNumber && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap))) |> ignore)
       | Some _, Some merge ->
           action "Don't Merge These" "Drop this merge: they stay separate." (fun () ->
               needs.SaveEdits (needs.Edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore)

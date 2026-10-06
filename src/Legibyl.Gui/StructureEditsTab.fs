@@ -152,7 +152,10 @@ let view (needs: Needs) : IView =
                                     | None -> ()
                                     if not edit.Cells.IsEmpty then
                                         let headers = edit.Cells |> List.filter (fun c -> c.Tag = "TH") |> List.length
-                                        detailLine $"rows and cells: rebuilt from the page, {edit.Cells.Length} cells ({headers} header)" false
+                                        if edit.Tag = "P" && edit.Retag = Some "Table" then
+                                            detailLine $"table conversion: checked grid, {edit.Cells.Length} cells ({headers} header)" false
+                                        else
+                                            detailLine $"rows and cells: rebuilt from the page, {edit.Cells.Length} cells ({headers} header)" false
                                     match edit.Text with
                                     | Some "" -> detailLine "text: (nothing to read)" false
                                     | Some text -> detailLine $"text: \"{text}\"" false
@@ -171,8 +174,11 @@ let view (needs: Needs) : IView =
                                                 let text = text.Trim()
                                                 if text.Length > 50 then $", from \"{text[..49]}…\"" else $", from \"{text}\"")
                                             |> Option.defaultValue ""
-                                        let noun = if edit.Tag = "Figure" then "figures" else "paragraphs"
-                                        detailLine $"merge: {edit.MergeWith.Length + 1} {noun} into one{start}" false
+                                        if edit.Tag = "P" && edit.Retag = Some "Table" then
+                                            detailLine $"table conversion: {edit.MergeWith.Length + 1} paragraphs into checked rows{start}" false
+                                        else
+                                            let noun = if edit.Tag = "Figure" then "figures" else "paragraphs"
+                                            detailLine $"merge: {edit.MergeWith.Length + 1} {noun} into one{start}" false
                                     detailLine status true
                                 ]
                             ]

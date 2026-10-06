@@ -35,6 +35,47 @@ let private createBrokenAs (cellTag: string) (path: string) (texts: string list 
 
 let private createBroken = createBrokenAs "TD"
 
+/// A page where each row is one paragraph and its cells are marked-content pieces in that paragraph.
+let private createParagraphRows (path: string) (texts: string list list) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.SetTagged() |> ignore
+    document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+    let page = document.AddNewPage PageSize.LETTER
+    let canvas = PdfCanvas page
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+    for row, values in List.indexed texts do
+        pointer.AddTag "P" |> ignore
+        for column, text in List.indexed values do
+            pointer.AddTag "Span" |> ignore
+            canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(80.0 + 150.0 * float column, 680.0 - 24.0 * float row).ShowText(text).EndText().CloseTag()
+            |> ignore
+            pointer.MoveToParent() |> ignore
+        pointer.MoveToParent() |> ignore
+
+/// The first row has one Span across both columns, so moving it whole would lose its cell split.
+let private createWideSpanRow (path: string) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.SetTagged() |> ignore
+    document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+    let page = document.AddNewPage PageSize.LETTER
+    let canvas = PdfCanvas page
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+    pointer.AddTag "P" |> ignore
+    pointer.AddTag "Span" |> ignore
+    for column, text in [ 0, "Plant"; 1, "Sow" ] do
+        canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(80.0 + 150.0 * float column, 680.0).ShowText(text).EndText().CloseTag()
+        |> ignore
+    pointer.MoveToParent() |> ignore
+    pointer.MoveToParent() |> ignore
+    pointer.AddTag "P" |> ignore
+    pointer.AddTag "Span" |> ignore
+    canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(80.0, 656.0).ShowText("Tomato").EndText().CloseTag()
+    |> ignore
+    pointer.MoveToParent() |> ignore
+    pointer.MoveToParent() |> ignore
+
 let rec private nodes (node: StructureNode) : StructureNode list =
     node :: (node.Children |> Seq.collect nodes |> List.ofSeq)
 
@@ -53,7 +94,95 @@ let private rebuildEdit (table: StructureNode) (cells: TableCell list) =
 /// The rows of the table at path: each row's cells, as tag and text.
 let private rows (path: string) =
     let table = VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
-    [ for row in table.Children -> row.Tag, [ for c in row.Children -> c.Tag, (Seq.append [ c.Content ] (c.Children |> Seq.map _.Content) |> Seq.choose Option.ofObj |> String.concat " ") ] ]
+    let rec content (node: StructureNode) =
+        [ yield! Option.ofObj node.Content |> Option.toList
+          for child in node.Children do yield! content child ]
+    [ for row in table.Children -> row.Tag, [ for c in row.Children -> c.Tag, (content c |> String.concat " ") ] ]
+
+[<Fact>]
+let ``consecutive row paragraphs convert to a checked table and keep each cell's marked content`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    use unchanged = new TempPdf()
+    createParagraphRows input.Path [ [ "Plant"; "Sow" ]; [ "Tomato"; "March" ] ]
+    let paragraphs = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P")
+    let edit =
+        { Page = 1
+          Tag = "P"
+          Box = paragraphs.Head.Geometry |> notNull
+          Alt = null
+          Text = null
+          MergeWith = paragraphs.Tail |> List.map (fun paragraph -> paragraph.Geometry |> notNull)
+          Retag = "Table"
+          Exclude = false
+          Move = None
+          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+    ElementEdits.pending input.Path [ edit ] |> should equal 1
+
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.AppliedFixes |> should contain "Converted 2 paragraph(s) on page 1 to a table with the checked rows and cells."
+    rows output.Path
+    |> should
+        equal
+        [ "TR", [ "TH", "Plant"; "TH", "Sow" ]
+          "TR", [ "TD", "Tomato"; "TD", "March" ] ]
+    ElementEdits.pending output.Path [ edit ] |> should equal 0
+    let after = failed output.Path
+    after |> Set.filter (fun rule -> rule.StartsWith "7.2-") |> should be Empty
+    let again = VeraPdfValidator(Edits = [ edit ]).Fix(output.Path, PdfProfile.PdfUa1, unchanged.Path, PdfFixOptions.ApplyEdits)
+    again.WasFixed |> should be False
+    again.NotApplied
+    |> Seq.exists (fun note -> note.Contains "they already make this table")
+    |> should be True
+
+[<Fact>]
+let ``paragraph table conversion refuses paragraphs that are not consecutive siblings`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createParagraphRows input.Path [ [ "Plant"; "Sow" ]; [ "Tomato"; "March" ]; [ "Lettuce"; "April" ] ]
+    let paragraphs = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P")
+    let edit =
+        { Page = 1
+          Tag = "P"
+          Box = paragraphs.Head.Geometry |> notNull
+          Alt = null
+          Text = null
+          MergeWith = [ paragraphs[2].Geometry |> notNull ]
+          Retag = "Table"
+          Exclude = false
+          Move = None
+          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+
+    ElementEdits.pending input.Path [ edit ] |> should equal 0
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.NotApplied |> Seq.length |> should equal 1
+    VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P") |> List.length |> should equal 3
+
+[<Fact>]
+let ``paragraph table conversion refuses one span covering more than one cell`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createWideSpanRow input.Path
+    let paragraphs = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P")
+    let edit =
+        { Page = 1
+          Tag = "P"
+          Box = paragraphs.Head.Geometry |> notNull
+          Alt = null
+          Text = null
+          MergeWith = paragraphs.Tail |> List.map (fun paragraph -> paragraph.Geometry |> notNull)
+          Retag = "Table"
+          Exclude = false
+          Move = None
+          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+
+    ElementEdits.pending input.Path [ edit ] |> should equal 0
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.NotApplied |> Seq.exists (fun note -> note.Contains "can't be assigned safely") |> should be True
+    VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P") |> List.length |> should equal 2
 
 [<Fact>]
 let ``a table with cells outside rows is rebuilt as rows of the cells checked, its text in them, and passes`` () =

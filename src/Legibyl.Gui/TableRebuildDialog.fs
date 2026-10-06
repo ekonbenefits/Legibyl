@@ -18,10 +18,10 @@ open Legibyl.Validation
 
 /// Shows cells (texts: the text drawn in each) over owner; the cells as checked, or None if
 /// cancelled.
-let show (owner: Window) (cells: TableCell list) (texts: string list) : Task<TableCell list option> =
+let showAs (owner: Window) (title: string) (instructions: string) (cells: TableCell list) (texts: string list) : Task<TableCell list option> =
     let window =
         HostWindow(
-            Title = "Rebuild Rows and Cells",
+            Title = title,
             Width = 720.0,
             SizeToContent = SizeToContent.Height,
             CanResize = true,
@@ -41,8 +41,7 @@ let show (owner: Window) (cells: TableCell list) (texts: string list) : Task<Tab
                 StackPanel.children [
                     TextBlock.create [
                         TextBlock.textWrapping TextWrapping.Wrap
-                        TextBlock.text
-                            $"The table's rows and cells, as found on the page: {rowCount} row(s) of {columnCount} column(s). Check each cell is a header cell (TH) or a data cell (TD); Export… then tags the table as these, each piece of it in the cell it's drawn in."
+                        TextBlock.text $"{instructions} The grid has {rowCount} row(s) and {columnCount} column(s). Check each cell is a header cell (TH) or a data cell (TD)."
                     ]
                     ScrollViewer.create [
                         ScrollViewer.maxHeight 480.0
@@ -128,3 +127,11 @@ let show (owner: Window) (cells: TableCell list) (texts: string list) : Task<Tab
         do! window.ShowDialog owner
         return chosen
     }
+
+let show (owner: Window) (cells: TableCell list) (texts: string list) : Task<TableCell list option> =
+    showAs
+        owner
+        "Rebuild Rows and Cells"
+        "The table's rows and cells, as found on the page. Export then tags the table as these, each piece of it in the cell it's drawn in."
+        cells
+        texts
