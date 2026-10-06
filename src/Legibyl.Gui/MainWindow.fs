@@ -704,7 +704,7 @@ module private MainView =
                                 sourcePath
                         match outputPath, review.Validation with
                         | Some outputPath, Some validation ->
-                            let exported = review.Exporting()
+                            let exported = review.Exporting true
                             isBusy.Set true
                             let! written =
                                 task {
@@ -744,7 +744,7 @@ module private MainView =
                         | None -> ()
                         | Some outputPath ->
                             // The review as it goes into the copy: leaving it then doesn't ask to save.
-                            let exported = review.Exporting()
+                            let exported = review.Exporting false
                             // The standard it was checked against, so the metadata fix writes its claim.
                             let profile =
                                 match outcome.Current with
