@@ -284,7 +284,7 @@ let ``after Export… leaving doesn't ask to save, until something changes again
     review.NeedsSaving |> should be True
 
     // A copy carrying the review is written.
-    let exported = review.Exporting()
+    let exported = review.Exporting false
     exported ()
 
     review.NeedsSaving |> should be False
@@ -302,7 +302,7 @@ let ``a change made while a copy is being exported isn't in it, so leaving still
     let review = DocumentReview(DateTime.Now)
     review.Title <- Some "Garden newsletter"
 
-    let exported = review.Exporting()
+    let exported = review.Exporting false
     review.Title <- Some "Garden newsletter, spring"
     exported ()
 
@@ -314,6 +314,48 @@ let ``an export that writes nothing leaves leaving asking`` () =
     review.Title <- Some "Garden newsletter"
 
     // Started, but the copy wasn't written: it's never taken as exported.
-    review.Exporting() |> ignore
+    review.Exporting false |> ignore
 
     review.NeedsSaving |> should be True
+
+[<Fact>]
+let ``checklist ticks a fixed copy doesn't carry still ask; a copy carrying the steps checked doesn't`` () =
+    let ticked () =
+        let review = DocumentReview(DateTime.Now)
+        review.Checklist <- Some("hash", set [ "reading-order" ])
+        review
+    let fixedCopy = ticked ()
+    (fixedCopy.Exporting false) ()
+    fixedCopy.NeedsSaving |> should be True
+
+    let checkedCopy = ticked ()
+    (checkedCopy.Exporting true) ()
+    checkedCopy.NeedsSaving |> should be False
+
+/// The review a copy of pdf carries, as written into it: a fixed copy's (see VeraPdfValidator.Review),
+/// or one carrying only the steps checked.
+let private carried (review: DocumentReview) (pdf: string) (checkedCopy: bool) =
+    if checkedCopy then
+        let copy = Path.ChangeExtension(pdf, ".copy.pdf")
+        review.WriteCheckedCopy(pdf, copy, "hash")
+        ReviewFile.readFor copy |> Option.get
+    else
+        review.ForCopy(pdf).Invoke(Collections.Generic.List<TaggedRegion>()) |> nonNull |> ReviewFile.parse |> Option.get
+
+[<Theory>]
+[<InlineData(false)>]
+[<InlineData(true)>]
+let ``what a copy carries is what Export takes as exported: the decisions, and the checklist only in a copy of the steps checked`` (checkedCopy: bool) =
+    withPdf false (fun pdf ->
+        let review = DocumentReview(DateTime.Now)
+        review.Title <- Some "Garden newsletter"
+        review.Checklist <- Some("hash", set [ "reading-order" ])
+
+        let copy = carried review pdf checkedCopy
+
+        // The decisions, always.
+        copy.Title |> should equal "Garden newsletter"
+        // The checklist only when Export says the copy carries it.
+        (not (isNull copy.Checklist)) |> should equal checkedCopy
+        // Never the original's validation: leaving after an export doesn't ask about it.
+        copy.Validation |> should be Null)

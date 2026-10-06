@@ -180,29 +180,44 @@ type DocumentReview(modified: DateTime) =
     /// Takes what it has now as what's saved.
     member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
 
-    /// What was last exported: the review as it was when a copy carrying it was written.
-    member val private Exported:
-        (Dismissals.Dismissed
-         * RegionEdits.Edit list
-         * string option
-         * Map<string, string>
-         * Map<string, Attachments.AttachmentEdit>
-         * PdfFixOptions option
-         * (string * DateTime) option
-         * (string * Set<string>) option) option = None with get, set
+    /// A person's decisions in the review, which every exported copy carries: the dismissals,
+    /// edits, title, role map, attachments and auto fixes.
+    member private this.Decisions = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes)
 
-    /// Starts an export of the review as it is now: the function it gives takes that as exported,
-    /// once the copy carrying it is written (changes made meanwhile aren't in it).
-    member this.Exporting() =
-        let now = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
+    /// What was last exported: the decisions as they were when a copy carrying them was written,
+    /// and the checklist too if the copy carried it (one carrying only the steps checked does; a
+    /// fixed copy doesn't).
+    member val private Exported:
+        ((Dismissals.Dismissed
+          * RegionEdits.Edit list
+          * string option
+          * Map<string, string>
+          * Map<string, Attachments.AttachmentEdit>
+          * PdfFixOptions option)
+         * (string * Set<string>) option option) option = None with get, set
+
+    /// Starts an export of the review as it is now (carriesChecklist: whether the copy carries
+    /// the checklist): the function it gives takes that as exported, once the copy carrying it is
+    /// written (changes made meanwhile aren't in it).
+    member this.Exporting(carriesChecklist: bool) =
+        let now = this.Decisions, (if carriesChecklist then Some this.Checklist else None)
         fun () -> this.Exported <- Some now
 
-    /// Whether leaving the PDF should ask to save: there are changes Save hasn't kept, and they
-    /// aren't all in the copy last exported (which carries the review), as they are when nothing's
-    /// changed since. The file next to the PDF isn't written either way.
+    /// Whether leaving the PDF should ask to save: there are changes Save hasn't kept, and some
+    /// aren't in the copy last exported. That's a decision changed since, or checklist ticks the
+    /// copy didn't carry. A newer validation alone doesn't ask then: it's the original's result,
+    /// redone when it's opened again, not something a person decided. The file next to the PDF
+    /// isn't written either way.
     member this.NeedsSaving =
+        let _, _, _, _, _, _, _, savedChecklist = this.Saved
         this.IsEdited
-        && this.Exported <> Some(this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
+        && match this.Exported with
+           | None -> true
+           | Some(decisions, carried) ->
+               decisions <> this.Decisions
+               || (match carried with
+                   | Some checklist -> checklist <> this.Checklist
+                   | None -> savedChecklist <> this.Checklist)
 
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
