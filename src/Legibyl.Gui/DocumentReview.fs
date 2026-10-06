@@ -180,6 +180,30 @@ type DocumentReview(modified: DateTime) =
     /// Takes what it has now as what's saved.
     member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
 
+    /// What was last exported: the review as it was when a copy carrying it was written.
+    member val private Exported:
+        (Dismissals.Dismissed
+         * RegionEdits.Edit list
+         * string option
+         * Map<string, string>
+         * Map<string, Attachments.AttachmentEdit>
+         * PdfFixOptions option
+         * (string * DateTime) option
+         * (string * Set<string>) option) option = None with get, set
+
+    /// Starts an export of the review as it is now: the function it gives takes that as exported,
+    /// once the copy carrying it is written (changes made meanwhile aren't in it).
+    member this.Exporting() =
+        let now = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
+        fun () -> this.Exported <- Some now
+
+    /// Whether leaving the PDF should ask to save: there are changes Save hasn't kept, and they
+    /// aren't all in the copy last exported (which carries the review), as they are when nothing's
+    /// changed since. The file next to the PDF isn't written either way.
+    member this.NeedsSaving =
+        this.IsEdited
+        && this.Exported <> Some(this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
+
     /// Whether a web address's title may be read.
     member this.MayRead(address: string) =
         match this.LinkTitles with

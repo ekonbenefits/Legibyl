@@ -276,3 +276,44 @@ let ``there's no Save button; Auto Fixes has the wrench its fixes have, and Sugg
             labels |> should not' (contain "Save")
             autoFixes |> should equal 1
             suggest |> should equal 1))
+
+[<Fact>]
+let ``after Export… leaving doesn't ask to save, until something changes again`` () =
+    let review = DocumentReview(DateTime.Now)
+    review.Title <- Some "Garden newsletter"
+    review.NeedsSaving |> should be True
+
+    // A copy carrying the review is written.
+    let exported = review.Exporting()
+    exported ()
+
+    review.NeedsSaving |> should be False
+    // (Still not saved next to the PDF: only Save does that.)
+    review.IsEdited |> should be True
+
+    // A change after it isn't in the copy; changing it back to how it was exported is no change.
+    review.Title <- Some "Garden newsletter, spring"
+    review.NeedsSaving |> should be True
+    review.Title <- Some "Garden newsletter"
+    review.NeedsSaving |> should be False
+
+[<Fact>]
+let ``a change made while a copy is being exported isn't in it, so leaving still asks`` () =
+    let review = DocumentReview(DateTime.Now)
+    review.Title <- Some "Garden newsletter"
+
+    let exported = review.Exporting()
+    review.Title <- Some "Garden newsletter, spring"
+    exported ()
+
+    review.NeedsSaving |> should be True
+
+[<Fact>]
+let ``an export that writes nothing leaves leaving asking`` () =
+    let review = DocumentReview(DateTime.Now)
+    review.Title <- Some "Garden newsletter"
+
+    // Started, but the copy wasn't written: it's never taken as exported.
+    review.Exporting() |> ignore
+
+    review.NeedsSaving |> should be True

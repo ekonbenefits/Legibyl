@@ -58,7 +58,7 @@ let install (window: Window) (actions: Actions) : NativeMenuItem * NativeMenuIte
         item
     let save = item "Save" Key.S (fun () -> if actions.CanSave () then actions.Save ())
     save.ToolTip <-
-        "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed. Closing the window asks about changes not saved."
+        "Keeps your review (edits, dismissed warnings, the title, the auto fixes chosen) in a .legibyl.json file next to the PDF, to pick up where you left off. The PDF isn't changed. Closing the window asks about changes not saved, unless they're all in a copy just exported."
     let exportItem = item "Export…" Key.E (fun () -> if actions.CanExport () then actions.Export ())
     // The PDFs opened lately, each opened as File › Open… would.
     let recent = NativeMenu()
