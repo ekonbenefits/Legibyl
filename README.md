@@ -403,6 +403,7 @@ new one. All of them:
 | Structure-11 | A figure tag that draws nothing | `empty-figures` |
 | Structure-12 | A page read out of order by a big jump | — (Order Page N by Layout, Move Up / Move Down) |
 | Structure-13 | Pages whose text couldn't be read (a font the page names but doesn't have), so the checks that go by text skipped them | — |
+| Structure-14 | Adjacent Span tags that split a word inside a text block | `join-split-words`, when the block's text is recoverable |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -662,6 +663,7 @@ needed): on a page where something spanning columns (across two elements side by
 side, above them, like a masthead) is read after content below it and under it.
 Reading the right column after the left isn't one, and running headers and
 footers (short, in the top or bottom tenth of the page) don't count either way.
+
 It points to Order Page N by Layout and Move Up / Move Down; there's no auto fix.
 
 What a tagged page draws outside every tag (a page's background, rules under
@@ -1064,6 +1066,7 @@ keeps this table in step with it):
 | `empty-toc-entries` | Remove empty table-of-contents entries |  |
 | `empty-figures` | Remove figure tags that draw nothing |  |
 | `join-split-paragraphs` | Join paragraphs tagged line by line where the page layout shows one block of text | uses the layout models |
+| `join-split-words` | Give text blocks replacement text where adjacent Span tags split words |  |
 | `lists` | Tag paragraphs that start with list markers as a list |  |
 | `table-header-scope` | Say which cells each table header cell heads (its Scope: column or row) |  |
 | `bookmarks` | Add bookmarks for the H1 and H2 headings |  |

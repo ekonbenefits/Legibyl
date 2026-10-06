@@ -260,6 +260,9 @@ let private fixChoices =
           + (match Legibyl.Layout.LayoutModel.downloadMegabytes () with
              | 0 -> "."
              | size -> $"; downloads the layout models (about {size} MB) the first time.") }
+      { Option = PdfFixOptions.JoinSplitWords
+        Title = "Fix words split across spans"
+        Detail = "For text blocks whose adjacent Span tags split a word, set replacement text from the exact text in those spans. The page and Span tags stay unchanged; only blocks whose text can be recovered safely are changed." }
       { Option = PdfFixOptions.Lists
         Title = "Tag lists"
         Detail = "Runs of paragraphs that start with list markers (•, (1), a.) become a list, so a screen reader announces it and its number of items; the page looks the same." }

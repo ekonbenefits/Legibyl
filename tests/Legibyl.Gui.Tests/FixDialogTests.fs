@@ -134,6 +134,7 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
               "Remove empty contents entries"
               "Remove empty figures"
               "Join split paragraphs"
+              "Fix words split across spans"
               "Tag lists"
               "Table header scope"
               "Add bookmarks"
@@ -149,6 +150,29 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
               "Title from the first page"
               "Fix XMP metadata" ]
         (Map.ofList shown)["Describe contents links"] |> should equal (false, "none found"))
+
+[<Fact>]
+let ``split-word warnings offer their replacement-text auto fix`` () =
+    onUiThread (fun () ->
+        let warning =
+            { finding PdfFixOptions.JoinSplitWords with
+                TestNumber = 14
+                Severity = FindingSeverity.Warning }
+        let mutable shown = Map.empty
+        let result =
+            withDialog [ warning ] (fun dialog ->
+                shown <- options dialog
+                let checkbox =
+                    descendants<CheckBox> dialog
+                    |> List.find (fun checkbox -> (lines checkbox).Head = "Fix words split across spans")
+                checkbox.IsChecked <- Nullable true
+                pump ()
+                (descendants<Button> dialog |> List.find (fun button -> string button.Content = "Done"))
+                    .RaiseEvent(Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent))
+                pump ())
+
+        shown["Fix words split across spans"] |> should equal (false, "1 found")
+        result |> should equal (Some PdfFixOptions.JoinSplitWords))
 
 [<Fact>]
 let ``metadata starts unticked when some failure can't be fixed, and says why`` () =

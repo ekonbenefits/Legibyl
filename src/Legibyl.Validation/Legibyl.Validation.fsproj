@@ -21,6 +21,7 @@
     <Compile Include="ValidatorLog.fs" />
     <Compile Include="MarkedContentTextIndex.fs" />
     <Compile Include="StructureTreeObjects.fs" />
+    <Compile Include="SplitWordSpans.fs" />
     <Compile Include="ParentTree.fs" />
     <Compile Include="RoleMaps.fs" />
     <Compile Include="Attachments.fs" />

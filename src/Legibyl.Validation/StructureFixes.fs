@@ -1190,6 +1190,7 @@ let orderedFixes
       PdfFixOptions.EmptyTocEntries, removeEmptyTocEntries
       PdfFixOptions.EmptyFigures, EmptyFigures.remove
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
+      PdfFixOptions.JoinSplitWords, SplitWordSpans.apply
       PdfFixOptions.Lists, tagParagraphLists
       PdfFixOptions.TableHeaderScope, scopeTableHeaders
       PdfFixOptions.Bookmarks, addBookmarks
