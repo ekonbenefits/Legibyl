@@ -704,14 +704,20 @@ module private MainView =
                                 sourcePath
                         match outputPath, review.Validation with
                         | Some outputPath, Some validation ->
-                            let exported = review.Exporting true
                             isBusy.Set true
                             let! written =
                                 task {
                                     try
                                         try
-                                            do! Task.Run(fun () -> review.WriteCheckedCopy(sourcePath, outputPath, validation.Hash))
-                                            return Ok()
+                                            // The review as the copy reads it: leaving it then doesn't ask to save.
+                                            let! exported =
+                                                Task.Run(
+                                                    Func<unit -> unit>(fun () ->
+                                                        let exported = review.Exporting true
+                                                        review.WriteCheckedCopy(sourcePath, outputPath, validation.Hash)
+                                                        exported)
+                                                )
+                                            return Ok exported
                                         with
                                         | :? IOException
                                         | :? UnauthorizedAccessException as ex -> return Error ex.Message
@@ -720,7 +726,7 @@ module private MainView =
                                         isBusy.Set false
                                 }
                             match written with
-                            | Ok() ->
+                            | Ok exported ->
                                 exported ()
                                 notice.Set $"Exported {Path.GetFileName outputPath}, carrying the steps checked."
                                 do! openElsewhere outputPath true :> Task
@@ -743,8 +749,9 @@ module private MainView =
                         match outputPath with
                         | None -> ()
                         | Some outputPath ->
-                            // The review as it goes into the copy: leaving it then doesn't ask to save.
-                            let exported = review.Exporting false
+                            // The review as it goes into the copy (taken as the copy reads it): leaving
+                            // it then doesn't ask to save.
+                            let exported = ref ignore
                             // The standard it was checked against, so the metadata fix writes its claim.
                             let profile =
                                 match outcome.Current with
@@ -779,6 +786,7 @@ module private MainView =
                                                 Task.Run(fun () ->
                                                     // The review, as it is now, goes in the fixed copy. Recording
                                                     // its layout reads the PDF, so it's done here too.
+                                                    exported.Value <- review.Exporting false
                                                     validator.Review <- review.ForCopy sourcePath
                                                     validator.Edits <- RegionEdits.toElementEdits review.Edits
                                                     validator.Title <- (review.Title |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.toObj)
@@ -803,7 +811,7 @@ module private MainView =
                             let! shownIn, fixedReport =
                                 match fixOutcome with
                                 | Ok fix when fix.WasFixed ->
-                                    exported ()
+                                    exported.Value ()
                                     notice.Set $"Exported {Path.GetFileName outputPath}."
                                     match fix.OutputPath with
                                     // It may be open already, from an earlier export to the same file.
