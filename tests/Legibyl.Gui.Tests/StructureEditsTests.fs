@@ -330,10 +330,14 @@ let ``a saved paragraph table conversion can be reviewed or removed`` () =
             click blocks[0] false
             click blocks[1] true
             let actions = descendants<Button> window |> List.map buttonText
+            (descendants<Button> window |> List.find (fun button -> buttonText button = "Don't Convert to Table")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+            pump ()
+            let remaining = window.Review.Edits
             window.Close()
 
             actions |> should contain "Check Table Conversion…"
-            actions |> should contain "Don't Convert to Table"))
+            actions |> should contain "Don't Convert to Table"
+            remaining |> should be Empty))
 
 [<Fact>]
 let ``shift-clicking selects the paragraphs between, which can be merged as an edit`` () =
