@@ -20,7 +20,16 @@ open UglyToad.PdfPig.Core
 
 type MarkedContentInfo = { Text: string; Geometry: StructureGeometry option }
 
-type Index = Dictionary<int * int, MarkedContentInfo>
+/// What each (page number, MCID) draws.
+type Index() =
+    inherit Dictionary<int * int, MarkedContentInfo>()
+
+    /// The pages whose text couldn't be read (a font the page's text names that it doesn't have,
+    /// say), so none of their marked content is here: what they draw is unknown, not nothing.
+    member val Unreadable = SortedSet<int>()
+
+    /// What PdfPig said about the first page it couldn't read, if any.
+    member val UnreadableReason: string option = None with get, set
 
 let private geometry pageNumber left bottom right top =
     { PageNumber = pageNumber; Left = left; Bottom = bottom; Right = right; Top = top }
@@ -122,9 +131,16 @@ let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedCon
 let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
     let index = Index()
     use document = PdfDocument.Open pdfPath
-    for page in document.GetPages() do
-        onPage page.Number document.NumberOfPages
-        indexMarkedContent page.Number (page.GetMarkedContents()) index
+    let pageCount = document.NumberOfPages
+    for pageNumber in 1..pageCount do
+        onPage pageNumber pageCount
+        // A page PdfPig can't read is left out, and said to be, rather than ending the reading of
+        // every page after it.
+        match (try Ok((document.GetPage pageNumber).GetMarkedContents()) with ex -> Error ex.Message) with
+        | Ok contents -> indexMarkedContent pageNumber contents index
+        | Error reason ->
+            index.Unreadable.Add pageNumber |> ignore
+            if index.UnreadableReason.IsNone then index.UnreadableReason <- Some reason
     index
 
 let build (pdfPath: string) : Index = buildReporting pdfPath (fun _ _ -> ())
