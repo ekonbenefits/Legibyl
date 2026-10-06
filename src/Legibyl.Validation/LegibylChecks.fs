@@ -19,8 +19,9 @@
 /// table-of-contents heading checks, Structure-3 to 5; lists tagged as paragraphs, Structure-6;
 /// missing bookmarks, Structure-7; the parent tree, Structure-9; figures in pieces, Structure-10;
 /// figures that draw nothing, Structure-11; pages read out of order, Structure-12; and pages whose
-/// text couldn't be read, Structure-13; and words split across Span boundaries, Structure-14) are
-/// added in `run` directly, and their messages to messageFor.
+/// text couldn't be read, Structure-13; words split across Span boundaries, Structure-14; and
+/// tables tagged as aligned paragraphs, Structure-15) are added in `run` directly, and their
+/// messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -90,6 +91,12 @@ let private splitParagraph context (visit: StructElemVisit) =
 [<Literal>]
 let private SplitWordSpansMessage =
     "Adjacent Span tags split a word inside this text block. This is not a PDF/UA failure, but structure-based text extraction may present fragments separately. An auto fix can set the block's replacement text when every span's text is recoverable and none carries a language, alt text or other attributes it would hide."
+
+// ---- Structure-15: paragraphs arranged like table cells ----
+
+[<Literal>]
+let private ParagraphTableMessage =
+    "These paragraphs appear arranged in repeated rows and columns. They may be a table tagged as paragraphs, so screen reader users may not hear the relationships between values. Check the page and tag it as a table if appropriate; this layout-based warning can also match aligned text."
 
 // ---- The checks ----
 
@@ -378,6 +385,14 @@ let run (document: PdfDocument) context : RuleViolation list =
                   candidate.Path
                   14
                   (if candidate.Fixable then PdfFixOptions.JoinSplitWords else PdfFixOptions.None)
+                  (Option.toObj candidate.Geometry)
+          for candidate in ParagraphTables.find context visits do
+              warning
+                  ParagraphTableMessage
+                  $"Page {candidate.Page}: {candidate.ParagraphCount} paragraphs in a repeated-row layout."
+                  candidate.Path
+                  15
+                  PdfFixOptions.None
                   (Option.toObj candidate.Geometry) ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
@@ -398,6 +413,7 @@ let messageFor (testNumber: int) : string option =
         | 12 -> Some ReadingJumpMessage
         | 13 -> Some UnreadableTextMessage
         | 14 -> Some SplitWordSpansMessage
+        | 15 -> Some ParagraphTableMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

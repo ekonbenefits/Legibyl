@@ -27,6 +27,7 @@
     <Compile Include="Attachments.fs" />
     <Compile Include="TocHeadings.fs" />
     <Compile Include="ParagraphLists.fs" />
+    <Compile Include="ParagraphTables.fs" />
     <Compile Include="ParagraphJoins.fs" />
     <Compile Include="SplitFigures.fs" />
     <Compile Include="Bookmarks.fs" />
