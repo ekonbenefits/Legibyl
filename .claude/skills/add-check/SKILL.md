@@ -37,16 +37,22 @@ changes what the tags say) when the user asks for it. Don't propose one.
 
 1. **Its flag.** The next power of two in `PdfFixOptions` (`Types.fs`), with a doc comment, and
    `All` raised to match (`All` is every bit set: 2^n − 1).
-2. **Its name.** Add it to `FixNames.order`, near where it runs (it's the order names are listed
-   in). Its CLI name is its flag's in kebab-case (`FontGlyphs` is `font-glyphs`). Then decide:
+2. **Its name.** Add it to `FixNames.order`, near where it runs (the order names are listed in,
+   which has drifted from the order they run in places: `link-contents` is listed after the font
+   fixes and runs before them). Its CLI name is its flag's in kebab-case (`FontGlyphs` is `font-glyphs`). Then decide:
    - `FixNames.safe`: only fixes that need no guesswork about the document's meaning (the CLI
      runs `safe` by default, and the Auto Fixes dialog starts with it ticked);
    - `FixNames.all` leaves out fixes that reach outside the file (`link-titles-from-web`);
    - `FixNames.usesLayout`, if it runs the layout model (a download the first time).
 3. **Its description.** One line in `PdfFixDescriptions` (`Results.fs`); `legibyl list fixes` and
    the warnings' "fixable" text use it.
-4. **Where it runs.** In `StructureFixes.orderedFixes`, in the place that's right for what other
-   fixes see, and say why in the numbered order comment above it.
+4. **Where it runs.** Most fixes go in `StructureFixes.orderedFixes`, in the place that's right
+   for what other fixes see. Say why in the numbered list of the order ("Legibyl's own fixes, in
+   the order they run", earlier in `StructureFixes.fs`), or beside its entry. Not everything
+   runs there: tagging an untagged PDF (`TagFromLayout`, with `QrLinks`) runs before it, in
+   `LayoutTagging`, and veraPDF's metadata fixer runs after it (under `Metadata`, which also has
+   a step of Legibyl's own in `orderedFixes`); both stages are in `VeraPdfValidator.Fix`. A fix
+   that belongs with one of those goes in that stage.
 5. **If it goes by page text** (`extractText`, `isSubtreeEmpty`, the text index), add it to
    `readsText` in `StructureFixes.fs`, so a page whose text couldn't be read is said once and the
    fix isn't also reported as having had nothing to do.
@@ -54,15 +60,18 @@ changes what the tags say) when the user asks for it. Don't propose one.
    it changed nothing (that's how "nothing in this PDF needed it" is worked out, and how a file
    needing nothing gets no copy written). What it found but couldn't change goes in
    `context.Notes`, which the user sees among what wasn't applied.
-7. **The rules it fixes.** Map each veraPDF rule it fixes, for PDF/UA-1 and PDF/UA-2, in
-   `fixesByRule` (`VeraPdfValidator.fs`): `ua1 "7.1-5" PdfFixOptions.RoleMap`.
-8. **The rule guide.** Those rules' `whatToDo` in `RuleGuide.yaml` names it the way the dialog
+7. **The rules it fixes,** if it fixes veraPDF failures. Map each one, for PDF/UA-1 and PDF/UA-2,
+   in `fixesByRule` (`VeraPdfValidator.fs`): `ua1 "7.1-5" PdfFixOptions.RoleMap`. A fix for a
+   Legibyl warning only (joining split paragraphs, say) has no rules here: its warning's
+   `FixOptions` points to it.
+8. **The rule guide,** for those rules. Their `whatToDo` in `RuleGuide.yaml` names it the way the dialog
    does ("Choose Map the PDF's own tag names in Auto Fixes…"), before the other ways to fix it.
    Use a YAML anchor (`&name`, then `*name`) when several rules share the advice.
 9. **The Auto Fixes dialog.** A choice in `Dialogs.fs` (its title and a sentence of what it does,
    in the user's terms), and its title in `FixDialogTests`.
 10. **The README's fix table**, between `<!-- fixes:start -->` and `<!-- fixes:end -->`: a row in
-    run order, exactly as `FixNames.fixes ()` gives it (its name, its `PdfFixDescriptions` line,
+    `FixNames.order`'s order (a listing order: it isn't exactly the order fixes run), exactly as
+    `FixNames.fixes ()` gives it (its name, its `PdfFixDescriptions` line,
     and notes: `safe`, `uses the layout models`…).
 
 `FixNamesTests` (in the CLI tests) catch some of these: a flag missing from `FixNames.order`, a
@@ -86,7 +95,9 @@ wrong `All`, a README fix table that doesn't match, and "repair" in what people 
   and `.ReadStructureTree`.
 - A new test file for each check or fix, added to `Legibyl.Validation.Tests.fsproj`.
 - For a fix, check:
-  - veraPDF fails the rule before and passes it after;
+  - for a fix of veraPDF failures: veraPDF fails the rule before and passes it after. For a fix of
+    a Legibyl warning only: the warning is there before and gone after (and veraPDF's results
+    are no worse);
   - a fix that shouldn't change how the page looks renders it pixel-identically (see `render` in
     `FontDictionariesTests.fs`, with `PdfRegionRenderer`);
   - a file that's already fine is left alone (`WasFixed` false, no copy written);
