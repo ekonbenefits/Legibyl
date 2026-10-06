@@ -481,7 +481,7 @@ module private MainView =
             let mayLeave () =
                 task {
                     match selectedFile.Current with
-                    | Some path when (layoutReviews.For path).IsEdited ->
+                    | Some path when (layoutReviews.For path).NeedsSaving ->
                         match! Dialogs.askToSave window (string (Path.GetFileName path)) with
                         | Some true -> return! saveReview ()
                         | Some false ->
@@ -512,8 +512,8 @@ module private MainView =
             ctx.useEffect (
                 (fun () ->
                     window.Closing.Add(fun e ->
-                        let edited = selectedFile.Current |> Option.exists (fun path -> (layoutReviews.For path).IsEdited)
-                        if edited && not closing.Current then
+                        let asks = selectedFile.Current |> Option.exists (fun path -> (layoutReviews.For path).NeedsSaving)
+                        if asks && not closing.Current then
                             e.Cancel <- true
                             task {
                                 let! leave = mayLeave ()
@@ -704,6 +704,7 @@ module private MainView =
                                 sourcePath
                         match outputPath, review.Validation with
                         | Some outputPath, Some validation ->
+                            let exported = review.Exporting()
                             isBusy.Set true
                             let! written =
                                 task {
@@ -720,6 +721,7 @@ module private MainView =
                                 }
                             match written with
                             | Ok() ->
+                                exported ()
                                 notice.Set $"Exported {Path.GetFileName outputPath}, carrying the steps checked."
                                 do! openElsewhere outputPath true :> Task
                             | Error message -> do! Dialogs.showMessage window $"The copy couldn't be written: {message}" "Export"
@@ -741,6 +743,8 @@ module private MainView =
                         match outputPath with
                         | None -> ()
                         | Some outputPath ->
+                            // The review as it goes into the copy: leaving it then doesn't ask to save.
+                            let exported = review.Exporting()
                             // The standard it was checked against, so the metadata fix writes its claim.
                             let profile =
                                 match outcome.Current with
@@ -799,6 +803,7 @@ module private MainView =
                             let! shownIn, fixedReport =
                                 match fixOutcome with
                                 | Ok fix when fix.WasFixed ->
+                                    exported ()
                                     notice.Set $"Exported {Path.GetFileName outputPath}."
                                     match fix.OutputPath with
                                     // It may be open already, from an earlier export to the same file.

@@ -526,7 +526,9 @@ the changes are written to a new copy. Three buttons under the details, and
   title, the auto fixes chosen) in `<name>.pdf.legibyl.json` next to the PDF, to pick up where you left
   off. Until then your changes are only in the app: the window's title says
   **Edited**, and closing it, or opening another PDF, asks whether to save them.
-  Changing something back to how it was saved isn't a change.
+  Changing something back to how it was saved isn't a change. Once **Export…** has
+  written a copy, which carries the review, it doesn't ask until something changes
+  again; the review isn't saved next to the original unless you choose Save.
   It keeps the validation's result too (`validation`, `SavedResults.fs`): the
   findings without their messages, for the file's SHA-256 and the veraPDF and
   Legibyl versions and standard that produced them. Reopening the PDF shows that
