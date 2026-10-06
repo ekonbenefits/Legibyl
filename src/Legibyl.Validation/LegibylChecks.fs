@@ -7,7 +7,8 @@
 ///      Some finding when something's wrong. Helpers for text, emptiness, and geometry
 ///      are in StructureTreeObjects.
 ///   2. Add it to `all` below with the next unused TestNumber (numbers are shown to
-///      users as "Structure-N", so never reuse or renumber one).
+///      users as "Structure-N", so never reuse or renumber one). Its message is fixed (what
+///      varies goes in the warning's detail, errorMessage), so a saved report reads it back.
 ///   3. If an auto fix can fix it, set FixOptions and implement the fix (in
 ///      StructureFixes, or a module of its own that StructureFixes.orderedFixes runs).
 ///   4. Cover it in a test file of its own in tests/Legibyl.Validation.Tests (as
@@ -17,8 +18,12 @@
 /// Checks that look at the document as a whole rather than one element at a time (the
 /// table-of-contents heading checks, Structure-3 to 5; lists tagged as paragraphs, Structure-6;
 /// missing bookmarks, Structure-7; the parent tree, Structure-9; figures in pieces, Structure-10;
-/// figures that draw nothing, Structure-11; and pages read out of order, Structure-12) are added
-/// in `run` directly, and their messages to messageFor.
+/// figures that draw nothing, Structure-11; pages read out of order, Structure-12; and pages whose
+/// text couldn't be read, Structure-13) are added in `run` directly, and their messages to
+/// messageFor.
+///
+/// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
+/// the add-check skill: .claude/skills/add-check/SKILL.md.
 module internal Legibyl.Validation.LegibylChecks
 
 open System
