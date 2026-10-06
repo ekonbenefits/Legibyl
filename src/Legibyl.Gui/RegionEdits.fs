@@ -138,6 +138,28 @@ let mergeElements (edits: Edit list) (page: int) (tag: string) (boxes: Structure
     (edits |> List.filter (not << involves))
     @ [ { Page = page; Tag = tag; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false; Move = None; Cells = [] } ]
 
+/// Converts selected sibling paragraphs to one table, with cells checked by a person. The first
+/// paragraph's box stays the edit anchor; the remaining boxes identify its consecutive siblings.
+let setParagraphsAsTable (edits: Edit list) (boxes: StructureGeometry list) (cells: TableCell list) =
+    match boxes with
+    | first :: rest when not rest.IsEmpty ->
+        let involves (edit: Edit) =
+            edit.Page = first.PageNumber
+            && (edit.Box :: edit.MergeWith)
+               |> List.exists (fun box -> (first :: rest) |> List.exists (fun selected -> Boxes.overlap box selected >= SameRegionOverlap))
+        (edits |> List.filter (not << involves))
+        @ [ { Page = first.PageNumber
+              Tag = "P"
+              Box = first
+              Alt = None
+              Text = None
+              MergeWith = rest
+              Retag = Some "Table"
+              Exclude = false
+              Move = None
+              Cells = cells } ]
+    | _ -> edits
+
 /// Paragraphs to merge into the first, by box, replacing any merge that involves them.
 let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry list) : Edit list =
     mergeElements edits page "P" boxes
@@ -182,4 +204,3 @@ let load (pdfPath: string) = editsOf (ReviewFile.readFor pdfPath)
 let fromFileOrPdf (path: string) : Edit list =
     if String.Equals(Path.GetExtension path, ".pdf", StringComparison.OrdinalIgnoreCase) then load path
     else fromFile path
-

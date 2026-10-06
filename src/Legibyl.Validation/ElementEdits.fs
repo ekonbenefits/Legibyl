@@ -58,7 +58,10 @@ let private elementsOn (structTreeRoot: PdfDictionary) context (page: int) (tag:
               for i in 0 .. kids.Size() - 1 do
                   match resolve (kids.Get i) with
                   | :? PdfDictionary as kid when PdfName(tag).Equals(standardTag kid context) ->
-                      match ancestorPage kid context with
+                      let elementPage =
+                          ancestorPage kid context
+                          |> Option.orElseWith (fun () -> subtreeGeometry kid context None |> Option.map _.PageNumber)
+                      match elementPage with
                       | Some p when p = page ->
                           match subtreeGeometry kid context (Some p) with
                           | Some box -> yield visit.Element, i, box
@@ -390,6 +393,22 @@ let private otherChanges (tables: ElementEdit list) =
           if not (isNull edit.Alt && isNull edit.Text && isNull edit.Retag && edit.Move.IsNone && not edit.Exclude) then
               { edit with Cells = [] } ]
 
+/// A person-confirmed conversion of consecutive paragraph siblings into a table.
+let private isParagraphTable (edit: ElementEdit) =
+    edit.Tag = "P" && edit.Retag = "Table" && not edit.MergeWith.IsEmpty && not edit.Cells.IsEmpty
+
+/// Whether the review's checked grid is already the table at the merged paragraphs' location.
+let private paragraphTableIsBuilt document context (edit: ElementEdit) =
+    let tableEdit =
+        { edit with
+            Tag = "Table"
+            Box = mergedBox edit
+            MergeWith = []
+            Retag = null
+            Cells = edit.Cells }
+    find document context [ tableEdit ]
+    |> List.exists (fun (_, table) -> TableRebuild.rebuilt table context edit.Page edit.Cells)
+
 let internal apply (document: PdfDocument) context (edits: ElementEdit list) : string list =
     // Content outside every tag first: it looks up the elements drawn before it, as they are.
     let outside, edits = edits |> List.partition isUntagged
@@ -400,6 +419,16 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
             context
             [ for edit, piece in untaggedPieces document outside ->
                   piece, (if edit.Retag = "Artifact" then UntaggedContent.NotRead else UntaggedContent.TagAs(edit.Retag |> nonNull, edit.Alt)) ]
+    let paragraphTables, edits = edits |> List.partition isParagraphTable
+    let converted =
+        [ for edit in paragraphTables do
+              if not (paragraphTableIsBuilt document context edit) then
+                match mergeRun document context edit with
+                | Some run ->
+                    match ParagraphTableRebuild.convert document context run edit.Cells with
+                    | Some count -> yield $"Converted {count} paragraph(s) on page {edit.Page} to a table with the checked rows and cells."
+                    | None -> ()
+                | None -> () ]
     // Tables rebuilt from their page first: what's in them then moves with them. What else their
     // edits change (a tag, alt text, a move) is changed as any edit's is, after.
     let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
@@ -429,6 +458,7 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     let count = applied.Length + runs.Length + artifacts.Length + outsideWritten
     // Those that don't apply are said by unapplied, one by one.
     [ if rebuilt.Length > 0 then $"Rebuilt {rebuilt.Length} table(s)' rows and cells from the page, as you checked them."
+      yield! converted
       if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)."
       if moved > 0 then $"Put {moved} element(s) in the reading order you gave them." ]
 
@@ -500,6 +530,7 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
         let context = createContext document pdfPath
         let outside, edits = edits |> List.partition isUntagged
         let outsideFound = untaggedPieces document outside
+        let paragraphTables, edits = edits |> List.partition isParagraphTable
         let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
         let edits = edits @ otherChanges tables
         let tablesFound = find document context tables
@@ -515,6 +546,16 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
                   | Some why -> $"Your rebuild of the {describe edit} wasn't applied: {why}."
                   | None when TableRebuild.rebuilt table context edit.Page edit.Cells -> $"Your rebuild of the {describe edit} changed nothing: its rows and cells are those already."
                   | None -> ()
+          for edit in paragraphTables do
+              if paragraphTableIsBuilt document context edit then
+                  $"Your conversion of the paragraphs from the {describe edit} changed nothing: they already make this table."
+              else
+                  match mergeRun document context edit with
+                  | None ->
+                      $"Your conversion of the paragraphs from the {describe edit} wasn't applied: they aren't consecutive paragraphs under one parent here."
+                  | Some run when not (ParagraphTableRebuild.canConvert context run edit.Cells) ->
+                      $"Your conversion of the paragraphs from the {describe edit} wasn't applied: their content can't be assigned safely to the checked cells."
+                  | Some _ -> ()
           for edit in outside do
               match outsideFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
               | Some(_, piece) when piece.Kind = UntaggedContent.Text && edit.Retag = "Artifact" ->
@@ -547,6 +588,7 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         use document = new PdfDocument(new PdfReader(pdfPath))
         let context = createContext document pdfPath
         let outside, edits = edits |> List.partition isUntagged
+        let paragraphTables, edits = edits |> List.partition isParagraphTable
         let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
         // A table's other changes are counted as an edit of their own, unless its rebuild is.
         let rebuilding =
@@ -556,7 +598,14 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         let edits =
             edits @ (tables |> List.filter (fun t -> not (rebuilding |> List.exists (fun r -> obj.ReferenceEquals(r, t)))) |> otherChanges)
         let merges, edits = edits |> List.partition (fun e -> not e.MergeWith.IsEmpty)
+        let conversions =
+            paragraphTables
+            |> List.filter (fun edit ->
+                not (paragraphTableIsBuilt document context edit)
+                && (mergeRun document context edit
+                    |> Option.exists (fun run -> ParagraphTableRebuild.canConvert context run edit.Cells)))
         rebuilding.Length
+        + conversions.Length
         +
         // (Text asked to be made decoration never is.)
         (untaggedPieces document outside |> List.filter (fun (e, piece) -> not (piece.Kind = UntaggedContent.Text && e.Retag = "Artifact")) |> List.length)

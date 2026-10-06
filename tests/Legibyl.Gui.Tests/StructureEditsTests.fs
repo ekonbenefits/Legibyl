@@ -296,6 +296,45 @@ let private click (block: Border) (extend: bool) =
 let private mergeButton (window: Window) =
     descendants<Button> window |> List.tryFind (fun b -> (buttonText b).StartsWith "Merge ")
 
+let private convertTableButton (window: Window) =
+    descendants<Button> window |> List.tryFind (fun b -> (buttonText b).StartsWith "Convert " && (buttonText b).EndsWith " to Table…")
+
+[<Fact>]
+let ``consecutive selected paragraphs offer a deliberate table conversion`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let window = show lines pdf
+            let blocks = paragraphs window
+            click blocks[0] false
+            click blocks[1] true
+            let offered = convertTableButton window |> Option.map buttonText
+            window.Close()
+
+            offered |> should equal (Some "Convert 2 Paragraphs to Table…")))
+
+[<Fact>]
+let ``a saved paragraph table conversion can be reviewed or removed`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            let selected =
+                lines.Children[0].Children
+                |> Seq.take 2
+                |> Seq.map (fun node -> nonNull node.Geometry)
+                |> List.ofSeq
+            let review = Reviews.read pdf
+            review.Edits <- RegionEdits.setParagraphsAsTable [] selected [ { Tag = "TH"; Box = rect 72.0 685.0 150.0 712.0 } ]
+            let window = StructureTreeWindow(Tagged lines, pdf, review, ignore, Width = 900.0, Height = 700.0)
+            window.Show()
+            pump ()
+            let blocks = paragraphs window
+            click blocks[0] false
+            click blocks[1] true
+            let actions = descendants<Button> window |> List.map buttonText
+            window.Close()
+
+            actions |> should contain "Check Table Conversion…"
+            actions |> should contain "Don't Convert to Table"))
+
 [<Fact>]
 let ``shift-clicking selects the paragraphs between, which can be merged as an edit`` () =
     onUiThread (fun () ->

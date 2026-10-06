@@ -40,6 +40,7 @@
     <Compile Include="EmptyFigures.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="TableRebuild.fs" />
+    <Compile Include="ParagraphTableRebuild.fs" />
     <Compile Include="ElementEdits.fs" />
     <Compile Include="PredefinedCMaps.fs" />
     <Compile Include="ToUnicodeMaps.fs" />

@@ -490,6 +490,117 @@ module private StructureView =
                     }
                     |> ignore
 
+            /// Converts selected consecutive paragraph siblings to a person-checked table.
+            let convertingParagraphs = ref false
+            let convertParagraphsToTable (nodes: StructureNode list) =
+                if convertingParagraphs.Value then ()
+                else
+                    task {
+                        convertingParagraphs.Value <- true
+                        let cursor = window.Cursor
+                        try
+                          try
+                            let parentMap = parents ()
+                            let commonParent =
+                                match nodes with
+                                | first :: _ ->
+                                    match parentMap.TryGetValue first with
+                                    | true, parent when nodes |> List.forall (fun node -> match parentMap.TryGetValue node with true, found -> obj.ReferenceEquals(parent, found) | _ -> false) ->
+                                        Some parent
+                                    | _ -> None
+                                | [] -> None
+                            let orderedNodes =
+                                commonParent
+                                |> Option.map (fun parent ->
+                                    let siblings = List.ofSeq parent.Children
+                                    let selected = nodes |> List.map (fun node -> siblings |> List.tryFindIndex (fun sibling -> obj.ReferenceEquals(sibling, node)))
+                                    if selected |> List.forall Option.isSome then
+                                        selected
+                                        |> List.choose id
+                                        |> List.sort
+                                        |> fun indexes ->
+                                            if indexes |> List.pairwise |> List.forall (fun (a, b) -> b = a + 1) then
+                                                indexes |> List.map (fun index -> siblings[index]) |> Some
+                                            else None
+                                    else None)
+                                |> Option.flatten
+                            match orderedNodes with
+                            | None ->
+                                do! Dialogs.showMessage window "Choose consecutive paragraphs under the same parent to convert them to a table." "Convert Paragraphs to Table"
+                            | Some nodes ->
+                                let boxes = nodes |> List.choose (fun node -> Option.ofObj node.Geometry)
+                                if boxes.Length <> nodes.Length then
+                                    do! Dialogs.showMessage window "Every selected paragraph needs a page region before it can be converted to a table." "Convert Paragraphs to Table"
+                                else
+                                    let first = boxes.Head
+                                    let region =
+                                        { first with
+                                            Left = boxes |> List.map _.Left |> List.min
+                                            Bottom = boxes |> List.map _.Bottom |> List.min
+                                            Right = boxes |> List.map _.Right |> List.max
+                                            Top = boxes |> List.map _.Top |> List.max }
+                                    let kept =
+                                        RegionEdits.findMerge edits.Current first.PageNumber first
+                                        |> Option.filter (fun edit -> edit.Retag = Some "Table" && edit.MergeWith.Length = boxes.Length - 1)
+                                        |> Option.map _.Cells
+                                        |> Option.filter (not << List.isEmpty)
+                                    if kept.IsNone && not (TableModel.isDownloaded ()) then
+                                        do!
+                                            Dialogs.showMessage
+                                                window
+                                                $"Finding the table's rows and cells needs the table-structure model (Table Transformer), about {TableModel.DownloadSizeMegabytes} MB, downloaded once from Hugging Face. It's downloaded now; this can take a minute."
+                                                "Convert Paragraphs to Table"
+                                    window.Cursor <- new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Wait)
+                                    let! found =
+                                        match kept with
+                                        | Some cells -> Task.FromResult(Some cells)
+                                        | None ->
+                                            Task.Run(fun () ->
+                                                if not (TableModel.isDownloaded ()) then
+                                                    (TableModel.download (Progress<float>(ignore)) CancellationToken.None).Wait()
+                                                use suggester = new LayoutSuggester(sourceFilePath)
+                                                suggester.TableCells(region.PageNumber, region)
+                                                |> Option.map (List.map (fun (header, geometry) ->
+                                                    ({ Tag = (if header then "TH" else "TD"); Box = geometry }: TableCell))))
+                                    window.Cursor <- cursor
+                                    match found with
+                                    | Some cells when not cells.IsEmpty ->
+                                        let rec drawn (node: StructureNode) : (string * StructureGeometry) list =
+                                            [ match node.Content, node.Geometry with
+                                              | NonNull text, NonNull geometry when text.Trim() <> "" -> text.Trim(), geometry
+                                              | _ -> ()
+                                              for child in node.Children do yield! drawn child ]
+                                        let cellBoxes = [ for cell in cells -> cell.Box ]
+                                        let placed =
+                                            nodes
+                                            |> List.collect drawn
+                                            |> List.map (fun (text, geometry) -> TableGrid.cellFor cellBoxes (Some geometry), text)
+                                        let texts =
+                                            [ for index in 0 .. cells.Length - 1 ->
+                                                  placed |> List.filter (fst >> (=) index) |> List.map snd |> String.concat " " ]
+                                        match! TableRebuildDialog.showAs
+                                                    window
+                                                    "Convert Paragraphs to Table"
+                                                    "These selected paragraph tags will be replaced by a table. Check that the detected grid matches the page, then choose which cells are headers."
+                                                    cells
+                                                    texts with
+                                        | Some checkedCells ->
+                                            do! saveEdits (RegionEdits.setParagraphsAsTable edits.Current boxes checkedCells)
+                                        | None -> ()
+                                    | Some _ ->
+                                        do! Dialogs.showMessage window "The table-structure model found no rows or cells in this region." "Convert Paragraphs to Table"
+                                    | None ->
+                                        do! Dialogs.showMessage window "The table-structure model isn't available, so these paragraphs can't be converted." "Convert Paragraphs to Table"
+                          with ex ->
+                            window.Cursor <- cursor
+                            let ex = match ex with :? AggregateException as a -> (match a.InnerException with null -> ex | inner -> inner) | ex -> ex
+                            do! Dialogs.showMessage window $"The table's rows and cells couldn't be found: {ex.Message}" "Convert Paragraphs to Table"
+                        finally
+                            window.Cursor <- cursor
+                            convertingParagraphs.Value <- false
+                    }
+                    |> ignore
+
             /// Selects the block for node, as clicking it does, opening collapsed blocks above it if
             /// it's in one, and scrolls it into view; then does after with its block. A node without
             /// a block of its own (a table's row, say) selects the nearest one above it that has.
@@ -807,7 +918,8 @@ module private StructureView =
                   MarkAllLike = markAllLike
                   EditNode = editNode
                   RoleMap = fun () -> review.RoleMap
-                  RebuildTable = rebuildTable }
+                  RebuildTable = rebuildTable
+                  ConvertParagraphsToTable = convertParagraphsToTable }
             /// A tagged PDF's selected element's moves in the reading order.
             let moves () = if isSuggested then [] else StructureActions.moveActions (orderNeeds ())
             menuFill.Value <-
