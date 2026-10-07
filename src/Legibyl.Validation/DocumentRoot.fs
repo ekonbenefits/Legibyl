@@ -57,7 +57,12 @@ let find (document: PdfDocument) context : Top option =
             Some(Left "the top of its structure holds content or an annotation directly, not only tags")
         | _ ->
             let elements = kids |> List.choose element
-            let tag (e: PdfDictionary) = standardTag e context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
+            // A standard tag means itself, whatever a (broken) role map says of it; another name, what
+            // the role map makes it.
+            let tag (e: PdfDictionary) =
+                match e.GetAsName(PdfName.S).GetValue() with
+                | name when RoleMaps.standardTags.Contains name -> name
+                | _ -> standardTag e context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
             match elements with
             | [ single ] when tag single = "Document" ->
                 if not (isPdf2 document) then Some Fine

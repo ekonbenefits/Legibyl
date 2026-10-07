@@ -127,11 +127,18 @@ let ``several tags at the top go under one Document, in their order`` () =
     let document = tree.Children |> Seq.exactlyOne
     [ for p in document.Children -> (Seq.exactlyOne p.Children).Content ] |> should equal [ "First."; "Second."; "Third." ]
 
-[<Fact>]
-let ``tags that already start with a single Document are left alone`` () =
+[<Theory>]
+[<InlineData(false)>]
+[<InlineData(true)>]
+let ``tags that already start with a single Document are left alone, even with a role map that remaps it`` (remapped: bool) =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    create input.Path PdfVersion.PDF_1_7 [ "The garden opens at eight." ] (fun _ _ -> ())
+    create input.Path PdfVersion.PDF_1_7 [ "The garden opens at eight." ] (fun _ root ->
+        // A broken role map: a standard tag mapped, which still means itself.
+        if remapped then
+            let roleMap = PdfDictionary()
+            roleMap.Put(PdfName.Document, PdfName.Part) |> ignore
+            root.Put(PdfName.RoleMap, roleMap) |> ignore)
 
     let result = fix input.Path output.Path
 
