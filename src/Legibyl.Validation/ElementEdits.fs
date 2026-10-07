@@ -261,36 +261,39 @@ let private markedContentOf (element: PdfDictionary) context =
 /// Makes elements artifacts: their marked content (/Tag <</MCID n>> BDC) becomes /Artifact BMC,
 /// so it's still drawn but not read, and they leave the structure tree. Through iText, which
 /// then leaves their content out of the parent tree.
-let private makeArtifacts (document: PdfDocument) context (elements: PdfDictionary list) =
+let internal makeArtifacts (document: PdfDocument) context (elements: PdfDictionary list) =
+    let root = document.GetStructTreeRoot()
+    // The forward hierarchy supplies an exact parent even when the source omitted /P.
+    for parent in root.GetPdfObject() :: [for visit in walk (root.GetPdfObject()) context -> visit.Element] do
+        let setParent kid =
+            match resolve kid with
+            | :? PdfDictionary as child when elements |> List.exists (fun element -> obj.ReferenceEquals(element, child)) ->
+                child.Put(PdfName.P, parent) |> ignore
+            | _ -> ()
+        match resolve (parent.Get PdfName.K) with
+        | :? PdfArray as kids -> for i in 0 .. kids.Size() - 1 do setParent (kids.Get i)
+        | kid -> setParent kid
     let byPage = Collections.Generic.Dictionary<int, Collections.Generic.HashSet<int>>()
     for element in elements do
         for KeyValue(page, mcids) in markedContentOf element context do
             match byPage.TryGetValue page with
             | true, all -> all.UnionWith mcids
             | _ -> byPage[page] <- Collections.Generic.HashSet mcids
-    for KeyValue(pageNumber, mcids) in byPage do
-        let page = document.GetPage pageNumber
-        let bytes = page.GetContentBytes()
-        let resources = page.GetResources()
-        let operations, length = ContentOperations.operationsOf bytes resources
-        use output = new IO.MemoryStream()
-        let mutable from = 0L
-        for operation in operations do
-            match ContentOperations.mcidOf resources operation with
-            | Some mcid when mcids.Contains mcid ->
-                output.Write(bytes, int from, int (operation.Start - from))
-                let artifact = Text.Encoding.ASCII.GetBytes "\n/Artifact BMC\n"
-                output.Write(artifact, 0, artifact.Length)
-                from <- operation.End
-            | _ -> ()
-        output.Write(bytes, int from, int (length - from))
-        page.GetPdfObject().Put(PdfName.Contents, PdfStream(output.ToArray()).MakeIndirect document) |> ignore
-    let root = document.GetStructTreeRoot()
+    ContentArtifacts.mark document byPage
+    let rec clear (structElem: iText.Kernel.Pdf.Tagging.PdfStructElem) depth =
+        if depth < 100 then
+            let kids = structElem.GetKids() |> Seq.toArray
+            for i in kids.Length - 1 .. -1 .. 0 do
+                match kids[i] with
+                | :? iText.Kernel.Pdf.Tagging.PdfStructElem as child ->
+                    child.GetPdfObject().Put(PdfName.P, structElem.GetPdfObject()) |> ignore
+                    clear child (depth + 1)
+                | _ -> ()
+                structElem.RemoveKid i |> ignore
     for element in elements do
         let structElem = iText.Kernel.Pdf.Tagging.PdfStructElem element
         // Its content first, so iText forgets it; then the element itself.
-        for i in (structElem.GetKids() |> Seq.length) - 1 .. -1 .. 0 do
-            structElem.RemoveKid i |> ignore
+        clear structElem 0
         match resolve (element.Get PdfName.P) with
         | :? PdfDictionary as parent when obj.ReferenceEquals(parent, root.GetPdfObject()) ->
             match resolve (parent.Get PdfName.K) with

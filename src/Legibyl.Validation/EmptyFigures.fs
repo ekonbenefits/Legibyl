@@ -90,24 +90,6 @@ let remove (document: PdfDocument) context : string list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot, find document context with
     | null, _
     | _, [] -> []
-    | root, empty ->
-        let isEmpty (kid: PdfObject | null) =
-            match resolve kid with
-            | :? PdfDictionary as element -> empty |> List.exists (fun e -> obj.ReferenceEquals(e, element))
-            | _ -> false
-        let mutable removed = 0
-        // Parents first, each once (walk visits every element below the root).
-        for parent in root :: [ for visit in walk root context -> visit.Element ] |> List.distinct do
-            match resolve (parent.Get PdfName.K) with
-            | :? PdfArray as kids ->
-                for index in kids.Size() - 1 .. -1 .. 0 do
-                    if isEmpty (kids.Get index) then
-                        kids.Remove index
-                        removed <- removed + 1
-            | kid when isEmpty kid ->
-                parent.Remove PdfName.K |> ignore
-                removed <- removed + 1
-            | _ -> ()
-        match removed with
-        | 0 -> []
-        | count -> [ $"Removed {count} figure tag(s) that draw nothing." ]
+    | _, empty ->
+        ElementEdits.makeArtifacts document context empty
+        [ $"Removed {empty.Length} figure tag(s) that draw nothing." ]

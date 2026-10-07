@@ -55,6 +55,7 @@
     <Compile Include="LinkTitlesTests.fs" />
     <Compile Include="LinkTargetsTests.fs" />
     <Compile Include="ParentTreeTests.fs" />
+    <Compile Include="ParentTreeConsistencyTests.fs" />
     <Compile Include="SplitFiguresTests.fs" />
     <Compile Include="SavedResultsTests.fs" />
     <Compile Include="RuleGuideTests.fs" />

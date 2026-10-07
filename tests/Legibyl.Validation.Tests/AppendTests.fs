@@ -361,6 +361,42 @@ let ``passing inputs with orphan parent entries are refused without guessing sib
     File.ReadAllText joined |> should equal "keep this existing output"
 
 [<Fact>]
+let ``fixing an obsolete empty association makes a passing PDF safely appendable`` () =
+    use folder = new Folder()
+    let garden, made, orphan, fixedCopy, joined =
+        folder.File "garden.pdf", folder.File "made.pdf", folder.File "orphan.pdf", folder.File "fixed.pdf", folder.File "packet.pdf"
+    createInput garden "Garden" "en-US" "P"
+    createInput made "Jardin" "es-ES" "P"
+    do
+        use document = new PdfDocument(new PdfReader(made), new PdfWriter(orphan))
+        let root = rawRoot document
+        let top =
+            root.GetAsDictionary PdfName.K
+            |> Option.ofObj
+            |> Option.defaultWith (fun () -> root.GetAsArray(PdfName.K).GetAsDictionary 0)
+        let page = document.GetPage 1
+        let empty = PdfStructElem(document, PdfName.Figure, page)
+        PdfStructElem(top).AddKid empty |> ignore
+        let mcr = PdfMcrNumber(page, empty)
+        empty.AddKid mcr |> ignore
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber(mcr.GetMcid())) |> ignore
+        PdfCanvas(page).BeginMarkedContent(PdfName.Figure, properties)
+            .SaveState().Rectangle(10.0, 10.0, 10.0, 10.0).Clip().EndPath().RestoreState().EndMarkedContent() |> ignore
+        let kids = top.GetAsArray PdfName.K
+        kids.Remove(kids.Size() - 1)
+    let original = File.ReadAllBytes orphan
+    validator.Value.Validate(orphan, PdfProfile.PdfUa1).IsCompliant |> should be True
+    (run [garden; orphan] joined Append.Options.Default).Joined |> should equal None
+    validator.Value.Fix(orphan, PdfProfile.PdfUa1, fixedCopy, PdfFixOptions.ParentTree).WasFixed |> should be True
+    let outcome = run [garden; fixedCopy] joined Append.Options.Default
+    outcome.Joined.IsSome |> should be True
+    failures outcome |> should be Empty
+    outcome.Differences |> should be Empty
+    rendersAsInputs outcome
+    File.ReadAllBytes orphan |> should equal original
+
+[<Fact>]
 let ``an existing parent key with a missing MCID slot is refused before merging`` () =
     use folder = new Folder()
     let garden, made, broken = folder.File "garden.pdf", folder.File "made.pdf", folder.File "broken.pdf"

@@ -6,6 +6,7 @@
 module internal Legibyl.Validation.ParentTree
 
 open System.Collections.Generic
+open System
 open iText.Kernel.Pdf
 open iText.Kernel.Pdf.Tagging
 open Legibyl.Validation.StructureTreeObjects
@@ -72,12 +73,121 @@ let private numbers (tree: PdfDictionary) : IReadOnlyDictionary<int, PdfObject> 
     read tree 0
     entries
 
+/// Reverse associations that disagree with the reachable, forward structure tree.
+let private inconsistent (document: PdfDocument) context =
+    let forward = tagged document context
+    let root = document.GetStructTreeRoot().GetPdfObject()
+    let entries =
+        match root.GetAsDictionary PdfName.ParentTree with
+        | null -> Dictionary<int, PdfObject>() :> IReadOnlyDictionary<_, _>
+        | tree -> numbers tree
+    [ for page in 1 .. document.GetNumberOfPages() do
+          match document.GetPage(page).GetPdfObject().GetAsNumber PdfName.StructParents with
+          | NonNull key ->
+              match entries.TryGetValue(key.IntValue()) with
+              | true, (:? PdfArray as slots) ->
+                  for mcid in 0 .. slots.Size() - 1 do
+                      match slots.GetAsDictionary mcid with
+                      | NonNull owner ->
+                          match forward.MarkedContent.TryGetValue((page, mcid)) with
+                          | true, expected when obj.ReferenceEquals(owner, expected) -> ()
+                          | true, expected -> yield page, mcid, owner, Some expected
+                          | _ -> yield page, mcid, owner, None
+                      | _ -> ()
+              | _ -> ()
+          | _ -> () ]
+
+/// Empty/whitespace text is not enough: a sequence may also paint an image or a path.
+/// Only sequences actually present on a readable page, with no painting, can be discarded.
+let private emptyContent (document: PdfDocument) (context: Context) (page: int) =
+    let pdfPage = document.GetPage page
+    let resources = pdfPage.GetResources()
+    let operations, _ = ContentOperations.operationsOf (pdfPage.GetContentBytes()) resources
+    let found = HashSet<int>()
+    let painted = HashSet<int>()
+    let mutable inside: int option list = []
+    let drawing = Set.union (ContentOperations.pathPainting |> Set.remove "n") (set ["Do"; "sh"; ContentOperations.inlineImage])
+    for operation in operations do
+        match operation.Name with
+        | "BDC" ->
+            let mcid = ContentOperations.mcidOf resources operation
+            mcid |> Option.iter (found.Add >> ignore)
+            inside <- mcid :: inside
+            let properties =
+                if operation.Operands.Length < 2 then null
+                else
+                    match operation.Operands[1] with
+                    | :? PdfDictionary as properties -> properties
+                    | :? PdfName as name ->
+                        match resources.GetResource PdfName.Properties with
+                        | null -> null
+                        | all -> all.GetAsDictionary name
+                    | _ -> null
+            if not (isNull properties)
+               && [PdfName.ActualText; PdfName.Alt] |> List.exists (fun key ->
+                   match (properties |> nonNull).GetAsString key with
+                   | null -> false
+                   | text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString()))) then
+                for mcid in inside do mcid |> Option.iter (painted.Add >> ignore)
+        | "BMC" -> inside <- None :: inside
+        | "EMC" -> inside <- (match inside with _ :: rest -> rest | [] -> [])
+        | name when drawing.Contains name ->
+            for mcid in inside do mcid |> Option.iter (painted.Add >> ignore)
+        | _ -> ()
+    fun mcid ->
+        found.Contains mcid && not (painted.Contains mcid)
+        && not (context.MarkedContent.Unreadable.Contains page)
+        && (match context.MarkedContent.TryGetValue((page, mcid)) with
+            | true, content -> String.IsNullOrWhiteSpace content.Text
+            | _ -> true)
+
+let private hasDescription (owner: PdfDictionary) =
+    [PdfName.ActualText; PdfName.Alt]
+    |> List.exists (fun key ->
+        match owner.GetAsString key with
+        | null -> false
+        | text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString())))
+
+/// iText owns the in-memory reverse registry. Register then unregister a transient MCR,
+/// rather than editing /ParentTree (which iText rewrites on close). This also works when
+/// the obsolete owner's /K or /P is already missing; no tag is added to the reading order.
+let private forget (document: PdfDocument) (page: int) (mcid: int) =
+    let transient = PdfStructElem(document, PdfName.Span)
+    transient.GetPdfObject().Put(PdfName.P, document.GetStructTreeRoot().GetPdfObject()) |> ignore
+    transient.GetPdfObject().Put(PdfName.Pg, document.GetPage(page).GetPdfObject()) |> ignore
+    transient.AddKid(PdfMcrNumber(PdfNumber mcid, transient)) |> ignore
+    transient.RemoveKid 0 |> ignore
+
+/// Pruning a text-empty tag must not hide a drawing it also owns.
+let canDiscard (document: PdfDocument) context (element: PdfDictionary) inheritedPage =
+    let pages = Dictionary<int, int -> bool>()
+    let empty page mcid =
+        match pages.TryGetValue page with
+        | true, test -> test mcid
+        | _ ->
+            let test = emptyContent document context page
+            pages[page] <- test
+            test mcid
+    let rec visit (kid: PdfObject | null) page depth =
+        if depth > 100 then false
+        else
+            match resolve kid with
+            | null -> true
+            | :? PdfNumber as number -> page |> Option.exists (fun page -> empty page (number.IntValue()))
+            | :? PdfArray as array -> Seq.init (array.Size()) array.Get |> Seq.forall (fun kid -> visit kid page (depth + 1))
+            | :? PdfDictionary as dictionary when not (isNull (dictionary.GetAsName PdfName.S)) ->
+                not (hasDescription dictionary)
+                && visit (dictionary.Get PdfName.K) (structElemPage dictionary context page) (depth + 1)
+            | _ -> false
+    visit element inheritedPage 0
+
 /// What's missing: whether the parent tree is, and how many pages with tagged content and tagged
 /// objects it has no entry for.
 type Missing =
     { TreeMissing: bool
       Pages: int
-      Objects: int }
+      Objects: int
+      Associations: int }
 
 /// What the parent tree lacks, if the structure tree tags any content it doesn't resolve.
 let find (document: PdfDocument) context : Missing option =
@@ -93,21 +203,39 @@ let find (document: PdfDocument) context : Missing option =
             | NonNull key, Some entries -> entries.ContainsKey(key.IntValue())
             | _ -> false
         let pagesMissing =
-            pages |> List.filter (fun page -> not (has (document.GetPage(page).GetPdfObject().GetAsNumber PdfName.StructParents)))
+            pages |> List.filter (fun page ->
+                let key = document.GetPage(page).GetPdfObject().GetAsNumber PdfName.StructParents
+                if not (has key) then true
+                else
+                    let slots =
+                        match entries.Value[key |> nonNull |> _.IntValue()] |> resolve with
+                        | :? PdfArray as slots -> Some slots
+                        | _ -> None
+                    tagged.MarkedContent
+                    |> Seq.exists (fun (KeyValue((p, mcid), owner)) ->
+                        p = page &&
+                        (match slots with
+                         | Some slots when mcid >= 0 && mcid < slots.Size() -> not (obj.ReferenceEquals(slots.GetAsDictionary mcid, owner))
+                         | _ -> true)))
         let objectsMissing =
             tagged.Objects.Keys
             |> Seq.filter (fun number ->
                 match document.GetPdfObject number with
-                | :? PdfDictionary as obj -> not (has (obj.GetAsNumber PdfName.StructParent))
+                | :? PdfDictionary as obj ->
+                    let key = obj.GetAsNumber PdfName.StructParent
+                    not (has key)
+                    || not (Object.ReferenceEquals(resolve entries.Value[(key |> nonNull).IntValue()], tagged.Objects[number]))
                 | _ -> false)
             |> Seq.length
-        if pagesMissing.IsEmpty && objectsMissing = 0 then
+        let associations = inconsistent document context
+        if pagesMissing.IsEmpty && objectsMissing = 0 && associations.IsEmpty then
             None
         else
             Some
                 { TreeMissing = tree.IsNone
                   Pages = pagesMissing.Length
-                  Objects = objectsMissing }
+                  Objects = objectsMissing
+                  Associations = associations.Length }
 
 /// Rebuilds the parent tree from the structure tree: registers each element's marked content
 /// with iText again, which writes the parent tree, the pages' /StructParents and
@@ -118,6 +246,28 @@ let rebuild (document: PdfDocument) context : string list =
     match find document context with
     | None -> []
     | Some missing ->
+        let mutable discarded = 0
+        let emptyPages = Dictionary<int, int -> bool>()
+        let byPage = Dictionary<int, HashSet<int>>()
+        for page, mcid, owner, expected in inconsistent document context do
+            let empty =
+                match emptyPages.TryGetValue page with
+                | true, empty -> empty
+                | _ ->
+                    let empty = emptyContent document context page
+                    emptyPages[page] <- empty
+                    empty
+            let artifact = PdfName.Artifact.Equals(owner.GetAsName PdfName.S)
+            if expected.IsSome || artifact || (not (hasDescription owner) && empty mcid) then
+                forget document page mcid
+                if expected.IsNone then
+                    match byPage.TryGetValue page with
+                    | true, mcids -> mcids.Add mcid |> ignore
+                    | _ -> byPage[page] <- HashSet [mcid]
+                    discarded <- discarded + 1
+            else
+                context.Notes.Add $"Page {page}, MCID {mcid} has content associated with a tag outside the reading order. It was kept: choose its place in Structure before appending."
+        ContentArtifacts.mark document byPage
         let entries =
             match resolve ((document.GetStructTreeRoot().GetPdfObject()).Get PdfName.ParentTree) with
             | :? PdfDictionary as tree -> numbers tree
@@ -131,7 +281,10 @@ let rebuild (document: PdfDocument) context : string list =
                         match (reference.GetPdfObject() :?> PdfDictionary).GetAsDictionary PdfName.Obj with
                         | NonNull obj when
                             (match obj.GetAsNumber PdfName.StructParent with
-                             | NonNull key -> not (entries.ContainsKey(key.IntValue()))
+                             | NonNull key ->
+                                 match entries.TryGetValue(key.IntValue()) with
+                                 | true, owner -> not (Object.ReferenceEquals(resolve owner, element.GetPdfObject()))
+                                 | _ -> true
                              | Null -> true)
                             ->
                             element.RemoveKid i |> ignore
@@ -158,5 +311,8 @@ let rebuild (document: PdfDocument) context : string list =
             [ if missing.Pages > 0 then (if missing.Pages = 1 then "1 page's content" else $"{missing.Pages} pages' content")
               if missing.Objects > 0 then (if missing.Objects = 1 then "1 tagged annotation" else $"{missing.Objects} tagged annotations") ]
             |> String.concat " and "
-        [ if missing.TreeMissing then $"Rebuilt the missing parent tree, so the tags are found for {what}."
-          else $"Completed the parent tree, so the tags are found for {what}." ]
+        [ if missing.Pages > 0 || missing.Objects > 0 then
+              if missing.TreeMissing then $"Rebuilt the missing parent tree, so the tags are found for {what}."
+              else $"Completed the parent tree, so the tags are found for {what}."
+          if discarded > 0 then
+              $"Removed {discarded} obsolete parent-tree association(s), marking their empty or explicitly decorative content as artifacts without changing the page." ]

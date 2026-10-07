@@ -15,7 +15,7 @@ open Legibyl.Validation.StructureTreeObjects
 
 /// Removes, below dictionary, every element isTarget accepts that has nothing visible below it
 /// (empty /P, empty TOCI); returns how many were removed.
-let rec private removeEmptyInside isTarget (dictionary: PdfDictionary) context inheritedPage : int =
+let rec private removeEmptyInside document isTarget (dictionary: PdfDictionary) context inheritedPage : int =
     match dictionary.Get(PdfName.K) with
     | null -> 0
     | kids ->
@@ -24,35 +24,46 @@ let rec private removeEmptyInside isTarget (dictionary: PdfDictionary) context i
         // A single child: shouldRemoveEmpty has already cleaned up inside it, so keep its
         // count (the array case below counts its own children instead).
         | :? PdfDictionary ->
-            match shouldRemoveEmpty isTarget kids context pageNumber with
+            match shouldRemoveEmpty document isTarget kids context pageNumber with
             | true, removedFromChild ->
+                match resolve kids with
+                | :? PdfDictionary as child -> ElementEdits.makeArtifacts document context [child]
+                | _ -> ()
                 dictionary.Remove(PdfName.K) |> ignore
                 removedFromChild + 1
             | false, removedFromChild -> removedFromChild
-        | _ -> removeEmptyFromKids isTarget kids context pageNumber
+        | _ -> removeEmptyFromKids document isTarget kids context pageNumber
 
-and private removeEmptyFromKids isTarget (kids: PdfObject) context inheritedPage : int =
+and private removeEmptyFromKids document isTarget (kids: PdfObject) context inheritedPage : int =
     match resolve kids with
     | :? PdfArray as array ->
         let mutable removed = 0
         for i in array.Size() - 1 .. -1 .. 0 do
-            let remove, childRemoved = shouldRemoveEmpty isTarget (array.Get i) context inheritedPage
+            let child = resolve (array.Get i)
+            let remove, childRemoved = shouldRemoveEmpty document isTarget child context inheritedPage
             if remove then
-                array.Remove i
+                match child with
+                | :? PdfDictionary as child ->
+                    ElementEdits.makeArtifacts document context [child]
+                    // A missing /P cannot locate the element in its parent.
+                    if i < array.Size() && obj.ReferenceEquals(resolve (array.Get i), child) then array.Remove i
+                | _ -> array.Remove i
                 removed <- removed + 1
             removed <- removed + childRemoved
         removed
-    | :? PdfDictionary as dictionary -> removeEmptyInside isTarget dictionary context inheritedPage
+    | :? PdfDictionary as dictionary -> removeEmptyInside document isTarget dictionary context inheritedPage
     | _ -> 0
 
 /// Cleans up obj's own children first, then reports whether obj itself is an empty element
 /// isTarget accepts (plus how many were removed below it).
-and private shouldRemoveEmpty isTarget (obj: PdfObject | null) context inheritedPage : bool * int =
+and private shouldRemoveEmpty document isTarget (obj: PdfObject | null) context inheritedPage : bool * int =
     match resolve obj with
     | :? PdfDictionary as dictionary ->
         let pageNumber = structElemPage dictionary context inheritedPage
-        let removedFromChildren = removeEmptyInside isTarget dictionary context pageNumber
-        isTarget dictionary context && isSubtreeEmpty dictionary context pageNumber, removedFromChildren
+        let removedFromChildren = removeEmptyInside document isTarget dictionary context pageNumber
+        isTarget dictionary context
+        && isSubtreeEmpty dictionary context pageNumber
+        && ParentTree.canDiscard document context dictionary pageNumber, removedFromChildren
     | _ -> false, 0
 
 // ---- Link /Contents ----
@@ -302,7 +313,7 @@ let private removeEmpty isTarget (describe: int -> string) (document: PdfDocumen
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
     | structTreeRoot ->
-        match removeEmptyInside isTarget structTreeRoot context None with
+        match removeEmptyInside document isTarget structTreeRoot context None with
         | 0 -> []
         | removed -> [ describe removed ]
 
