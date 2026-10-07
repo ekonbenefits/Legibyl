@@ -80,6 +80,36 @@ let ``append refuses a file that fails, writes nothing, and exits 2`` () =
         File.Exists(Path.Combine(folder, "packet.pdf")) |> should equal false)
 
 [<Fact>]
+let ``append reports orphan tags as refused even when the input passes PDFUA`` () =
+    withInputs (fun folder garden jardin ->
+        let orphan, output = Path.Combine(folder, "orphan.pdf"), Path.Combine(folder, "packet.pdf")
+        do
+            use document = new PdfDocument(new PdfReader(jardin), new PdfWriter(orphan))
+            let root = document.GetStructTreeRoot().GetPdfObject()
+            let top =
+                root.GetAsDictionary PdfName.K
+                |> Option.ofObj
+                |> Option.defaultWith (fun () -> root.GetAsArray(PdfName.K).GetAsDictionary 0)
+            let kids = top.GetAsArray PdfName.K
+            kids.Remove(kids.Size() - 1)
+            top.SetModified() |> ignore
+        Legibyl.Validation.VeraPdfValidator().Validate(orphan, Legibyl.Validation.PdfProfile.PdfUa1).IsCompliant
+        |> should equal true
+        let before = File.ReadAllBytes orphan
+        let code, report = append [ garden; orphan; "--output"; output ]
+        code |> should equal 2
+        let report = report.Value
+        report.GetProperty("status").GetString() |> should equal "refused"
+        report.GetProperty("outputPath").ValueKind |> should equal JsonValueKind.Null
+        let refusal = report.GetProperty("refusals").EnumerateArray() |> Seq.exactlyOne
+        refusal.GetProperty("file").GetString() |> should equal orphan
+        let reason = refusal.GetProperty("reason").GetString()
+        Assert.Contains("not reachable", reason)
+        Assert.Contains("reading order", reason)
+        File.Exists output |> should equal false
+        File.ReadAllBytes orphan |> should equal before)
+
+[<Fact>]
 let ``append takes two files or more, a part tag its standard has, and a language tag`` () =
     withInputs (fun _ garden jardin ->
         append [ garden ] |> fst |> should equal 64
