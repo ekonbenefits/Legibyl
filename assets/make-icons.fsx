@@ -44,9 +44,12 @@ let run (program: string) (arguments: string list) =
     for argument in arguments do
         info.ArgumentList.Add argument
     use proc = Process.Start info
-    let output = proc.StandardOutput.ReadToEnd()
-    let error = proc.StandardError.ReadToEnd()
+    // Both read at once: reading one to its end first could leave the other's pipe full, and both
+    // waiting.
+    let output = proc.StandardOutput.ReadToEndAsync()
+    let error = proc.StandardError.ReadToEndAsync()
     proc.WaitForExit()
+    let output, error = output.Result, error.Result
     if proc.ExitCode <> 0 then failwith $"{program} failed ({proc.ExitCode}): {error}{output}"
     output
 
