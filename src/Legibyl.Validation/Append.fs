@@ -139,7 +139,7 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
         if problem.IsNone then
             problem <-
                 Some
-                    $"Its tag hierarchy and parent tree disagree ({detail}). Joining would lose or change content tags. Restore the missing tags in the source authoring tool, or have an accessibility specialist fix the hierarchy and verify reading order, then validate and retry. Append does not guess reading order or run fixes."
+                    $"Its tag hierarchy and parent tree disagree ({detail}). Joining would lose or change content tags. Run Rebuild the parent tree (parent-tree) and append the fixed copy: it resolves missing associations and obsolete empty or decorative entries. Meaningful content outside the hierarchy is kept and reported; restore its place and verify reading order before retrying. Append does not guess reading order or run fixes."
     let same (a: PdfDictionary) (b: PdfDictionary) =
         obj.ReferenceEquals(a, b)
         || (not (isNull (a.GetIndirectReference())) && a.GetIndirectReference().Equals(b.GetIndirectReference()))
@@ -270,8 +270,8 @@ let private read (file: string) : Result<Input, Refusal list> =
                   else
                       let context = StructureTreeObjects.createContext document file
                       match ParentTree.find document context with
-                      | Some _ -> refuse "Its parent tree (which ties the page content to its tags) is incomplete, so its tags can't be joined as they are."
-                      | None ->
+                      | Some missing when missing.TreeMissing -> refuse "Its parent tree (which ties the page content to its tags) is missing. Run Rebuild the parent tree (parent-tree) and append the fixed copy."
+                      | _ ->
                           match structureProblem document (catalog.GetAsDictionary PdfName.StructTreeRoot |> nonNull) with
                           | Some reason -> refuse reason
                           | None -> ()

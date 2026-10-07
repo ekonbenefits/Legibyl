@@ -22,6 +22,8 @@
     <Compile Include="MarkedContentTextIndex.fs" />
     <Compile Include="StructureTreeObjects.fs" />
     <Compile Include="SplitWordSpans.fs" />
+    <Compile Include="ContentOperations.fs" />
+    <Compile Include="ContentArtifacts.fs" />
     <Compile Include="ParentTree.fs" />
     <Compile Include="RoleMaps.fs" />
     <Compile Include="DocumentRoot.fs" />
@@ -34,16 +36,15 @@
     <Compile Include="Bookmarks.fs" />
     <Compile Include="LinkTargets.fs" />
     <Compile Include="LinkTitles.fs" />
-    <Compile Include="ContentOperations.fs" />
     <Compile Include="TableGrid.fs" />
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="UntaggedContent.fs" />
     <Compile Include="FigureRegion.fs" />
-    <Compile Include="EmptyFigures.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="TableRebuild.fs" />
     <Compile Include="ParagraphTableRebuild.fs" />
     <Compile Include="ElementEdits.fs" />
+    <Compile Include="EmptyFigures.fs" />
     <Compile Include="PredefinedCMaps.fs" />
     <Compile Include="ToUnicodeMaps.fs" />
     <Compile Include="FontEmbedding.fs" />
