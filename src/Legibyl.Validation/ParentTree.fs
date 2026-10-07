@@ -342,7 +342,7 @@ let rebuild (document: PdfDocument) context : string list =
                 if context.MarkedContent.Unreadable.Contains page then "the page's text couldn't be read, so whether they draw anything isn't known"
                 else "they draw something or have a description"
             context.Notes.Add
-                $"Page {page}: {count} piece(s) of content are tied to a tag that isn't in the tags any more, and were kept as they are: {why}. Their tag needs putting back where the PDF was made, or in a PDF editor's tags panel."
+                $"Page {page}: {count} piece(s) of content are tied to a tag that isn't in the tags any more, and were kept as they are: {why} (Structure… shows them, under Tied to tags that are gone). Their tag needs putting back where the PDF was made, or in a PDF editor's tags panel."
         ContentArtifacts.mark document byPage
         let entries =
             match resolve ((document.GetStructTreeRoot().GetPdfObject()).Get PdfName.ParentTree) with

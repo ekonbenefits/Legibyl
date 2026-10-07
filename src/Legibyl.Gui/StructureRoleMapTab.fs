@@ -16,7 +16,7 @@ open Avalonia.Media
 open Legibyl.Validation
 
 /// The names in a structure that aren't tags: the root, the content outside the tags.
-let private notNames = set [ "StructTreeRoot"; "NotInTags"; "?" ]
+let private notNames = set [ "StructTreeRoot"; "NotInTags"; "Disconnected"; "DisconnectedTag"; "?" ]
 
 /// A tagged PDF's own tag names its elements use, in the order first used, of those inRoleMap
 /// says its role map is for (not a PDF 2.0 file's names in another namespace, which its own map
