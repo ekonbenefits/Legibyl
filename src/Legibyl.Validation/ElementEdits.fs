@@ -264,7 +264,10 @@ let private markedContentOf (element: PdfDictionary) context =
 let internal makeArtifacts (document: PdfDocument) context (elements: PdfDictionary list) =
     let root = document.GetStructTreeRoot()
     // The forward hierarchy supplies an exact parent even when the source omitted /P.
-    for parent in root.GetPdfObject() :: [for visit in walk (root.GetPdfObject()) context -> visit.Element] do
+    let parents =
+        if elements.IsEmpty || isNull root then []
+        else root.GetPdfObject() :: [for visit in walk (root.GetPdfObject()) context -> visit.Element]
+    for parent in parents do
         let setParent kid =
             match resolve kid with
             | :? PdfDictionary as child when elements |> List.exists (fun element -> obj.ReferenceEquals(element, child)) ->
