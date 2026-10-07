@@ -112,4 +112,19 @@
     <None Include="..\..\assets\Legibyl.icns" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!--
+    macOS 26 and later show the icon as Icon Composer made it (Liquid Glass, with its dark and
+    tinted looks): assets/Assets.car, compiled from assets/icon_glass.icon by make-icons.fsx, and
+    named by CFBundleIconName. Earlier macOS show Legibyl.icns (CFBundleIconFile). Dotnet.Bundle has
+    no setting for either, so they're added to the bundle it writes.
+  -->
+  <Target Name="AddGlassIcon" AfterTargets="BundleApp">
+    <PropertyGroup>
+      <AppContents>$(PublishDir)$(CFBundleName).app/Contents</AppContents>
+    </PropertyGroup>
+    <Copy SourceFiles="..\..\assets\Assets.car" DestinationFolder="$(AppContents)/Resources" />
+    <Exec Command="/usr/libexec/PlistBuddy -c &quot;Delete :CFBundleIconName&quot; &quot;$(AppContents)/Info.plist&quot;" IgnoreExitCode="true" StandardErrorImportance="low" StandardOutputImportance="low" />
+    <Exec Command="/usr/libexec/PlistBuddy -c &quot;Add :CFBundleIconName string icon_glass&quot; &quot;$(AppContents)/Info.plist&quot;" />
+  </Target>
+
 </Project>

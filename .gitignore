@@ -6,3 +6,6 @@ artifacts/
 .vs/
 *.msi
 *.wixpdb
+
+# Affinity's lock on a document it has open.
+*~lock~
