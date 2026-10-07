@@ -80,7 +80,8 @@ let ``append refuses a file that fails, writes nothing, and exits 2`` () =
         File.Exists(Path.Combine(folder, "packet.pdf")) |> should equal false)
 
 [<Fact>]
-let ``append takes two files or more, and a part tag its standard has`` () =
+let ``append takes two files or more, a part tag its standard has, and a language tag`` () =
     withInputs (fun _ garden jardin ->
         append [ garden ] |> fst |> should equal 64
-        append [ garden; jardin; "--part-tag"; "DocumentFragment" ] |> fst |> should equal 64)
+        append [ garden; jardin; "--part-tag"; "DocumentFragment" ] |> fst |> should equal 64
+        append [ garden; jardin; "--lang"; "English (US)" ] |> fst |> should equal 64)
