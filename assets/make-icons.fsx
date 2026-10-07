@@ -1,48 +1,100 @@
-// Makes Legibyl's icons from icon_vector.svg (exported from icon_vector.af), each size drawn from
-// the vector rather than scaled from a bitmap:
+// Makes Legibyl's icons from icon_glass.icon, made in Apple's Icon Composer (its one layer is
+// icon_vector.svg, exported from icon_vector.af), with Apple's own tools:
 //
-//   Legibyl.icns   macOS: the artwork on Apple's icon grid (824 of 1024, centred, with a soft
-//                  shadow below), 16 to 1024 pixels
-//   Legibyl.ico    Windows: the artwork to the edge, 16 to 256 pixels
+//   Assets.car     macOS 26 and later: the icon as Icon Composer made it (Liquid Glass, with its
+//                  dark and tinted looks), compiled by actool; the app's Info.plist names it
+//                  (CFBundleIconName icon_glass)
+//   Legibyl.icns   macOS before 26: the icon on Apple's icon grid (824 of 1024, centred, with a
+//                  soft shadow below), 16 to 1024 pixels
+//   Legibyl.ico    Windows: the icon to the edge, 16 to 256 pixels
 //   Legibyl.png    the About window's, 256 pixels, as Windows'
 //
-// After changing the SVG, run from the repository:
+// Every size is rendered by Icon Composer's ictool at that size, rather than scaled from a bitmap;
+// up to 32 pixels from icon_glass_small.icon instead, a simpler drawing, if there is one.
+// After changing the icon, run from the repository:
 //
 //   dotnet fsi assets/make-icons.fsx
 //
-// It needs only .NET (it writes the .icns and .ico itself), so it runs on macOS, Windows or Linux.
+// It needs a Mac with Xcode 26 or later (for actool and ictool); ictool also comes with the
+// Icon Composer app on its own.
 
-#r "nuget: Svg.Skia, 5.2.3"
+#r "nuget: SkiaSharp, 3.119.4"
 
+open System
+open System.Diagnostics
 open System.IO
 open SkiaSharp
 
 let folder = __SOURCE_DIRECTORY__
-let source = Path.Combine(folder, "icon_vector.svg")
+let source = Path.Combine(folder, "icon_glass.icon")
+/// The icon's name in Assets.car: its file's (Info.plist's CFBundleIconName).
+let iconName = Path.GetFileNameWithoutExtension source
 
-let svg = new Svg.Skia.SKSvg()
-svg.Load source |> ignore
-let picture = svg.Picture |> Option.ofObj |> Option.defaultWith (fun () -> failwith $"Couldn't read {source}")
-let bounds = picture.CullRect
+/// A simpler drawing for the small sizes, if there is one: detail that reads at 256 pixels is
+/// noise at 16. Used up to SmallUpTo pixels (Windows' 16 to 32, and the .icns's 16 and 32); the
+/// full icon above, and in Assets.car, which macOS scales itself.
+let small = Path.Combine(folder, "icon_glass_small.icon")
 
-/// The artwork drawn at size pixels, square: filling inset..size-inset (in 1024ths), with Apple's
-/// shadow if asked.
-let draw (size: int) (inset: float32) (shadow: bool) : SKImage =
+[<Literal>]
+let SmallUpTo = 32
+
+/// Runs a program, failing with what it said if it fails.
+let run (program: string) (arguments: string list) =
+    let info = ProcessStartInfo(program, RedirectStandardOutput = true, RedirectStandardError = true)
+    for argument in arguments do
+        info.ArgumentList.Add argument
+    use proc = Process.Start info
+    // Both read at once: reading one to its end first could leave the other's pipe full, and both
+    // waiting.
+    let output = proc.StandardOutput.ReadToEndAsync()
+    let error = proc.StandardError.ReadToEndAsync()
+    proc.WaitForExit()
+    let output, error = output.Result, error.Result
+    if proc.ExitCode <> 0 then failwith $"{program} failed ({proc.ExitCode}): {error}{output}"
+    output
+
+if not (OperatingSystem.IsMacOS()) then failwith "Making the icons needs a Mac: Apple's actool and ictool make them."
+
+/// The selected Xcode's Developer folder (xcode-select -p).
+let developer = (run "xcode-select" [ "-p" ]).Trim()
+
+let actool =
+    try (run "xcrun" [ "--find"; "actool" ]).Trim()
+    with _ -> failwith "Couldn't find actool: it comes with Xcode 26 or later."
+
+/// Icon Composer's ictool: the one in the selected Xcode's copy of the app, else the app's own. (The
+/// ictool xcrun finds, Xcode's command-line one, can't render previews.)
+let ictool =
+    [ Path.Combine(developer, "..", "Applications", "Icon Composer.app", "Contents", "Executables", "ictool")
+      "/Applications/Icon Composer.app/Contents/Executables/ictool" ]
+    |> List.map Path.GetFullPath
+    |> List.tryFind File.Exists
+    |> Option.defaultWith (fun () -> failwith "Couldn't find Icon Composer's ictool: it comes with Xcode 26 or later, and with the Icon Composer app.")
+
+let work = Directory.CreateTempSubdirectory "legibyl-icons"
+
+/// The icon as macOS shows it, size pixels square, to the edge (its rounded square fills it): the
+/// simpler drawing at the small sizes, if there is one.
+let render (size: int) : SKImage =
+    let path = Path.Combine(work.FullName, $"{size}.png")
+    let icon = if size <= SmallUpTo && Directory.Exists small then small else source
+    // Platform, appearance, width, height, scale, and tilt (none).
+    run ictool [ icon; "--export-preview"; "macOS"; "Light"; string size; string size; "1"; "0"; path ] |> ignore
+    SKImage.FromEncodedData path |> Option.ofObj |> Option.defaultWith (fun () -> failwith $"ictool wrote no image for {size} pixels")
+
+/// The icon on Apple's icon grid at size pixels: rendered at 824 of 1024 of it, centred, with the
+/// template's shadow (black at 30%, 10 below, blurred 10, in 1024ths).
+let onGrid (size: int) : SKImage =
+    let scale = float32 size / 1024f
+    let inner = max 1 (int (MathF.Round(824f * scale)))
+    use artwork = render inner
     use surface = SKSurface.Create(SKImageInfo(size, size, SKColorType.Rgba8888, SKAlphaType.Premul))
     let canvas = surface.Canvas
     canvas.Clear SKColors.Transparent
-    let scale = float32 size / 1024f
-    let side = float32 size - 2f * inset * scale
     use paint = new SKPaint(IsAntialias = true)
-    if shadow then
-        // Apple's template: black at 30%, 10 below, blurred 10 (in 1024ths).
-        paint.ImageFilter <- SKImageFilter.CreateDropShadow(0f, 10f * scale, 10f * scale, 10f * scale, SKColor(0uy, 0uy, 0uy, 77uy))
-    canvas.SaveLayer paint |> ignore
-    canvas.Translate(inset * scale, inset * scale)
-    canvas.Scale(side / bounds.Width, side / bounds.Height)
-    canvas.Translate(-bounds.Left, -bounds.Top)
-    canvas.DrawPicture picture
-    canvas.Restore()
+    paint.ImageFilter <- SKImageFilter.CreateDropShadow(0f, 10f * scale, 10f * scale, 10f * scale, SKColor(0uy, 0uy, 0uy, 77uy))
+    let offset = float32 (size - inner) / 2f
+    canvas.DrawImage(artwork, offset, offset, paint)
     surface.Snapshot()
 
 let png (image: SKImage) =
@@ -82,21 +134,20 @@ let argb (image: SKImage) =
     image.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0) |> ignore
     let pixels = bitmap.Bytes
     let channel offset = Array.init (size * size) (fun p -> pixels[p * 4 + offset])
-    Array.concat [ System.Text.Encoding.ASCII.GetBytes "ARGB"; packChannel (channel 3); packChannel (channel 0); packChannel (channel 1); packChannel (channel 2) ]
+    Array.concat [ Text.Encoding.ASCII.GetBytes "ARGB"; packChannel (channel 3); packChannel (channel 0); packChannel (channel 1); packChannel (channel 2) ]
 
-let macOS size = draw size 100f true
-let windows size = png (draw size 0f false)
+let windows size = png (render size)
 
 let bigEndian (value: int) = [| byte (value >>> 24); byte (value >>> 16); byte (value >>> 8); byte value |]
 
-/// An .icns: its PNGs, by the type each size goes in.
+/// An .icns: its images, by the type each size goes in.
 let icns (entries: (string * byte array) list) =
     let body =
-        [| for kind, png in entries do
-               yield! System.Text.Encoding.ASCII.GetBytes kind
-               yield! bigEndian (png.Length + 8)
-               yield! png |]
-    Array.concat [ System.Text.Encoding.ASCII.GetBytes "icns"; bigEndian (body.Length + 8); body ]
+        [| for kind, image in entries do
+               yield! Text.Encoding.ASCII.GetBytes kind
+               yield! bigEndian (image.Length + 8)
+               yield! image |]
+    Array.concat [ Text.Encoding.ASCII.GetBytes "icns"; bigEndian (body.Length + 8); body ]
 
 /// An .ico: its PNGs, by their size.
 let ico (entries: (int * byte array) list) =
@@ -106,18 +157,18 @@ let ico (entries: (int * byte array) list) =
     writer.Write 1us
     writer.Write(uint16 entries.Length)
     let mutable offset = 6 + 16 * entries.Length
-    for size, png in entries do
+    for size, image in entries do
         writer.Write(byte (if size >= 256 then 0 else size))
         writer.Write(byte (if size >= 256 then 0 else size))
         writer.Write 0uy
         writer.Write 0uy
         writer.Write 1us
         writer.Write 32us
-        writer.Write(uint32 png.Length)
+        writer.Write(uint32 image.Length)
         writer.Write(uint32 offset)
-        offset <- offset + png.Length
-    for _, png in entries do
-        writer.Write png
+        offset <- offset + image.Length
+    for _, image in entries do
+        writer.Write image
     writer.Flush()
     stream.ToArray()
 
@@ -126,21 +177,34 @@ let write name (bytes: byte array) =
     File.WriteAllBytes(path, bytes)
     printfn $"Wrote {path} ({bytes.Length:N0} bytes)"
 
-write
-    "Legibyl.icns"
-    (icns [
-        "ic04", argb (macOS 16)
-        "ic11", png (macOS 32) // 16@2x
-        "ic05", argb (macOS 32)
-        "ic12", png (macOS 64) // 32@2x
-        "ic07", png (macOS 128)
-        "ic13", png (macOS 256) // 128@2x
-        "ic08", png (macOS 256)
-        "ic14", png (macOS 512) // 256@2x
-        "ic09", png (macOS 512)
-        "ic10", png (macOS 1024) // 512@2x
-    ])
+try
+    // Assets.car, as Xcode builds it for an app whose icon is the .icon (its .icns isn't kept: it
+    // stops at 256 pixels, so Legibyl.icns, below, is the one before macOS 26).
+    let compiled = Directory.CreateDirectory(Path.Combine(work.FullName, "compiled"))
+    run actool [ source; "--compile"; compiled.FullName; "--app-icon"; iconName; "--enable-on-demand-resources"; "NO"
+                 "--development-region"; "en"; "--target-device"; "mac"; "--platform"; "macosx"
+                 "--minimum-deployment-target"; "12.0"
+                 "--output-partial-info-plist"; Path.Combine(work.FullName, "partial.plist") ]
+    |> ignore
+    write "Assets.car" (File.ReadAllBytes(Path.Combine(compiled.FullName, "Assets.car")))
 
-write "Legibyl.ico" (ico [ for size in [ 16; 20; 24; 32; 40; 48; 64; 256 ] -> size, windows size ])
+    write
+        "Legibyl.icns"
+        (icns [
+            "ic04", argb (onGrid 16)
+            "ic11", png (onGrid 32) // 16@2x
+            "ic05", argb (onGrid 32)
+            "ic12", png (onGrid 64) // 32@2x
+            "ic07", png (onGrid 128)
+            "ic13", png (onGrid 256) // 128@2x
+            "ic08", png (onGrid 256)
+            "ic14", png (onGrid 512) // 256@2x
+            "ic09", png (onGrid 512)
+            "ic10", png (onGrid 1024) // 512@2x
+        ])
 
-write "Legibyl.png" (windows 256)
+    write "Legibyl.ico" (ico [ for size in [ 16; 20; 24; 32; 40; 48; 64; 256 ] -> size, windows size ])
+
+    write "Legibyl.png" (windows 256)
+finally
+    work.Delete true
