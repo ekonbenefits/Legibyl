@@ -923,7 +923,7 @@ let private appendCommand =
         description
             "Join PDFs that pass PDF/UA into one, in the order given, keeping each one's tags as they are (each becomes a \
              part of the joined file), and check the result: veraPDF, Legibyl's warnings, and each part's structure \
-             against its file's. No fixes are run. If any file fails PDF/UA or can't be joined (a form, layers, \
+             against its file's. No fixes or reading-order guesses are made. If any file fails PDF/UA or can't be joined (inconsistent tags, a form, layers, \
              attached files), nothing is written."
         inputs (
             input {

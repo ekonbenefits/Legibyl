@@ -139,7 +139,7 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
         if problem.IsNone then
             problem <-
                 Some
-                    $"Its tag hierarchy and parent tree disagree ({detail}). Joining would lose or change content tags. Restore the missing tags in the source authoring tool, or have an accessibility specialist repair the hierarchy and verify reading order, then validate and retry. Append does not guess reading order or run fixes."
+                    $"Its tag hierarchy and parent tree disagree ({detail}). Joining would lose or change content tags. Restore the missing tags in the source authoring tool, or have an accessibility specialist fix the hierarchy and verify reading order, then validate and retry. Append does not guess reading order or run fixes."
     let same (a: PdfDictionary) (b: PdfDictionary) =
         obj.ReferenceEquals(a, b)
         || (not (isNull (a.GetIndirectReference())) && a.GetIndirectReference().Equals(b.GetIndirectReference()))

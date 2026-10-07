@@ -46,6 +46,26 @@ agents: see [Command-line tool](#command-line-tool-for-scripts--ai-agents).
 
 The rest of this README is the detail, including how it works inside.
 
+### Appending accessible PDFs
+
+**File › Append PDFs…**, or `legibyl append first.pdf second.pdf --output packet.pdf`,
+joins passing PDF/UA inputs without running fixes. Each input keeps its tags within
+a separate part of the output.
+
+Append also checks that the forward tag hierarchy (`StructTreeRoot/K`) and the
+reverse content associations (`ParentTree`) agree. A PDF can pass veraPDF while
+its parent tree still points to orphaned tags absent from the forward hierarchy.
+Copying its pages would lose those associations. Append refuses such inputs
+before writing anything, identifies the parent-tree key and MCID (or object),
+and leaves both the inputs and any existing output untouched. The CLI reports
+`status: "refused"` and exits 2; the app displays the same explanation.
+
+Restore the missing tags in the source authoring tool, or have an accessibility
+specialist fix the hierarchy and verify reading order, then validate and retry.
+Parent pointers and MCID numbers do not establish sibling reading order. The
+`parent-tree` fix rebuilds reverse associations from reachable tags; it cannot
+recover orphaned tags or their order and is not a fix for this refusal.
+
 ## How it works
 
 veraPDF's `greenfield-apps` fat jar (bundling its Greenfield validation
