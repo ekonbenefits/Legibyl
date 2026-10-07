@@ -170,7 +170,8 @@ type TableCell = { Tag: string; Box: StructureGeometry }
 
 type ElementEdit =
     { Page: int
-      /// Its standard tag, e.g. "Figure".
+      /// Its standard tag, e.g. "Figure". "FigureRegion" reserves Box as a selected
+      /// rectangle: replace complete content within it with one Figure, requiring Alt.
       Tag: string
       Box: StructureGeometry
       /// Alt text to write (/Alt); null to leave it.

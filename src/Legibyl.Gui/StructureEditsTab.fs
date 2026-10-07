@@ -85,7 +85,9 @@ let view (needs: Needs) : IView =
                     | None when not (review.Pages.ContainsKey edit.Page) -> $"Page {edit.Page}'s layout isn't found yet."
                     | None -> $"No <{edit.Tag}> suggested in about this place, so tagging won't use it."
                 | None ->
-                if not edit.MergeWith.IsEmpty then
+                if edit.Tag = "FigureRegion" then
+                    "Figure from selected region: Export… checks its boundaries and writes it to a copy, or explains why it can't."
+                elif not edit.MergeWith.IsEmpty then
                     let boxes = edit.Box :: edit.MergeWith
                     let all =
                         { edit.Box with

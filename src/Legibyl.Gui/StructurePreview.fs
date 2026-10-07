@@ -69,9 +69,7 @@ let nodeAt (root: StructureNode) (page: int) (x: float) (y: float) =
     |> Seq.tryHead
     |> Option.map fst
 
-/// Where on its page, in PDF points, a pointer is over a page preview rendered at
-/// previewScale; None off the page (the image is scaled to fit, centred).
-let pointOnPage (image: Image) (bitmap: Bitmap) (position: Point) =
+let private onPreview (image: Image) (bitmap: Bitmap) (position: Point) (clamp: bool) =
     let size = bitmap.Size
     let bounds = image.Bounds.Size
     if size.Width <= 0.0 || size.Height <= 0.0 || bounds.Width <= 0.0 || bounds.Height <= 0.0 then
@@ -80,6 +78,7 @@ let pointOnPage (image: Image) (bitmap: Bitmap) (position: Point) =
         let fit = min (bounds.Width / size.Width) (bounds.Height / size.Height)
         let x = (position.X - (bounds.Width - size.Width * fit) / 2.0) / fit
         let y = (position.Y - (bounds.Height - size.Height * fit) / 2.0) / fit
+        let x, y = if clamp then Math.Clamp(x, 0.0, size.Width), Math.Clamp(y, 0.0, size.Height) else x, y
         if x < 0.0 || y < 0.0 || x > size.Width || y > size.Height then
             None
         else
@@ -87,3 +86,20 @@ let pointOnPage (image: Image) (bitmap: Bitmap) (position: Point) =
             let pixels = float bitmap.PixelSize.Width / size.Width
             let scale = float previewScale
             Some(x * pixels / scale, (size.Height - y) * pixels / scale)
+
+/// Where on its page, in PDF points, a pointer is over a page preview rendered at
+/// previewScale; None off the page (the image is scaled to fit, centred).
+let pointOnPage (image: Image) (bitmap: Bitmap) (position: Point) = onPreview image bitmap position false
+
+/// pointOnPage, with a pointer off the page taken to its nearest edge (a drag past the page).
+let pointOnPageClamped (image: Image) (bitmap: Bitmap) (position: Point) = onPreview image bitmap position true
+
+/// Where a point on its page, in PDF points, is on a page preview of the given size showing
+/// bitmap: the inverse of pointOnPage.
+let pageToPreview (bounds: Size) (bitmap: Bitmap) (x: float, y: float) =
+    let size = bitmap.Size
+    let fit = min (bounds.Width / size.Width) (bounds.Height / size.Height)
+    let pixels = float bitmap.PixelSize.Width / size.Width
+    let scale = float previewScale
+    Point((bounds.Width - size.Width * fit) / 2.0 + x * scale / pixels * fit,
+          (bounds.Height - size.Height * fit) / 2.0 + (size.Height - y * scale / pixels) * fit)

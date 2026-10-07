@@ -23,6 +23,7 @@
     <Compile Include="DescriptionEditTests.fs" />
     <Compile Include="TableRebuildTests.fs" />
     <Compile Include="LayoutOrderTests.fs" />
+    <Compile Include="StructureBlockSelectionTests.fs" />
     <Compile Include="BlocksPreviewTests.fs" />
     <Compile Include="TableLayoutTests.fs" />
     <Compile Include="FindingMarkersTests.fs" />
@@ -33,6 +34,7 @@
     <Compile Include="StructureCacheTests.fs" />
     <Compile Include="DismissalsTests.fs" />
     <Compile Include="RegionEditsTests.fs" />
+    <Compile Include="FigureRegionTests.fs" />
     <Compile Include="EmbeddedReviewTests.fs" />
     <Compile Include="LinkTitleOfferTests.fs" />
     <Compile Include="DismissWarningsTests.fs" />

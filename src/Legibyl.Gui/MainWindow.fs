@@ -677,12 +677,17 @@ module private MainView =
                 // Tagging isn't an auto fix here: an untagged PDF is tagged from its suggested
                 // structure, and only once that's been suggested.
                 let chosen = autoFixes.Current |> Option.defaultValue PdfFixOptions.None &&& ~~~PdfFixOptions.TagFromLayout
+                // A saved region may no longer pass its safety guards. Still run ApplyEdits
+                // so Export explains the refusal instead of silently omitting the decision.
+                let hasFigureRegions =
+                    selectedFile.Current
+                    |> Option.exists (fun path -> (layoutReviews.For path).Edits |> List.exists (fun e -> e.Tag = "FigureRegion"))
                 if untagged () && not pending.Current.TagsFromReview then
                     PdfFixOptions.None
                 else
                     chosen
                     ||| (if pending.Current.TagsFromReview then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
-                    ||| (if pending.Current.Changes > 0 && not pending.Current.TagsFromReview then PdfFixOptions.ApplyEdits else PdfFixOptions.None)
+                    ||| (if (pending.Current.Changes > 0 || hasFigureRegions) && not pending.Current.TagsFromReview then PdfFixOptions.ApplyEdits else PdfFixOptions.None)
 
             /// Writes the next version of the PDF with saveOptions (its review, saved or not, goes in
             /// it too), then opens it.

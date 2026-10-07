@@ -667,6 +667,40 @@ Reading the right column after the left isn't one, and running headers and
 footers (short, in the top or bottom tenth of the page) don't count either way.
 It points to Order Page N by Layout and Move Up / Move Down; there's no auto fix.
 
+**Replace Structure with Figure from Region…**, under the page preview in
+**Structure…**, lets you drag a rectangle around a whole chart or illustration
+and its labels. The region is outlined with dashes (element outlines are solid)
+while you drag and while you confirm. Check it and the text listed in the preview,
+enter alt text, then confirm. This creates one Figure from the whole content
+items selected by the rectangle, even when its labels belong to distant
+Art/Sect/P branches and its drawing is marked as decoration (Artifact) or is
+outside every tag. It does not retag broad wrappers or move unrelated article
+paragraphs. The Figure
+takes the first selected content's place in reading order; the visible artwork
+is unchanged. Inspect its reading order in the exported copy.
+
+This is a pending, user-driven edit, not an auto fix: **Save** keeps it in the
+review, **Export…** applies it to a copy, and **Remove** in the Edits tab undoes
+it before export. CLI `fix --edits` / `--edits-from` applies the same operation
+and guards. In review JSON it is an edit with `"tag": "FigureRegion"`,
+`"retag": "Figure"`, `"page"`, `"box": [left, bottom, right, top]` (PDF points),
+and nonblank `"alt"`.
+
+Indivisible marked-content sequences, text objects and drawings are included
+only when **each actual painted bounding box is more than 50% covered** by the
+rectangle; items at 50% or less, including items wholly outside it, are left
+out. A selected item is kept whole, so its visible part outside the rectangle
+is included too; the preview lists the left, bottom, right and top bounds
+(PDF points) of each painted box extending outside it. For a
+sequence or text object with several painted boxes, every box must pass the
+threshold, so a distant item can't be swept in by a large sparse aggregate
+box. Zero-width or zero-height boxes qualify only when fully inside the
+rectangle. Check the preview and make sure no included item is an article
+paragraph. The visible artwork is never clipped or changed.
+Unknown/unreadable content, shading, nested marked content, form XObjects,
+annotations, rotated pages and offset crop boxes are conservatively refused
+with an explanation. These need manual review rather than guessing ownership.
+
 Legibyl also looks for likely tables tagged as paragraphs (Structure-15,
 `ParagraphTables.fs`, no model needed): consecutive sibling paragraphs whose
 text boxes repeat in at least two horizontal positions across multiple aligned
