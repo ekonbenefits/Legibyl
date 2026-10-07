@@ -23,6 +23,7 @@
     <Compile Include="DescriptionEditTests.fs" />
     <Compile Include="TableRebuildTests.fs" />
     <Compile Include="LayoutOrderTests.fs" />
+    <Compile Include="StructureBlockSelectionTests.fs" />
     <Compile Include="BlocksPreviewTests.fs" />
     <Compile Include="TableLayoutTests.fs" />
     <Compile Include="FindingMarkersTests.fs" />
