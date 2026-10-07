@@ -104,8 +104,8 @@ let ``append reports orphan tags as refused even when the input passes PDFUA`` (
         let refusal = report.GetProperty("refusals").EnumerateArray() |> Seq.exactlyOne
         refusal.GetProperty("file").GetString() |> should equal orphan
         let reason = refusal.GetProperty("reason").GetString()
-        Assert.Contains("not reachable", reason)
-        Assert.Contains("reading order", reason)
+        Assert.Contains("is tied to a tag that isn't in the tags", reason)
+        Assert.Contains("doesn't fix tags or guess where they belong", reason)
         File.Exists output |> should equal false
         File.ReadAllBytes orphan |> should equal before)
 
