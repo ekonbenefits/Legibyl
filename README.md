@@ -195,17 +195,27 @@ installed machine, not just in this source repository.
 
 ## Icons
 
-The icon's source is `assets/icon_vector.af` (Affinity), exported as
-`assets/icon_vector.svg`. The app's icons are made from the SVG, every size
-drawn from the vector:
+The icon's source is `assets/icon_glass.icon`, made in Apple's Icon Composer.
+Its one layer is `assets/icon_vector.svg`, exported from `assets/icon_vector.af`
+(Affinity). The app's icons are made from it by Apple's own tools, each size
+rendered at that size:
 
-- `Legibyl.icns` (macOS): the artwork on Apple's icon grid (824 of 1024 px,
-  with the template's shadow), 16 to 1024 px.
-- `Legibyl.ico` (Windows, the exe's and the installer's): the artwork to the
+- `Assets.car` (macOS 26 and later): the icon as Icon Composer made it (Liquid
+  Glass, with its dark and tinted looks), compiled by `actool`. The app's
+  Info.plist names it (`CFBundleIconName`).
+- `Legibyl.icns` (macOS before 26): the icon on Apple's icon grid (824 of 1024
+  px, with the template's shadow), 16 to 1024 px.
+- `Legibyl.ico` (Windows, the exe's and the installer's): the icon to the
   edge, 16 to 256 px.
 - `Legibyl.png`: the About window's, 256 px.
 
-After changing the SVG, remake them (it needs only .NET, on any OS):
+Detail that reads at 256 px is noise at 16, so if there's an
+`assets/icon_glass_small.icon` (a simpler drawing: no text, bolder strokes), the
+sizes up to 32 px (Windows' 16 to 32, the `.icns`'s 16 and 32) are rendered from
+it instead.
+
+After changing the icon, remake them. It needs a Mac with Xcode 26 or later
+(for `actool`, and Icon Composer's `ictool`):
 
 ```sh
 dotnet fsi assets/make-icons.fsx
@@ -215,7 +225,8 @@ dotnet fsi assets/make-icons.fsx
 
 The GUI project builds a self-contained `Legibyl.app` with
 [Dotnet.Bundle](https://github.com/egramtel/dotnet-bundle) (Info.plist values
-are in `Legibyl.Gui.fsproj`, icon in `assets/Legibyl.icns`). Its Info.plist
+are in `Legibyl.Gui.fsproj`, icon in `assets/Legibyl.icns`, and from macOS 26
+on, `assets/Assets.car`, which the `AddGlassIcon` target adds). Its Info.plist
 declares PDFs as documents it can view, ranked as an alternative, so Finder
 offers it under **Open With** without making it their default app; Dotnet.Bundle
 has no setting for that, so the `AddPdfDocumentType` target adds it after the
