@@ -320,6 +320,95 @@ let private refusedWith (change: PdfDocument -> unit) =
         change document
     refused [ folder.File "garden.pdf"; folder.File "jardin.pdf" ] |> List.map snd
 
+[<Theory>]
+[<InlineData(1)>]
+[<InlineData(2)>]
+let ``passing inputs with orphan parent entries are refused without guessing sibling order`` (count: int) =
+    use folder = new Folder()
+    let garden, made, orphan, joined = folder.File "garden.pdf", folder.File "made.pdf", folder.File "orphan.pdf", folder.File "packet.pdf"
+    createInput garden "Garden" "en-US" "P"
+    createInput made "Jardin" "es-ES" "P"
+    do
+        use document = new PdfDocument(new PdfReader(made), new PdfWriter(orphan))
+        let root = rawRoot document
+        let top =
+            root.GetAsDictionary PdfName.K
+            |> Option.ofObj
+            |> Option.defaultWith (fun () -> root.GetAsArray(PdfName.K).GetAsDictionary 0)
+        let kids = top.GetAsArray PdfName.K
+        // Leave the parent pointers and reverse associations intact, as an ordinary stamp
+        // does. Neither pointer tells us which sibling slot each removed tag occupied.
+        for _ in 1 .. count do kids.Remove 1
+        top.SetModified() |> ignore
+    validator.Value.Validate(orphan, PdfProfile.PdfUa1).IsCompliant |> should equal true
+    let original = File.ReadAllBytes orphan
+    let outcome = run [ garden; orphan ] joined Append.Options.Default
+    outcome.Joined |> should equal None
+    outcome.After |> should equal None
+    outcome.Inputs |> should be Empty
+    let refusal = outcome.Refusals |> List.exactlyOne
+    refusal.File |> should equal orphan
+    Assert.Contains("parent tree key", refusal.Reason)
+    Assert.Contains("not reachable", refusal.Reason)
+    Assert.Contains("reading order", refusal.Reason)
+    File.Exists joined |> should equal false
+    File.ReadAllBytes orphan |> should equal original
+    // A refusal must also leave an existing destination intact.
+    File.WriteAllText(joined, "keep this existing output")
+    (run [ garden; orphan ] joined Append.Options.Default).Joined |> should equal None
+    File.ReadAllText joined |> should equal "keep this existing output"
+    Assert.Throws<ArgumentException>(fun () -> Append.join [ garden; orphan ] joined Append.Options.Default |> ignore) |> ignore
+    File.ReadAllText joined |> should equal "keep this existing output"
+
+[<Fact>]
+let ``an existing parent key with a missing MCID slot is refused before merging`` () =
+    use folder = new Folder()
+    let garden, made, broken = folder.File "garden.pdf", folder.File "made.pdf", folder.File "broken.pdf"
+    createInput garden "Garden" "en-US" "P"
+    createInput made "Jardin" "es-ES" "P"
+    let arrayNumber, owner =
+        use document = new PdfDocument(new PdfReader(made))
+        let page = document.GetPage(1).GetPdfObject()
+        let key = page.GetAsNumber(PdfName.StructParents).IntValue()
+        let nums = rawRoot(document).GetAsDictionary(PdfName.ParentTree).GetAsArray PdfName.Nums
+        let i = [ 0 .. 2 .. nums.Size() - 2 ] |> List.find (fun i -> nums.GetAsNumber(i).IntValue() = key)
+        let parents = nums.GetAsArray(i + 1)
+        parents.GetIndirectReference().GetObjNumber(), parents.GetAsDictionary(0).GetIndirectReference().ToString()
+    // Change only the reverse entry, byte for byte, so iText cannot repair it while stamping.
+    let text = System.Text.Encoding.Latin1.GetString(File.ReadAllBytes made)
+    let pattern = $@"(?ms)^{arrayNumber} 0 obj\b.*?endobj"
+    let text =
+        System.Text.RegularExpressions.Regex.Replace(
+            text, pattern,
+            fun m -> m.Value.Replace(owner, "null".PadRight(owner.Length))
+        )
+    File.WriteAllBytes(broken, System.Text.Encoding.Latin1.GetBytes text)
+    refused [ garden; broken ]
+    |> List.map snd
+    |> List.exactlyOne
+    |> fun reason -> Assert.Contains("does not point to its reachable tag", reason)
+
+[<Fact>]
+let ``multiple forward references to one MCID are refused as ambiguous`` () =
+    refusedWith (fun document ->
+        let rec duplicate (element: PdfDictionary) =
+            match element.Get PdfName.K with
+            | :? PdfNumber as mcid ->
+                element.Put(PdfName.K, array [ mcid; mcid ]) |> ignore
+                element.SetModified() |> ignore
+                true
+            | :? PdfArray as kids ->
+                [ 0 .. kids.Size() - 1 ]
+                |> List.exists (fun i ->
+                    match kids.GetAsDictionary i with
+                    | null -> false
+                    | child -> duplicate child)
+            | :? PdfDictionary as child -> duplicate child
+            | _ -> false
+        duplicate (rawRoot document) |> should equal true)
+    |> List.exactlyOne
+    |> fun reason -> Assert.Contains("multiple structure references", reason)
+
 [<Fact>]
 let ``a form, optional content or an attached file is refused, saying why`` () =
     refusedWith (fun document ->

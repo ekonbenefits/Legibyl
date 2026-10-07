@@ -127,6 +127,121 @@ let private namespaces (root: PdfDictionary) : Map<string, string> =
                   name ns, roles ]
         |> Map.ofList
 
+/// PdfMerger copies the forward hierarchy, not orphaned elements still named by the parent
+/// tree. Check both directions before it can discard those content associations. /P alone
+/// cannot tell us where an orphan belongs in its parent's reading order.
+let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
+    let entries = Dictionary<int, PdfObject>()
+    let expected = Dictionary<int * int, PdfDictionary>()
+    let seen = HashSet<PdfDictionary>(HashIdentity.Reference)
+    let mutable problem = None
+    let fail detail =
+        if problem.IsNone then
+            problem <-
+                Some
+                    $"Its tag hierarchy and parent tree disagree ({detail}). Joining would lose or change content tags. Restore the missing tags in the source authoring tool, or have an accessibility specialist repair the hierarchy and verify reading order, then validate and retry. Append does not guess reading order or run fixes."
+    let same (a: PdfDictionary) (b: PdfDictionary) =
+        obj.ReferenceEquals(a, b)
+        || (not (isNull (a.GetIndirectReference())) && a.GetIndirectReference().Equals(b.GetIndirectReference()))
+    let rec numbers (node: PdfDictionary) depth =
+        if depth > 64 || not (seen.Add node) then
+            fail "the parent number tree is cyclic or too deep"
+        else
+            match node.GetAsArray PdfName.Nums with
+            | null -> ()
+            | nums ->
+                for i in 0 .. 2 .. nums.Size() - 2 do
+                    match nums.GetAsNumber i with
+                    | null -> fail "a parent tree key is not a number"
+                    | key ->
+                        if entries.ContainsKey(key.IntValue()) then fail $"parent tree key {key.IntValue()} is repeated"
+                        else entries[key.IntValue()] <- nums.Get(i + 1)
+            match node.GetAsArray PdfName.Kids with
+            | null -> ()
+            | kids ->
+                for i in 0 .. kids.Size() - 1 do
+                    match kids.GetAsDictionary i with
+                    | null -> fail "a parent number tree child is not a dictionary"
+                    | child -> numbers child (depth + 1)
+    match root.GetAsDictionary PdfName.ParentTree with
+    | null -> ()
+    | tree -> numbers tree 0
+    seen.Clear()
+    let add (holder: PdfDictionary | null) (mcid: int) (element: PdfDictionary) =
+        match holder with
+        | null -> fail $"MCID {mcid} has no page or stream"
+        | holder ->
+            match holder.GetAsNumber PdfName.StructParents with
+            | null -> fail $"MCID {mcid} has no StructParents key"
+            | key ->
+                let address = key.IntValue(), mcid
+                if expected.ContainsKey address then fail $"parent tree key {fst address}, MCID {mcid} has multiple structure references"
+                else expected[address] <- element
+    let objects = Dictionary<int, PdfDictionary>()
+    let rec visit (element: PdfDictionary) (parent: PdfDictionary) (page: PdfDictionary | null) depth =
+        if depth > 512 || not (seen.Add element) then
+            fail "the tag hierarchy is cyclic, shared or too deep"
+        else
+            match element.GetAsDictionary PdfName.P with
+            | NonNull own when same own parent -> ()
+            | _ -> fail "a structure element's parent pointer disagrees with its position in the hierarchy"
+            let page = match element.GetAsDictionary PdfName.Pg with null -> page | own -> own
+            let rec kid (value: PdfObject | null) =
+                match StructureTreeObjects.resolve value with
+                | :? PdfArray as kids -> for i in 0 .. kids.Size() - 1 do kid (kids.Get i)
+                | :? PdfNumber as mcid -> add page (mcid.IntValue()) element
+                | :? PdfDictionary as child when not (isNull (child.GetAsName PdfName.S)) -> visit child element page (depth + 1)
+                | :? PdfDictionary as reference ->
+                    match reference.GetAsNumber PdfName.MCID, reference.GetAsDictionary PdfName.Obj with
+                    | NonNull mcid, _ ->
+                        match reference.GetAsStream PdfName.Stm with
+                        | NonNull stream -> add stream (mcid.IntValue()) element
+                        | Null ->
+                            let holder = match reference.GetAsDictionary PdfName.Pg with null -> page | own -> own
+                            add holder (mcid.IntValue()) element
+                    | Null, NonNull obj ->
+                        match obj.GetAsNumber PdfName.StructParent with
+                        | null -> fail "a tagged object has no StructParent key"
+                        | key ->
+                            if objects.ContainsKey(key.IntValue()) then fail $"parent tree key {key.IntValue()} has multiple object references"
+                            else objects[key.IntValue()] <- element
+                    | _ -> ()
+                | _ -> ()
+            kid (element.Get PdfName.K)
+    let rec top (value: PdfObject | null) =
+        match StructureTreeObjects.resolve value with
+        | :? PdfArray as kids -> for i in 0 .. kids.Size() - 1 do top (kids.Get i)
+        | :? PdfDictionary as element -> visit element root null 0
+        | _ -> ()
+    top (root.Get PdfName.K)
+    let matches (value: PdfObject | null) (element: PdfDictionary) =
+        match StructureTreeObjects.resolve value with
+        | :? PdfDictionary as actual -> same actual element
+        | _ -> false
+    for KeyValue((key, mcid), element) in expected do
+        match entries.TryGetValue key with
+        | true, (:? PdfArray as array) when mcid >= 0 && mcid < array.Size() && matches (array.Get mcid) element -> ()
+        | _ -> fail $"parent tree key {key}, MCID {mcid} does not point to its reachable tag"
+    for KeyValue(key, element) in objects do
+        match entries.TryGetValue key with
+        | true, value when matches value element -> ()
+        | _ -> fail $"parent tree key {key} does not point to its reachable object tag"
+    for KeyValue(key, value) in entries do
+        match StructureTreeObjects.resolve value with
+        | :? PdfArray as array ->
+            for mcid in 0 .. array.Size() - 1 do
+                let value = StructureTreeObjects.resolve (array.Get mcid)
+                if not (isNull value) && not (value :? PdfNull) then
+                    match expected.TryGetValue((key, mcid)) with
+                    | true, element when matches value element -> ()
+                    | _ -> fail $"parent tree key {key}, MCID {mcid} names a tag not reachable at that address from StructTreeRoot/K"
+        | :? PdfDictionary as element ->
+            match objects.TryGetValue key with
+            | true, expected when same element expected -> ()
+            | _ -> fail $"parent tree key {key} names an object tag not reachable from StructTreeRoot/K"
+        | _ -> fail $"parent tree key {key} has an invalid value"
+    problem
+
 /// Reads file, or why it can't be joined.
 let private read (file: string) : Result<Input, Refusal list> =
     let refuse reason = { File = file; Reason = reason }
@@ -135,7 +250,7 @@ let private read (file: string) : Result<Input, Refusal list> =
         Error [ refuse "It doesn't exist." ]
     else
         try
-            let reader = new PdfReader(file)
+            use reader = new PdfReader(file)
             use document = new PdfDocument(reader)
             let catalog = document.GetCatalog().GetPdfObject()
             let fields =
@@ -156,7 +271,10 @@ let private read (file: string) : Result<Input, Refusal list> =
                       let context = StructureTreeObjects.createContext document file
                       match ParentTree.find document context with
                       | Some _ -> refuse "Its parent tree (which ties the page content to its tags) is incomplete, so its tags can't be joined as they are."
-                      | None -> ()
+                      | None ->
+                          match structureProblem document (catalog.GetAsDictionary PdfName.StructTreeRoot |> nonNull) with
+                          | Some reason -> refuse reason
+                          | None -> ()
                   if fields > 0 then
                       refuse "It has a form: field names can collide across the files, so forms aren't joined yet."
                   if not (isNull (catalog.Get PdfName.OCProperties)) then
