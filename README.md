@@ -62,11 +62,18 @@ before writing anything, identifies the parent-tree key and MCID (or object),
 and leaves both the inputs and any existing output untouched. The CLI reports
 `status: "refused"` and exits 2; the app displays the same explanation.
 
-Restore the missing tags in the source authoring tool, or have an accessibility
-specialist fix the hierarchy and verify reading order, then validate and retry.
-Parent pointers and MCID numbers do not establish sibling reading order. The
-`parent-tree` fix rebuilds reverse associations from reachable tags; it cannot
-recover orphaned tags or their order and is not a fix for this refusal.
+Run **Rebuild the parent tree** in Auto Fixes, or
+`legibyl fix input.pdf --fixes parent-tree`, then append the fixed copy. This
+reconciles reverse associations with reachable tags and clears obsolete slots
+for sequences that are demonstrably empty (including whitespace and clipping-only
+sequences), or whose former owner explicitly says Artifact. Their content is
+marked as a real artifact; its drawing operators are unchanged. Empty-tag fixes
+also keep these associations consistent as they remove tags.
+
+Meaningful orphan content is never dropped or made decorative just to allow
+append. Its page and MCID are reported, and it remains unchanged. Such a tag needs
+its place restored and its reading order verified before appending: parent
+pointers and MCID numbers alone do not establish sibling reading order.
 
 ## How it works
 
@@ -431,7 +438,7 @@ new one. All of them:
 | Structure-6 | A list tagged as plain paragraphs | `lists` |
 | Structure-7 | Headings but no bookmarks | `bookmarks` |
 | Structure-8 | An empty table-of-contents entry | `empty-toc-entries` |
-| Structure-9 | A missing or incomplete parent tree | `parent-tree` |
+| Structure-9 | A missing, incomplete, or inconsistent parent tree | `parent-tree` |
 | Structure-10 | Small figures side by side: one picture tagged in pieces | — (merge them in Structure…) |
 | Structure-11 | A figure tag that draws nothing | `empty-figures` |
 | Structure-12 | A page read out of order by a big jump | — (Order Page N by Layout, Move Up / Move Down) |
@@ -479,6 +486,10 @@ tree gives the content, and are fixable by the matching **Rebuild the parent
 tree** fix (`parent-tree`, one of the safe ones, run first): it rebuilds the tree
 from the tags, giving each page `/StructParents` and each tagged annotation a
 `/StructParent`. Nothing on the page changes.
+It also checks individual slots against the forward hierarchy, not just whether
+the page has an entry. Obsolete associations for empty or explicitly decorative
+sequences become real artifacts; meaningful orphan content is kept and reported
+instead of inventing a reading order.
 
 A document that tags headings but has no bookmarks (document outline) gets a
 warning (`Bookmarks.fs`, Structure-7): readers can't jump between its sections
@@ -1140,7 +1151,7 @@ keeps this table in step with it):
 |---|---|---|
 | `tag-from-layout` | Tag an untagged document from each page's layout | uses the layout models |
 | `qr-links` | Link QR codes to the web addresses they encode | with tag-from-layout |
-| `parent-tree` | Rebuild the parent tree, so the tags are found for the content they hold | safe |
+| `parent-tree` | Reconcile the parent tree with the tags, keeping meaningful content and clearing obsolete associations | safe |
 | `document-root` | Put the tags under a single Document tag at the top of the structure | safe |
 | `role-map` | Map the PDF's own tag names to standard tags, and fix a broken role map |  |
 | `language` | Declare the document's language, detected from its text |  |

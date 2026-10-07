@@ -61,7 +61,8 @@ type PdfFixOptions =
     /// LinkTargets. Does nothing to a PDF 1.x file.
     | LinkTargets = 131072
     /// Rebuilds the structure tree's parent tree (which content and annotations each tag holds)
-    /// where it's missing or incomplete, so the tags are found; see ParentTree. Runs first.
+    /// where it's missing or inconsistent, and clears obsolete empty/decorative associations
+    /// without discarding meaningful content; see ParentTree. Runs first.
     | ParentTree = 262144
     /// Removes figures tagged around nothing (see EmptyFigures): they fail for having no alt text,
     /// with nothing on the page to describe.
