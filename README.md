@@ -54,19 +54,19 @@ The rest of this README is the detail, including how it works inside.
 joins passing PDF/UA inputs without running fixes. Each input keeps its tags within
 a separate part of the output.
 
-Append also checks that the forward tag hierarchy (`StructTreeRoot/K`) and the
-reverse content associations (`ParentTree`) agree. A PDF can pass veraPDF while
-its parent tree still points to orphaned tags absent from the forward hierarchy.
-Copying its pages would lose those associations. Append refuses such inputs
-before writing anything, identifies the parent-tree key and MCID (or object),
-and leaves both the inputs and any existing output untouched. The CLI reports
-`status: "refused"` and exits 2; the app displays the same explanation.
+A PDF's tags can be reached two ways: down from the top of its tags, and back
+from the page content through its parent tree. A PDF can pass veraPDF while its
+parent tree still ties some content to a tag that isn't in its tags any more (one
+cut out without its parent-tree entries), or the two otherwise disagree. Joining
+copies the tags, so that content would lose its tag. So Append checks both ways,
+and refuses such a file before writing anything, saying which content and parent
+tree entry disagree; the files, and any existing output, are left as they were.
+The CLI reports `status: "refused"` and exits 2; the app shows the same reason.
 
-Restore the missing tags in the source authoring tool, or have an accessibility
-specialist fix the hierarchy and verify reading order, then validate and retry.
-Parent pointers and MCID numbers do not establish sibling reading order. The
-`parent-tree` fix rebuilds reverse associations from reachable tags; it cannot
-recover orphaned tags or their order and is not a fix for this refusal.
+Export it again with tags from the tool that made it, or have the tags fixed in a
+PDF editor, then check it and join it again. A tag that's only in the parent tree
+can't be put back automatically: nothing says where among its neighbours it was
+read.
 
 ## How it works
 

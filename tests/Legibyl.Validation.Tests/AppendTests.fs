@@ -348,9 +348,9 @@ let ``passing inputs with orphan parent entries are refused without guessing sib
     outcome.Inputs |> should be Empty
     let refusal = outcome.Refusals |> List.exactlyOne
     refusal.File |> should equal orphan
-    Assert.Contains("parent tree key", refusal.Reason)
-    Assert.Contains("not reachable", refusal.Reason)
-    Assert.Contains("reading order", refusal.Reason)
+    Assert.Contains("parent tree entry", refusal.Reason)
+    Assert.Contains("isn't in the tags", refusal.Reason)
+    Assert.Contains("doesn't fix tags or guess where they belong", refusal.Reason)
     File.Exists joined |> should equal false
     File.ReadAllBytes orphan |> should equal original
     // A refusal must also leave an existing destination intact.
@@ -386,7 +386,7 @@ let ``an existing parent key with a missing MCID slot is refused before merging`
     refused [ garden; broken ]
     |> List.map snd
     |> List.exactlyOne
-    |> fun reason -> Assert.Contains("does not point to its reachable tag", reason)
+    |> fun reason -> Assert.Contains("isn't tied to the tag holding it", reason)
 
 [<Fact>]
 let ``multiple forward references to one MCID are refused as ambiguous`` () =
@@ -407,7 +407,7 @@ let ``multiple forward references to one MCID are refused as ambiguous`` () =
             | _ -> false
         duplicate (rawRoot document) |> should equal true)
     |> List.exactlyOne
-    |> fun reason -> Assert.Contains("multiple structure references", reason)
+    |> fun reason -> Assert.Contains("is in more than one tag", reason)
 
 [<Fact>]
 let ``a form, optional content or an attached file is refused, saying why`` () =

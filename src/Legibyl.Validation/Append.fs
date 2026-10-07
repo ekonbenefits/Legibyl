@@ -127,9 +127,11 @@ let private namespaces (root: PdfDictionary) : Map<string, string> =
                   name ns, roles ]
         |> Map.ofList
 
-/// PdfMerger copies the forward hierarchy, not orphaned elements still named by the parent
-/// tree. Check both directions before it can discard those content associations. /P alone
-/// cannot tell us where an orphan belongs in its parent's reading order.
+/// Why a file's tags and parent tree disagree, if they do. PdfMerger copies the tags (from the
+/// structure tree root down), not a tag only the parent tree still names, so joining such a file
+/// would lose content's tags; so both directions are checked: each tag's content is tied to it in
+/// the parent tree, and everything the parent tree ties is in the tags. (A tag only the parent tree
+/// names can't be put back: its /P doesn't say where among its parent's kids it was read.)
 let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
     let entries = Dictionary<int, PdfObject>()
     let expected = Dictionary<int * int, PdfDictionary>()
@@ -139,29 +141,29 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
         if problem.IsNone then
             problem <-
                 Some
-                    $"Its tag hierarchy and parent tree disagree ({detail}). Joining would lose or change content tags. Restore the missing tags in the source authoring tool, or have an accessibility specialist fix the hierarchy and verify reading order, then validate and retry. Append does not guess reading order or run fixes."
+                    $"Its tags and its parent tree (which ties the page content to its tags) disagree: {detail}. Joined as it is, some content would lose its tag or get another. Export it again with tags from the tool that made it, or have the tags fixed in a PDF editor, then check it and join it again. Appending doesn't fix tags or guess where they belong."
     let same (a: PdfDictionary) (b: PdfDictionary) =
         obj.ReferenceEquals(a, b)
         || (not (isNull (a.GetIndirectReference())) && a.GetIndirectReference().Equals(b.GetIndirectReference()))
     let rec numbers (node: PdfDictionary) depth =
         if depth > 64 || not (seen.Add node) then
-            fail "the parent number tree is cyclic or too deep"
+            fail "the parent tree loops back on itself, or is too deep"
         else
             match node.GetAsArray PdfName.Nums with
             | null -> ()
             | nums ->
                 for i in 0 .. 2 .. nums.Size() - 2 do
                     match nums.GetAsNumber i with
-                    | null -> fail "a parent tree key is not a number"
+                    | null -> fail "a parent tree entry has no number"
                     | key ->
-                        if entries.ContainsKey(key.IntValue()) then fail $"parent tree key {key.IntValue()} is repeated"
+                        if entries.ContainsKey(key.IntValue()) then fail $"parent tree entry {key.IntValue()} is there twice"
                         else entries[key.IntValue()] <- nums.Get(i + 1)
             match node.GetAsArray PdfName.Kids with
             | null -> ()
             | kids ->
                 for i in 0 .. kids.Size() - 1 do
                     match kids.GetAsDictionary i with
-                    | null -> fail "a parent number tree child is not a dictionary"
+                    | null -> fail "part of the parent tree is damaged"
                     | child -> numbers child (depth + 1)
     match root.GetAsDictionary PdfName.ParentTree with
     | null -> ()
@@ -169,22 +171,23 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
     seen.Clear()
     let add (holder: PdfDictionary | null) (mcid: int) (element: PdfDictionary) =
         match holder with
-        | null -> fail $"MCID {mcid} has no page or stream"
+        | null -> fail $"content {mcid} isn't on any page"
         | holder ->
             match holder.GetAsNumber PdfName.StructParents with
-            | null -> fail $"MCID {mcid} has no StructParents key"
+            | null -> fail $"the page holding content {mcid} has no parent tree entry"
             | key ->
                 let address = key.IntValue(), mcid
-                if expected.ContainsKey address then fail $"parent tree key {fst address}, MCID {mcid} has multiple structure references"
+                if expected.ContainsKey address then fail $"content {mcid} (parent tree entry {fst address}) is in more than one tag"
                 else expected[address] <- element
     let objects = Dictionary<int, PdfDictionary>()
     let rec visit (element: PdfDictionary) (parent: PdfDictionary) (page: PdfDictionary | null) depth =
         if depth > 512 || not (seen.Add element) then
-            fail "the tag hierarchy is cyclic, shared or too deep"
+            fail "a tag is in more than one place, or the tags loop back on themselves"
         else
             match element.GetAsDictionary PdfName.P with
             | NonNull own when same own parent -> ()
-            | _ -> fail "a structure element's parent pointer disagrees with its position in the hierarchy"
+            | NonNull _ -> fail "a tag names another tag as its parent (/P) than the one holding it"
+            | Null -> fail "a tag doesn't name its parent (/P)"
             let page = match element.GetAsDictionary PdfName.Pg with null -> page | own -> own
             let rec kid (value: PdfObject | null) =
                 match StructureTreeObjects.resolve value with
@@ -201,9 +204,9 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
                             add holder (mcid.IntValue()) element
                     | Null, NonNull obj ->
                         match obj.GetAsNumber PdfName.StructParent with
-                        | null -> fail "a tagged object has no StructParent key"
+                        | null -> fail "a tagged annotation or object has no parent tree entry"
                         | key ->
-                            if objects.ContainsKey(key.IntValue()) then fail $"parent tree key {key.IntValue()} has multiple object references"
+                            if objects.ContainsKey(key.IntValue()) then fail $"parent tree entry {key.IntValue()} is tied to more than one annotation or object"
                             else objects[key.IntValue()] <- element
                     | _ -> ()
                 | _ -> ()
@@ -221,11 +224,11 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
     for KeyValue((key, mcid), element) in expected do
         match entries.TryGetValue key with
         | true, (:? PdfArray as array) when mcid >= 0 && mcid < array.Size() && matches (array.Get mcid) element -> ()
-        | _ -> fail $"parent tree key {key}, MCID {mcid} does not point to its reachable tag"
+        | _ -> fail $"content {mcid} (parent tree entry {key}) isn't tied to the tag holding it"
     for KeyValue(key, element) in objects do
         match entries.TryGetValue key with
         | true, value when matches value element -> ()
-        | _ -> fail $"parent tree key {key} does not point to its reachable object tag"
+        | _ -> fail $"parent tree entry {key} isn't tied to the tag holding its annotation or object"
     for KeyValue(key, value) in entries do
         match StructureTreeObjects.resolve value with
         | :? PdfArray as array ->
@@ -234,12 +237,12 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
                 if not (isNull value) && not (value :? PdfNull) then
                     match expected.TryGetValue((key, mcid)) with
                     | true, element when matches value element -> ()
-                    | _ -> fail $"parent tree key {key}, MCID {mcid} names a tag not reachable at that address from StructTreeRoot/K"
+                    | _ -> fail $"content {mcid} (parent tree entry {key}) is tied to a tag that isn't in the tags"
         | :? PdfDictionary as element ->
             match objects.TryGetValue key with
             | true, expected when same element expected -> ()
-            | _ -> fail $"parent tree key {key} names an object tag not reachable from StructTreeRoot/K"
-        | _ -> fail $"parent tree key {key} has an invalid value"
+            | _ -> fail $"parent tree entry {key} is tied to an annotation's tag that isn't in the tags"
+        | _ -> fail $"parent tree entry {key} is damaged"
     problem
 
 /// Reads file, or why it can't be joined.
