@@ -1,3 +1,5 @@
+<img src="assets/Legibyl.png" align="right" width="128" height="128" alt="Legibyl's icon: a letter L whose top is scattered red fragments and whose bottom is orderly grey structure, on a navy rounded square.">
+
 # Legibyl
 
 Legibyl checks PDFs for accessibility (PDF/UA-1 and PDF/UA-2) and helps fix them:

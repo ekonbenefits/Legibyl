@@ -9,3 +9,6 @@ artifacts/
 
 # Affinity's lock on a document it has open.
 *~lock~
+
+# Finder's folder settings (macOS).
+.DS_Store
