@@ -56,7 +56,12 @@ type private Input =
       Language: string option
       /// Whether it carries a review Legibyl saved in it (see EmbeddedReview).
       HasReview: bool
-      Pages: int }
+      Pages: int
+      /// Its own namespaces (PDF 2.0), by name: what each maps its tags to (/RoleMapNS).
+      Namespaces: Map<string, string> }
+
+let private textString (value: string) =
+    if value |> Seq.forall (fun c -> c < '\u0080') then PdfString value else PdfString(value, iText.IO.Font.PdfEncodings.UNICODE_BIG)
 
 let private text (value: string | null) =
     match value with
@@ -90,14 +95,48 @@ let private hasAttachments (document: PdfDocument) =
        |> Seq.exists (fun page ->
            document.GetPage(page).GetAnnotations() |> Seq.exists (fun annotation -> PdfName.FileAttachment.Equals(annotation.GetSubtype())))
 
+/// The structure tree's namespaces (PDF 2.0, /Namespaces), by name: what each maps its tags to
+/// (/RoleMapNS: a tag to a tag, or to a tag in another namespace, named), written out to
+/// compare by.
+let private namespaces (root: PdfDictionary) : Map<string, string> =
+    let name (ns: PdfDictionary | null) =
+        match ns with
+        | NonNull ns -> match ns.GetAsString PdfName.NS with null -> "" | uri -> uri.ToUnicodeString()
+        | Null -> ""
+    match root.GetAsArray PdfName.Namespaces with
+    | null -> Map.empty
+    | list ->
+        [ for i in 0 .. list.Size() - 1 do
+              match list.GetAsDictionary i with
+              | null -> ()
+              | ns ->
+                  let roles =
+                      match ns.GetAsDictionary PdfName.RoleMapNS with
+                      | null -> ""
+                      | map ->
+                          [ for key in map.KeySet() |> Seq.sortBy _.GetValue() ->
+                                let role =
+                                    match map.Get key with
+                                    | :? PdfName as tag -> tag.GetValue()
+                                    | :? PdfArray as target when target.Size() >= 1 ->
+                                        let tag = match target.GetAsName 0 with null -> "" | tag -> tag.GetValue()
+                                        $"{tag} in {name (target.GetAsDictionary 1)}"
+                                    | _ -> ""
+                                $"{key.GetValue()} -> {role}" ]
+                          |> String.concat "; "
+                  name ns, roles ]
+        |> Map.ofList
+
 /// Reads file, or why it can't be joined.
 let private read (file: string) : Result<Input, Refusal list> =
     let refuse reason = { File = file; Reason = reason }
+    let encrypted = "It's encrypted: save a copy without a password, then join that."
     if not (File.Exists file) then
         Error [ refuse "It doesn't exist." ]
     else
         try
-            use document = new PdfDocument(new PdfReader(file))
+            let reader = new PdfReader(file)
+            use document = new PdfDocument(reader)
             let catalog = document.GetCatalog().GetPdfObject()
             let fields =
                 match catalog.GetAsDictionary PdfName.AcroForm with
@@ -107,7 +146,11 @@ let private read (file: string) : Result<Input, Refusal list> =
                     | null -> 0
                     | fields -> fields.Size()
             let problems =
-                [ if isNull (catalog.GetAsDictionary PdfName.StructTreeRoot) then
+                [ // Opened without its password (one asked only to change it), it can be read, not
+                  // written again.
+                  if reader.IsEncrypted() then
+                      refuse encrypted
+                  if isNull (catalog.GetAsDictionary PdfName.StructTreeRoot) then
                       refuse "It isn't tagged: it has no structure tree to keep."
                   else
                       let context = StructureTreeObjects.createContext document file
@@ -129,8 +172,12 @@ let private read (file: string) : Result<Input, Refusal list> =
                       Title = titleOf document file
                       Language = text (match catalog.GetAsString PdfName.Lang with null -> null | lang -> lang.ToUnicodeString())
                       HasReview = not (isNull (catalog.Get(PdfName "LBYL_Review")))
-                      Pages = document.GetNumberOfPages() }
+                      Pages = document.GetNumberOfPages()
+                      Namespaces = namespaces (catalog.GetAsDictionary PdfName.StructTreeRoot |> nonNull) }
         with
+        // Without iText's cryptography (Legibyl doesn't ship it), an encrypted file can't be opened.
+        | :? iText.Kernel.Exceptions.PdfException as ex when ex.Message = iText.Kernel.Exceptions.KernelExceptionMessageConstant.PDF_ENCRYPTION ->
+            Error [ refuse encrypted ]
         | :? iText.Commons.Exceptions.ITextException
         | :? IOException
         | :? UnauthorizedAccessException as ex -> Error [ refuse $"It couldn't be read: {ex.Message}" ]
@@ -142,7 +189,8 @@ let private profileOf (version: PdfVersion) =
 let private versionName (version: PdfVersion) = version.ToString().Replace("PDF-", "")
 
 /// Why the files can't be joined as they are, before any are validated: each one's problems,
-/// then whether they mix PDF 1.x and 2.0. Empty when they can be.
+/// then whether they mix PDF 1.x and 2.0, or map a namespace's tags differently. Empty when they
+/// can be.
 let refusals (files: string list) : Refusal list =
     let read = files |> List.map read
     let each = read |> List.collect (function Error refusals -> refusals | Ok _ -> [])
@@ -156,7 +204,20 @@ let refusals (files: string list) : Refusal list =
           yield
               { File = null
                 Reason =
-                  $"""PDF 2.0 files (PDF/UA-2) and earlier ones (PDF/UA-1) can't be joined into one: {String.Join(", ", listed)}.""" } ]
+                  $"""PDF 2.0 files (PDF/UA-2) and earlier ones (PDF/UA-1) can't be joined into one: {String.Join(", ", listed)}.""" }
+      // The merge keeps one of each namespace (the first file's), so a later file's tags in a
+      // namespace it maps differently would read as the first's do.
+      let seen = Dictionary<string, Input>()
+      for input in inputs do
+          for KeyValue(ns, roles) in input.Namespaces do
+              match seen.TryGetValue ns with
+              | true, earlier when earlier.Namespaces[ns] <> roles ->
+                  yield
+                      { File = input.File
+                        Reason =
+                          $"Its namespace {ns} maps its tags differently from {Path.GetFileName earlier.File}'s, so its tags would read as that file's do; files like that aren't joined yet." }
+              | true, _ -> ()
+              | false, _ -> seen[ns] <- input ]
 
 // ---- The structure tree, raw ----
 
@@ -382,20 +443,23 @@ let private prepare (taken: Taken) (index: int) (input: Input) : Prepared =
         // Named destinations an input before has, and what goes to them: links, other actions,
         // the outline.
         let destinations = document.GetCatalog().GetNameTree PdfName.Dests
-        let names = destinations.GetNames() |> Seq.map (fun pair -> pair.Key.ToUnicodeString()) |> Set.ofSeq
+        // Each name as text, and its key as the file has it (its bytes, which text written
+        // again may not match).
+        let keys = destinations.GetNames().Keys |> Seq.map (fun key -> key.ToUnicodeString(), key) |> Map.ofSeq
+        let names = keys |> Map.keys |> Set.ofSeq
         let destRenames = Dictionary<string, string>()
         for destination in names do
             if taken.Destinations.Contains destination then
                 destRenames[destination] <- fresh (fun d -> taken.Destinations.Contains d || names.Contains d || destRenames.ContainsValue d) destination
         if destRenames.Count > 0 then
             for KeyValue(old, renamed) in destRenames do
-                let value = destinations.GetNames()[PdfString old]
-                destinations.RemoveEntry(PdfString old)
-                destinations.AddEntry(PdfString renamed, value)
+                let value = destinations.GetNames()[keys[old]]
+                destinations.RemoveEntry keys[old]
+                destinations.AddEntry(textString renamed, value)
             let renameDest (holder: PdfDictionary) (key: PdfName) =
                 match holder.Get key with
-                | :? PdfString as d when destRenames.ContainsKey(d.ToUnicodeString()) -> holder.Put(key, PdfString destRenames[d.ToUnicodeString()]) |> ignore
-                | :? PdfName as d when destRenames.ContainsKey(d.GetValue()) -> holder.Put(key, PdfString destRenames[d.GetValue()]) |> ignore
+                | :? PdfString as d when destRenames.ContainsKey(d.ToUnicodeString()) -> holder.Put(key, textString destRenames[d.ToUnicodeString()]) |> ignore
+                | :? PdfName as d when destRenames.ContainsKey(d.GetValue()) -> holder.Put(key, textString destRenames[d.GetValue()]) |> ignore
                 | _ -> ()
             let rec renameAction (action: PdfDictionary | null) depth =
                 match action with
@@ -474,9 +538,6 @@ type Joined =
       Parts: Part list
       /// What was renamed, and what wasn't carried over.
       Notes: string list }
-
-let private textString (value: string) =
-    if value |> Seq.forall (fun c -> c < '\u0080') then PdfString value else PdfString(value, iText.IO.Font.PdfEncodings.UNICODE_BIG)
 
 /// The joined file's outline: an entry for each part, going to its first page, with the input's
 /// own outline (its top entries, counted per part) below it.
@@ -675,6 +736,9 @@ let private wrapParts (document: PdfDocument) (tag: string) (languages: string o
                 documentElement.MakeIndirect document |> ignore
                 documentElement, true
         | [] -> root, false
+    // The merge keeps the first file's Document element as the joined file's, with its /Lang: the
+    // document's language is the catalog's, and each part says its own.
+    if not created then container.Remove PdfName.Lang |> ignore
     let namespace' = container.Get PdfName.NS
     let partOf =
         marked
@@ -776,6 +840,34 @@ let private combine (document: PdfDocument) (roleMap: Dictionary<string, string>
             array.Add ns
         root.Put(PdfName.Namespaces, array) |> ignore
 
+/// The named destinations the merge doesn't carry: it copies those a link or outline entry in the
+/// file goes to, not those only links from elsewhere use (file.pdf#nameddest=chapter). Each goes
+/// to its page in the joined file, as it's placed there; prepare has renamed those that clash.
+let private carryDestinations (document: PdfDocument) (prepared: Prepared list) (parts: Part list) =
+    let tree = document.GetCatalog().GetNameTree PdfName.Dests
+    let have = HashSet<string>(tree.GetNames().Keys |> Seq.map _.ToUnicodeString())
+    for input, part in List.zip prepared parts do
+        use source = new PdfDocument(new PdfReader(new MemoryStream(input.Bytes)))
+        for KeyValue(key, value) in List.ofSeq (source.GetCatalog().GetNameTree(PdfName.Dests).GetNames()) do
+            let destination: PdfArray | null =
+                match value with
+                | :? PdfArray as explicitDestination -> explicitDestination
+                | :? PdfDictionary as holder -> holder.GetAsArray PdfName.D
+                | _ -> null
+            match destination with
+            | NonNull destination when destination.Size() >= 1 && not (have.Contains(key.ToUnicodeString())) ->
+                match destination.GetAsDictionary 0 with
+                | NonNull page when source.GetPageNumber page >= 1 ->
+                    let carried = PdfArray()
+                    carried.Add(document.GetPage(part.FirstPage + source.GetPageNumber page - 1).GetPdfObject())
+                    // The rest (/XYZ left top zoom, /Fit…) is names, numbers and nulls.
+                    for i in 1 .. destination.Size() - 1 do
+                        carried.Add(destination.Get i)
+                    tree.AddEntry(PdfString(key.GetValueBytes()), carried)
+                    have.Add(key.ToUnicodeString()) |> ignore
+                | _ -> ()
+            | _ -> ()
+
 /// The document level: its language, that it's tagged, its title (shown in place of the file
 /// name) and its PDF/UA claim.
 let private documentLevel (document: PdfDocument) (profile: PdfProfile) (title: string) (language: string option) =
@@ -864,6 +956,7 @@ let join (files: string list) (output: string) (options: Options) : Joined =
         use document = new PdfDocument(new PdfReader(new MemoryStream(hideStructure merged)), new PdfWriter(output))
         let elements = wrapParts document tag (prepared |> List.map _.Language) language
         combine document taken.RoleMap prepared
+        carryDestinations document prepared parts
         outlineParts
             document
             profile

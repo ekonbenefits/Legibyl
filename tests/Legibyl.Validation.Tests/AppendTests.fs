@@ -415,3 +415,113 @@ let ``a file already where the joined one goes is replaced only once it's writte
     |> Array.map (Path.GetFileName >> string)
     |> Array.filter (fun name -> name.StartsWith ".")
     |> should be Empty
+
+// ---- From the cold review ----
+
+/// The same file changed by change, written to output.
+let private changed (input: string) (output: string) (change: PdfDocument -> unit) =
+    use document = new PdfDocument(new PdfReader(input), new PdfWriter(output))
+    change document
+
+[<Fact>]
+let ``the first file's Document language doesn't stay on the joined Document, where a later part would take it`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput (folder.File "g.pdf") "Garden" "en-US" "P"
+    createInput jardin "Jardin" "es-ES" "P"
+    // English said on the garden's Document element too, as Acrobat can.
+    changed (folder.File "g.pdf") garden (fun document ->
+        let root = rawRoot document
+        let documentElement = root.GetAsDictionary PdfName.K |> Option.ofObj |> Option.defaultWith (fun () -> root.GetAsArray(PdfName.K).GetAsDictionary 0)
+        documentElement.Put(PdfName.Lang, PdfString "en-US") |> ignore)
+    let outcome = run [ garden; jardin ] joined { Append.Options.Default with Language = Some "es-ES" }
+    outcome.Passes |> should equal true
+    let root = validator.Value.ReadStructureTree joined |> notNull
+    let documentNode = root.Children |> Seq.find (fun child -> child.Tag = "Document")
+    Option.ofObj documentNode.Language |> should equal None
+    // The Spanish part takes the document's Spanish; the English one says it's English.
+    parts joined |> List.map (fun part -> Option.ofObj part.Language) |> should equal [ Some "en-US"; None ]
+
+[<Fact>]
+let ``a named destination nothing in its file goes to is carried over, to its page`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput (folder.File "g.pdf") "Garden" "en-US" "P"
+    createInput (folder.File "j.pdf") "Jardin" "es-ES" "P"
+    // "chapter", for links from elsewhere (packet.pdf#nameddest=chapter): page 2, and page 1.
+    let chapter (page: int) (document: PdfDocument) =
+        document.AddNamedDestination("chapter", array [ document.GetPage(page).GetPdfObject(); PdfName.XYZ; PdfNumber 0; PdfNumber 700; PdfNull.PDF_NULL ])
+    changed (folder.File "g.pdf") garden (chapter 2)
+    changed (folder.File "j.pdf") jardin (chapter 1)
+    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    outcome.Passes |> should equal true
+    use document = new PdfDocument(new PdfReader(joined))
+    let names = document.GetCatalog().GetNameTree(PdfName.Dests).GetNames()
+    [ for KeyValue(name, destination) in names ->
+          let destination = destination :?> PdfArray
+          name.ToUnicodeString(), document.GetPageNumber(destination.GetAsDictionary 0), destination.GetAsName(1).GetValue() ]
+    |> List.sort
+    |> should equal [ "chapter", 2, "XYZ"; "chapter-2", 3, "XYZ" ]
+
+[<Fact>]
+let ``a named destination with letters beyond ASCII both files have is renamed`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput (folder.File "g.pdf") "Garden" "en-US" "P"
+    createInput (folder.File "j.pdf") "Jardin" "es-ES" "P"
+    let café (document: PdfDocument) =
+        document.GetCatalog().GetNameTree(PdfName.Dests).AddEntry(PdfString("Café", iText.IO.Font.PdfEncodings.UNICODE_BIG), array [ document.GetPage(2).GetPdfObject(); PdfName.Fit ])
+        document.GetOutlines(false).AddOutline("Café").GetContent().Put(PdfName.Dest, PdfString("Café", iText.IO.Font.PdfEncodings.UNICODE_BIG)) |> ignore
+    changed (folder.File "g.pdf") garden café
+    changed (folder.File "j.pdf") jardin café
+    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    outcome.Passes |> should equal true
+    use document = new PdfDocument(new PdfReader(joined))
+    [ for KeyValue(name, destination) in document.GetCatalog().GetNameTree(PdfName.Dests).GetNames() ->
+          name.ToUnicodeString(), document.GetPageNumber((destination :?> PdfArray).GetAsDictionary 0) ]
+    |> List.sort
+    |> should equal [ "Café", 2; "Café-2", 4 ]
+
+[<Fact>]
+let ``PDF 2.0 files whose namespace maps a tag differently are refused`` () =
+    use folder = new Folder()
+    // The same namespace in each, mapping <Box> to a paragraph in one and a heading in the other.
+    let withNamespace (output: string) (role: string) =
+        changed (corpusFile "pdfua2-pass.pdf") output (fun document ->
+            let root = rawRoot document
+            let roles = PdfDictionary()
+            roles.Put(PdfName "Box", PdfName role) |> ignore
+            let ns = PdfDictionary()
+            ns.Put(PdfName.Type, PdfName.Namespace) |> ignore
+            ns.Put(PdfName.NS, PdfString "https://example.org/ns") |> ignore
+            ns.Put(PdfName.RoleMapNS, roles) |> ignore
+            let list = match root.GetAsArray PdfName.Namespaces with null -> PdfArray() | list -> list
+            list.Add(ns.MakeIndirect document)
+            root.Put(PdfName.Namespaces, list) |> ignore)
+    withNamespace (folder.File "one.pdf") "P"
+    withNamespace (folder.File "two.pdf") "H1"
+    withNamespace (folder.File "same.pdf") "P"
+    refused [ folder.File "one.pdf"; folder.File "two.pdf" ]
+    |> should
+        equal
+        [ Some "two.pdf",
+          "Its namespace https://example.org/ns maps its tags differently from one.pdf's, so its tags would read as that file's do; files like that aren't joined yet." ]
+    Append.refusals [ folder.File "one.pdf"; folder.File "same.pdf" ] |> should be Empty
+
+[<Fact>]
+let ``an encrypted file is refused, saying so, before anything is validated`` () =
+    use folder = new Folder()
+    createInput (folder.File "garden.pdf") "Garden" "en-US" "P"
+    createInput (folder.File "j.pdf") "Jardin" "es-ES" "P"
+    // Encrypted, by its trailer naming the standard security handler (iText needs its
+    // cryptography to make or open one, which Legibyl doesn't ship).
+    do
+        let text = Text.Encoding.Latin1.GetString(File.ReadAllBytes(folder.File "j.pdf"))
+        let key = String('0', 64)
+        let encrypt = $"trailer\n<</Encrypt <</Filter /Standard /V 1 /R 2 /O <{key}> /U <{key}> /P -4>>"
+        let at = text.LastIndexOf "trailer\n<<"
+        at |> should be (greaterThan 0)
+        File.WriteAllBytes(folder.File "jardin.pdf", Text.Encoding.Latin1.GetBytes(text.Substring(0, at) + encrypt + text.Substring(at + "trailer\n<<".Length)))
+    Append.refusals [ folder.File "garden.pdf"; folder.File "jardin.pdf" ]
+    |> List.map (fun refusal -> Option.ofObj refusal.File |> Option.map Path.GetFileName |> Option.defaultValue "", refusal.Reason)
+    |> should equal [ "jardin.pdf", "It's encrypted: save a copy without a password, then join that." ]

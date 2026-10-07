@@ -615,13 +615,13 @@ type private AppendArgs =
 let private appendText (r: AppendOutcome) =
     let sb = StringBuilder()
     let line (text: string) = sb.AppendLine text |> ignore
-    match r.Status, r.After with
-    | AppendStatus.Refused, _ -> line "Nothing was written:"
-    | _, NonNull after ->
+    // A joined file is always validated; a refusal writes none.
+    match r.After with
+    | NonNull after ->
         let standing = if after.IsCompliant then "PASS" else $"FAIL, {after.FailedCount} failed"
         let structure = if r.StructureDifferences.Count = 0 then "structure as the files'" else $"{r.StructureDifferences.Count} structure difference(s)"
         line $"joined {r.Inputs.Count} files → {r.OutputPath} ({r.Standard}: {standing}; {structure})"
-    | status, _ -> line status
+    | Null -> line "Nothing was written:"
     for refusal in r.Refusals do
         match refusal.File with
         | NonNull file -> line $"  ! {file}: {refusal.Reason}"
@@ -645,9 +645,12 @@ let private runAppend (args: AppendArgs) =
         usageError "Name two or more PDFs to join."
     else
         let profile, _ = PdfUaTarget.detect files.Head
-        match args.PartTag with
-        | Some tag when not (List.contains tag (Append.partTags profile)) ->
+        match args.PartTag, args.Lang with
+        | Some tag, _ when not (List.contains tag (Append.partTags profile)) ->
             usageError $"""--part-tag for {PdfUaTarget.displayName profile} is one of {String.Join(", ", Append.partTags profile)}, not '{tag}'."""
+        // A language tag (BCP 47): a language, then subtags, e.g. en, en-US, zh-Hant-TW.
+        | _, Some lang when not (RegularExpressions.Regex.IsMatch(lang, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$")) ->
+            usageError $"--lang takes a language tag, e.g. en-US, not '{lang}'."
         | _ ->
             let output = args.Output |> Option.defaultWith (fun () -> nextVersion files.Head)
             let options: Append.Options = { Title = args.Title; Language = args.Lang; PartTag = args.PartTag }
