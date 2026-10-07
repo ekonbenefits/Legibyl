@@ -75,7 +75,7 @@ let choose (owner: Window) (first: string option) : Task<Choice option> =
                 StackPanel.children [
                     TextBlock.create [
                         TextBlock.text
-                            "Join PDFs that pass PDF/UA into one, in this order, keeping each one's tags as they are: each becomes a part of the joined file. Each is validated first; if any fails, or can't be joined (a form, layers, attached files), nothing is written. The joined file is then checked, and opened."
+                            "Join PDFs that pass PDF/UA into one, in this order, keeping each one's tags as they are: each becomes a part of the joined file. Each is validated first; if any fails, or can't be joined (inconsistent tags, a form, layers, attached files), nothing is written. No fixes or reading-order guesses are made. The joined file is then checked, and opened."
                         TextBlock.textWrapping TextWrapping.Wrap
                     ]
                     DockPanel.create [
