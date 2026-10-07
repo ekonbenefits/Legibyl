@@ -231,9 +231,9 @@ let selectableBorder
         Border.focusable true
         AttrBuilder<Border>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, blockName node, ValueNone)
         AttrBuilder<Border>.CreateProperty<ITemplate<Control> | null>(Control.FocusAdornerProperty, focusOutline, ValueNone)
-        Border.onKeyDown (blockKeys selection node)
+        Border.onKeyDown (blockKeys selection node, SubPatchOptions.Always)
         AttrBuilder<Border>.CreateProperty<ContextMenu | null>(Control.ContextMenuProperty, selection.Menu, ValueNone)
-        Border.onPointerPressed (fun e ->
+        Border.onPointerPressed ((fun e ->
             match e.Source with
             // FuncUI also subscribes to the tunnel phase, where the outermost block would
             // see the click first; only the innermost block (bubble phase) should select.
@@ -241,15 +241,22 @@ let selectableBorder
                 e.Route = Interactivity.RoutingStrategies.Bubble
                 && e.GetCurrentPoint(source).Properties.IsLeftButtonPressed
                 ->
-                // This handler's own border: the nearest border tagged with this node.
+                // Reordering reuses borders for other nodes: select the innermost block's
+                // current tag, not a node captured before the move.
                 let owner =
                     source.GetSelfAndVisualAncestors()
-                    |> Seq.pick (function
-                        | :? Border as border when obj.ReferenceEquals(border.Tag, node) -> Some border
+                    |> Seq.tryPick (function
+                        | :? Border as border ->
+                            match border.Tag with
+                            | :? StructureNode as current -> Some(current, border)
+                            | _ -> None
                         | _ -> None)
-                e.Handled <- true
-                selection.Select node owner (e.KeyModifiers.HasFlag KeyModifiers.Shift)
-            | _ -> ())
+                match owner with
+                | Some(current, border) ->
+                    e.Handled <- true
+                    selection.Select current border (e.KeyModifiers.HasFlag KeyModifiers.Shift)
+                | None -> ()
+            | _ -> ()), SubPatchOptions.Always)
     ]
 
 let geometryTip (node: StructureNode) (what: string) (noun: string) =
