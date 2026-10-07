@@ -277,8 +277,8 @@ let private read (file: string) : Result<Input, Refusal list> =
                   else
                       let context = StructureTreeObjects.createContext document file
                       match ParentTree.find document context with
-                      | Some _ -> refuse "Its parent tree (which ties the page content to its tags) is incomplete, so its tags can't be joined as they are."
-                      | None ->
+                      | Some missing when missing.TreeMissing -> refuse "Its parent tree (which ties the page content to its tags) is missing. Run Rebuild the parent tree (parent-tree) and append the fixed copy."
+                      | _ ->
                           match structureProblem document (catalog.GetAsDictionary PdfName.StructTreeRoot |> nonNull) with
                           | Some reason -> refuse reason
                           | None -> ()

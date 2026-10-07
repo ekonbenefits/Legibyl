@@ -223,8 +223,9 @@ let private parentTreeFindings (document: PdfDocument) context =
         let objects = if missing.Objects = 1 then "1 tagged annotation has" else $"{missing.Objects} tagged annotations have"
         let detail =
             [ if missing.TreeMissing then "The parent tree is missing."
-              if missing.Pages > 0 then $"{pages} no entry in it."
-              if missing.Objects > 0 then $"{objects} no entry in it." ]
+              if missing.Pages > 0 then $"{pages} missing or incorrect entries in it."
+              if missing.Objects > 0 then $"{objects} missing or incorrect entries in it." ]
+            @ [ if missing.Associations > 0 then $"{missing.Associations} content association(s) disagree with the reading order." ]
             |> String.concat " "
         [ warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null ]
 
