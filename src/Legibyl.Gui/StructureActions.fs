@@ -80,6 +80,7 @@ let editKinds (node: StructureNode) =
     // (One of the PDF's own tag names by what its role map makes it: an Image mapped to Figure.)
     let tag = match node.Role with NonNull role -> role | Null -> node.Tag
     match node.Geometry with
+    | _ when node.Tag = "Disconnected" || node.Tag = "DisconnectedTag" -> []
     | null -> []
     | _ ->
         [ if tag = "Link" then LinkDescription
@@ -156,7 +157,7 @@ let movesIn (edits: RegionEdits.Edit list) =
 
 /// The tags whose children keep their order: a table's cells and rows, a table of contents'
 /// entries, which Move Up and Move Down don't change.
-let fixedOrder = set [ "Table"; "THead"; "TBody"; "TFoot"; "TR"; "TOC"; "StructTreeRoot"; "NotInTags" ]
+let fixedOrder = set [ "Table"; "THead"; "TBody"; "TFoot"; "TR"; "TOC"; "StructTreeRoot"; "NotInTags"; "Disconnected" ]
 
 /// The positions in order of the longest run of it that's in the order sequence already has
 /// (a longest increasing subsequence of positions).
@@ -408,6 +409,7 @@ let moveActions (needs: OrderBarNeeds) : Action list =
             (fun () -> move false) with
           Enabled = (match moving with Some(_, _, _, _, after) -> after.IsSome | None -> false)
           Keys = Some(KeyGesture(Key.Down, KeyModifiers.Alt)) } ]
+    |> List.filter (fun _ -> needs.Selected |> List.forall (fun node -> node.Tag <> "Disconnected" && node.Tag <> "DisconnectedTag"))
 
 // For a tagged PDF's shown page: put in the order its layout reads, or back in the order it was
 // tagged in.

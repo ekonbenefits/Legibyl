@@ -857,7 +857,7 @@ module private StructureView =
             let ordering = ctx.useState false
             /// The element whose children are the tagged PDF's top level (its Document), if there's one.
             let topLevel () =
-                match root.Current.Children |> Seq.filter (fun n -> n.Tag <> "NotInTags") |> List.ofSeq with
+                match root.Current.Children |> Seq.filter (fun n -> n.Tag <> "NotInTags" && n.Tag <> "Disconnected") |> List.ofSeq with
                 | [ document ] when not (fixedOrder.Contains document.Tag) -> Some document
                 | _ -> None
             /// Suggests page's reading order from its layout, to accept or not.

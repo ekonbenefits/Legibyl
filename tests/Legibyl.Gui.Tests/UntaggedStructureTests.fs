@@ -94,6 +94,45 @@ let private blockStarting (window: Window) (start: string) =
     pieceBlocks window |> List.find (fun b -> (string (nodeOf b).Content).StartsWith start)
 
 [<Fact>]
+let ``disconnected text is visible separately and cannot be moved as a reading-order sibling`` () =
+    withPdf 1 (fun pdf ->
+        let disconnected = Path.Combine(Path.GetDirectoryName(pdf) |> nonNull, "disconnected.pdf")
+        do
+            use document = new PdfDocument(new PdfReader(pdf), new PdfWriter(disconnected))
+            let root = document.GetStructTreeRoot()
+            let parent = root.GetKids()[0] :?> PdfStructElem
+            let page = document.GetPage 1
+            let orphan = parent.AddKid(PdfStructElem(document, PdfName.P, page))
+            let reference = PdfMcrNumber(page, orphan)
+            orphan.AddKid reference |> ignore
+            let properties = PdfDictionary()
+            properties.Put(PdfName.MCID, PdfNumber(reference.GetMcid())) |> ignore
+            PdfCanvas(page).BeginMarkedContent(PdfName.P, properties).BeginText()
+                .SetFontAndSize(PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA, 12f)
+                .MoveText(72.0, 400.0).ShowText("Disconnected disclosure.").EndText().EndMarkedContent() |> ignore
+            let kids = parent.GetPdfObject().GetAsArray PdfName.K
+            kids.Remove(kids.Size() - 1)
+        onUiThread (fun () ->
+            let window = show disconnected
+            try
+                texts window |> List.exists (fun text -> text.Contains "Disconnected associations") |> should be True
+                texts window |> List.exists (fun text -> text.Contains "Disconnected disclosure.") |> should be True
+                let block =
+                    descendants<Border> window
+                    |> List.find (fun border ->
+                        match border.Tag with
+                        | :? StructureNode as node -> node.Tag = "DisconnectedTag"
+                        | _ -> false)
+                let node = nodeOf block
+                node.Geometry |> should not' (be Null)
+                StructureActions.canRetag false node |> should be False
+                StructureActions.editKinds node |> should be Empty
+                StructureActions.fixedOrder.Contains "Disconnected" |> should be True
+                click block false
+                buttons window |> List.exists (fun label -> label = "Move Up" || label = "Move Down") |> should be False
+            finally window.Close()))
+
+[<Fact>]
 let ``what's drawn outside the tags is listed per page, likely decoration first, with hints`` () =
     withPdf 1 (fun pdf ->
         onUiThread (fun () ->

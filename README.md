@@ -71,6 +71,11 @@ made it, or have the tags fixed in a PDF editor, then check it and join it again
 A tag that's only in the parent tree can't be put back automatically: nothing says
 where among its neighbours it was read.
 
+Structure… shows such content on its own, after the tags, under **Tied to tags
+that are gone**: each one's page, text, and description, highlighted on the page
+where it can be. It's there to look at, not to edit or move: nothing says where
+its tag was read, so showing it never puts it back in the tags.
+
 ## How it works
 
 veraPDF's `greenfield-apps` fat jar (bundling its Greenfield validation
