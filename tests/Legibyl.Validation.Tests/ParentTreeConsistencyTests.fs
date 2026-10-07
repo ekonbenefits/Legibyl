@@ -66,6 +66,29 @@ let private render path =
 
 let private fix input output options = VeraPdfValidator().Fix(input, PdfProfile.PdfUa1, output, options)
 
+let rec private allNodes (node: StructureNode) =
+    node :: (node.Children |> Seq.collect allNodes |> List.ofSeq)
+
+[<Fact>]
+let ``meaningful reverse-only tags are shown separately without adding a reading order`` () =
+    use input = new TempPdf()
+    create input.Path "P" true "text" false
+    let original = File.ReadAllBytes input.Path
+    let tree = VeraPdfValidator().ReadStructureTree input.Path |> notNull
+    let group = tree.Children |> Seq.find (fun node -> node.Tag = "Disconnected")
+    group.Content |> should haveSubstring "outside the reading order"
+    let shown = group.Children |> Seq.exactlyOne
+    shown.Tag |> should equal "DisconnectedTag"
+    shown.Content |> should haveSubstring "Important disclosure text."
+    shown.Content |> should haveSubstring "MCID(s) 1"
+    shown.PageNumber.Value |> should equal 1
+    shown.Geometry |> should not' (be Null)
+    let warning = warnings input.Path |> List.exactlyOne
+    warning.ErrorMessage |> should haveSubstring "MCID(s) 1"
+    warning.Geometry |> should not' (be Null)
+    allNodes tree |> List.filter (fun node -> node.Tag = "P") |> should haveLength 1
+    File.ReadAllBytes input.Path |> should equal original
+
 [<Theory>]
 [<InlineData("P", "space")>]
 [<InlineData("Figure", "clip")>]
@@ -81,6 +104,8 @@ let ``obsolete reverse tags become real artifacts without changing visible or ac
     let result = fix input.Path output.Path PdfFixOptions.ParentTree
     result.WasFixed |> should be True
     warnings output.Path |> should be Empty
+    VeraPdfValidator().ReadStructureTree output.Path |> notNull |> allNodes
+    |> List.exists (fun node -> node.Tag = "Disconnected") |> should be False
     let after = VeraPdfValidator().Validate(output.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
     Set.difference after before |> should be Empty
     render output.Path |> should equal (render input.Path)

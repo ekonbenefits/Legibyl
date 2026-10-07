@@ -227,7 +227,26 @@ let private parentTreeFindings (document: PdfDocument) context =
               if missing.Objects > 0 then $"{objects} missing or incorrect entries in it." ]
             @ [ if missing.Associations > 0 then $"{missing.Associations} content association(s) disagree with the reading order." ]
             |> String.concat " "
-        [ warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null ]
+        let disconnected =
+            ParentTree.inconsistent document context
+            |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
+            |> List.groupBy (fun (page, _, owner, _) -> page, owner)
+        [ if missing.Pages > 0 || missing.Objects > 0 || disconnected.IsEmpty then
+              yield warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null
+          for (page, owner), associations in disconnected do
+              let mcids = associations |> List.map (fun (_, mcid, _, _) -> mcid)
+              let ids = mcids |> List.map string |> String.concat ", "
+              let geometry =
+                  mcids
+                  |> Seq.choose (fun mcid ->
+                      match context.MarkedContent.TryGetValue((page, mcid)) with
+                      | true, content -> content.Geometry
+                      | _ -> None)
+                  |> unionGeometry |> Option.toObj
+              let role = match owner.GetAsName PdfName.S with null -> "unknown" | role -> role.GetValue()
+              yield warning ParentTreeMessage
+                  $"Page {page}, MCID(s) {ids}: <{role}> is disconnected from the reading order. Shown separately under Disconnected associations in Structure. Rebuild the parent tree clears only empty or explicitly decorative associations; meaningful content is kept and reported."
+                  "StructTreeRoot" 9 PdfFixOptions.ParentTree geometry ]
 
 // ---- Structure-10: a picture tagged in pieces, as many small figures (see SplitFigures) ----
 

@@ -74,7 +74,7 @@ let private numbers (tree: PdfDictionary) : IReadOnlyDictionary<int, PdfObject> 
     entries
 
 /// Reverse associations that disagree with the reachable, forward structure tree.
-let private inconsistent (document: PdfDocument) context =
+let inconsistent (document: PdfDocument) context =
     let forward = tagged document context
     let root = document.GetStructTreeRoot().GetPdfObject()
     let entries =
@@ -266,7 +266,7 @@ let rebuild (document: PdfDocument) context : string list =
                     | _ -> byPage[page] <- HashSet [mcid]
                     discarded <- discarded + 1
             else
-                context.Notes.Add $"Page {page}, MCID {mcid} has content associated with a tag outside the reading order. It was kept: choose its place in Structure before appending."
+                context.Notes.Add $"Page {page}, MCID {mcid} has content associated with a tag outside the reading order. It was kept and is shown under Disconnected associations in Structure; its reading-order position must be restored before appending."
         ContentArtifacts.mark document byPage
         let entries =
             match resolve ((document.GetStructTreeRoot().GetPdfObject()).Get PdfName.ParentTree) with

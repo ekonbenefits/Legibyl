@@ -579,7 +579,8 @@ let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) :
             let tagged = walkChildren structTreeRoot context None 0
             // And what its pages draw outside every tag, for a person to mark (see UntaggedContent).
             let outside = try UntaggedContent.nodes pdfPath with _ -> []
-            let children = Array.append tagged (Array.ofList outside)
+            let disconnected = DisconnectedContent.nodes pdfPath
+            let children = Array.concat [tagged; Array.ofList outside; Array.ofList disconnected]
             { Tag = "StructTreeRoot"
               Role = null
               AlternateDescription = null

@@ -74,6 +74,11 @@ Meaningful orphan content is never dropped or made decorative just to allow
 append. Its page and MCID are reported, and it remains unchanged. Such a tag needs
 its place restored and its reading order verified before appending: parent
 pointers and MCID numbers alone do not establish sibling reading order.
+Structure shows reverse-only tags separately under **Disconnected associations —
+not in reading order**, including their page, MCIDs, available text, descriptions,
+and page highlight where geometry is known. These are review evidence, not
+editable reading-order siblings; displaying them never inserts them into the
+hierarchy. Structure-9 warnings identify and highlight the affected content.
 
 ## How it works
 

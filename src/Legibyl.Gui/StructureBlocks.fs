@@ -339,7 +339,13 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
         WrapPanel.create [
             WrapPanel.margin (0.0, 0.0, 0.0, 4.0)
             WrapPanel.children [
-                tagChip (if node.Tag = "NotInTags" then "Not in the tags" else node.Tag) borderColor headerColor
+                tagChip
+                    (match node.Tag with
+                     | "NotInTags" -> "Not in the tags"
+                     | "Disconnected" -> "Disconnected associations — not in reading order"
+                     | "DisconnectedTag" -> "Disconnected tag"
+                     | tag -> tag)
+                    borderColor headerColor
                 match findingMarker selection node with
                 | Some marker -> marker
                 | None -> ()
