@@ -52,7 +52,8 @@ let private joined (notes: string list) : Append.Joined =
       Parts =
         [ { File = "/tmp/garden.pdf"; FirstPage = 1; Pages = 2; RenamedTags = Map.empty }
           { File = "/tmp/jardin.pdf"; FirstPage = 3; Pages = 2; RenamedTags = Map.empty } ]
-      Notes = notes }
+      Notes = notes
+      NotCarriedOver = [] }
 
 let private report (compliant: bool) : ValidationReport =
     { FilePath = "/tmp/packet.pdf"
@@ -88,3 +89,23 @@ let ``the summary says why nothing was written, or how the joined file checks ou
         ))
     AppendDialog.summary { passing with After = Some(report false); Joined = Some(joined []) }
     |> should equal "Joined 2 files into packet.pdf, but it doesn't pass PDF/UA-1: its report says why."
+
+[<Fact>]
+let ``a review not carried over is said under its own heading, not as a change made to join them`` () =
+    let review = "The review saved in garden.pdf wasn't carried over: its edits name pages by number."
+    let outcome: Append.Outcome =
+        { Refusals = []
+          Inputs = []
+          Joined = Some { joined [] with NotCarriedOver = [ review ] }
+          After = Some(report true)
+          Differences = [] }
+    AppendDialog.summary outcome
+    |> should
+        equal
+        (String.Join(
+            Environment.NewLine,
+            [ "Joined 2 files into packet.pdf. It passes PDF/UA-1, and each part reads as its file did."
+              ""
+              "Not carried over:"
+              "• " + review ]
+        ))
