@@ -127,7 +127,13 @@ let ``disconnected text is visible separately and cannot be moved as a reading-o
                 node.Geometry |> should not' (be Null)
                 StructureActions.canRetag false node |> should be False
                 StructureActions.editKinds node |> should be Empty
-                StructureActions.fixedOrder.Contains "Disconnected" |> should be True
+                let group =
+                    descendants<Border> window
+                    |> List.pick (fun border ->
+                        match border.Tag with
+                        | :? StructureNode as node when node.Kind = StructureNodeKind.Disconnected -> Some node
+                        | _ -> None)
+                StructureActions.keepsOrder group |> should be True
                 click block false
                 buttons window |> List.exists (fun label -> label = "Move Up" || label = "Move Down") |> should be False
             finally window.Close()))

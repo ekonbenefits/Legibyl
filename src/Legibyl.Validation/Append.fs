@@ -1151,7 +1151,7 @@ let differences (part: Part) (index: int) (input: StructureNode) (joined: Struct
     // The elements a reader meets, not the content outside them the reader adds (see
     // UntaggedContent.nodes).
     let children (node: StructureNode) =
-        node.Children |> Seq.filter (fun child -> child.Tag <> "NotInTags" && child.Tag <> "Disconnected" && isRead child) |> List.ofSeq
+        node.Children |> Seq.filter (fun child -> child.Kind = StructureNodeKind.Element && isRead child) |> List.ofSeq
     // An input's part: its Document's children, else its root's.
     let ownParts (root: StructureNode) =
         match children root with

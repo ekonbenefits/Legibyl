@@ -15,8 +15,6 @@ open Avalonia.Layout
 open Avalonia.Media
 open Legibyl.Validation
 
-/// The names in a structure that aren't tags: the root, the content outside the tags.
-let private notNames = set [ "StructTreeRoot"; "NotInTags"; "Disconnected"; "DisconnectedTag"; "?" ]
 
 /// A tagged PDF's own tag names its elements use, in the order first used, of those inRoleMap
 /// says its role map is for (not a PDF 2.0 file's names in another namespace, which its own map
@@ -25,7 +23,8 @@ let names (inRoleMap: string -> bool) (root: StructureNode) : (string * int * st
     let found = Collections.Generic.Dictionary<string, int * string option>()
     let order = ResizeArray<string>()
     let rec walk (node: StructureNode) =
-        if not (Tags.standard.Contains node.Tag) && not (notNames.Contains node.Tag) && inRoleMap node.Tag then
+        // Legibyl's own nodes aren't tags; "?" is an element with no tag at all.
+        if node.Kind = StructureNodeKind.Element && node.Tag <> "?" && not (Tags.standard.Contains node.Tag) && inRoleMap node.Tag then
             match found.TryGetValue node.Tag with
             | true, (uses, role) -> found[node.Tag] <- (uses + 1, role |> Option.orElse (Option.ofObj node.Role))
             | _ ->

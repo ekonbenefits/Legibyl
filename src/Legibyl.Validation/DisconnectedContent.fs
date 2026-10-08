@@ -9,8 +9,9 @@ open System
 open iText.Kernel.Pdf
 open Legibyl.Validation.StructureTreeObjects
 
-let private node tag content page geometry leaves children : StructureNode =
+let private node kind tag content page geometry leaves children : StructureNode =
     { Tag = tag
+      Kind = kind
       Role = null
       AlternateDescription = null
       ActualText = null
@@ -63,5 +64,5 @@ let nodes (pdfPath: string) (text: MarkedContentTextIndex.Index) =
                                 | null -> ()
                                 | text -> $"{label}: {text.ToUnicodeString()}" ]
                           |> String.concat "\n"
-                      yield node "DisconnectedTag" details page geometry tag.Mcids.Length [] ]
-            node "Disconnected" $"Page {page}: tied to tags that are gone" page null 0 children)
+                      yield node StructureNodeKind.DisconnectedTag "DisconnectedTag" details page geometry tag.Mcids.Length [] ]
+            node StructureNodeKind.Disconnected "Disconnected" $"Page {page}: tied to tags that are gone" page null 0 children)

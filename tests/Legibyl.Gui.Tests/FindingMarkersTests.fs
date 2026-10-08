@@ -23,6 +23,7 @@ let private rect (l, b, r, t) : StructureGeometry = { PageNumber = 1; Left = l; 
 
 let private node (tag: string) (geometry: StructureGeometry | null) (children: StructureNode list) =
     { Tag = tag
+      Kind = (if tag = "StructTreeRoot" then StructureNodeKind.Root else StructureNodeKind.Element)
       Role = null
       AlternateDescription = null
       ActualText = null

@@ -232,8 +232,9 @@ let itemGeometry (document: PdfDocument) (page: int) (content: int) (contentItem
 
 // ---- As the structure shows them ----
 
-let private node (tag: string) (content: string | null) (geometry: StructureGeometry | null) (page: int) (children: StructureNode list) : StructureNode =
+let private node (kind: StructureNodeKind) (tag: string) (content: string | null) (geometry: StructureGeometry | null) (page: int) (children: StructureNode list) : StructureNode =
     { Tag = tag
+      Kind = kind
       Role = null
       AlternateDescription = null
       ActualText = null
@@ -295,8 +296,8 @@ let nodes (pdfPath: string) : StructureNode list =
               let pieces =
                   [ for piece in found ->
                         let text = if piece.Kind = Text then textIn page piece.Box else None
-                        node "Untagged" (describe piece text (page.GetCropBox())) piece.Box n [] ]
-              node "NotInTags" $"Page {n}: not in the tags" null n pieces ]
+                        node StructureNodeKind.Untagged "Untagged" (describe piece text (page.GetCropBox())) piece.Box n [] ]
+              node StructureNodeKind.NotInTags "NotInTags" $"Page {n}: not in the tags" null n pieces ]
 
 // ---- What a person chose for them ----
 

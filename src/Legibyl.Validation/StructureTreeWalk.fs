@@ -501,6 +501,7 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
         |> Option.orElseWith (fun () -> if tag = Tags.TOCI then firstDescendantLinkTarget children else None)
 
     { Tag = tag
+      Kind = StructureNodeKind.Element
       Role = role
       AlternateDescription = nullIfEmpty (elem.getAlternateDescription ())
       ActualText = nullIfEmpty (actualTextOf elem)
@@ -583,6 +584,7 @@ let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) :
             let disconnected = try DisconnectedContent.nodes pdfPath context.TextIndex with _ -> []
             let children = Array.concat [tagged; Array.ofList outside; Array.ofList disconnected]
             { Tag = "StructTreeRoot"
+              Kind = StructureNodeKind.Root
               Role = null
               AlternateDescription = null
               ActualText = null

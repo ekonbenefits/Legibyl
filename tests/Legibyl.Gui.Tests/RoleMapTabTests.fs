@@ -17,6 +17,7 @@ let private rect top : StructureGeometry =
 
 let private node (tag: string) (role: string | null) (geometry: StructureGeometry | null) (children: StructureNode list) =
     { Tag = tag
+      Kind = (if tag = "StructTreeRoot" then StructureNodeKind.Root else StructureNodeKind.Element)
       Role = role
       AlternateDescription = null
       ActualText = null
@@ -104,6 +105,15 @@ let ``the Role map tab lists the PDF's own tag names, what they're mapped to, an
             first |> should equal "Not chosen"
             chosen |> should equal (Map.ofList [ "Zorp", "P" ])
             cleared.IsEmpty |> should be True))
+
+[<Fact>]
+let ``a PDF's own tag named like one of Legibyl's own nodes is listed, and Legibyl's own nodes aren't`` () =
+    let outside =
+        { node "NotInTags" null null [ { node "Untagged" null (rect 500.0) [] with Kind = StructureNodeKind.Untagged } ] with
+            Kind = StructureNodeKind.NotInTags }
+    let tree =
+        node "StructTreeRoot" null null [ node "Document" null null [ node "Untagged" null (rect 700.0) []; node "NotInTags" null (rect 680.0) [] ]; outside ]
+    StructureRoleMapTab.names (fun _ -> true) tree |> should equal [ "Untagged", 1, (None: string option); "NotInTags", 1, None ]
 
 [<Fact>]
 let ``a PDF that uses only standard tags has no Role map tab`` () =

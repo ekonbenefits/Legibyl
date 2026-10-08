@@ -16,6 +16,7 @@ open Legibyl.Gui.Tests.HeadlessSession
 
 let private node (tag: string) (children: StructureNode list) =
     { Tag = tag
+      Kind = (if tag = "StructTreeRoot" then StructureNodeKind.Root else StructureNodeKind.Element)
       Role = null
       AlternateDescription = null
       ActualText = null

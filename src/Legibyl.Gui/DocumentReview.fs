@@ -401,6 +401,7 @@ type ReviewedLayout(prefetcher: LayoutPrefetcher, review: DocumentReview) =
 module SuggestedTree =
     let private node (tag: string) (geometry: StructureGeometry | null) (children: StructureNode list) : StructureNode =
         { Tag = tag
+          Kind = StructureNodeKind.Element
           Role = null
           AlternateDescription = null
           ActualText = null
@@ -482,4 +483,4 @@ module SuggestedTree =
 
     /// The whole document: a Document element holding every page found so far, in order.
     let build (pages: StructureNode list seq) : StructureNode =
-        node "StructTreeRoot" null [ node Tags.Document null (List.concat pages) ]
+        { node "StructTreeRoot" null [ node Tags.Document null (List.concat pages) ] with Kind = StructureNodeKind.Root }
