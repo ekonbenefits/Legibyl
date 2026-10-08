@@ -33,6 +33,23 @@ let private fileMenu (window: Window) =
           | :? NativeMenuItem as item -> item.Header |> string, item
           | _ -> () ]
 
+let private descendants<'T when 'T :> Avalonia.Visual> (root: Avalonia.Visual) : 'T list =
+    Avalonia.VisualTree.VisualExtensions.GetVisualDescendants root
+    |> Seq.choose (fun v -> match box v with :? 'T as c -> Some c | _ -> None)
+    |> List.ofSeq
+
+/// Closes window, answering Don't Save if it asks, and waits until it's gone; whether it asked.
+let private closeWithoutSaving (window: Window) =
+    window.Close()
+    HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> window.OwnedWindows.Count > 0 || not window.IsVisible) |> ignore
+    let asked = window.OwnedWindows |> Seq.exists (fun owned -> owned.Title = "Save Your Review?")
+    for owned in List.ofSeq window.OwnedWindows do
+        if owned.Title = "Save Your Review?" then
+            (descendants<Button> owned |> List.find (fun b -> string b.Content = "Don't Save"))
+                .RaiseEvent(Avalonia.Interactivity.RoutedEventArgs Button.ClickEvent)
+    HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 5.0) (fun () -> not window.IsVisible) |> ignore
+    asked
+
 [<Fact>]
 let ``another PDF opens in its own window, and one already open is brought forward`` () =
     withTwoPdfs (fun first second ->
@@ -65,14 +82,15 @@ let ``the File menu opens, closes, saves and exports, in step with the buttons``
             let items = fileMenu window
             let enabled name = (items |> List.find (fst >> (=) name) |> snd).IsEnabled
             let saveAtFirst, exportAtFirst = enabled "Save", enabled "Export…"
-            window.Close()
-            for asked in List.ofSeq window.OwnedWindows do asked.Close()
+            closeWithoutSaving window |> ignore
+            let closed = not window.IsVisible
 
             items |> List.map fst |> should equal [ "Open…"; "Open Recent"; "Append PDFs…"; "Close Window"; "Save"; "Export…" ]
             // The validation just run, of a PDF with things to do, is kept by Save (see
             // SavedResults); nothing to export until there's a change or a fix chosen.
             saveAtFirst |> should be True
-            exportAtFirst |> should be False))
+            exportAtFirst |> should be False
+            closed |> should be True))
 
 [<Fact>]
 let ``a PDF that passes with nothing to do opens with nothing to save, and closes without asking`` () =
@@ -82,15 +100,64 @@ let ``a PDF that passes with nothing to do opens with nothing to save, and close
             HeadlessWindow.openPdf window passing
             let save = (fileMenu window |> List.find (fst >> (=) "Save") |> snd).IsEnabled
             let title = window.Title
-            window.Close()
-            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> window.OwnedWindows.Count > 0) |> ignore
-            let asked = [ for owned in window.OwnedWindows -> owned.Title ]
-            for owned in List.ofSeq window.OwnedWindows do owned.Close()
-
+            let asked = closeWithoutSaving window
             title |> should equal "pdfua1-pass.pdf — Legibyl"
             save |> should be False
-            asked |> should be Empty
+            asked |> should be False
             window.IsVisible |> should be False))
+
+/// A PDF/UA-1 file (iText's PDF/UA support makes it so): a heading and a paragraph, and no
+/// bookmarks, which Legibyl warns about (Structure-7).
+let private createPassingWithWarning (pdf: string) =
+    use document =
+        new iText.Pdfua.PdfUADocument(
+            new iText.Kernel.Pdf.PdfWriter(pdf),
+            iText.Pdfua.PdfUAConfig(iText.Kernel.Pdf.PdfUAConformance.PDF_UA_1, "The Community Garden", "en-US")
+        )
+    let font =
+        iText.Kernel.Font.PdfFontFactory.CreateFont(
+            Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "fonts", "Lato-Regular.ttf"),
+            iText.IO.Font.PdfEncodings.WINANSI,
+            iText.Kernel.Font.PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED
+        )
+    use layout = new iText.Layout.Document(document)
+    layout.SetFont font |> ignore
+    let heading = iText.Layout.Element.Paragraph "The Community Garden"
+    heading.GetAccessibilityProperties().SetRole(iText.Kernel.Pdf.Tagging.StandardRoles.H1) |> ignore
+    layout.Add heading |> ignore
+    layout.Add(iText.Layout.Element.Paragraph "Open to every resident of the neighbourhood, whatever they grow.") |> ignore
+
+[<Fact>]
+let ``a PDF that passes with its warnings dismissed opens with nothing to save, until a person changes something`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    try
+        let pdf = Path.Combine(folder, "garden.pdf")
+        createPassingWithWarning pdf
+        // Its warning dismissed, and saved, with no validation kept: opening it validates it.
+        Reviews.save pdf (fun review ->
+            review.Dismissed <- Map [ { Dismissals.Rule = "Legibyl Structure-7"; Dismissals.Location = Dismissals.AnyLocation }, "No bookmarks" ])
+        onUiThread (fun () ->
+            DocumentShell.Shared.Reviews.Forget pdf
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let save () = (fileMenu window |> List.find (fst >> (=) "Save") |> snd).IsEnabled
+            let titleAtFirst, saveAtFirst = window.Title, save ()
+            // A step of the checklist ticked: a change a person made.
+            let step = descendants<Border> window |> List.find (fun b -> (b.Tag :? string) && string b.Tag = "step-title")
+            (descendants<CheckBox> step |> List.exactlyOne).IsChecked <- true
+            HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+            let titleAfter, saveAfter = window.Title, save ()
+            let asked = closeWithoutSaving window
+
+            titleAtFirst |> should equal "garden.pdf — Legibyl"
+            saveAtFirst |> should be False
+            titleAfter |> should equal "garden.pdf — Edited — Legibyl"
+            saveAfter |> should be True
+            asked |> should be True
+            window.IsVisible |> should be False)
+    finally
+        Directory.Delete(folder, true)
 
 [<Fact>]
 let ``a PDF asked for before the window is shown opens once it is, in an empty window first`` () =
