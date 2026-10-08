@@ -748,11 +748,14 @@ tag. The page looks the same.
 - **What it refuses, saying why:** a region that takes only part of a paragraph
   or other tag; content in more than one tag, or marked inside other marked
   content; a form (a drawing reused from elsewhere, which can carry its own
-  tags); a link, form field or other annotation; a shading (gradient) in the
-  selection, whose extent can't be measured; an image that can't be read;
-  turned (rotated) pages and pages whose visible area is offset. Shadings
-  elsewhere on the page are left as they are. Replacement text on the selected
-  content gives way to your alt text, and the preview says so.
+  tags); a link, form field or other annotation; something drawn in the region
+  that's only partly marked, or that can't be measured (an image that can't be
+  read); a place for the Figure that can't take one (straight in a table's row,
+  say); turned (rotated) pages and pages whose visible area is offset. A shading
+  (gradient) is measured by the clip it's painted in, like anything else.
+  Replacement text on the selected content gives way to your alt text, and a
+  language it all says goes on the Figure; the preview says what's going in, and
+  what in the region is left out.
 
 It's an edit you make, not an auto fix: **Save** keeps it in the review,
 **Export…** makes it in a copy, and **Remove** in the Edits tab undoes it. The

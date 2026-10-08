@@ -707,12 +707,15 @@ let otherActions (needs: SelectionNeeds) : Action list =
           && (nodes |> List.map (fun n -> (nonNull n.Geometry).PageNumber) |> List.distinct |> List.length) = 1
           ->
           let boxes = nodes |> List.map (fun n -> nonNull n.Geometry)
+          // Round what they draw, with room: the elements' boxes are their glyphs' tight boxes,
+          // while what goes in is measured by the font's whole height and a stroke's width.
+          let room = 4.0
           let region =
               { PageNumber = boxes.Head.PageNumber
-                Left = boxes |> List.map _.Left |> List.min
-                Bottom = boxes |> List.map _.Bottom |> List.min
-                Right = boxes |> List.map _.Right |> List.max
-                Top = boxes |> List.map _.Top |> List.max }
+                Left = max 0.0 ((boxes |> List.map _.Left |> List.min) - room)
+                Bottom = max 0.0 ((boxes |> List.map _.Bottom |> List.min) - room)
+                Right = (boxes |> List.map _.Right |> List.max) + room
+                Top = (boxes |> List.map _.Top |> List.max) + room }
           action
               "Replace with Figure…"
               "Make what the selection draws one Figure, with alt text you give: for a chart or diagram tagged as many paragraphs and spans. The same as drawing a region round it (Replace Structure with Figure from Region…)."
