@@ -494,6 +494,9 @@ type LayoutSuggester(pdfPath: string) =
         lazy (if TableModel.isDownloaded () then Some(new Microsoft.ML.OnnxRuntime.InferenceSession(TableModel.path ())) else None)
     // How far round a table its picture reaches, in points: the model looks for one with a margin.
     let tableMargin = 6.0
+    // A tagged table's region is its text's box, tighter than the detector's; with only
+    // tableMargin round it, the model misses rows (a 4-row label/value block was found as 2).
+    let taggedTableMargin = 12.0
     // OCR wants more pixels than the detector: about 300 dpi.
     let ocrScale = 4.0
     // QR codes are scanned at 400 dpi, as qr-link-pdf does: stylised codes (rounded modules,
@@ -535,11 +538,11 @@ type LayoutSuggester(pdfPath: string) =
     /// The cells the table-structure model finds in a table's region on the page (rendered at
     /// bitmap's ocrScale; crop the page's crop box), each a header cell or not and where it is,
     /// in reading order: rows down the page, then across. None without the model.
-    let cellsIn (bitmap: SKBitmap) (crop: UglyToad.PdfPig.Core.PdfRectangle) (pageNumber: int) (g: StructureGeometry) =
+    let cellsIn (bitmap: SKBitmap) (crop: UglyToad.PdfPig.Core.PdfRectangle) (pageNumber: int) (margin: float) (g: StructureGeometry) =
         match tables.Value with
         | None -> None
         | Some session ->
-            let framed = { g with Left = g.Left - tableMargin; Right = g.Right + tableMargin; Top = g.Top + tableMargin; Bottom = g.Bottom - tableMargin }
+            let framed = { g with Left = g.Left - margin; Right = g.Right + margin; Top = g.Top + margin; Bottom = g.Bottom - margin }
             // Where the picture's top-left is in the page's rendering (as readRegions crops it).
             let left = max 0 (int (Math.Round((framed.Left - crop.Left) * ocrScale)))
             let top = max 0 (int (Math.Round((crop.Top - framed.Top) * ocrScale)))
@@ -571,7 +574,28 @@ type LayoutSuggester(pdfPath: string) =
                 raise (InvalidOperationException "its page is turned (rotated), which finding a table's cells doesn't handle yet")
             let crop = page.CropBox.Bounds
             use bitmap = pages.Render(pageNumber, float32 ocrScale)
-            cellsIn bitmap crop pageNumber region)
+            cellsIn bitmap crop pageNumber taggedTableMargin region)
+
+    /// The text in each of cells on pageNumber: the page's words in it, else (text drawn as
+    /// outlines or pixels, or a font without its characters' Unicode) what OCR reads there.
+    member _.CellTexts(pageNumber: int, cells: StructureGeometry list) : string list =
+        lock gate (fun () ->
+            let page = document.GetPage pageNumber
+            if page.Rotation.Value % 360 <> 0 || cells.IsEmpty then
+                cells |> List.map (fun _ -> "")
+            else
+                let words =
+                    [ for word in page.GetWords() do
+                          let centre = word.BoundingBox.Centroid
+                          yield word.Text, (centre.X, centre.Y) ]
+                let texts = LayoutSuggestions.assignText cells words
+                if texts |> List.forall ((<>) "") then
+                    texts
+                else
+                    use bitmap = pages.Render(pageNumber, float32 ocrScale)
+                    let read =
+                        readRegions bitmap ocrScale page.CropBox.Bounds [ for text, g in List.zip texts cells -> (if text = "" then Some recognize else None), g ]
+                    [ for text, read in List.zip texts read -> defaultArg read text ])
 
     /// Detects pageNumber's regions. The model must be downloaded (see LayoutModel).
     member _.Suggest(pageNumber: int) : PageSuggestion =
@@ -680,7 +704,7 @@ type LayoutSuggester(pdfPath: string) =
                     [ for block in blocks do
                           yield block
                           if block.Tag = "Table" then
-                              match cellsIn bitmap crop pageNumber block.Geometry with
+                              match cellsIn bitmap crop pageNumber tableMargin block.Geometry with
                               | Some cells when not cells.IsEmpty ->
                                   let texts = LayoutSuggestions.assignText (List.map snd cells) words
                                   let read =
