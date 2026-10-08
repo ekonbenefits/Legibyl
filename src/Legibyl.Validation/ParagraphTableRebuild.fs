@@ -19,7 +19,9 @@ type private Conversion =
 
 let private standaloneKeys = [ PdfName.ActualText; PdfName.Alt; PdfName.E; PdfName.ID ]
 
-let private spaced (text: string) = Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim()
+// Spacing is left out entirely, not just evened: the drawn text is read kid by kid, with a space
+// between kids, so a row tagged a glyph to a span ("3", "4", "0", "%") reads "3 4 0 %".
+let private unspaced (text: string) = Text.RegularExpressions.Regex.Replace(text, @"\s+", "")
 
 /// Whether paragraph's replacement text (/ActualText) says only what its content draws, spacing
 /// aside: then it adds nothing, and nothing is lost when the paragraph's content is split among
@@ -28,8 +30,8 @@ let private redundantActualText context page (paragraph: PdfStructElem) =
     match paragraph.GetPdfObject().GetAsString PdfName.ActualText with
     | null -> false
     | text ->
-        let drawn = spaced (extractText (paragraph.GetPdfObject().Get PdfName.K) context (Some page))
-        drawn <> "" && spaced (text.ToUnicodeString()) = drawn
+        let drawn = unspaced (extractText (paragraph.GetPdfObject().Get PdfName.K) context (Some page))
+        drawn <> "" && unspaced (text.ToUnicodeString()) = drawn
 
 /// Whether paragraph says something of its own the cells it's split among couldn't: replacement
 /// text other than what it draws, alt text, an expansion, or an ID something may refer to.
