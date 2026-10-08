@@ -191,3 +191,28 @@ let ``a figure drawn as an inline image draws something, and stays`` () =
 
     emptyFigureWarnings input.Path |> should be Empty
     result.WasFixed |> should be False
+
+[<Fact>]
+let ``a figure whose marked content carries replacement text isn't taken for one that draws nothing`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    do
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(input.Path))
+        document.SetTagged() |> ignore
+        let page = document.AddNewPage()
+        let top = iText.Kernel.Pdf.Tagging.PdfStructElem(document, iText.Kernel.Pdf.PdfName.Document)
+        document.GetStructTreeRoot().AddKid top |> ignore
+        let figure = iText.Kernel.Pdf.Tagging.PdfStructElem(document, iText.Kernel.Pdf.PdfName.Figure, page)
+        top.AddKid figure |> ignore
+        figure.AddKid(iText.Kernel.Pdf.Tagging.PdfMcrNumber(page, figure)) |> ignore
+        let properties = iText.Kernel.Pdf.PdfDictionary()
+        properties.Put(iText.Kernel.Pdf.PdfName.MCID, iText.Kernel.Pdf.PdfNumber 0) |> ignore
+        properties.Put(iText.Kernel.Pdf.PdfName.ActualText, iText.Kernel.Pdf.PdfString "Sales rose 12%.") |> ignore
+        // Only a clip: nothing painted, but the marked content says what it is.
+        iText.Kernel.Pdf.Canvas.PdfCanvas(page).BeginMarkedContent(iText.Kernel.Pdf.PdfName.Figure, properties)
+            .SaveState().Rectangle(72.0, 600.0, 30.0, 30.0).Clip().EndPath().RestoreState().EndMarkedContent() |> ignore
+
+    VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).Assertions
+    |> Seq.filter (fun a -> a.Specification = "Legibyl" && a.TestNumber = 11)
+    |> should be Empty
+    (VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.EmptyFigures)).WasFixed |> should be False
