@@ -426,6 +426,11 @@ let private paragraphTableIsBuilt document context (edit: ElementEdit) =
     |> List.exists (fun (_, table) -> TableRebuild.rebuilt table context edit.Page edit.Cells)
 
 let internal apply (document: PdfDocument) context (edits: ElementEdit list) : string list =
+    let figures, edits = edits |> List.partition (fun e -> e.Tag = FigureRegion.Tag)
+    // Original refusals are reported by unapplied. A valid operation can also be refused
+    // after another edit changed its content; apply reports that in the context's notes.
+    let figures =
+        figures |> List.filter (fun e -> FigureRegion.already document context e || (FigureRegion.plan document context e |> Result.isOk))
     // Content outside every tag first: it looks up the elements drawn before it, as they are.
     let outside, edits = edits |> List.partition isUntagged
     // (Text asked to be made decoration isn't: unapplied says why.)
@@ -472,8 +477,10 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     // Last, once nothing else will change what's where: elements moved among their siblings.
     let moved = moveElements document context (found |> List.filter (fun (e, _) -> e.Move.IsSome))
     let count = applied.Length + runs.Length + artifacts.Length + outsideWritten
+    let figuresWritten = figures |> List.filter (FigureRegion.apply document context) |> List.length
     // Those that don't apply are said by unapplied, one by one.
     [ if rebuilt.Length > 0 then $"Rebuilt {rebuilt.Length} table(s)' rows and cells from the page, as you checked them."
+      if figuresWritten > 0 then $"Replaced structure in {figuresWritten} selected region(s) with a Figure and your alt text, preserving the artwork."
       yield! converted
       if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)."
       if moved > 0 then $"Put {moved} element(s) in the reading order you gave them." ]
@@ -544,6 +551,7 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
     else
         use document = new PdfDocument(new PdfReader(pdfPath))
         let context = createContext document pdfPath
+        let figures, edits = edits |> List.partition (fun e -> e.Tag = FigureRegion.Tag)
         let outside, edits = edits |> List.partition isUntagged
         let outsideFound = untaggedPieces document outside
         let paragraphTables, edits = edits |> List.partition isParagraphTable
@@ -554,7 +562,14 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
         let found = findIn document context (boxesOf merges) edits
         let moves = found |> List.filter (fun (e, _) -> e.Move.IsSome)
         let moving = movedElements document context moves
-        [ for edit in tables do
+        [ for edit in figures do
+              if FigureRegion.already document context edit then
+                  $"Your Figure from region on page {edit.Page} changed nothing: it is in this PDF already."
+              else
+                  match FigureRegion.plan document context edit with
+                  | Error reason -> $"Your Figure from region on page {edit.Page} wasn't applied: {reason}."
+                  | Ok _ -> ()
+          for edit in tables do
               match tablesFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
               | None -> $"Your rebuild of the {describe edit} wasn't applied: no <{edit.Tag}> is in about that place."
               | Some(_, table) ->
@@ -603,6 +618,7 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
     else
         use document = new PdfDocument(new PdfReader(pdfPath))
         let context = createContext document pdfPath
+        let figures, edits = edits |> List.partition (fun e -> e.Tag = FigureRegion.Tag)
         let outside, edits = edits |> List.partition isUntagged
         let paragraphTables, edits = edits |> List.partition isParagraphTable
         let tables, edits = edits |> List.partition (fun e -> not e.Cells.IsEmpty)
@@ -620,7 +636,8 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
                 not (paragraphTableIsBuilt document context edit)
                 && (mergeRun document context edit
                     |> Option.exists (fun run -> ParagraphTableRebuild.canConvert context run edit.Cells)))
-        rebuilding.Length
+        (figures |> List.filter (fun e -> not (FigureRegion.already document context e) && (FigureRegion.plan document context e |> Result.isOk)) |> List.length)
+        + rebuilding.Length
         + conversions.Length
         +
         // (Text asked to be made decoration never is.)
@@ -629,3 +646,15 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         + (let found = findIn document context (boxesOf merges) edits
            let moving = movedElements document context (found |> List.filter (fun (e, _) -> e.Move.IsSome))
            found |> List.filter (fun ((_, element) as pair) -> not (changes pair).IsEmpty || moving.Contains element) |> List.length)
+
+/// A safe, read-only preview of a person-selected Figure region. Refusals explain what
+/// needs review; Export and CLI --edits run the same preflight again.
+let figureRegionPreview (pdfPath: string) (box: StructureGeometry) : Result<string, string> =
+    try
+        use document = new PdfDocument(new PdfReader(pdfPath))
+        let context = createContext document pdfPath
+        let edit: ElementEdit =
+            { Page = box.PageNumber; Tag = FigureRegion.Tag; Box = box; Alt = "preview"; Text = null
+              MergeWith = []; Retag = "Figure"; Exclude = false; Move = None; Cells = [] }
+        FigureRegion.plan document context edit |> Result.map _.Summary
+    with ex -> Error $"the PDF couldn't be read: {ex.Message}"

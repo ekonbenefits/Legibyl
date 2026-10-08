@@ -74,6 +74,9 @@ module private StructureView =
 
     /// Over an element on the page preview, to say it can be clicked.
     let private handCursor = lazy (new Cursor(StandardCursorType.Hand))
+    let private crossCursor = lazy (new Cursor(StandardCursorType.Cross))
+    /// A figure region's outline dashes (structure outlines are solid).
+    let private figureDashes = Collections.AvaloniaList<float>([ 4.0; 2.0 ])
 
     /// Edits change review (Save in the main window keeps it); onEditsChanged is called after each
     /// (so the main window can count them). For a suggested layout, prefetcher finds its pages and
@@ -160,6 +163,13 @@ module private StructureView =
             // The page the preview shows, if any.
             let shownPage = ctx.useState ((None: int option), false)
             let previewImage = ctx.useState (None: Bitmap option)
+            let drawingFigure = ctx.useState false
+            // A figure region being drawn or confirmed, in PDF points: where the drag began, and
+            // the box so far (outlined, dashed, over the preview).
+            let figureStart = ctx.useState (None: (float * float) option)
+            let figureBox = ctx.useState (None: StructureGeometry option)
+            // The page preview's laid-out size, to place that outline on it.
+            let previewSize = ctx.useState (Size(), false)
             // For a link: the page it goes to, with its destination marked in blue.
             let targetImage = ctx.useState (None: Bitmap option)
             let targetNote = ctx.useState ""
@@ -340,6 +350,49 @@ module private StructureView =
                     onEditsChanged ()
                     // The overview labels elements as edited.
                     showPage selected.Current
+                }
+
+            let figureFromRegion (box: StructureGeometry) =
+                task {
+                    let title = "Replace Structure with Figure from Region"
+                    let! preview =
+                        Task.Run(fun () ->
+                            match ElementEdits.figureRegionPreview sourceFilePath box with
+                            | Error reason -> Error reason
+                            | Ok summary ->
+                                // The page alone, so the dashed outline over it is all that's marked.
+                                try Ok(summary, renderer.RenderPageWithRegions(sourceFilePath, box.PageNumber, Seq.empty<PageRegion>, previewScale))
+                                with ex -> Error $"the selected region couldn't be rendered: {ex.Message}")
+                    let finish () =
+                        figureBox.Set None
+                        showPage selected.Current
+                    match preview with
+                    | Error reason ->
+                        do! Dialogs.showMessage window $"This region can't be replaced: {reason}." title
+                        finish ()
+                    | Ok(summary, bytes) ->
+                        use stream = new MemoryStream(bytes)
+                        let image = new Bitmap(stream)
+                        // Not replaced by a page render still on its way.
+                        previewVersion.Set(previewVersion.Current + 1)
+                        previewImage.Set(Some image)
+                        figureBox.Set(Some box)
+                        previewNote.Set $"Selected region on page {box.PageNumber}, outlined with dashes. Check the artwork inside it before confirming."
+                        let! alt = Dialogs.promptText window title
+                                       (summary + "\n\nWhole indivisible items are included when each of their painted boxes is more than 50% covered by the dashed rectangle; items at 50% or less are left out. The whole item is kept, including any part extending beyond the rectangle, and those painted boxes are listed above. Check that no included item is an article paragraph. The visible artwork stays unchanged. Enter the alt text a screen reader should announce:")
+                                       "" "Describe the chart's meaning"
+                        match alt with
+                        | Some text when not (String.IsNullOrWhiteSpace text) ->
+                            let! confirmed = Dialogs.showMessageWithAction window
+                                                ($"Replace the selected content with one Figure described as:\n\n{text}\n\nIt goes at the first selected content's place in reading order. This is a pending edit: Save keeps it in the review; Export… applies it to a copy. Remove it in the Edits tab to undo.")
+                                                title "Replace Structure"
+                            figureBox.Set None
+                            if confirmed then do! saveEdits (RegionEdits.replaceWithFigure edits.Current box text)
+                            else showPage selected.Current
+                        | Some _ ->
+                            do! Dialogs.showMessage window "Alt text is required; no edit was added." title
+                            finish ()
+                        | None -> finish ()
                 }
 
             let editNode (node: StructureNode) (kind: EditKind) =
@@ -1160,6 +1213,20 @@ module private StructureView =
                                         AttrBuilder<TextBlock>.CreateProperty<int>(Automation.AutomationProperties.HeadingLevelProperty, 2, ValueNone)
                                     ]
                                     if not isSuggested then StructureActions.pageOrderButtons (orderNeeds ())
+                                    if not isSuggested then
+                                        Button.create [
+                                            Button.content (if drawingFigure.Current then "Cancel Drawing Figure Region" else "Replace Structure with Figure from Region…")
+                                            Button.isEnabled shownPage.Current.IsSome
+                                            ToolTip.tip "Draw around the chart or illustration, including its labels. An item is included only if every painted box is more than 50% covered; items at 50% or less are left out. Export applies the pending edit to a copy."
+                                            Button.onClick (fun _ ->
+                                                let drawing = not drawingFigure.Current
+                                                drawingFigure.Set drawing
+                                                figureStart.Set None
+                                                figureBox.Set None
+                                                if drawing then
+                                                    previewNote.Set "Drag a rectangle around the whole figure on the page preview."
+                                                else showPage selected.Current)
+                                        ]
                                     TextBlock.create [
                                         TextBlock.text previewNote.Current
                                         TextBlock.textWrapping TextWrapping.Wrap
@@ -1179,19 +1246,35 @@ module private StructureView =
                                         Border.borderThickness 1.0
                                         Border.padding 6.0
                                         Border.child (
+                                          // Sized to the image, so the outline's canvas shares its coordinates.
+                                          Grid.create [
+                                           Grid.horizontalAlignment HorizontalAlignment.Center
+                                           Grid.verticalAlignment VerticalAlignment.Center
+                                           Grid.children [
                                             Image.create [
                                                 match image with
                                                 | Some image -> Image.source image
                                                 | None -> ()
                                                 Image.stretch Stretch.Uniform
                                                 if clickable then
+                                                    Image.onSizeChanged ((fun e -> previewSize.Set e.NewSize), SubPatchOptions.Always)
                                                     Image.onPointerPressed (
                                                         (fun e ->
-                                                            match previewNodeAt e with
-                                                            | Some(image, node) when e.GetCurrentPoint(image).Properties.IsLeftButtonPressed ->
-                                                                e.Handled <- true
-                                                                selectNode node (e.KeyModifiers.HasFlag KeyModifiers.Shift)
-                                                            | _ -> ()),
+                                                            match e.Source, previewImage.Current with
+                                                            | (:? Image as image), Some bitmap when drawingFigure.Current && e.GetCurrentPoint(image).Properties.IsLeftButtonPressed ->
+                                                                match shownPage.Current, pointOnPage image bitmap (e.GetPosition image) with
+                                                                | Some page, Some(x, y) ->
+                                                                    figureStart.Set(Some(x, y))
+                                                                    figureBox.Set(Some { PageNumber = page; Left = x; Bottom = y; Right = x; Top = y })
+                                                                    e.Pointer.Capture image
+                                                                    e.Handled <- true
+                                                                | _ -> ()
+                                                            | _ ->
+                                                                match previewNodeAt e with
+                                                                | Some(image, node) when e.GetCurrentPoint(image).Properties.IsLeftButtonPressed ->
+                                                                    e.Handled <- true
+                                                                    selectNode node (e.KeyModifiers.HasFlag KeyModifiers.Shift)
+                                                                | _ -> ()),
                                                         SubPatchOptions.Always
                                                     )
                                                     // A hand over an element, to say it can be clicked.
@@ -1199,12 +1282,74 @@ module private StructureView =
                                                         (fun e ->
                                                             match e.Source with
                                                             | :? Image as image ->
-                                                                let cursor = if (previewNodeAt e).IsSome then handCursor.Value else Cursor.Default
+                                                                if drawingFigure.Current then
+                                                                    match figureStart.Current, shownPage.Current, previewImage.Current with
+                                                                    | Some(x1, y1), Some page, Some bitmap ->
+                                                                        match pointOnPageClamped image bitmap (e.GetPosition image) with
+                                                                        | Some(x2, y2) ->
+                                                                            figureBox.Set(Some { PageNumber = page; Left = min x1 x2; Bottom = min y1 y2; Right = max x1 x2; Top = max y1 y2 })
+                                                                        | None -> ()
+                                                                    | _ -> ()
+                                                                let cursor = if drawingFigure.Current then crossCursor.Value elif (previewNodeAt e).IsSome then handCursor.Value else Cursor.Default
                                                                 if not (obj.ReferenceEquals(image.Cursor, cursor)) then image.Cursor <- cursor
                                                             | _ -> ()),
                                                         SubPatchOptions.Always
                                                     )
+                                                    Image.onPointerReleased (
+                                                        (fun e ->
+                                                            match e.Source, figureStart.Current, shownPage.Current, previewImage.Current with
+                                                            | (:? Image as image), Some(x1, y1), Some page, Some bitmap ->
+                                                                let finish = pointOnPageClamped image bitmap (e.GetPosition image)
+                                                                e.Pointer.Capture null
+                                                                figureStart.Set None
+                                                                drawingFigure.Set false
+                                                                e.Handled <- true
+                                                                match finish with
+                                                                | Some(x2, y2) when abs (x2 - x1) >= 2.0 && abs (y2 - y1) >= 2.0 ->
+                                                                    let box = { PageNumber = page; Left = min x1 x2; Bottom = min y1 y2; Right = max x1 x2; Top = max y1 y2 }
+                                                                    // Kept outlined while it's confirmed.
+                                                                    figureBox.Set(Some box)
+                                                                    figureFromRegion box |> ignore
+                                                                | _ ->
+                                                                    figureBox.Set None
+                                                                    previewNote.Set "No edit added: draw a rectangle on the page, at least 2 points wide and high."
+                                                            | _ -> ()),
+                                                        SubPatchOptions.Always
+                                                    )
                                             ]
+                                            // The figure region, dashed (unlike the solid outlines of elements), on a
+                                            // canvas: it doesn't take part in layout, so drawing it never moves the page.
+                                            if clickable then
+                                                Canvas.create [
+                                                    Canvas.isHitTestVisible false
+                                                    Canvas.useLayoutRounding false
+                                                    Canvas.children [
+                                                        match figureBox.Current, previewImage.Current with
+                                                        | Some box, Some bitmap when shownPage.Current = Some box.PageNumber && previewSize.Current.Width > 0.0 ->
+                                                            let topLeft = pageToPreview previewSize.Current bitmap (box.Left, box.Top)
+                                                            let bottomRight = pageToPreview previewSize.Current bitmap (box.Right, box.Bottom)
+                                                            // A white rule under black dashes, to show on any artwork.
+                                                            for brush, thickness, dashed in [ Brushes.White, 4.0, false; Brushes.Black, 2.0, true ] do
+                                                                Rectangle.create [
+                                                                    Shapes.Rectangle.tag "FigureRegionOutline"
+                                                                    Shapes.Rectangle.isHitTestVisible false
+                                                                    // Exactly where the pointer is, not rounded to a pixel.
+                                                                    Shapes.Rectangle.useLayoutRounding false
+                                                                    Canvas.left (topLeft.X - thickness / 2.0)
+                                                                    Canvas.top (topLeft.Y - thickness / 2.0)
+                                                                    Shapes.Rectangle.width (bottomRight.X - topLeft.X + thickness)
+                                                                    Shapes.Rectangle.height (bottomRight.Y - topLeft.Y + thickness)
+                                                                    Shapes.Rectangle.stroke brush
+                                                                    Shapes.Rectangle.strokeThickness thickness
+                                                                    if dashed then
+                                                                        AttrBuilder<Shapes.Rectangle>.CreateProperty<Collections.AvaloniaList<float> | null>(
+                                                                            Shapes.Shape.StrokeDashArrayProperty, figureDashes, ValueNone)
+                                                                ]
+                                                        | _ -> ()
+                                                    ]
+                                                ]
+                                           ]
+                                          ]
                                         )
                                     ]
                                 Grid.create [

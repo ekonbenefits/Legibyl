@@ -67,6 +67,10 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
 let setCells edits page tag box (cells: TableCell list) =
     update edits page tag box (fun e -> { e with Cells = cells })
 
+/// A selected page rectangle, not the box of a wrapper in the structure tree.
+let replaceWithFigure (edits: Edit list) (box: StructureGeometry) (alt: string) =
+    update edits box.PageNumber "FigureRegion" box (fun e -> { e with Alt = Some alt; Retag = Some "Figure" })
+
 /// A figure's alt text set, or removed if blank.
 let setAlt edits page tag box (alt: string) =
     update edits page tag box (fun e -> { e with Alt = (if String.IsNullOrWhiteSpace alt then None else Some alt) })
