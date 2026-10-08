@@ -35,11 +35,11 @@ let onRegions (edits: ElementEdit list) (regions: LayoutRegion seq) : LayoutRegi
           | Some edit ->
               let region =
                   match edit.Retag with
-                  | NonNull tag -> { region with Tag = tag; ListNumbering = (if tag = "LI" then region.ListNumbering else null) }
+                  | NonNull tag -> { region with Tag = tag; ListNumbering = (if tag = Tags.LI then region.ListNumbering else null) }
                   | Null -> region
               let region =
                   match edit.Alt with
-                  | NonNull alt when region.Tag = "Figure" && not (String.IsNullOrWhiteSpace alt) -> { region with Alt = alt }
+                  | NonNull alt when region.Tag = Tags.Figure && not (String.IsNullOrWhiteSpace alt) -> { region with Alt = alt }
                   | _ -> region
               match edit.Text with
               | NonNull text when not (isNull region.ActualText) ->
@@ -137,7 +137,7 @@ let private findIn (document: PdfDocument) context (boxes: ElementEdit -> Struct
                   let page =
                       visit.Page
                       |> Option.orElseWith (fun () ->
-                          if List.contains "Table" names && wanted |> Set.exists (fun (_, tag) -> tag = "Table") then
+                          if List.contains Tags.Table names && wanted |> Set.exists (fun (_, tag) -> tag = Tags.Table) then
                               subtreeGeometry visit.Element context None |> Option.map _.PageNumber
                           else
                               None)
@@ -166,15 +166,15 @@ let private textOf (element: PdfDictionary) (key: PdfName) =
 
 /// Whether an edit is for a link, whose "alt text" is its description: its annotation's
 /// /Contents, which is what readers announce, rather than the element's /Alt.
-let private isLink (edit: ElementEdit) = edit.Tag = "Link" || edit.Retag = "Link"
+let private isLink (edit: ElementEdit) = edit.Tag = Tags.Link || edit.Retag = Tags.Link
 
 /// Whether an edit is for another annotation's element (a comment, a stamp, a highlight), whose
 /// "alt text" is its description, its annotation's /Contents, as a link's is.
-let private isAnnotation (edit: ElementEdit) = edit.Tag = "Annot" || edit.Retag = "Annot"
+let private isAnnotation (edit: ElementEdit) = edit.Tag = Tags.Annot || edit.Retag = Tags.Annot
 
 /// Whether an edit is for a form field's element, whose "alt text" is its tooltip: what a screen
 /// reader says when it reaches the field.
-let private isFormField (edit: ElementEdit) = edit.Tag = "Form" || edit.Retag = "Form"
+let private isFormField (edit: ElementEdit) = edit.Tag = Tags.Form || edit.Retag = Tags.Form
 
 /// The field a widget annotation is for: the widget itself, where it's the field too (it has a
 /// name, or no parent), else its parent.
@@ -231,7 +231,7 @@ let private changes (edit: ElementEdit, element: PdfDictionary) =
 // ---- Not read: an element made an artifact ----
 
 /// Whether an edit makes its element an artifact: decoration, not read (Not Read in Structure…).
-let private isArtifact (edit: ElementEdit) = edit.Retag = "Artifact"
+let private isArtifact (edit: ElementEdit) = edit.Retag = Tags.Artifact
 
 /// An element's marked content, by page: its MCIDs and those of what's inside it (content in a
 /// form XObject, by a marked-content reference with /Stm, is left).
@@ -411,13 +411,13 @@ let private otherChanges (tables: ElementEdit list) =
 
 /// A person-confirmed conversion of consecutive paragraph siblings into a table.
 let private isParagraphTable (edit: ElementEdit) =
-    edit.Tag = "P" && edit.Retag = "Table" && not edit.MergeWith.IsEmpty && not edit.Cells.IsEmpty
+    edit.Tag = Tags.P && edit.Retag = Tags.Table && not edit.MergeWith.IsEmpty && not edit.Cells.IsEmpty
 
 /// Whether the review's checked grid is already the table at the merged paragraphs' location.
 let private paragraphTableIsBuilt document context (edit: ElementEdit) =
     let tableEdit =
         { edit with
-            Tag = "Table"
+            Tag = Tags.Table
             Box = mergedBox edit
             MergeWith = []
             Retag = null
@@ -439,7 +439,7 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
             document
             context
             [ for edit, piece in untaggedPieces document outside ->
-                  piece, (if edit.Retag = "Artifact" then UntaggedContent.NotRead else UntaggedContent.TagAs(edit.Retag |> nonNull, edit.Alt)) ]
+                  piece, (if edit.Retag = Tags.Artifact then UntaggedContent.NotRead else UntaggedContent.TagAs(edit.Retag |> nonNull, edit.Alt)) ]
     let paragraphTables, edits = edits |> List.partition isParagraphTable
     let converted =
         [ for edit in paragraphTables do
@@ -590,7 +590,7 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
                       | None -> ()
           for edit in outside do
               match outsideFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
-              | Some(_, piece) when piece.Kind = UntaggedContent.Text && edit.Retag = "Artifact" ->
+              | Some(_, piece) when piece.Kind = UntaggedContent.Text && edit.Retag = Tags.Artifact ->
                   $"Your edit making text outside the tags on page {edit.Page} decoration wasn't applied: text isn't hidden. Tag it as a paragraph (P) instead."
               | Some _ -> ()
               | None when not (isNull edit.Retag) ->
@@ -608,7 +608,7 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
               | Some _ -> ()
           for merge in merges do
               if (mergeRun document context merge).IsNone then
-                  let what = if merge.Tag = "Figure" then "figures" else "paragraphs"
+                  let what = if merge.Tag = Tags.Figure then "figures" else "paragraphs"
                   $"Your merge of {merge.MergeWith.Length + 1} {what} from the {describe merge} wasn't applied: they aren't {what} next to each other under one parent here (or they're merged already)." ]
 
 /// How many of edits would change pdfPath: their element is found and doesn't already say it, or
@@ -642,7 +642,7 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
         + conversions.Length
         +
         // (Text asked to be made decoration never is.)
-        (untaggedPieces document outside |> List.filter (fun (e, piece) -> not (piece.Kind = UntaggedContent.Text && e.Retag = "Artifact")) |> List.length)
+        (untaggedPieces document outside |> List.filter (fun (e, piece) -> not (piece.Kind = UntaggedContent.Text && e.Retag = Tags.Artifact)) |> List.length)
         + (merges |> List.choose (mergeRun document context) |> List.length)
         + (let found = findIn document context (boxesOf merges) edits
            let moving = movedElements document context (found |> List.filter (fun (e, _) -> e.Move.IsSome))
@@ -656,7 +656,7 @@ let figureRegionPreview (pdfPath: string) (box: StructureGeometry) : Result<stri
         let context = createContext document pdfPath
         let edit: ElementEdit =
             { Page = box.PageNumber; Tag = FigureRegion.Tag; Box = box; Alt = "preview"; Text = null
-              MergeWith = []; Retag = "Figure"; Exclude = false; Move = None; Cells = [] }
+              MergeWith = []; Retag = Tags.Figure; Exclude = false; Move = None; Cells = [] }
         FigureRegion.plan document context edit |> Result.map _.Summary
     with ex -> Error $"the PDF couldn't be read: {ex.Message}"
 
@@ -670,8 +670,8 @@ let paragraphTableRefusal (pdfPath: string) (boxes: StructureGeometry list) : st
             use document = new PdfDocument(new PdfReader(pdfPath))
             let context = createContext document pdfPath
             let edit: ElementEdit =
-                { Page = first.PageNumber; Tag = "P"; Box = first; Alt = null; Text = null
-                  MergeWith = rest; Retag = "Table"; Exclude = false; Move = None; Cells = [] }
+                { Page = first.PageNumber; Tag = Tags.P; Box = first; Alt = null; Text = null
+                  MergeWith = rest; Retag = Tags.Table; Exclude = false; Move = None; Cells = [] }
             mergeRun document context edit |> Option.bind (ParagraphTableRebuild.paragraphsRefusal context)
         with _ -> None
     | _ -> None

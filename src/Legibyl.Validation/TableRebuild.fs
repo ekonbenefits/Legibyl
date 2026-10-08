@@ -12,7 +12,7 @@ open Legibyl.Validation.Interop
 open Legibyl.Validation.StructureTreeObjects
 
 /// The tags that make a table's shape (not what its cells hold).
-let private tableTags = set [ "TR"; "TH"; "TD"; "THead"; "TBody"; "TFoot" ]
+let private tableTags = set [ Tags.TR; Tags.TH; Tags.TD; Tags.THead; Tags.TBody; Tags.TFoot ]
 
 /// How deep a table's shape (its rows, row groups and cells) is followed; one deeper is refused.
 [<Literal>]
@@ -48,7 +48,7 @@ let private piecesOf (element: PdfStructElem) context (page: int) =
                     let tag = tagOf context child
                     if tableTags.Contains tag then walk child (depth + 1)
                     // (A table's caption is the table's, not a cell's: it stays where it is.)
-                    elif tag = "Caption" && depth = 0 then ()
+                    elif tag = Tags.Caption && depth = 0 then ()
                     else add child (subtreeGeometry (child.GetPdfObject()) context (Some page))
                 | :? PdfObjRef as reference ->
                     match (reference.GetPdfObject() :?> PdfDictionary).GetAsDictionary PdfName.Obj with
@@ -96,9 +96,9 @@ let rebuilt (tableDictionary: PdfDictionary) context (page: int) (cells: TableCe
     let order = ordered cells
     let expected =
         [ for cell, place in order ->
-              place.Row, cell.Tag, place.RowSpan, place.ColSpan, (if cell.Tag = "TH" then Some(if place.Row = 0 then "Column" else "Row") else None) ]
-    let kids = [ for kid in table.GetKids() do match kid with :? PdfStructElem as e when tagOf context e <> "Caption" -> Some e | :? PdfStructElem -> () | _ -> None ]
-    if kids |> List.exists (fun k -> match k with Some e -> tagOf context e <> "TR" | None -> true) then
+              place.Row, cell.Tag, place.RowSpan, place.ColSpan, (if cell.Tag = Tags.TH then Some(if place.Row = 0 then "Column" else "Row") else None) ]
+    let kids = [ for kid in table.GetKids() do match kid with :? PdfStructElem as e when tagOf context e <> Tags.Caption -> Some e | :? PdfStructElem -> () | _ -> None ]
+    if kids |> List.exists (fun k -> match k with Some e -> tagOf context e <> Tags.TR | None -> true) then
         false
     else
         let rows = kids |> List.choose id
@@ -148,7 +148,7 @@ let rebuild (document: PdfDocument) context (tableDictionary: PdfDictionary) (pa
     let captions =
         [ for i, kid in List.indexed kids do
               match kid with
-              | :? PdfStructElem as e when tagOf e = "Caption" -> (i < firstRow), e.GetPdfObject()
+              | :? PdfStructElem as e when tagOf e = Tags.Caption -> (i < firstRow), e.GetPdfObject()
               | _ -> () ]
     while table.GetKids().Count > 0 do
         table.RemoveKid 0 |> ignore
@@ -166,7 +166,7 @@ let rebuild (document: PdfDocument) context (tableDictionary: PdfDictionary) (pa
         let element = PdfStructElem(document, PdfName cell.Tag, pdfPage)
         let attributes = PdfDictionary()
         attributes.Put(PdfName.O, PdfName.Table) |> ignore
-        if cell.Tag = "TH" then attributes.Put(PdfName.Scope, (if place.Row = 0 then PdfName.Column else PdfName.Row)) |> ignore
+        if cell.Tag = Tags.TH then attributes.Put(PdfName.Scope, (if place.Row = 0 then PdfName.Column else PdfName.Row)) |> ignore
         if place.RowSpan > 1 then attributes.Put(PdfName.RowSpan, PdfNumber place.RowSpan) |> ignore
         if place.ColSpan > 1 then attributes.Put(PdfName.ColSpan, PdfNumber place.ColSpan) |> ignore
         element.GetPdfObject().Put(PdfName.A, attributes) |> ignore

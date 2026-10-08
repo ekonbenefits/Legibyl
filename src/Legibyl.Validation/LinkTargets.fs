@@ -14,8 +14,8 @@ open Legibyl.Validation.StructureTreeObjects
 /// Div) or text inside a block (Span, Link).
 let private targetTags =
     set
-        [ "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "Title"; "P"; "L"; "Table"; "Figure"; "Formula"
-          "Caption"; "BlockQuote"; "Code"; "Note"; "FENote"; "TOC"; "Index"; "Aside" ]
+        [ Tags.H; Tags.H1; Tags.H2; Tags.H3; Tags.H4; Tags.H5; Tags.H6; Tags.Title; Tags.P; Tags.L; Tags.Table; Tags.Figure; Tags.Formula
+          Tags.Caption; Tags.BlockQuote; Tags.Code; Tags.Note; Tags.FENote; Tags.TOC; Tags.Index; Tags.Aside ]
 
 /// An element a destination can land on, and where its content starts.
 type private Candidate =

@@ -56,7 +56,7 @@ let private LeftoverText = -1
 [<Literal>]
 let private PageFigure = -2
 
-let private isTextRegion (tag: string) = tag <> "Artifact" && tag <> "Figure"
+let private isTextRegion (tag: string) = tag <> Tags.Artifact && tag <> Tags.Figure
 
 /// The owner of one piece of content: the smallest region it's centred in. Text outside
 /// every region still reads as content, in the nearest text region; images and drawings
@@ -72,14 +72,14 @@ let private ownerOf (regions: (LayoutRegion * Rectangle) array) (cellsOf: int ->
         |> Array.sortBy (fun (_, (_, r)) -> area r)
         |> Array.tryHead
     match drawn.Kind, inside with
-    | Path, Some(index, (region, _)) when region.Tag = "Table" && not (cellsOf index).IsEmpty -> Artifact
-    | _, Some(index, (region, _)) when region.Tag = "Table" && not (cellsOf index).IsEmpty ->
+    | Path, Some(index, (region, _)) when region.Tag = Tags.Table && not (cellsOf index).IsEmpty -> Artifact
+    | _, Some(index, (region, _)) when region.Tag = Tags.Table && not (cellsOf index).IsEmpty ->
         cellsOf index |> List.minBy (fun cell -> distance (snd regions[cell]) point) |> Region
     | Text, Some(index, (region, _))
-    | Image, Some(index, (region, _)) -> if region.Tag = "Artifact" then Artifact else Region index
+    | Image, Some(index, (region, _)) -> if region.Tag = Tags.Artifact then Artifact else Region index
     // Lines and fills are decoration, except in a figure or table (a chart, a table's rules),
     // or where they draw a region's text (outlined text, read by OCR into its ActualText).
-    | Path, Some(index, (region, _)) when region.Tag = "Figure" || region.Tag = "Table" || not (isNull region.ActualText) ->
+    | Path, Some(index, (region, _)) when region.Tag = Tags.Figure || region.Tag = Tags.Table || not (isNull region.ActualText) ->
         Region index
     | Path, _ -> Artifact
     | Image, None -> Artifact
@@ -151,21 +151,21 @@ type private Tally =
 let private writtenTag (region: LayoutRegion) hasTitle =
     match region.Tag with
     // A level a person gave (a retag edit) is kept.
-    | "H1"
-    | "H2"
-    | "H3"
-    | "H4"
-    | "H5"
-    | "H6" -> region.Tag
+    | Tags.H1
+    | Tags.H2
+    | Tags.H3
+    | Tags.H4
+    | Tags.H5
+    | Tags.H6 -> region.Tag
     // Levels below the title aren't known from the layout; one level under it keeps the
     // outline from skipping levels.
-    | "H" -> if hasTitle then "H2" else "H1"
-    | "Figure" -> "Figure"
-    | "Note" -> "Note"
-    | "LI" -> "LI"
+    | Tags.H -> if hasTitle then Tags.H2 else Tags.H1
+    | Tags.Figure -> Tags.Figure
+    | Tags.Note -> Tags.Note
+    | Tags.LI -> Tags.LI
     // A table's rows and cells can't be found from its outline; its text reads as text, and
     // the report says it needs tagging by hand.
-    | _ -> "P"
+    | _ -> Tags.P
 
 /// Tags pdfPath's pages from source's regions, writing the result to outputPath. Returns
 /// the report lines; empty (and nothing worth keeping written) if the document was already
@@ -190,7 +190,7 @@ let tag
         let root = PdfDictionary()
         root.Put(PdfName.Type, PdfName.StructTreeRoot) |> ignore
         root.MakeIndirect document |> ignore
-        let documentElement = newElement document "Document" root None
+        let documentElement = newElement document Tags.Document root None
         root.Put(PdfName.K, documentElement.Dictionary) |> ignore
         // PDF/UA-2 (for PDF 2.0) wants the Document in PDF 2.0's namespace. The elements under
         // it are the same in PDF 1.7's, which is the default and is allowed there too.
@@ -210,7 +210,7 @@ let tag
             [| for page in 1 .. pageCount ->
                    onPage page pageCount
                    List.ofSeq (source.PageRegions(pdfPath, page)) |]
-        let hasTitle = regionsByPage |> Array.exists (List.exists (fun region -> region.Tag = "H1"))
+        let hasTitle = regionsByPage |> Array.exists (List.exists (fun region -> region.Tag = Tags.H1))
         // The titles of the pages QR codes go to, when asked for.
         let pageTitles =
             match titles with
@@ -244,7 +244,7 @@ let tag
                 if TableGrid.isCell region.Tag then
                     regions
                     |> Array.indexed
-                    |> Array.filter (fun (_, (table, tableBox)) -> table.Tag = "Table" && containsPoint tableBox (centre box))
+                    |> Array.filter (fun (_, (table, tableBox)) -> table.Tag = Tags.Table && containsPoint tableBox (centre box))
                     |> Array.sortBy (fun (_, (_, tableBox)) -> area tableBox)
                     |> Array.tryHead
                     |> Option.iter (fun (table, _) -> tableOf[i] <- table)
@@ -277,8 +277,8 @@ let tag
             let mcids = List<PdfDictionary>()
             let regionAt index =
                 match index with
-                | LeftoverText -> { Tag = "P"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
-                | PageFigure -> { Tag = "Figure"; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
+                | LeftoverText -> { Tag = Tags.P; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
+                | PageFigure -> { Tag = Tags.Figure; Geometry = Unchecked.defaultof<_>; ListNumbering = null; ActualText = null; QrText = null; Alt = null }
                 | index -> fst regions[index]
             let markRecognized (element: Element) (region: LayoutRegion) =
                 match region.ActualText with
@@ -294,13 +294,13 @@ let tag
                 match elements.TryGetValue table with
                 | true, element -> element
                 | _ ->
-                    let element = newElement document "Table" documentElement.Dictionary (Some page)
+                    let element = newElement document Tags.Table documentElement.Dictionary (Some page)
                     elements[table] <- element
                     tally.TablesWithCells <- tally.TablesWithCells + 1
                     let cells = cellsOf table
                     let places = TableGrid.place [ for cell in cells -> (fst regions[cell]).Geometry ]
                     let rowCount = places |> List.map (fun p -> p.Row + p.RowSpan) |> List.max
-                    let rows = [| for _ in 1..rowCount -> newElement document "TR" element.Dictionary (Some page) |]
+                    let rows = [| for _ in 1..rowCount -> newElement document Tags.TR element.Dictionary (Some page) |]
                     for row in rows do element.Kids.Add row.Dictionary
                     for cell, place in List.zip cells places |> List.sortBy (fun (_, p) -> p.Row, p.Column) do
                         let region = fst regions[cell]
@@ -308,7 +308,7 @@ let tag
                         let cellElement = newElement document region.Tag row.Dictionary (Some page)
                         let attributes = PdfDictionary()
                         attributes.Put(PdfName.O, PdfName.Table) |> ignore
-                        if region.Tag = "TH" then attributes.Put(PdfName.Scope, PdfName.Column) |> ignore
+                        if region.Tag = Tags.TH then attributes.Put(PdfName.Scope, PdfName.Column) |> ignore
                         if place.RowSpan > 1 then attributes.Put(PdfName.RowSpan, PdfNumber place.RowSpan) |> ignore
                         if place.ColSpan > 1 then attributes.Put(PdfName.ColSpan, PdfNumber place.ColSpan) |> ignore
                         cellElement.Dictionary.Put(PdfName.A, attributes) |> ignore
@@ -325,10 +325,10 @@ let tag
                     let region = regionAt index
                     let element =
                         match writtenTag region hasTitle with
-                        | "LI" ->
+                        | Tags.LI ->
                             // Its list is found when the page's elements are put in order.
-                            let item = newElement document "LI" documentElement.Dictionary None
-                            let body = newElement document "LBody" item.Dictionary (Some page)
+                            let item = newElement document Tags.LI documentElement.Dictionary None
+                            let body = newElement document Tags.LBody item.Dictionary (Some page)
                             item.Kids.Add body.Dictionary
                             listItems[index] <- (item, (match region.ListNumbering with NonNull numbering -> numbering | Null -> ""))
                             tally.ListItems <- tally.ListItems + 1
@@ -336,13 +336,13 @@ let tag
                         | tag ->
                             let element = newElement document tag documentElement.Dictionary (Some page)
                             match tag with
-                            | "H1"
-                            | "H2"
-                            | "H3"
-                            | "H4"
-                            | "H5"
-                            | "H6" -> tally.Headings <- tally.Headings + 1
-                            | "Figure" ->
+                            | Tags.H1
+                            | Tags.H2
+                            | Tags.H3
+                            | Tags.H4
+                            | Tags.H5
+                            | Tags.H6 -> tally.Headings <- tally.Headings + 1
+                            | Tags.Figure ->
                                 tally.Figures <- tally.Figures + 1
                                 // Alt text a person wrote comes first; the QR code's own is kept
                                 // for anything else it's used for (its link).
@@ -376,7 +376,7 @@ let tag
                                     match address with
                                     | Some address when linkQrCodes && not (alreadyLinked ()) ->
                                         // A Link holding the figure; its annotation is added with the page's.
-                                        let wrapper = newElement document "Link" documentElement.Dictionary (Some page)
+                                        let wrapper = newElement document Tags.Link documentElement.Dictionary (Some page)
                                         // So is its annotation's /Contents.
                                         wrapper.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
                                         element.Dictionary.Put(PdfName.P, wrapper.Dictionary) |> ignore
@@ -384,12 +384,12 @@ let tag
                                         qrLinks.Add((index, address, wrapper))
                                     | _ -> ()
                                 | Null -> ()
-                            | "Note" ->
+                            | Tags.Note ->
                                 // PDF/UA wants every Note to have an ID.
                                 noteIds <- noteIds + 1
                                 element.Dictionary.Put(PdfName.ID, PdfString $"note-{noteIds}") |> ignore
                             | _ ->
-                                if region.Tag = "Table" then tally.Tables <- tally.Tables + 1
+                                if region.Tag = Tags.Table then tally.Tables <- tally.Tables + 1
                                 tally.Paragraphs <- tally.Paragraphs + 1
                             element
                     markRecognized element region
@@ -520,7 +520,7 @@ let tag
                         match currentList with
                         | Some(list, current) when current = numbering -> list
                         | _ ->
-                            let list = newElement document "L" documentElement.Dictionary None
+                            let list = newElement document Tags.L documentElement.Dictionary None
                             documentElement.Kids.Add list.Dictionary
                             if numbering <> "" then
                                 let attributes = PdfDictionary()
@@ -565,7 +565,7 @@ let tag
                         |> Array.tryHead
                         |> Option.map (fun (i, _) -> elements[i])
                         |> Option.defaultValue documentElement
-                    let link = newElement document "Link" parent.Dictionary (Some page)
+                    let link = newElement document Tags.Link parent.Dictionary (Some page)
                     parent.Kids.Add link.Dictionary
                     let reference = PdfDictionary()
                     reference.Put(PdfName.Type, PdfName.OBJR) |> ignore

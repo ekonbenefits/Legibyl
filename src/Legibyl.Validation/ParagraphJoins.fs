@@ -21,7 +21,7 @@ type JoinRun =
 
 /// Regions that hold running text, whose lines belong together.
 let private isTextRegion (region: LayoutRegion) =
-    not (List.contains region.Tag [ "Figure"; "Table"; "Artifact"; "Formula"; "Lbl" ])
+    not (List.contains region.Tag [ Tags.Figure; Tags.Table; Tags.Artifact; Tags.Formula; Tags.Lbl ])
 
 /// How much of a paragraph's text must lie in a region for it to count as in it.
 [<Literal>]

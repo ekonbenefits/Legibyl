@@ -21,17 +21,17 @@ let Tag = "FigureRegion"
 
 /// Tags that hold others and say nothing of their own (a section, a part of the document): a
 /// Figure can go among their kids, and they're left when emptied.
-let private containers = set [ "Document"; "DocumentFragment"; "Part"; "Art"; "Sect"; "Div"; "Aside"; "NonStruct" ]
+let private containers = set [ Tags.Document; Tags.DocumentFragment; Tags.Part; Tags.Art; Tags.Sect; Tags.Div; Tags.Aside; Tags.NonStruct ]
 
 /// Tags a Figure can go in among their kids, kept when emptied: sections, a table's cells, a list
 /// item's label and body, a caption.
 let private takesFigure (tag: string) =
-    containers.Contains tag || Set.contains tag (set [ "TD"; "TH"; "LBody"; "Lbl"; "Caption" ])
+    containers.Contains tag || Set.contains tag (set [ Tags.TD; Tags.TH; Tags.LBody; Tags.Lbl; Tags.Caption ])
 
 /// A table's and list's structure (and a contents list's): kept when emptied, but a Figure can't
 /// be one of their kids (a table holds rows, a row cells).
 let private structural (tag: string) =
-    Set.contains tag (set [ "Table"; "THead"; "TBody"; "TFoot"; "TR"; "L"; "LI"; "TOC"; "TOCI" ])
+    Set.contains tag (set [ Tags.Table; Tags.THead; Tags.TBody; Tags.TFoot; Tags.TR; Tags.L; Tags.LI; Tags.TOC; Tags.TOCI ])
 
 /// Tags left in the tags when this empties them.
 let private kept (tag: string) = takesFigure tag || structural tag
@@ -205,7 +205,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
             Error "the region isn't a rectangle on its page"
         elif String.IsNullOrWhiteSpace edit.Alt then
             Error "enter alt text describing the figure"
-        elif (not (isNull edit.Retag) && edit.Retag <> "Figure")
+        elif (not (isNull edit.Retag) && edit.Retag <> Tags.Figure)
              || not (isNull edit.Text) || edit.Exclude || edit.Move.IsSome || not edit.MergeWith.IsEmpty || not edit.Cells.IsEmpty then
             Error "this edit only takes a page, a region and alt text"
         elif isNull (document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot) then
