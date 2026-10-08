@@ -163,6 +163,13 @@ let rec extractText (obj: PdfObject | null) context (inheritedPage: int option) 
         sb.ToString()
     | :? PdfNumber as mcid when inheritedPage.IsSome ->
         markedContent context mcid inheritedPage.Value |> Option.map _.Text |> Option.defaultValue ""
+    // A marked-content reference (/MCR): its MCID, on its own /Pg or the tag's page.
+    | :? PdfDictionary as reference when
+        isNull (reference.GetAsName PdfName.S) && not (isNull (reference.GetAsNumber PdfName.MCID)) && isNull (reference.Get PdfName.Stm)
+        ->
+        match structElemPage reference context inheritedPage with
+        | Some page -> markedContent context (reference.GetAsNumber PdfName.MCID) page |> Option.map _.Text |> Option.defaultValue ""
+        | None -> ""
     | :? PdfDictionary as dictionary ->
         match actualText dictionary with
         | NonNull text when not (String.IsNullOrWhiteSpace text) -> text

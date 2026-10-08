@@ -294,6 +294,87 @@ let ``a row paragraph tagged a glyph to a span, its replacement text what they d
     result.AppliedFixes |> should contain "Converted 2 paragraph(s) on page 1 to a table with the checked rows and cells."
     rows output.Path |> List.map (snd >> List.map fst) |> should equal [ [ "TH"; "TH" ]; [ "TD"; "TD" ] ]
 
+/// path, rewritten with change made to each structure element's dictionary (and the page).
+let private rewriteElements (path: string) (change: PdfDocument -> PdfDictionary -> unit) =
+    let bytes = System.IO.File.ReadAllBytes path
+    use document = new PdfDocument(new PdfReader(new System.IO.MemoryStream(bytes)), new PdfWriter(path))
+    for i in 1 .. document.GetNumberOfPdfObjects() - 1 do
+        match document.GetPdfObject i with
+        | :? PdfDictionary as d when PdfName.StructElem.Equals(d.GetAsName PdfName.Type) -> change document d
+        | _ -> ()
+
+/// The second row's paragraph (the one actualText is given to), changed by change.
+let private changeSecondRow (path: string) (change: PdfDictionary -> unit) =
+    rewriteElements path (fun _ d ->
+        if PdfName.P.Equals(d.GetAsName PdfName.S) && not (isNull (d.Get PdfName.ActualText)) then change d)
+
+[<Fact>]
+let ``replacement text with its words broken in other places than the drawn text's isn't taken as the same`` () =
+    use input = new TempPdf()
+    // "Tomato" | "March" drawn; "Tom atoMarch" has the same letters, but other words.
+    createParagraphRowsWithEmptySpans input.Path (Some "Tom atoMarch")
+
+    let notes = ElementEdits.unapplied input.Path [ conversionOf input.Path ]
+
+    notes |> should haveLength 1
+    notes.Head |> should haveSubstring "replacement text (/ActualText) other than the text it draws"
+
+[<Fact>]
+let ``a row whose content is referred to by marked-content references reads its drawn text, and converts`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createParagraphRowsWithEmptySpans input.Path (Some "Tomato March")
+    // Each span's MCID as an /MCR dictionary, naming its page, rather than a number.
+    rewriteElements input.Path (fun document d ->
+        match d.Get PdfName.K with
+        | :? PdfNumber as mcid ->
+            let reference = PdfDictionary()
+            reference.Put(PdfName.Type, PdfName.MCR) |> ignore
+            reference.Put(PdfName.MCID, PdfNumber(mcid.IntValue())) |> ignore
+            reference.Put(PdfName.Pg, document.GetPage(1).GetPdfObject()) |> ignore
+            d.Put(PdfName.K, reference) |> ignore
+        | _ -> ())
+    let edit = conversionOf input.Path
+
+    ElementEdits.unapplied input.Path [ edit ] |> should be Empty
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+    result.AppliedFixes |> should contain "Converted 2 paragraph(s) on page 1 to a table with the checked rows and cells."
+
+[<Fact>]
+let ``the refusal names what the paragraph says of its own, blank alt text says nothing, and it's known before the model`` () =
+    use input = new TempPdf()
+    use blank = new TempPdf()
+    createParagraphRowsWithEmptySpans input.Path (Some "Tomato March")
+    System.IO.File.Copy(input.Path, blank.Path, true)
+    changeSecondRow input.Path (fun p -> p.Put(PdfName.Alt, PdfString "A row of the planting table") |> ignore)
+    changeSecondRow blank.Path (fun p -> p.Put(PdfName.Alt, PdfString "") |> ignore)
+    let boxes (path: string) = [ for p in (conversionOf path |> fun e -> e.Box :: e.MergeWith) -> p ]
+
+    let notes = ElementEdits.unapplied input.Path [ conversionOf input.Path ]
+    notes |> should haveLength 1
+    notes.Head |> should haveSubstring "alt text (/Alt)"
+    // The same, before any cells are found.
+    ElementEdits.paragraphTableRefusal input.Path (boxes input.Path) |> should equal (Some "a paragraph has alt text (/Alt), which can't be split among cells")
+    ElementEdits.unapplied blank.Path [ conversionOf blank.Path ] |> should be Empty
+    ElementEdits.paragraphTableRefusal blank.Path (boxes blank.Path) |> should equal (None: string option)
+
+[<Fact>]
+let ``converted, no replacement text is left on the table`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createParagraphRowsWithEmptySpans input.Path (Some " Tomato March    ")
+    let edit = conversionOf input.Path
+
+    (VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)).WasFixed |> should be True
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    [ for i in 1 .. document.GetNumberOfPdfObjects() - 1 do
+          match document.GetPdfObject i with
+          | :? PdfDictionary as d when PdfName.StructElem.Equals(d.GetAsName PdfName.Type) && not (isNull (d.Get PdfName.ActualText)) ->
+              d.GetAsName(PdfName.S).GetValue()
+          | _ -> () ]
+    |> should be Empty
+
 [<Fact>]
 let ``a grid without a row for each paragraph isn't converted, and says why`` () =
     use input = new TempPdf()

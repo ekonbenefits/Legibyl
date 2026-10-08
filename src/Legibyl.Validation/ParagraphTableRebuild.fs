@@ -17,29 +17,65 @@ type private Conversion =
       RowCount: int
       Contents: (int * PdfStructElem * (IStructureNode * StructureGeometry) list) list }
 
-let private standaloneKeys = [ PdfName.ActualText; PdfName.Alt; PdfName.E; PdfName.ID ]
+/// What a paragraph can say of its own that the cells it's split among can't, by key.
+let private standaloneKeys =
+    [ PdfName.ActualText, "replacement text (/ActualText) other than the text it draws"
+      PdfName.Alt, "alt text (/Alt)"
+      PdfName.E, "an expansion (/E)"
+      PdfName.ID, "an ID (/ID) something may refer to" ]
 
-// Spacing is left out entirely, not just evened: the drawn text is read kid by kid, with a space
-// between kids, so a row tagged a glyph to a span ("3", "4", "0", "%") reads "3 4 0 %".
 let private unspaced (text: string) = Text.RegularExpressions.Regex.Replace(text, @"\s+", "")
 
-/// Whether paragraph's replacement text (/ActualText) says only what its content draws, spacing
-/// aside: then it adds nothing, and nothing is lost when the paragraph's content is split among
-/// cells and the paragraph is gone.
+/// Where text breaks between words, by how many characters (spaces aside) come before each break.
+let private wordBreaks (text: string) =
+    Text.RegularExpressions.Regex.Split(text.Trim(), @"\s+")
+    |> Array.scan (fun count (word: string) -> count + word.Length) 0
+    |> fun counts -> counts[1 .. counts.Length - 2]
+    |> Set.ofArray
+
+/// Whether paragraph's replacement text (/ActualText) says only what its content draws: the same
+/// characters, and a word break only where the drawn text has one. (The drawn text is read kid by
+/// kid with a space between, so a row tagged a glyph to a span, "3", "4", "0", "%", reads "3 4 0 %",
+/// and "3 40%" matches it; but "34 0%" doesn't match a drawn "3 40%", nor "Tom atoMarch" "Tomato
+/// March": spacing can change what a number, or a word, is.) Then it adds nothing, and nothing is
+/// lost when the paragraph's content is split among cells and the paragraph is gone.
 let private redundantActualText context page (paragraph: PdfStructElem) =
     match paragraph.GetPdfObject().GetAsString PdfName.ActualText with
     | null -> false
     | text ->
-        let drawn = unspaced (extractText (paragraph.GetPdfObject().Get PdfName.K) context (Some page))
-        drawn <> "" && unspaced (text.ToUnicodeString()) = drawn
+        let own = structElemPage (paragraph.GetPdfObject()) context (Some page)
+        let drawnText = extractText (paragraph.GetPdfObject().Get PdfName.K) context own
+        let actual = text.ToUnicodeString()
+        let drawn = unspaced drawnText
+        drawn <> ""
+        && unspaced actual = drawn
+        && Set.isSubset (wordBreaks actual) (wordBreaks drawnText)
 
-/// Whether paragraph says something of its own the cells it's split among couldn't: replacement
-/// text other than what it draws, alt text, an expansion, or an ID something may refer to.
+/// What paragraph says of its own that the cells it's split among couldn't, if anything: the first
+/// of replacement text other than what it draws, alt text, an expansion, or an ID. (Blank alt text
+/// or expansion says nothing, and is no reason; blank replacement text hides the content, and is.)
 let private standalone context page (paragraph: PdfStructElem) =
     standaloneKeys
-    |> List.exists (fun key ->
-        paragraph.GetPdfObject().ContainsKey key
-        && not (key.Equals PdfName.ActualText && redundantActualText context page paragraph))
+    |> List.tryPick (fun (key, what) ->
+        let saysSomething =
+            match paragraph.GetPdfObject().Get key with
+            | null -> false
+            | :? PdfString as value when not (key.Equals PdfName.ActualText) -> not (String.IsNullOrWhiteSpace(value.ToUnicodeString()))
+            | _ -> true
+        if saysSomething && not (key.Equals PdfName.ActualText && redundantActualText context page paragraph) then Some what
+        else None)
+
+/// Why paragraphs can't be made a table whatever cells are checked, if they can't (so it's said
+/// before the table-structure model is run): one says something of its own (see standalone).
+let paragraphsRefusal context (run: ParagraphJoins.JoinRun) =
+    let parent = PdfStructElem run.Parent
+    let paragraphs =
+        run.Indexes |> List.choose (fun index -> match parent.GetKids().[index] with :? PdfStructElem as p -> Some p | _ -> None)
+    if paragraphs.Length < 2 then Some "a table needs at least two paragraphs"
+    else
+        paragraphs
+        |> List.tryPick (standalone context run.Page)
+        |> Option.map (fun what -> $"a paragraph has {what}, which can't be split among cells")
 
 let private kidsOf (element: PdfStructElem) = List.ofSeq (element.GetKids())
 
@@ -150,8 +186,9 @@ let private plan context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
           Error "a table needs at least two paragraphs"
       elif assignedRows <> [ 0 .. rowCount - 1 ] || (rowBoxes |> List.exists (fun (_, boxes) -> boxes.IsEmpty)) then
           Error $"the checked grid doesn't have a row for each paragraph ({rowCount} row(s) for {paragraphs.Length} paragraphs)"
-      elif paragraphs |> List.exists (standalone context run.Page) then
-          Error "a paragraph has its own replacement text (other than the text it draws), alt text, expansion or ID (/ActualText, /Alt, /E or /ID), which can't be split among cells"
+      elif (paragraphs |> List.tryPick (standalone context run.Page)).IsSome then
+          let what = paragraphs |> List.pick (standalone context run.Page)
+          Error $"a paragraph has {what}, which can't be split among cells"
       elif misplaced () then
           Error "some of their content isn't drawn within one cell of its row"
       else

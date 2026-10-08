@@ -607,10 +607,19 @@ module private StructureView =
                                             else None
                                     else None)
                                 |> Option.flatten
-                            match orderedNodes with
-                            | None ->
+                            // What would refuse them whatever cells are checked, said before the
+                            // table-structure model is downloaded or run.
+                            let! refused =
+                                match orderedNodes with
+                                | Some nodes when nodes |> List.forall (fun node -> not (isNull node.Geometry)) ->
+                                    Task.Run(fun () -> ElementEdits.paragraphTableRefusal sourceFilePath [ for node in nodes -> nonNull node.Geometry ])
+                                | _ -> Task.FromResult None
+                            match orderedNodes, refused with
+                            | None, _ ->
                                 do! Dialogs.showMessage window "Choose consecutive paragraphs under the same parent to convert them to a table." "Convert Paragraphs to Table"
-                            | Some nodes ->
+                            | Some _, Some why ->
+                                do! Dialogs.showMessage window $"These paragraphs can't be converted to a table: {why}." "Convert Paragraphs to Table"
+                            | Some nodes, None ->
                                 let boxes = nodes |> List.choose (fun node -> Option.ofObj node.Geometry)
                                 if boxes.Length <> nodes.Length then
                                     do! Dialogs.showMessage window "Every selected paragraph needs a page region before it can be converted to a table." "Convert Paragraphs to Table"

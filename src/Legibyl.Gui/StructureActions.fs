@@ -271,13 +271,14 @@ let mergeable (nodes: StructureNode list) =
 /// Paragraphs Convert to Table is offered for: two or more on one page, without alt text. Unlike
 /// merging, replacement text (/ActualText) doesn't rule them out: the conversion goes ahead when
 /// it says only what they draw, and says why not otherwise.
-let convertibleToTable (nodes: StructureNode list) =
+let convertibleToTable (roleMap: Map<string, string>) (nodes: StructureNode list) =
     match nodes with
     | first :: _ :: _ when
         nodes
         |> List.forall (fun n ->
-            n.Tag = "P"
-            && isNull n.AlternateDescription
+            // A paragraph (or a name of the PDF's own for one), with no alt text that says anything.
+            heardTag roleMap n = "P"
+            && String.IsNullOrWhiteSpace n.AlternateDescription
             && (match n.Geometry, first.Geometry with
                 | NonNull box, NonNull firstBox -> box.PageNumber = firstBox.PageNumber
                 | _ -> false))
@@ -598,7 +599,7 @@ let otherActions (needs: SelectionNeeds) : Action list =
     // A tagged table's rows and cells, rebuilt from how it looks (the wand: the model suggests them).
     [ match needs.Selected.Current with
       | _ when not needs.Suggested ->
-          match convertibleToTable needs.Selected.Current with
+          match convertibleToTable (needs.RoleMap()) needs.Selected.Current with
           | Some (first :: _ :: _ as nodes) ->
               let savedConversion =
                   match first.Geometry with
@@ -688,7 +689,7 @@ let otherActions (needs: SelectionNeeds) : Action list =
               |> Option.filter (fun m -> m.MergeWith.Length = rest.Length && (m.Retag <> Some "Table" || m.Cells.IsEmpty))
           | _ -> None
       let conversion =
-          match (if needs.Suggested then None else convertibleToTable needs.Selected.Current), pendingMerge with
+          match (if needs.Suggested then None else convertibleToTable (needs.RoleMap()) needs.Selected.Current), pendingMerge with
           | Some(first :: rest), None when needs.Edits.Current |> List.exists (fun edit ->
                   edit.Page = (nonNull first.Geometry).PageNumber
                   && edit.Retag = Some "Table"

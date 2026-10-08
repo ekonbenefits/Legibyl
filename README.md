@@ -776,7 +776,12 @@ selected region; check the cells and their TH/TD roles before keeping the edit.
 Export then replaces the paragraph tags with table, row and cell tags, distributing
 each paragraph's marked content by its position on the page. Nonconsecutive
 paragraphs are refused; so is a tagged text container that spans multiple detected
-cells or rows, since it can't be split without changing the content's structure.
+cells or rows, since it can't be split without changing the content's structure. So
+is a paragraph that says something of its own the cells couldn't: alt text, an
+expansion (`/E`), an ID, or replacement text (`/ActualText`) other than what it
+draws. Replacement text that only repeats the drawn text, the same characters with
+no word break where the drawn text has none, is fine, and goes with the paragraph.
+These are said before the table-structure model runs.
 
 What a tagged page draws outside every tag (a page's background, rules under
 headings, a border, stray text: each fails 7.1-3 as untagged content) shows after
