@@ -20,18 +20,6 @@ open UglyToad.PdfPig.Core
 
 type MarkedContentInfo = { Text: string; Geometry: StructureGeometry option }
 
-/// A glyph a page draws, in the order it draws them: what it reads as, its box, its baseline and
-/// size, and the marked content it's in (its innermost MCID; -1 for none).
-type PageLetter =
-    { Value: string
-      Left: float
-      Bottom: float
-      Right: float
-      Top: float
-      Baseline: float
-      Size: float
-      Mcid: int }
-
 /// What each (page number, MCID) draws.
 type Index() =
     inherit Dictionary<int * int, MarkedContentInfo>()
@@ -43,9 +31,9 @@ type Index() =
     /// What PdfPig said about the first page it couldn't read, if any.
     member val UnreadableReason: string option = None with get, set
 
-    /// Each readable page's glyphs, in the order it draws them, for reading its text across
-    /// marked content (a web address split between spans, say).
-    member val Letters = Dictionary<int, PageLetter array>()
+    /// The web addresses each readable page's text shows (see WebAddressText), read across its
+    /// marked content: one split between spans is found whole. Only those are kept, not the glyphs.
+    member val Addresses = Dictionary<int, WebAddressText.Found list>()
 
 let private geometry pageNumber left bottom right top =
     { PageNumber = pageNumber; Left = left; Bottom = bottom; Right = right; Top = top }
@@ -134,26 +122,34 @@ let private concatenateLetters (letters: IReadOnlyList<Letter>) =
         previous <- Some letter
     sb.ToString()
 
-/// A page's glyphs as PageLetters, each with the innermost marked content it's in.
-let private pageLetters (page: Page) =
+/// A page's glyphs, each with the innermost marked content it's in, less those in artifacts
+/// (which aren't read): for finding the web addresses it shows.
+let private pageGlyphs (page: Page) : WebAddressText.Glyph array =
     let mcids = Dictionary<int, int>()
-    let rec mark (elements: IReadOnlyList<MarkedContentElement>) =
+    let artifacts = HashSet<int>()
+    let rec mark (elements: IReadOnlyList<MarkedContentElement>) (inArtifact: bool) =
         for element in elements do
+            let inArtifact = inArtifact || element.IsArtifact
             for letter in element.Letters do
                 mcids[letter.TextSequence] <- element.MarkedContentIdentifier
+                if inArtifact then artifacts.Add letter.TextSequence |> ignore
             // Inner marked content after its outer, so the innermost is kept.
-            mark element.Children
-    mark (page.GetMarkedContents())
-    [| for letter in page.Letters |> Seq.sortBy _.TextSequence ->
-           let box = if hasArea letter.GlyphRectangle then letter.GlyphRectangle else whitespaceRectangle letter
-           { Value = letter.Value
-             Left = min box.Left box.Right
-             Bottom = min box.Bottom box.Top
-             Right = max box.Left box.Right
-             Top = max box.Bottom box.Top
-             Baseline = letter.StartBaseLine.Y
-             Size = (if letter.PointSize > 0.0 then letter.PointSize else max 1.0 letter.GlyphRectangle.Height)
-             Mcid = match mcids.TryGetValue letter.TextSequence with | true, mcid -> mcid | _ -> -1 } |]
+            mark element.Children inArtifact
+    mark (page.GetMarkedContents()) false
+    [| for letter in page.Letters do
+           if not (artifacts.Contains letter.TextSequence) then
+               let box = if hasArea letter.GlyphRectangle then letter.GlyphRectangle else whitespaceRectangle letter
+               yield
+                   { Value = letter.Value
+                     Left = min box.Left box.Right
+                     Bottom = min box.Bottom box.Top
+                     Right = max box.Left box.Right
+                     Top = max box.Bottom box.Top
+                     Start = letter.StartBaseLine.X
+                     End = letter.EndBaseLine.X
+                     Baseline = letter.StartBaseLine.Y
+                     Size = (if letter.PointSize > 0.0 then letter.PointSize else max 1.0 (box.Top - box.Bottom))
+                     Mcid = match mcids.TryGetValue letter.TextSequence with | true, mcid -> mcid | _ -> -1 } |]
 
 let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedContentElement>) (index: Index) =
     for element in elements do
@@ -177,12 +173,12 @@ let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
         let read () =
             let pdfPage = document.GetPage pageNumber
             indexMarkedContent pageNumber (pdfPage.GetMarkedContents()) page
-            pageLetters pdfPage
+            WebAddressText.find (pageGlyphs pdfPage)
         match (try Ok(read ()) with ex -> Error ex.Message) with
-        | Ok letters ->
+        | Ok addresses ->
             for KeyValue(key, info) in page do
                 index[key] <- info
-            index.Letters[pageNumber] <- letters
+            if not addresses.IsEmpty then index.Addresses[pageNumber] <- addresses
         | Error reason ->
             index.Unreadable.Add pageNumber |> ignore
             if index.UnreadableReason.IsNone then index.UnreadableReason <- Some reason

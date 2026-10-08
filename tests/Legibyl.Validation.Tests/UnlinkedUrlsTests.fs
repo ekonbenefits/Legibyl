@@ -93,7 +93,7 @@ let ``an address that's already a link isn't warned about`` () =
     unlinked pdf.Path |> should be Empty
 
 [<Fact>]
-let ``an address split across spans is found whole, and left for the fix`` () =
+let ``an address split across spans is found whole, and left unfixed`` () =
     use pdf = new TempPdf()
     createPdf pdf.Path [ [ Plain "Plan: "; Plain "https://exam"; Plain "ple.org/plan" ] ]
 
@@ -152,3 +152,152 @@ let ``a file with no address shown as text isn't changed, and no copy is written
 
     result.WasFixed |> should be False
     File.Exists output.Path |> should be False
+
+// ---- From a cold review: text drawn in other ways, and tags of other shapes ----
+
+/// A tagged file (iText's tagging), titled and in English, each page drawn by draw, in Helvetica.
+let private tagged (path: string) (draw: PdfDocument -> iText.Kernel.Pdf.Tagutils.TagTreePointer -> iText.Kernel.Font.PdfFont -> unit) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.SetTagged() |> ignore
+    document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+    draw document (iText.Kernel.Pdf.Tagutils.TagTreePointer document) (iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA)
+
+let private show (canvas: iText.Kernel.Pdf.Canvas.PdfCanvas) font (x: float) (y: float) (text: string) =
+    canvas.BeginText().SetFontAndSize(font, 12f).MoveText(x, y).ShowText(text).EndText() |> ignore
+
+/// text drawn at x, y in tags (a P around a Span, say) of its own.
+let private inTags (pointer: iText.Kernel.Pdf.Tagutils.TagTreePointer) (page: PdfPage) font (tags: string list) (x: float) (y: float) (text: string) =
+    let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+    pointer.SetPageForTagging page |> ignore
+    for tag in tags do pointer.AddTag tag |> ignore
+    canvas.OpenTag(pointer.GetTagReference()) |> ignore
+    show canvas font x y text
+    canvas.CloseTag() |> ignore
+    for _ in tags do pointer.MoveToParent() |> ignore
+
+/// The web addresses Structure-18 names, each with whether its fix is offered.
+let private named (path: string) =
+    unlinked path |> List.map (fun (detail, fixable) -> detail.Split('"').[1], fixable)
+
+[<Fact>]
+let ``an address is read whole however narrow its letters, as many times as it's drawn over itself`` () =
+    use narrow = new TempPdf()
+    tagged narrow.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        for i, text in List.indexed [ "https://example.org/a.html"; "https://example.org/T.Hanks"; "HTTPS://EXAMPLE.ORG/UP" ] do
+            inTags pointer page font [ "P"; "Span" ] 72.0 (700.0 - 20.0 * float i) text)
+    named narrow.Path |> should equal [ "https://example.org/a.html", true; "https://example.org/T.Hanks", true; "HTTPS://EXAMPLE.ORG/UP", true ]
+    // Bold faked by drawing it twice, a little apart: one address, linked to itself once.
+    use bold = new TempPdf()
+    use fixedCopy = new TempPdf ".fixed"
+    tagged bold.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+        pointer.SetPageForTagging(page).AddTag("P").AddTag("Span") |> ignore
+        canvas.OpenTag(pointer.GetTagReference()) |> ignore
+        show canvas font 72.0 700.0 "https://example.org/plan"
+        show canvas font 72.3 700.0 "https://example.org/plan"
+        canvas.CloseTag() |> ignore)
+    named bold.Path |> should equal [ "https://example.org/plan", true ]
+    validator.Value.Fix(bold.Path, PdfProfile.PdfUa1, fixedCopy.Path, PdfFixOptions.LinkUrls) |> ignore
+    use document = new PdfDocument(new PdfReader(fixedCopy.Path))
+    [ for annotation in document.GetPage(1).GetAnnotations() -> (annotation :?> PdfLinkAnnotation).GetAction().GetAsString(PdfName.URI).ToUnicodeString() ]
+    |> should equal [ "https://example.org/plan" ]
+
+[<Fact>]
+let ``an address drawn right to left is read left to right, whole`` () =
+    use pdf = new TempPdf()
+    tagged pdf.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        let host = float (font.GetWidth("https://example.org", 12f))
+        inTags pointer page font [ "P"; "Span" ] (72.0 + host) 700.0 "/plan"
+        inTags pointer page font [ "P"; "Span" ] 72.0 700.0 "https://example.org")
+    named pdf.Path |> should equal [ "https://example.org/plan", false ]
+
+[<Fact>]
+let ``www. inside a word or an e-mail address isn't an address`` () =
+    use pdf = new TempPdf()
+    tagged pdf.Path (fun document pointer font ->
+        inTags pointer (document.AddNewPage()) font [ "P" ] 72.0 700.0 "Write to jay@www.example.org about awww.cool things.")
+    named pdf.Path |> should be Empty
+
+[<Fact>]
+let ``an address in a running footer (an artifact, not read) isn't warned about`` () =
+    use pdf = new TempPdf()
+    tagged pdf.Path (fun document pointer font ->
+        for i in 1..2 do
+            let page = document.AddNewPage()
+            inTags pointer page font [ "P" ] 72.0 700.0 $"Page {i} of the garden plan."
+            let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+            canvas.OpenTag(iText.Kernel.Pdf.Canvas.CanvasArtifact()) |> ignore
+            show canvas font 72.0 40.0 "www.example.org/footer"
+            canvas.CloseTag() |> ignore)
+    named pdf.Path |> should be Empty
+
+[<Fact>]
+let ``an untagged file's addresses are warned about, the fix left for tagging`` () =
+    use pdf = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(pdf.Path))
+        show (iText.Kernel.Pdf.Canvas.PdfCanvas(document.AddNewPage())) (iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA) 72.0 700.0 "See https://example.org/plan today."
+    unlinked pdf.Path |> should equal [ "Page 1: \"https://example.org/plan\". Not fixable here: the PDF isn't tagged: tagging it comes first.", false ]
+
+[<Fact>]
+let ``a span already in a Link with nothing to follow is reported, not wrapped in another`` () =
+    use pdf = new TempPdf()
+    tagged pdf.Path (fun document pointer font -> inTags pointer (document.AddNewPage()) font [ "P"; "Link"; "Span" ] 72.0 700.0 "https://example.org/plan")
+    unlinked pdf.Path
+    |> should equal [ "Page 1: \"https://example.org/plan\". Not fixable here: it's tagged as a link already, with no link annotation to follow.", false ]
+
+[<Fact>]
+let ``the fix moves the address's own page's content, not another page's with the same number`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // One P: MCID 0 on page 1 (other text) and MCID 0 on page 2 (the address alone).
+    tagged input.Path (fun document pointer font ->
+        let first, second = document.AddNewPage(), document.AddNewPage()
+        pointer.SetPageForTagging(first).AddTag("P") |> ignore
+        for page, text in [ first, "Intro text on page one."; second, "https://example.org/plan" ] do
+            pointer.SetPageForTagging page |> ignore
+            let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+            canvas.OpenTag(pointer.GetTagReference()) |> ignore
+            show canvas font 72.0 700.0 text
+            canvas.CloseTag() |> ignore)
+    validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed |> should be True
+    let failed = validator.Value.Validate(output.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> List.ofSeq
+    failed |> should not' (contain "7.1-3")
+    let paragraph = (validator.Value.ReadStructureTree output.Path |> notNull).Children[0].Children[0]
+    (string paragraph.Content, [ for child in paragraph.Children -> child.Tag, string child.Content, child.PageNumber.GetValueOrDefault() ])
+    |> should equal ("Intro text on page one.", [ "Link", "https://example.org/plan", 2 ])
+
+[<Fact>]
+let ``a span taking its page from its paragraph is linked`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    tagged input.Path (fun document pointer font ->
+        inTags pointer (document.AddNewPage()) font [ "P"; "Span" ] 72.0 700.0 "https://example.org/plan"
+        let span = ((document.GetStructTreeRoot().GetKids()[0] :?> iText.Kernel.Pdf.Tagging.PdfStructElem).GetKids()[0] :?> iText.Kernel.Pdf.Tagging.PdfStructElem)
+        span.GetPdfObject().Remove PdfName.Pg |> ignore)
+    let result = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls)
+    result.AppliedFixes |> should contain "Linked 1 web address shown as text, to where it goes."
+    named output.Path |> should be Empty
+
+[<Fact>]
+let ``each address is dismissed on its own`` () =
+    use pdf = new TempPdf()
+    tagged pdf.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        inTags pointer page font [ "P"; "Span" ] 72.0 700.0 "https://example.org/one"
+        inTags pointer page font [ "P"; "Span" ] 72.0 680.0 "https://example.org/two"
+        inTags pointer page font [ "P" ] 72.0 660.0 "See www.example.org and www.example.net.")
+    let warnings =
+        validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1).Assertions
+        |> Seq.filter (fun finding -> finding.Specification = "Legibyl" && finding.TestNumber = 18)
+        |> List.ofSeq
+    warnings |> List.map ReviewFile.dismissalLocation |> List.distinct |> should haveLength 4
+    let first = warnings.Head
+    let review: ReviewFile.SavedFile =
+        { Version = 1
+          DismissedWarnings = [| { Rule = ReviewFile.dismissalRule first; Location = ReviewFile.dismissalLocation first; Message = first.Message } |]
+          Edits = null; Title = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+    warnings |> List.filter (ReviewFile.dismisses review) |> should equal [ first ]
