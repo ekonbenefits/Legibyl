@@ -1235,7 +1235,8 @@ let orderedFixes
 /// The fixes that go by what a page says (its text, through MarkedContentTextIndex).
 let private readsText =
     set
-        [ PdfFixOptions.Language
+        [ PdfFixOptions.ParentTree
+          PdfFixOptions.Language
           PdfFixOptions.HeadingsFromToc
           PdfFixOptions.EmptyParagraphs
           PdfFixOptions.EmptyTocEntries

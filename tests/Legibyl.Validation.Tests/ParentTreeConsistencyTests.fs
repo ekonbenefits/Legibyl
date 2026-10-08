@@ -216,3 +216,70 @@ let ``untying content from a tag that's gone leaves no tag of its own behind`` (
           | :? PdfDictionary as d when PdfName.StructElem.Equals(d.GetAsName PdfName.Type) && PdfName.Span.Equals(d.GetAsName PdfName.S) -> d
           | _ -> () ]
     |> should be Empty
+
+/// A Document with paragraphs: "Kept text." (MCID 0), and then pieces (MCIDs 1 on), each text or
+/// " ", in their own P or, if together, in one P; changed by change (the Document, its P's).
+let private createPieces (path: string) (pieces: string list) (together: bool) (change: PdfStructElem -> PdfStructElem list -> unit) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.SetTagged() |> ignore
+    let page = document.AddNewPage()
+    let top = PdfStructElem(document, PdfName.Document)
+    document.GetStructTreeRoot().AddKid top |> ignore
+    let paragraph () =
+        let p = PdfStructElem(document, PdfName.P)
+        p.GetPdfObject().Put(PdfName.Pg, page.GetPdfObject()) |> ignore
+        top.AddKid p |> ignore
+        p
+    let first = paragraph ()
+    first.AddKid(PdfMcrNumber(PdfNumber 0, first)) |> ignore
+    let shared = if together then Some(paragraph ()) else None
+    let others =
+        [ for i in 1 .. pieces.Length do
+              let p = shared |> Option.defaultWith paragraph
+              p.AddKid(PdfMcrNumber(PdfNumber i, p)) |> ignore
+              if shared.IsNone || i = 1 then yield p ]
+    let canvas = PdfCanvas page
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    for i, text in List.indexed ("Kept text." :: pieces) do
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber i) |> ignore
+        canvas.BeginMarkedContent(PdfName.P, properties) |> ignore
+        canvas.BeginText().SetFontAndSize(font, 12f).MoveText(72.0, 700.0 - 20.0 * float i).ShowText(text).EndText() |> ignore
+        canvas.EndMarkedContent() |> ignore
+    change top (first :: others)
+
+[<Fact>]
+let ``an empty paragraph that takes its page from its parent is removed, not a failure`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPieces input.Path [ " " ] false (fun top paragraphs ->
+        top.GetPdfObject().Put(PdfName.Pg, (paragraphs.Head.GetPdfObject().GetAsDictionary PdfName.Pg)) |> ignore
+        for p in paragraphs do p.GetPdfObject().Remove PdfName.Pg |> ignore)
+
+    let result = fix input.Path output.Path PdfFixOptions.EmptyParagraphs
+
+    result.WasFixed |> should be True
+    result.AppliedFixes |> Seq.exists (fun line -> line.Contains "empty") |> should be True
+
+[<Fact>]
+let ``content of a tag still in the tags, but placed on no page, isn't taken for a tag that's gone`` () =
+    use input = new TempPdf()
+    createPieces input.Path [ "More text." ] false (fun _ paragraphs ->
+        for p in paragraphs do p.GetPdfObject().Remove PdfName.Pg |> ignore)
+
+    VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).Findings
+    |> Seq.filter (fun f -> f.Specification = "Legibyl" && f.TestNumber = 17)
+    |> should be Empty
+
+[<Fact>]
+let ``a tag that's gone, holding text and a space, is kept whole`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPieces input.Path [ "Kept too."; " " ] true (fun top _ ->
+        // The shared paragraph taken out of the tags, its parent tree entries left.
+        top.GetPdfObject().GetAsArray(PdfName.K).Remove 1)
+
+    let result = fix input.Path output.Path PdfFixOptions.ParentTree
+
+    result.WasFixed |> should be False
+    result.NotApplied |> Seq.exists (fun line -> line.StartsWith "Page 1: 2 piece(s) of content are tied to a tag that isn't in the tags any more, and were kept") |> should be True

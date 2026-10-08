@@ -263,6 +263,7 @@ let private markedContentOf (element: PdfDictionary) context =
 /// then leaves their content out of the parent tree.
 let internal makeArtifacts (document: PdfDocument) context (elements: PdfDictionary list) =
     let root = document.GetStructTreeRoot()
+    let removing = Collections.Generic.HashSet<PdfDictionary>(elements, HashIdentity.Reference)
     // The forward hierarchy supplies an exact parent even when the source omitted /P.
     let parents =
         if elements.IsEmpty || isNull root then []
@@ -270,7 +271,7 @@ let internal makeArtifacts (document: PdfDocument) context (elements: PdfDiction
     for parent in parents do
         let setParent kid =
             match resolve kid with
-            | :? PdfDictionary as child when elements |> List.exists (fun element -> obj.ReferenceEquals(element, child)) ->
+            | :? PdfDictionary as child when removing.Contains child ->
                 child.Put(PdfName.P, parent) |> ignore
             | _ -> ()
         match resolve (parent.Get PdfName.K) with
@@ -283,20 +284,29 @@ let internal makeArtifacts (document: PdfDocument) context (elements: PdfDiction
             | true, all -> all.UnionWith mcids
             | _ -> byPage[page] <- Collections.Generic.HashSet mcids
     ContentArtifacts.mark document byPage
-    let rec clear (structElem: iText.Kernel.Pdf.Tagging.PdfStructElem) depth =
+    // iText finds an MCID's page by its tag's own /Pg, so a tag that takes its page from a
+    // parent is given it before its content is untied (else iText fails on the missing page).
+    let givePage (element: PdfDictionary) (page: int option) =
+        match element.GetAsDictionary PdfName.Pg, page with
+        | null, Some page when page >= 1 && page <= document.GetNumberOfPages() ->
+            element.Put(PdfName.Pg, document.GetPage(page).GetPdfObject()) |> ignore
+        | _ -> ()
+    let rec clear (structElem: iText.Kernel.Pdf.Tagging.PdfStructElem) (page: int option) depth =
         if depth < 100 then
+            let page = structElemPage (structElem.GetPdfObject()) context page
+            givePage (structElem.GetPdfObject()) page
             let kids = structElem.GetKids() |> Seq.toArray
             for i in kids.Length - 1 .. -1 .. 0 do
                 match kids[i] with
                 | :? iText.Kernel.Pdf.Tagging.PdfStructElem as child ->
                     child.GetPdfObject().Put(PdfName.P, structElem.GetPdfObject()) |> ignore
-                    clear child (depth + 1)
+                    clear child page (depth + 1)
                 | _ -> ()
                 structElem.RemoveKid i |> ignore
     for element in elements do
         let structElem = iText.Kernel.Pdf.Tagging.PdfStructElem element
         // Its content first, so iText forgets it; then the element itself.
-        clear structElem 0
+        clear structElem (ancestorPage element context) 0
         match resolve (element.Get PdfName.P) with
         | :? PdfDictionary as parent when obj.ReferenceEquals(parent, root.GetPdfObject()) ->
             match resolve (parent.Get PdfName.K) with

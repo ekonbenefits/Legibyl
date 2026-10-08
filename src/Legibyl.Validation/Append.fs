@@ -180,6 +180,8 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
     | null -> ()
     | tree -> numbers tree 0
     seen.Clear()
+    // Parent tree entries of form XObjects' content: the parent tree fix doesn't look in those.
+    let streamKeys = HashSet<int>()
     let add (holder: PdfDictionary | null) (mcid: int) (element: PdfDictionary) =
         match holder with
         | null -> fail $"content {mcid} isn't on any page"
@@ -187,6 +189,7 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
             match holder.GetAsNumber PdfName.StructParents with
             | null -> fail $"the page holding content {mcid} has no parent tree entry"
             | key ->
+                if holder :? PdfStream then streamKeys.Add(key.IntValue()) |> ignore
                 let address = key.IntValue(), mcid
                 match expected.TryGetValue address with
                 | true, other when same other element -> fail $"content {mcid} (parent tree entry {fst address}) is listed twice in one tag"
@@ -237,7 +240,9 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
     for KeyValue((key, mcid), element) in expected do
         match entries.TryGetValue key with
         | true, (:? PdfArray as array) when mcid >= 0 && mcid < array.Size() && matches (array.Get mcid) element -> ()
-        | _ -> failContent $"content {mcid} (parent tree entry {key}) isn't tied to the tag holding it"
+        | _ ->
+            let detail = $"content {mcid} (parent tree entry {key}) isn't tied to the tag holding it"
+            if streamKeys.Contains key then fail detail else failContent detail
     for KeyValue(key, element) in objects do
         match entries.TryGetValue key with
         | true, value when matches value element -> ()
@@ -250,7 +255,9 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
                 if not (isNull value) && not (value :? PdfNull) then
                     match expected.TryGetValue((key, mcid)) with
                     | true, element when matches value element -> ()
-                    | _ -> failContent $"content {mcid} (parent tree entry {key}) is tied to a tag that isn't in the tags"
+                    | _ ->
+                        let detail = $"content {mcid} (parent tree entry {key}) is tied to a tag that isn't in the tags"
+                        if streamKeys.Contains key then fail detail else failContent detail
         | :? PdfDictionary as element ->
             match objects.TryGetValue key with
             | true, expected when same element expected -> ()

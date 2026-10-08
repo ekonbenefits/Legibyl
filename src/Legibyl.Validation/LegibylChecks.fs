@@ -394,7 +394,7 @@ let run (document: PdfDocument) context : RuleViolation list =
                                       && not (discardable.Value visit.Element visit.Page) ->
                       warning
                           check.Message
-                          "The fix leaves this one: it draws something, has a description, or its content isn't on the page. Check it in Structure…."
+                          "The fix leaves this one: it draws something, has a description, or its content isn't on the page: check it in Structure…"
                           finding.Location
                           check.TestNumber
                           PdfFixOptions.None

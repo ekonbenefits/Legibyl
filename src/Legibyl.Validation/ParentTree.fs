@@ -74,9 +74,12 @@ let private numbers (tree: PdfDictionary) : IReadOnlyDictionary<int, PdfObject> 
     entries
 
 /// Reverse associations that disagree with the reachable, forward structure tree.
-let private inconsistent (document: PdfDocument) context =
+let inconsistent (document: PdfDocument) context =
     let forward = tagged document context
     let root = document.GetStructTreeRoot().GetPdfObject()
+    // The tags in the tags: content tied to one of them, though not where its content was found
+    // (no page anywhere, say), isn't tied to a tag that's gone, and is left alone.
+    let reachable = HashSet<PdfDictionary>(seq { for visit in walk root context -> visit.Element }, HashIdentity.Reference)
     let entries =
         match root.GetAsDictionary PdfName.ParentTree with
         | null -> Dictionary<int, PdfObject>() :> IReadOnlyDictionary<_, _>
@@ -92,6 +95,7 @@ let private inconsistent (document: PdfDocument) context =
                           match forward.MarkedContent.TryGetValue((page, mcid)) with
                           | true, expected when obj.ReferenceEquals(owner, expected) -> ()
                           | true, expected -> yield page, mcid, owner, Some expected
+                          | _ when reachable.Contains owner -> ()
                           | _ -> yield page, mcid, owner, None
                       | _ -> ()
               | _ -> ()
@@ -154,6 +158,39 @@ let private hasDescription (owner: PdfDictionary) =
         match owner.GetAsString key with
         | null -> false
         | text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString())))
+
+/// Content still tied, by the parent tree, to a tag that isn't in the tags any more: by page and
+/// that tag, its MCIDs, and whether Rebuild the parent tree unties it (marking it as not read):
+/// the tag said it was an artifact, or it has no description and none of its content draws
+/// anything. Decided for the tag as a whole, as the warning (Structure-17) and Structure… show it.
+type Disconnected =
+    { Page: int
+      Owner: PdfDictionary
+      Mcids: int list
+      /// The tag that's gone was an artifact.
+      Artifact: bool
+      Untied: bool }
+
+let disconnected (document: PdfDocument) context : Disconnected list =
+    let empty = Dictionary<int, int -> bool>()
+    let emptyOn page =
+        match empty.TryGetValue page with
+        | true, test -> test
+        | _ ->
+            let test = emptyContent document context page
+            empty[page] <- test
+            test
+    inconsistent document context
+    |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
+    |> List.groupBy (fun (page, _, owner, _) -> page, owner)
+    |> List.map (fun ((page, owner), content) ->
+        let mcids = content |> List.map (fun (_, mcid, _, _) -> mcid)
+        let artifact = PdfName.Artifact.Equals(owner.GetAsName PdfName.S)
+        { Page = page
+          Owner = owner
+          Mcids = mcids
+          Artifact = artifact
+          Untied = artifact || (not (hasDescription owner) && mcids |> List.forall (emptyOn page)) })
 
 /// Takes a page's MCID out of iText's parent tree (which it writes on close), whatever tag it's
 /// tied to: by tying it to a tag of the moment, then untying it. That tag is never in the tags,
@@ -273,31 +310,29 @@ let rebuild (document: PdfDocument) context : string list =
     | None -> []
     | Some missing ->
         let mutable discarded = 0
-        let emptyPages = Dictionary<int, int -> bool>()
         let byPage = Dictionary<int, HashSet<int>>()
         let kept = SortedDictionary<int, int>()
         use forgetter = new Forgetter(document)
-        for page, mcid, owner, expected in inconsistent document context do
-            let empty =
-                match emptyPages.TryGetValue page with
-                | true, empty -> empty
-                | _ ->
-                    let empty = emptyContent document context page
-                    emptyPages[page] <- empty
-                    empty
-            let artifact = PdfName.Artifact.Equals(owner.GetAsName PdfName.S)
-            if expected.IsSome || artifact || (not (hasDescription owner) && empty mcid) then
-                forgetter.Forget page mcid
-                if expected.IsNone then
-                    match byPage.TryGetValue page with
+        // Content tied to the wrong tag: untied here, and tied to the right one below.
+        for page, mcid, _, expected in inconsistent document context do
+            if expected.IsSome then forgetter.Forget page mcid
+        // Content tied to a tag that's gone: untied, and marked as not read, a tag at a time.
+        for gone in disconnected document context do
+            if gone.Untied then
+                for mcid in gone.Mcids do
+                    forgetter.Forget gone.Page mcid
+                    match byPage.TryGetValue gone.Page with
                     | true, mcids -> mcids.Add mcid |> ignore
-                    | _ -> byPage[page] <- HashSet [mcid]
+                    | _ -> byPage[gone.Page] <- HashSet [ mcid ]
                     discarded <- discarded + 1
             else
-                kept[page] <- (match kept.TryGetValue page with | true, n -> n + 1 | _ -> 1)
+                kept[gone.Page] <- (match kept.TryGetValue gone.Page with | true, n -> n + gone.Mcids.Length | _ -> gone.Mcids.Length)
         for KeyValue(page, count) in kept do
+            let why =
+                if context.MarkedContent.Unreadable.Contains page then "the page's text couldn't be read, so whether they draw anything isn't known"
+                else "they draw something or have a description"
             context.Notes.Add
-                $"Page {page}: {count} piece(s) of content are tied to a tag that isn't in the tags any more, and draw something or have a description, so they were kept as they are. Their tag needs putting back where the PDF was made, or in a PDF editor's tags panel."
+                $"Page {page}: {count} piece(s) of content are tied to a tag that isn't in the tags any more, and were kept as they are: {why}. Their tag needs putting back where the PDF was made, or in a PDF editor's tags panel."
         ContentArtifacts.mark document byPage
         let entries =
             match resolve ((document.GetStructTreeRoot().GetPdfObject()).Get PdfName.ParentTree) with
