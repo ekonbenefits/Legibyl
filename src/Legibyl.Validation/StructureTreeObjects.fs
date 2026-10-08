@@ -49,11 +49,15 @@ let pageList (pages: int seq) =
     | [ one ] -> one
     | last :: rest -> $"""{String.Join(", ", List.rev rest)} and {last}"""
 
-let createContext (document: PdfDocument) (pdfPath: string) =
+/// A context for document with its pages' text already read (markedContent).
+let createContextWith (document: PdfDocument) (markedContent: MarkedContentTextIndex.Index) =
     { PageNumberByObject = pageNumberIndex document
-      MarkedContent = MarkedContentTextIndex.build pdfPath
+      MarkedContent = markedContent
       RoleMap = roleMap document
       Notes = List<string>() }
+
+let createContext (document: PdfDocument) (pdfPath: string) =
+    createContextWith document (MarkedContentTextIndex.build pdfPath)
 
 /// Unions geometries that are all on one page; None if there are none or they span pages.
 let unionGeometry (geometries: StructureGeometry seq) =

@@ -32,12 +32,13 @@ let private node tag content page geometry leaves children : StructureNode =
       RowSpan = 1
       Children = Array.ofList children }
 
-let nodes (pdfPath: string) =
+/// The nodes for pdfPath, whose pages' text is already read (text: StructureTreeWalk.read's).
+let nodes (pdfPath: string) (text: MarkedContentTextIndex.Index) =
     use document = new PdfDocument(new PdfReader(pdfPath))
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> []
     | _ ->
-        let context = createContext document pdfPath
+        let context = createContextWith document text
         ParentTree.disconnected document context
         |> List.groupBy _.Page
         |> List.map (fun (page, gone) ->
@@ -52,7 +53,8 @@ let nodes (pdfPath: string) =
                       let name = match tag.Owner.GetAsName PdfName.S with null -> "a tag" | name -> $"<{name.GetValue()}>"
                       let details =
                           [ $"Tied to {name}, which isn't in the tags."
-                            (if tag.Untied then "It draws nothing: Rebuild the parent tree marks it as not read."
+                            (if tag.Artifact then "Its tag said it was decoration: Rebuild the parent tree marks it as not read."
+                             elif tag.Untied then "It draws nothing: Rebuild the parent tree marks it as not read."
                              else "It's kept: its tag needs putting back where the PDF was made, or in a PDF editor.")
                             if context.MarkedContent.Unreadable.Contains page then "The page's text couldn't be read."
                             yield! content |> List.map _.Text |> List.filter (String.IsNullOrWhiteSpace >> not) |> List.distinct

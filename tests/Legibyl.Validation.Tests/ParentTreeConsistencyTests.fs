@@ -368,3 +368,23 @@ let ``content tied to a tag that's gone, and drawing nothing, offers the fix tha
     warning.TestNumber |> should equal 17
     warning.FixOptions |> should equal PdfFixOptions.ParentTree
     warning.ErrorMessage |> should haveSubstring "Rebuild the parent tree unties it"
+
+[<Fact>]
+let ``a tag that's gone, holding text and a space, is warned of without the fix`` () =
+    use input = new TempPdf()
+    createPieces input.Path [ "Kept too."; " " ] true (fun top _ -> top.GetPdfObject().GetAsArray(PdfName.K).Remove 1)
+
+    let gone = warnings input.Path |> List.exactlyOne
+
+    gone.TestNumber |> should equal 17
+    gone.FixOptions |> should equal PdfFixOptions.None
+
+[<Fact>]
+let ``a tag that's gone, which said it was decoration, says so rather than that it draws nothing`` () =
+    use input = new TempPdf()
+    create input.Path "Artifact" true "shape" false
+
+    let gone = warnings input.Path |> List.exactlyOne
+
+    gone.FixOptions |> should equal PdfFixOptions.ParentTree
+    gone.ErrorMessage |> should haveSubstring "Its tag said it was decoration"

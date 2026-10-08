@@ -255,7 +255,9 @@ let private disconnectedFindings (document: PdfDocument) context =
               |> Option.toObj
           let tag = match gone.Owner.GetAsName PdfName.S with null -> "a tag" | name -> $"<{name.GetValue()}>"
           let what =
-              if gone.Untied then
+              if gone.Artifact then
+                  "Its tag said it was decoration, so Rebuild the parent tree unties it and marks it as not read."
+              elif gone.Untied then
                   "It draws nothing, so Rebuild the parent tree unties it and marks it as not read."
               else
                   "It draws something or has a description, so it's kept: its tag needs putting back where the PDF was made, or in a PDF editor."
