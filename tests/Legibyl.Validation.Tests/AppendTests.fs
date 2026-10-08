@@ -280,7 +280,9 @@ let ``a review saved in a file isn't carried over, and the note says so`` () =
     createInput jardin "Jardin" "es-ES" "P"
     EmbeddedReview.write (folder.File "g.pdf") garden """{"dismissed":[]}"""
     let outcome = run [ garden; jardin ] joined Append.Options.Default
-    outcome.Joined.Value.Notes |> should equal [ "The review saved in garden.pdf wasn't carried over: its edits name pages by number." ]
+    outcome.Joined.Value.NotCarriedOver |> should equal [ "The review saved in garden.pdf wasn't carried over: its edits name pages by number." ]
+    // Nothing was changed to join them.
+    outcome.Joined.Value.Notes |> should be Empty
     EmbeddedReview.read joined |> should equal None
 
 // ---- Refusals: nothing is written ----
@@ -695,3 +697,71 @@ let ``a parent tree entry with no value is refused as damaged`` () =
     |> List.map snd
     |> List.exactlyOne
     |> fun reason -> Assert.Contains("part of the parent tree is damaged", reason)
+
+// ---- What the summary reports (#304) ----
+
+[<Fact>]
+let ``empty elements a file has before its content aren't reported as reading differently`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput (folder.File "g.pdf") "Garden" "en-US" "P"
+    createInput jardin "Jardin" "es-ES" "P"
+    // Three <Art>s at the top of the garden's Document, each holding only an empty <Sect>: no
+    // kids, no content, nothing a screen reader reads.
+    changed (folder.File "g.pdf") garden (fun document ->
+        let root = rawRoot document
+        let documentElement = root.GetAsDictionary PdfName.K |> Option.ofObj |> Option.defaultWith (fun () -> root.GetAsArray(PdfName.K).GetAsDictionary 0)
+        let kids = documentElement.GetAsArray PdfName.K
+        for _ in 1..3 do
+            let art = PdfDictionary()
+            art.Put(PdfName.Type, PdfName.StructElem) |> ignore
+            art.Put(PdfName.S, PdfName "Art") |> ignore
+            art.Put(PdfName.P, documentElement) |> ignore
+            art.MakeIndirect document |> ignore
+            let sect = PdfDictionary()
+            sect.Put(PdfName.Type, PdfName.StructElem) |> ignore
+            sect.Put(PdfName.S, PdfName "Sect") |> ignore
+            sect.Put(PdfName.P, art) |> ignore
+            sect.MakeIndirect document |> ignore
+            art.Put(PdfName.K, sect) |> ignore
+            kids.Add(0, art))
+    let input = validator.Value.ReadStructureTree garden |> notNull
+    let rec count (node: StructureNode) = (if node.Tag = "Sect" then 1 else 0) + Seq.sumBy count node.Children
+    count input |> should equal 3
+    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    outcome.Differences |> should be Empty
+    outcome.Passes |> should equal true
+
+/// A structure node: with text, a leaf a reader meets; with neither text nor children, empty.
+let private node (tag: string) (text: string | null) (children: StructureNode list) : StructureNode =
+    { Tag = tag
+      Role = null
+      AlternateDescription = null
+      ActualText = null
+      Content = text
+      FormFieldName = null
+      FormFieldDescription = null
+      FormFieldType = null
+      FormFieldValue = null
+      LinkUri = null
+      LinkDestinationPageNumber = Nullable()
+      LinkDestinationDescription = null
+      LinkDestination = null
+      LinkDescription = null
+      Geometry = null
+      Language = null
+      PageNumber = Nullable()
+      ContentLeafCount = (if isNull text then 0 else 1)
+      Children = List.toArray children
+      ColSpan = 1
+      RowSpan = 1 }
+
+[<Fact>]
+let ``with the empty elements left out, a paragraph whose text changed is still reported, and only it`` () =
+    let part: Append.Part = { File = "/tmp/garden.pdf"; FirstPage = 1; Pages = 1; RenamedTags = Map.empty }
+    let input =
+        node "StructTreeRoot" null [ node "Document" null [ node "Art" null [ node "Sect" null [] ]; node "P" "One" []; node "P" "Two" [] ] ]
+    let joined =
+        node "StructTreeRoot" null [ node "Document" null [ node "Sect" null [ node "P" "One" []; node "P" "Changed" [] ] ] ]
+    Append.differences part 0 input joined
+    |> should equal [ "garden.pdf: part 1 › <P> 2: the text was \"Two\", is \"Changed\" in the joined file." ]

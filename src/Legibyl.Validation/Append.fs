@@ -683,8 +683,10 @@ type Joined =
       Title: string
       Language: string option
       Parts: Part list
-      /// What was renamed, and what wasn't carried over.
-      Notes: string list }
+      /// What was changed to join them: tags, classes, IDs and named destinations renamed.
+      Notes: string list
+      /// What wasn't carried over into the joined file (a review saved in an input).
+      NotCarriedOver: string list }
 
 /// The joined file's outline: an entry for each part, going to its first page, with the input's
 /// own outline (its top entries, counted per part) below it.
@@ -1119,21 +1121,31 @@ let join (files: string list) (output: string) (options: Options) : Joined =
       Title = title
       Language = language
       Parts = parts
-      Notes =
+      Notes = prepared |> List.collect _.Notes
+      NotCarriedOver =
         [ for input in prepared do
-              yield! input.Notes
               if input.Input.HasReview then
-                  yield $"The review saved in {Path.GetFileName input.Input.File} wasn't carried over: its edits name pages by number." ] }
+                  $"The review saved in {Path.GetFileName input.Input.File} wasn't carried over: its edits name pages by number." ] }
 
 // ---- Checking the joined file's structure ----
 
-/// How an input's structure differs from its part of the joined file's: by element, in reading
-/// order, what each says (its tag, text, alt text, replacement text, link) and its page.
+/// How an input's structure differs from its part of the joined file's: by element a reader meets,
+/// in reading order, what each says (its tag, text, alt text, replacement text, link) and its page.
 let differences (part: Part) (index: int) (input: StructureNode) (joined: StructureNode) : string list =
     let name = Path.GetFileName part.File
-    // The elements, not the content outside them the reader adds (see UntaggedContent.nodes).
+    // Whether a screen reader meets the element: it has content, alt or replacement text, a link
+    // or a form field, or an element inside it does. Empty ones (an <Art> holding only an empty
+    // <Sect>) can be dropped by the join, and would shift every element after them.
+    let rec isRead (node: StructureNode) =
+        node.ContentLeafCount > 0
+        || [ node.Content; node.AlternateDescription; node.ActualText; node.LinkUri; node.LinkDescription; node.FormFieldName ]
+           |> List.exists (String.IsNullOrEmpty >> not)
+        || not (isNull node.LinkDestination)
+        || node.Children |> Seq.exists isRead
+    // The elements a reader meets, not the content outside them the reader adds (see
+    // UntaggedContent.nodes).
     let children (node: StructureNode) =
-        node.Children |> Seq.filter (fun child -> child.Tag <> "NotInTags" && child.Tag <> "Disconnected") |> List.ofSeq
+        node.Children |> Seq.filter (fun child -> child.Tag <> "NotInTags" && child.Tag <> "Disconnected" && isRead child) |> List.ofSeq
     // An input's part: its Document's children, else its root's.
     let ownParts (root: StructureNode) =
         match children root with

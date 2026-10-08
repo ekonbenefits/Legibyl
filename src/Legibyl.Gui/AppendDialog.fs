@@ -164,5 +164,5 @@ let summary (outcome: Append.Outcome) : string =
             | true, _ -> $"Joined {joined.Parts.Length} files into {Path.GetFileName joined.Output}. It passes {standard}, but some of it doesn't read as its file did."
         String.Join(
             Environment.NewLine,
-            headline :: lines "Read differently:" outcome.Differences @ lines "Changed to join them:" joined.Notes
+            headline :: lines "Read differently:" outcome.Differences @ lines "Changed to join them:" joined.Notes @ lines "Not carried over:" joined.NotCarriedOver
         )
