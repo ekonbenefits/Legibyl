@@ -489,7 +489,7 @@ let private prepare (taken: Taken) (index: int) (input: Input) : Prepared =
                 | role -> map[key.GetValue()] <- role.GetValue()
             let renames = Dictionary<string, string>()
             let renamed (tag: string) = match renames.TryGetValue tag with | true, other -> other | _ -> tag
-            let used (tag: string) = taken.RoleMap.ContainsKey tag || map.ContainsKey tag || renames.ContainsValue tag || RoleMaps.standardTags.Contains tag
+            let used (tag: string) = taken.RoleMap.ContainsKey tag || map.ContainsKey tag || renames.ContainsValue tag || Tags.standard.Contains tag
             let mutable changed = true
             while changed do
                 changed <- false

@@ -326,9 +326,8 @@ let private topLevel (structTreeRoot: PdfDictionary) context =
         | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match resolve (array.Get i) with :? PdfDictionary as d when not (isNull (d.GetAsName PdfName.S)) -> yield d | _ -> () ]
         | :? PdfDictionary as d when not (isNull (d.GetAsName PdfName.S)) -> [ d ]
         | _ -> []
-    let wrappers = set [ "Document"; "Part"; "Art"; "Sect"; "Div" ]
     match elementsIn (structTreeRoot.Get PdfName.K) with
-    | [ only ] when wrappers.Contains(standardTag only context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue "") ->
+    | [ only ] when Tags.wrappers.Contains(standardTag only context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue "") ->
         elementsIn (only.Get PdfName.K)
     | elements -> elements
 

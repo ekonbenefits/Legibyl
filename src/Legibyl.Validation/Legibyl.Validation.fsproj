@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="Tags.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="PdfUaTarget.fs" />
     <Compile Include="PdfLocationParser.fs" />

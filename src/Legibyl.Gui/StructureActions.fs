@@ -111,18 +111,18 @@ let fieldNameText (name: string) =
         String.Join(" ", (first.Substring(0, 1).ToUpperInvariant() + first.Substring(1).ToLowerInvariant()) :: (rest |> List.map _.ToLowerInvariant()))
 
 /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
-let retagTags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
+let offeredRetags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
 
 /// The tag a screen reader hears for node: one of the PDF's own tag names by the standard tag
 /// chosen for it (roleMap, the Role map tab's), else by its role map's; a standard tag, itself.
 let heardTag (roleMap: Map<string, string>) (node: StructureNode) =
-    if RoleMaps.standardTags.Contains node.Tag then node.Tag
+    if Tags.standard.Contains node.Tag then node.Tag
     else roleMap.TryFind node.Tag |> Option.orElse (Option.ofObj node.Role) |> Option.defaultValue node.Tag
 
 /// Whether node, which a screen reader hears as heard, can be given another tag.
 let private canRetagAs (suggested: bool) (heard: string) (node: StructureNode) =
     not (isNull node.Geometry)
-    && (if suggested then node.Tag <> "Link" else heard = "H" || List.contains heard retagTags)
+    && (if suggested then node.Tag <> "Link" else heard = "H" || List.contains heard offeredRetags)
 
 /// Whether node can be given another tag: in a tagged PDF, a block of text (one of the PDF's own
 /// tag names by its role map's tag); in a suggested layout, any region (it needs its place on its
@@ -560,7 +560,7 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
             if needs.Suggested && targets |> List.forall (fun n -> TableGrid.isCell n.Tag) then [ "TH"; "TD" ]
             elif needs.Suggested then LayoutFile.tags
             elif targets |> List.forall (fun n -> heard n = "Figure") then [ "Figure"; "Artifact" ]
-            else retagTags
+            else offeredRetags
         Some
             { Targets = targets
               Tags = (match tag with Some tag when not (List.contains tag tags) -> tag :: tags | _ -> tags)
