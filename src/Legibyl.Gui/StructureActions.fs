@@ -268,6 +268,23 @@ let mergeable (nodes: StructureNode list) =
         Some nodes
     | _ -> None
 
+/// Paragraphs Convert to Table is offered for: two or more on one page, without alt text. Unlike
+/// merging, replacement text (/ActualText) doesn't rule them out: the conversion goes ahead when
+/// it says only what they draw, and says why not otherwise.
+let convertibleToTable (nodes: StructureNode list) =
+    match nodes with
+    | first :: _ :: _ when
+        nodes
+        |> List.forall (fun n ->
+            n.Tag = "P"
+            && isNull n.AlternateDescription
+            && (match n.Geometry, first.Geometry with
+                | NonNull box, NonNull firstBox -> box.PageNumber = firstBox.PageNumber
+                | _ -> false))
+        ->
+        Some nodes
+    | _ -> None
+
 /// What of edit isn't in the element yet: (label, text) lines.
 let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
     [ match edit.Retag with
@@ -581,8 +598,8 @@ let otherActions (needs: SelectionNeeds) : Action list =
     // A tagged table's rows and cells, rebuilt from how it looks (the wand: the model suggests them).
     [ match needs.Selected.Current with
       | _ when not needs.Suggested ->
-          match mergeable needs.Selected.Current with
-          | Some (first :: _ :: _ as nodes) when first.Tag = "P" ->
+          match convertibleToTable needs.Selected.Current with
+          | Some (first :: _ :: _ as nodes) ->
               let savedConversion =
                   match first.Geometry with
                   | NonNull box ->
@@ -670,20 +687,25 @@ let otherActions (needs: SelectionNeeds) : Action list =
               RegionEdits.findMerge needs.Edits.Current box.PageNumber box
               |> Option.filter (fun m -> m.MergeWith.Length = rest.Length && (m.Retag <> Some "Table" || m.Cells.IsEmpty))
           | _ -> None
-      match mergeable needs.Selected.Current, pendingMerge with
-      | Some(first :: rest), None when needs.Edits.Current |> List.exists (fun edit ->
-              edit.Page = (nonNull first.Geometry).PageNumber
-              && edit.Retag = Some "Table"
-              && not edit.Cells.IsEmpty
-              && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap
-              && edit.MergeWith.Length = rest.Length) ->
+      let conversion =
+          match (if needs.Suggested then None else convertibleToTable needs.Selected.Current), pendingMerge with
+          | Some(first :: rest), None when needs.Edits.Current |> List.exists (fun edit ->
+                  edit.Page = (nonNull first.Geometry).PageNumber
+                  && edit.Retag = Some "Table"
+                  && not edit.Cells.IsEmpty
+                  && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap
+                  && edit.MergeWith.Length = rest.Length) ->
+              Some first
+          | _ -> None
+      match conversion, mergeable needs.Selected.Current, pendingMerge with
+      | Some first, _, _ ->
           action "Don't Convert to Table" "Drop this conversion: the selected paragraphs stay separate." (fun () ->
               needs.SaveEdits (needs.Edits.Current |> List.filter (fun edit ->
                   not (edit.Retag = Some "Table" && edit.Page = (nonNull first.Geometry).PageNumber && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap))) |> ignore)
-      | Some _, Some merge ->
+      | None, Some _, Some merge ->
           action "Don't Merge These" "Drop this merge: they stay separate." (fun () ->
               needs.SaveEdits (needs.Edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore)
-      | Some nodes, None ->
+      | None, Some nodes, None ->
           let figures = nodes.Head.Tag = "Figure"
           action
               (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs")
@@ -692,7 +714,7 @@ let otherActions (needs: SelectionNeeds) : Action list =
               (fun () ->
                   let boxes = nodes |> List.map (fun p -> nonNull p.Geometry)
                   needs.SaveEdits (RegionEdits.mergeElements needs.Edits.Current boxes.Head.PageNumber nodes.Head.Tag boxes) |> ignore)
-      | None, _ -> ()
+      | None, None, _ -> ()
       // The keyboard's way to Replace Structure with Figure from Region: the region round what
       // the selected elements, on one page, draw. For several elements, or one holding others (a
       // chart's group or section); not for one paragraph alone.

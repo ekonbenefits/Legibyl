@@ -313,6 +313,29 @@ let ``consecutive selected paragraphs offer a deliberate table conversion`` () =
             offered |> should equal (Some "Convert 2 Paragraphs to Table…")))
 
 [<Fact>]
+let ``paragraphs with replacement text offer a table conversion, though not a merge`` () =
+    onUiThread (fun () ->
+        withPdf (fun pdf ->
+            // A row paragraph, as summary_merge.v5.pdf's vesting table has, with its text as /ActualText.
+            let withText =
+                node "StructTreeRoot" null [
+                    node "Document" null [
+                        node "P" (rect 72.0 697.0 238.0 712.0) []
+                        { node "P" (rect 72.0 685.0 227.0 698.0) [] with ActualText = "3 40%" }
+                    ]
+                ]
+            let window = show withText pdf
+            let blocks = paragraphs window
+            click blocks[0] false
+            click blocks[1] true
+            let offered = convertTableButton window |> Option.map buttonText
+            let merge = mergeButton window
+            window.Close()
+
+            offered |> should equal (Some "Convert 2 Paragraphs to Table…")
+            merge |> should equal None))
+
+[<Fact>]
 let ``a saved paragraph table conversion can be reviewed or removed`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->

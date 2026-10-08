@@ -237,12 +237,30 @@ let ``empty spans in row paragraphs go with the content beside them, and don't s
           "TR", [ "TD", "Tomato"; "TD", "March" ] ]
 
 [<Fact>]
-let ``a row paragraph with its own replacement text isn't converted, and says why`` () =
+let ``a row paragraph whose replacement text says other than it draws isn't converted, and says why`` () =
     use input = new TempPdf()
-    createParagraphRowsWithEmptySpans input.Path (Some "Tomato March")
+    createParagraphRowsWithEmptySpans input.Path (Some "Tomatoes, in March")
     let notes = ElementEdits.unapplied input.Path [ conversionOf input.Path ]
     notes |> should haveLength 1
     notes.Head |> should haveSubstring "/ActualText"
+
+[<Fact>]
+let ``a row paragraph whose replacement text says only what it draws is converted, the text in its cells`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // As summary_merge.v5.pdf's vesting table has it: the row's text, spaced differently.
+    createParagraphRowsWithEmptySpans input.Path (Some " Tomato March    ")
+    let edit = conversionOf input.Path
+    ElementEdits.unapplied input.Path [ edit ] |> should be Empty
+
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.AppliedFixes |> should contain "Converted 2 paragraph(s) on page 1 to a table with the checked rows and cells."
+    rows output.Path
+    |> should
+        equal
+        [ "TR", [ "TH", "Plant"; "TH", "Sow" ]
+          "TR", [ "TD", "Tomato"; "TD", "March" ] ]
 
 [<Fact>]
 let ``a grid without a row for each paragraph isn't converted, and says why`` () =
