@@ -285,6 +285,20 @@ let ``a review saved in a file isn't carried over, and the note says so`` () =
     outcome.Joined.Value.Notes |> should be Empty
     EmbeddedReview.read joined |> should equal None
 
+[<Fact>]
+let ``all the notes are in the order the files were joined: the first file's review before the second file's renamed tag`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput (folder.File "g.pdf") "Garden" "en-US" "P"
+    createInput jardin "Jardin" "es-ES" "H2"
+    EmbeddedReview.write (folder.File "g.pdf") garden """{"dismissed":[]}"""
+    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    outcome.Joined.Value.AllNotes
+    |> should
+        equal
+        [ "The review saved in garden.pdf wasn't carried over: its edits name pages by number."
+          "Renamed the tag <Callout> in jardin.pdf to <Callout-2>: an earlier file maps <Callout> to something else." ]
+
 // ---- Refusals: nothing is written ----
 
 let private refused (files: string list) =

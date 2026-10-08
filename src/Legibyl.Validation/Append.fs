@@ -686,7 +686,15 @@ type Joined =
       /// What was changed to join them: tags, classes, IDs and named destinations renamed.
       Notes: string list
       /// What wasn't carried over into the joined file (a review saved in an input).
-      NotCarriedOver: string list }
+      NotCarriedOver: string list
+      /// Both, in the order the files were joined: each file's changes, then what of it wasn't
+      /// carried over.
+      AllNotes: string list }
+
+/// What of an input wasn't carried over into the joined file.
+let private notCarriedOver (input: Prepared) =
+    [ if input.Input.HasReview then
+          $"The review saved in {Path.GetFileName input.Input.File} wasn't carried over: its edits name pages by number." ]
 
 /// The joined file's outline: an entry for each part, going to its first page, with the input's
 /// own outline (its top entries, counted per part) below it.
@@ -1122,10 +1130,8 @@ let join (files: string list) (output: string) (options: Options) : Joined =
       Language = language
       Parts = parts
       Notes = prepared |> List.collect _.Notes
-      NotCarriedOver =
-        [ for input in prepared do
-              if input.Input.HasReview then
-                  $"The review saved in {Path.GetFileName input.Input.File} wasn't carried over: its edits name pages by number." ] }
+      NotCarriedOver = prepared |> List.collect notCarriedOver
+      AllNotes = prepared |> List.collect (fun input -> input.Notes @ notCarriedOver input) }
 
 // ---- Checking the joined file's structure ----
 

@@ -53,7 +53,8 @@ let private joined (notes: string list) : Append.Joined =
         [ { File = "/tmp/garden.pdf"; FirstPage = 1; Pages = 2; RenamedTags = Map.empty }
           { File = "/tmp/jardin.pdf"; FirstPage = 3; Pages = 2; RenamedTags = Map.empty } ]
       Notes = notes
-      NotCarriedOver = [] }
+      NotCarriedOver = []
+      AllNotes = notes }
 
 let private report (compliant: bool) : ValidationReport =
     { FilePath = "/tmp/packet.pdf"
