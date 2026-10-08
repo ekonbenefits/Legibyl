@@ -41,7 +41,10 @@ type Found =
       WholeRun: bool
       /// Whether a marked content's glyphs are read on both sides of another's (0, then 1, then 0
       /// again): then its pieces, however they're tagged, can't be read in the address's order.
-      Interleaved: bool }
+      Interleaved: bool
+      /// When the last of its marked content goes on past it only with punctuation ("dol-diversification."),
+      /// and the others are all of it: that punctuation, which a fix can split off.
+      Tail: string option }
 
 /// "http(s)://" or "www.", not inside a word, a number or an e-mail address, up to whitespace.
 let private addressPattern =
@@ -140,6 +143,21 @@ let find (glyphs: Glyph array) : Found list =
                   match runs.TryGetValue mcid with
                   | true, run -> run.ToString() = part mcid
                   | _ -> part mcid = ""
+              let wholeRun = mcids |> List.forall (fun mcid -> mcid >= 0 && all mcid)
+              let tail =
+                  match List.tryLast mcids with
+                  | Some last when not wholeRun && last >= 0 && mcids |> List.forall (fun mcid -> mcid = last || (mcid >= 0 && all mcid)) ->
+                      match runs.TryGetValue last with
+                      | true, run ->
+                          let run = run.ToString()
+                          let address = part last
+                          if address <> "" && run.StartsWith(address, StringComparison.Ordinal)
+                             && run.Length > address.Length
+                             && run.Substring address.Length |> Seq.forall (fun c -> ".,;:!?\"')]}".Contains c) then
+                              Some(run.Substring address.Length)
+                          else None
+                      | _ -> None
+                  | _ -> None
               yield
                   { Text = written
                     Left = glyphs |> List.map _.Left |> List.min
@@ -147,5 +165,6 @@ let find (glyphs: Glyph array) : Found list =
                     Right = glyphs |> List.map _.Right |> List.max
                     Top = glyphs |> List.map _.Top |> List.max
                     Mcids = mcids
-                    WholeRun = mcids |> List.forall (fun mcid -> mcid >= 0 && all mcid)
-                    Interleaved = (glyphs |> List.map _.Mcid |> List.fold (fun runs mcid -> match runs with last :: _ when last = mcid -> runs | _ -> mcid :: runs) []).Length > mcids.Length } ]
+                    WholeRun = wholeRun
+                    Interleaved = (glyphs |> List.map _.Mcid |> List.fold (fun runs mcid -> match runs with last :: _ when last = mcid -> runs | _ -> mcid :: runs) []).Length > mcids.Length
+                    Tail = tail } ]

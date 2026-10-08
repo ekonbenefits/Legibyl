@@ -30,6 +30,9 @@ type Candidate =
       /// belong to, side by side among its kids, when the fix can tag it as a link: then they move
       /// under a new Link element.
       Run: (int list * PdfDictionary) option
+      /// Punctuation drawn at the end of its last piece, after it ("." in "…/dol-diversification."),
+      /// that the fix splits off into a piece of its own first, read after the link.
+      SplitOff: string option
       /// Why the fix leaves it, when it does.
       Left: string option }
 
@@ -80,9 +83,16 @@ let private inLink (element: PdfDictionary) context =
         | _ -> false
     climb element 0
 
+/// How the punctuation at the end of a page's piece of marked content would be split off (see
+/// MarkedContentSplit), numbered past the MCIDs the tags give the page.
+let private splitPlan (document: PdfDocument) (context: Context) (page: int) (mcid: int) (tail: string) =
+    let used = (ParentTree.tagged document context).MarkedContent.Keys |> Seq.filter (fun (p, _) -> p = page) |> Seq.map snd
+    MarkedContentSplit.plan (document.GetPage page) mcid tail used
+
 /// The addresses pages show as text that nothing links, in page order.
 let find (document: PdfDocument) (context: Context) : Candidate list =
     let tagged = lazy (ParentTree.tagged document context)
+    let splitPlan = splitPlan document context
     // Each element's path, as Legibyl's warnings give it ("StructTreeRoot/K[0]/K[3]").
     let paths =
         lazy
@@ -130,7 +140,7 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
                                   None, Some "it's drawn in more than one piece, in different tags, which would have to be joined to tag it as a link"
                               | Some _ when address.Interleaved ->
                                   None, Some "a piece of it is read on both sides of another, so its pieces can't be tagged in the address's order"
-                              | Some _ when not address.WholeRun ->
+                              | Some _ when not address.WholeRun && address.Tail.IsNone ->
                                   None, Some "it's part of a longer piece of text, which would have to be split to tag the address alone"
                               | Some(_, owner) when inLink owner context ->
                                   None, Some "it's tagged as a link already, with no link annotation to follow"
@@ -138,7 +148,13 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
                                   None, Some "its tag holds it in a way the fix doesn't change"
                               | Some run when not (sideBySide (indexes run)) ->
                                   None, Some "its pieces aren't side by side in its tag, in the order they're read"
-                              | Some run -> Some run, None
+                              | Some(mcids, _ as run) ->
+                                  match address.Tail with
+                                  | Some tail ->
+                                      match splitPlan pageNumber (List.last mcids) tail with
+                                      | Ok _ -> Some run, None
+                                      | Error why -> None, Some $"the \"{tail}\" after it is drawn in the same piece, and can't be split off: {why}"
+                                  | None -> Some run, None
                           let location =
                               match owner |> Option.bind (fun (_, owner) -> match paths.Value.TryGetValue owner with | true, path -> Some path | _ -> None) with
                               | Some path -> $"{path} + {address.Text}"
@@ -150,6 +166,7 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
                                 Geometry = geometry
                                 Location = location
                                 Run = run
+                                SplitOff = if run.IsSome then address.Tail else None
                                 Left = left }
                   | None -> () ]
 
@@ -166,6 +183,17 @@ let apply (document: PdfDocument) (context: Context) =
             let element = PdfStructElem owner
             match mcids |> List.map (fun mcid -> kidIndex owner mcid candidate.Page context) with
             | Some index :: _ as indexes when indexes |> List.forall Option.isSome ->
+              // The punctuation after it split off first, into a piece of its own.
+              let splitOff =
+                  match candidate.SplitOff with
+                  | Some tail ->
+                      match splitPlan document context candidate.Page (List.last mcids) tail with
+                      | Ok plan -> Ok(Some(MarkedContentSplit.split document page plan))
+                      | Error why -> Error $"the \"{tail}\" after it is drawn in the same piece, and can't be split off: {why}"
+                  | None -> Ok None
+              match splitOff with
+              | Error why -> context.Notes.Add $"Page {candidate.Page}: \"{candidate.Text}\" isn't linked: {why}."
+              | Ok splitOff ->
                 // iText unties the content by its owner's own page; one it takes from an ancestor
                 // (the address's page, as kidIndex found) is written on it first.
                 if isNull (owner.GetAsDictionary PdfName.Pg) then owner.Put(PdfName.Pg, page.GetPdfObject()) |> ignore
@@ -187,6 +215,8 @@ let apply (document: PdfDocument) (context: Context) =
                 // Not tagged by iText, which would give it a Link of its own at the top: it's this one's.
                 page.AddAnnotation(-1, annotation, false) |> ignore
                 link.AddKid(PdfObjRef(annotation, link, document.GetNextStructParentIndex())) |> ignore
+                // The punctuation split off, read after the link, in its tag as it was.
+                splitOff |> Option.iter (fun id -> element.AddKid(index + 1, PdfMcrNumber(PdfNumber id, element)) |> ignore)
                 // Its annotations in the order of the tags, as PDF/UA asks of a page with them.
                 page.GetPdfObject().Put(PdfName.Tabs, PdfName.S) |> ignore
                 linked <- linked + 1
