@@ -389,9 +389,9 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
                             StackPanel.children [
                                 for label, text in lines do
                                     match label, text with
-                                    | "tag", "Artifact" when not selection.Suggested -> detailLine "✎ not read (decoration), not in the PDF yet" true
-                                    | "tag", "Figure" when isUntagged node -> detailLine "✎ tagged as a figure, not in the PDF yet" true
-                                    | "tag", "P" when isUntagged node -> detailLine "✎ tagged as a paragraph, not in the PDF yet" true
+                                    | "tag", Tags.Artifact when not selection.Suggested -> detailLine "✎ not read (decoration), not in the PDF yet" true
+                                    | "tag", Tags.Figure when isUntagged node -> detailLine "✎ tagged as a figure, not in the PDF yet" true
+                                    | "tag", Tags.P when isUntagged node -> detailLine "✎ tagged as a paragraph, not in the PDF yet" true
                                     | _ when selection.Suggested -> detailLine $"✎ your {label}: \"{text}\"" true
                                     | _ -> detailLine $"✎ your {label}, not in the PDF yet: \"{text}\"" true
                                 if editFor edits.Current node |> Option.exists _.Exclude then
@@ -435,8 +435,8 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
 /// stacked (in the order the moves give them, unless their order is fixed).
 and childViews (selection: Selection) (childLevels: int) (node: StructureNode) : IView list =
     match node.Tag with
-    | "TOC" -> [ tocGrid selection node ]
-    | "Table" -> [ tableGrid selection node ]
+    | Tags.TOC -> [ tocGrid selection node ]
+    | Tags.Table -> [ tableGrid selection node ]
     | tag when fixedOrder.Contains tag ->
         [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child ]
     | _ ->
@@ -477,7 +477,7 @@ and fallbackStack (selection: Selection) (node: StructureNode) : IView =
     ]
 
 and tocCell (selection: Selection) (item: StructureNode) row column (background: IBrush option) (attrs: IAttr<Border> list) : IView =
-    let borderColor, _ = colorsFor "TOCI"
+    let borderColor, _ = colorsFor Tags.TOCI
     selectableBorder
         selection
         item
@@ -496,7 +496,7 @@ and tocCell (selection: Selection) (item: StructureNode) row column (background:
 /// Renders a TOC as a grid: one row per TOCI, with the TOCI tag in the first
 /// column and each of its children in the following columns.
 and tocGrid (selection: Selection) (toc: StructureNode) : IView =
-    let items = toc.Children |> Seq.filter (fun child -> child.Tag = "TOCI") |> List.ofSeq
+    let items = toc.Children |> Seq.filter (fun child -> child.Tag = Tags.TOCI) |> List.ofSeq
     if items.IsEmpty then
         fallbackStack selection toc
     else
@@ -508,11 +508,11 @@ and tocGrid (selection: Selection) (toc: StructureNode) : IView =
             Grid.rowDefinitions (String.Join(",", List.replicate items.Length "Auto"))
             Grid.children [
                 for row, item in List.indexed items do
-                    let _, headerColor = colorsFor "TOCI"
+                    let _, headerColor = colorsFor Tags.TOCI
                     tocCell selection item row 0 (Some(brush headerColor)) [
                         Border.child (
                             TextBlock.create [
-                                TextBlock.text "TOCI"
+                                TextBlock.text Tags.TOCI
                                 TextBlock.fontFamily Fonts.Monospace
                                 TextBlock.fontWeight FontWeight.Bold
                                 TextBlock.fontSize 12.0
@@ -542,11 +542,11 @@ and tocGrid (selection: Selection) (toc: StructureNode) : IView =
 /// above) leave free, across its ColSpan columns and down its RowSpan rows.
 and tableGrid (selection: Selection) (table: StructureNode) : IView =
     let tableCells (row: StructureNode) =
-        match row.Children |> Seq.filter (fun child -> child.Tag = "TH" || child.Tag = "TD") |> List.ofSeq with
+        match row.Children |> Seq.filter (fun child -> child.Tag = Tags.TH || child.Tag = Tags.TD) |> List.ofSeq with
         | [] -> List.ofSeq row.Children
         | cells -> cells
 
-    let rows = table.Children |> Seq.filter (fun child -> child.Tag = "TR") |> List.ofSeq
+    let rows = table.Children |> Seq.filter (fun child -> child.Tag = Tags.TR) |> List.ofSeq
     if rows.IsEmpty then
         fallbackStack selection table
     else

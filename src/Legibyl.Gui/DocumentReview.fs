@@ -242,7 +242,7 @@ type DocumentReview(modified: DateTime) =
 
     /// A web link's description: as edited, else as prefilled; None for none.
     member this.LinkDescription(link: WebLink) =
-        match RegionEdits.find this.Edits link.Page "Link" link.Box |> Option.bind _.Alt with
+        match RegionEdits.find this.Edits link.Page Tags.Link link.Box |> Option.bind _.Alt with
         | Some edited -> if String.IsNullOrWhiteSpace edited then None else Some edited
         | None -> Some(this.LinkPrefill link.Address) |> Option.filter (String.IsNullOrWhiteSpace >> not)
 
@@ -435,7 +435,7 @@ module SuggestedTree =
         let links = review.WebLinks |> List.filter (fun link -> link.Page = page.PageNumber)
         let linkNode (link: WebLink) =
             let prefill = review.LinkPrefill link.Address
-            { node "Link" link.Box [] with
+            { node Tags.Link link.Box [] with
                 LinkUri = link.Address
                 LinkDescription = (if String.IsNullOrWhiteSpace prefill then null else prefill) }
         // Each link goes in the region it's most inside, if it's mostly inside one.
@@ -456,12 +456,12 @@ module SuggestedTree =
         let rec group (blocks: SuggestedBlock list) =
             match blocks with
             | [] -> []
-            | first :: _ when first.Tag = "LI" ->
-                let items = blocks |> List.takeWhile (fun b -> b.Tag = "LI")
-                node "L" null [ for item in items -> region item ] :: group (blocks |> List.skip items.Length)
+            | first :: _ when first.Tag = Tags.LI ->
+                let items = blocks |> List.takeWhile (fun b -> b.Tag = Tags.LI)
+                node Tags.L null [ for item in items -> region item ] :: group (blocks |> List.skip items.Length)
             // A table's cells, after it, in its rows, with their spans, as tagging writes them
             // (see TableGrid); its own text is theirs.
-            | first :: rest when first.Tag = "Table" ->
+            | first :: rest when first.Tag = Tags.Table ->
                 let cells = rest |> List.takeWhile (fun b -> TableGrid.isCell b.Tag && within first.Geometry b.Geometry >= 0.5)
                 if cells.IsEmpty then
                     region first :: group rest
@@ -470,7 +470,7 @@ module SuggestedTree =
                     let rowCount = places |> List.map (fun p -> p.Row + p.RowSpan) |> List.max
                     let rows =
                         [ for row in 0 .. rowCount - 1 ->
-                              node "TR" null [
+                              node Tags.TR null [
                                   for cell, place in List.zip cells places |> List.filter (fun (_, p) -> p.Row = row) |> List.sortBy (fun (_, p) -> p.Column) ->
                                       { region cell with RowSpan = place.RowSpan; ColSpan = place.ColSpan }
                               ] ]
@@ -482,4 +482,4 @@ module SuggestedTree =
 
     /// The whole document: a Document element holding every page found so far, in order.
     let build (pages: StructureNode list seq) : StructureNode =
-        node "StructTreeRoot" null [ node "Document" null (List.concat pages) ]
+        node "StructTreeRoot" null [ node Tags.Document null (List.concat pages) ]

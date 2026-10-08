@@ -39,9 +39,9 @@ let names (inRoleMap: string -> bool) (root: StructureNode) : (string * int * st
 /// The standard tags offered, the commonest first.
 let tags =
     let common =
-        [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "H"; "P"; "L"; "LI"; "Lbl"; "LBody"; "Caption"; "Note"; "Figure"; "Formula"
-          "Table"; "TR"; "TH"; "TD"; "THead"; "TBody"; "TFoot"; "Link"; "Span"; "Quote"; "BlockQuote"; "Code"
-          "TOC"; "TOCI"; "Index"; "Sect"; "Div"; "Art"; "Part"; "Document"; "NonStruct" ]
+        [ Tags.H1; Tags.H2; Tags.H3; Tags.H4; Tags.H5; Tags.H6; Tags.H; Tags.P; Tags.L; Tags.LI; Tags.Lbl; Tags.LBody; Tags.Caption; Tags.Note; Tags.Figure; Tags.Formula
+          Tags.Table; Tags.TR; Tags.TH; Tags.TD; Tags.THead; Tags.TBody; Tags.TFoot; Tags.Link; Tags.Span; Tags.Quote; Tags.BlockQuote; Tags.Code
+          Tags.TOC; Tags.TOCI; Tags.Index; Tags.Sect; Tags.Div; Tags.Art; Tags.Part; Tags.Document; Tags.NonStruct ]
     common @ (Tags.standard |> Set.toList |> List.filter (fun tag -> not (List.contains tag common)))
 
 /// What the tab needs: the structure, the review its choices go in, and what to call when one's

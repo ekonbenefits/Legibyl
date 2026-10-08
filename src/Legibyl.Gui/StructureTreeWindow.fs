@@ -251,7 +251,7 @@ module private StructureView =
                                                   { Geometry = nonNull element.Geometry
                                                     Label = if leftOut then $"× {i + 1} {tag}" else $"{i + 1} {tag}"
                                                     // Not a region of its own, not read, or outside every tag: grey.
-                                                    Color = if leftOut || tag = "Artifact" || tag = "Untagged" then leftOutColor else outlineColor tag
+                                                    Color = if leftOut || tag = Tags.Artifact || tag = "Untagged" then leftOutColor else outlineColor tag
                                                     // Outside every tag (whatever's chosen for it): dashed.
                                                     Dashed = isUntagged element
                                                     Emphasised = within element
@@ -423,10 +423,10 @@ module private StructureView =
                                 // Decoration isn't described but tagged Artifact, not read: a suggested region,
                                 // or a tagged PDF's figure.
                                 let decoration =
-                                    if isSuggested || node.Tag = "Figure" then " If it's only decoration, close this and give it the tag Artifact instead."
+                                    if isSuggested || node.Tag = Tags.Figure then " If it's only decoration, close this and give it the tag Artifact instead."
                                     else ""
                                 // A piece outside the tags is given alt text as the figure it's tagged as.
-                                let shownTag = if isUntagged node then "Figure" else node.Tag
+                                let shownTag = if isUntagged node then Tags.Figure else node.Tag
                                 "Alt Text",
                                 $"Alt text for this <{shownTag}> on page {page}: what a screen reader says for it. "
                                 + "Say what it's for here, not only what it shows: \"Map of the route to the campsite\", not \"map\". "
@@ -541,7 +541,7 @@ module private StructureView =
                                             (TableModel.download (Progress<float>(ignore)) CancellationToken.None).Wait()
                                         use suggester = new LayoutSuggester(sourceFilePath)
                                         suggester.TableCells(box.PageNumber, box)
-                                        |> Option.map (List.map (fun (header, g) -> ({ Tag = (if header then "TH" else "TD"); Box = g }: TableCell))))
+                                        |> Option.map (List.map (fun (header, g) -> ({ Tag = (if header then Tags.TH else Tags.TD); Box = g }: TableCell))))
                             window.Cursor <- cursor
                             match found with
                             | Some cells when not cells.IsEmpty ->
@@ -633,7 +633,7 @@ module private StructureView =
                                             Top = boxes |> List.map _.Top |> List.max }
                                     let kept =
                                         RegionEdits.findMerge edits.Current first.PageNumber first
-                                        |> Option.filter (fun edit -> edit.Retag = Some "Table" && edit.MergeWith.Length = boxes.Length - 1)
+                                        |> Option.filter (fun edit -> edit.Retag = Some Tags.Table && edit.MergeWith.Length = boxes.Length - 1)
                                         |> Option.map _.Cells
                                         |> Option.filter (not << List.isEmpty)
                                     if kept.IsNone && not (TableModel.isDownloaded ()) then
@@ -654,7 +654,7 @@ module private StructureView =
                                                 use suggester = new LayoutSuggester(sourceFilePath)
                                                 suggester.TableCells(region.PageNumber, region)
                                                 |> Option.map (List.map (fun (header, geometry) ->
-                                                    ({ Tag = (if header then "TH" else "TD"); Box = geometry }: TableCell)))
+                                                    ({ Tag = (if header then Tags.TH else Tags.TD); Box = geometry }: TableCell)))
                                                 // The model misses rows (a header row especially): one row a paragraph.
                                                 |> Option.map (TableGrid.fitRows boxes))
                                     window.Cursor <- cursor
@@ -768,7 +768,7 @@ module private StructureView =
                             && not (isNull n.Geometry)
                             && untaggedKind n = untaggedKind piece
                             && (let w, h = size n in near w width && near h height)
-                            && (editFor edits.Current n |> Option.bind _.Retag) <> Some "Artifact")
+                            && (editFor edits.Current n |> Option.bind _.Retag) <> Some Tags.Artifact)
                     let pages = alike |> List.map (fun n -> (nonNull n.Geometry).PageNumber) |> List.distinct |> List.sort
                     let where =
                         match pages with
@@ -785,7 +785,7 @@ module private StructureView =
                     if confirmed then
                         do!
                             alike
-                            |> List.fold (fun edits n -> let box = nonNull n.Geometry in RegionEdits.setRetag edits box.PageNumber n.Tag box "Artifact") edits.Current
+                            |> List.fold (fun edits n -> let box = nonNull n.Geometry in RegionEdits.setRetag edits box.PageNumber n.Tag box Tags.Artifact) edits.Current
                             |> saveEdits
                 }
                 |> ignore
@@ -1504,7 +1504,7 @@ module private StructureView =
                         match review.Pages.TryGetValue 1 with
                         | true, first ->
                             first.Blocks
-                            |> List.tryFind (fun block -> RegionEdits.tagOf edits.Current 1 block = "H1")
+                            |> List.tryFind (fun block -> RegionEdits.tagOf edits.Current 1 block = Tags.H1)
                             |> Option.bind (fun block ->
                                 RegionEdits.textFor edits.Current 1 block
                                 |> Option.orElse (Some block.Text)
@@ -1513,7 +1513,7 @@ module private StructureView =
                         | _ -> None
                     else
                         let rec firstHeading (node: StructureNode) : string option =
-                            if node.Tag = "H1" then Option.ofObj node.Content |> Option.map tidy |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                            if node.Tag = Tags.H1 then Option.ofObj node.Content |> Option.map tidy |> Option.filter (String.IsNullOrWhiteSpace >> not)
                             else node.Children |> Seq.tryPick firstHeading
                         firstHeading root.Current
                     |> Option.map (fun title -> { DocumentTitles.Title = title; DocumentTitles.Source = "first heading" })
