@@ -20,6 +20,7 @@ let order =
       PdfFixOptions.Lists
       PdfFixOptions.TableHeaderScope
       PdfFixOptions.Bookmarks
+      PdfFixOptions.LinkUrls
       PdfFixOptions.LinkTargets
       PdfFixOptions.Tabs
       PdfFixOptions.EmbedFonts

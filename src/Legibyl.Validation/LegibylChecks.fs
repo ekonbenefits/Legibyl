@@ -413,6 +413,20 @@ let private documentRootFindings (document: PdfDocument) context =
             [ warning DocumentRootMessage $"Not fixable here: {reason}." "StructTreeRoot" 16 PdfFixOptions.None null ]
         | _ -> []
 
+// ---- Structure-18: web addresses shown as text that nothing links ----
+
+[<Literal>]
+let private UnlinkedUrlMessage =
+    "A web address is shown as text, but nothing links it. This is not a PDF/UA failure, but someone using a screen reader or a keyboard can't follow it."
+
+let private unlinkedUrlFindings (document: PdfDocument) context =
+    [ for candidate in UnlinkedUrls.find document context ->
+          let fixes, detail =
+              match candidate.Left with
+              | None -> PdfFixOptions.LinkUrls, $"Page {candidate.Page}: \"{candidate.Text}\"."
+              | Some why -> PdfFixOptions.None, $"Page {candidate.Page}: \"{candidate.Text}\". Not fixable here: {why}."
+          warning UnlinkedUrlMessage detail "StructTreeRoot" 18 fixes candidate.Geometry ]
+
 // ---- Structure-13: pages whose text couldn't be read ----
 
 [<Literal>]
@@ -460,6 +474,7 @@ let run (document: PdfDocument) context : RuleViolation list =
           let ties = ties document context
           yield! parentTreeFindings document ties
           yield! disconnectedFindings document context ties
+          yield! unlinkedUrlFindings document context
           yield! tocHeadingFindings document context
           yield! paragraphListFindings document context
           yield! splitFigureFindings document context
@@ -507,6 +522,7 @@ let messageFor (testNumber: int) : string option =
         | 15 -> Some ParagraphTableMessage
         | 16 -> Some DocumentRootMessage
         | 17 -> Some DisconnectedMessage
+        | 18 -> Some UnlinkedUrlMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
