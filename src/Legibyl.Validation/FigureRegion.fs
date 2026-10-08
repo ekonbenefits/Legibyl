@@ -1,4 +1,10 @@
-/// Person-selected content ownership, not a retag of the wrappers around a chart.
+/// Replace Structure with Figure from Region: what's drawn in a rectangle a person draws on a
+/// tagged page (a chart tagged as dozens of paragraphs and spans, say) made one Figure with the
+/// alt text they give, the page drawn the same. Each piece of content (a marked-content sequence,
+/// or a text object, path or image outside any) goes in whole when most of each of its painted
+/// boxes is inside the rectangle, and is left out otherwise; whatever can't be changed safely is
+/// refused, and said. The Figure gets the box of what it draws (its Layout /BBox), and goes where
+/// its first content was read.
 module internal Legibyl.Validation.FigureRegion
 
 open System
@@ -13,19 +19,33 @@ open Legibyl.Validation.StructureTreeObjects
 [<Literal>]
 let Tag = "FigureRegion"
 
-let private marker = PdfName "LegibylFigureRegion"
+/// Tags that hold others and say nothing of their own (a section, a part of the document): a
+/// Figure can go among their kids, and they're left when emptied.
+let private containers = set [ "Document"; "DocumentFragment"; "Part"; "Art"; "Sect"; "Div"; "Aside"; "NonStruct" ]
+
+/// A table's and a list's structure: kept even when emptied (an empty cell is still a cell), and a
+/// Figure replacing all of one's content goes inside it.
+let private frames = set [ "Table"; "THead"; "TBody"; "TFoot"; "TR"; "TH"; "TD"; "L"; "LI"; "Lbl"; "LBody" ]
+
+let private holds (tag: string) = containers.Contains tag || frames.Contains tag
 
 type Part =
     { First: int
       Last: int
       Mcid: int option
-      Marked: bool }
+      Marked: bool
+      /// Its marked content had replacement text (/ActualText), which the alt text replaces.
+      Described: bool }
 
 type Plan =
     { Parts: Part list
       Bytes: byte array
       Operations: List<Operation>
       Owners: (int * PdfDictionary) list
+      /// What the selected content draws: the Figure's Layout /BBox.
+      Box: iText.Kernel.Geom.Rectangle option
+      /// The first MCID free on the page: past every one its content uses, in the tags or not.
+      NextMcid: int
       Summary: string }
 
 let private intersects (region: StructureGeometry) (box: iText.Kernel.Geom.Rectangle) =
@@ -50,6 +70,22 @@ let private coverage (region: StructureGeometry) (box: iText.Kernel.Geom.Rectang
         let coveredHeight = max 0.0 (min region.Top top - max region.Bottom bottom)
         Some(coveredWidth * coveredHeight / (width * height))
 
+/// A Figure's Layout /BBox (in its /A, a dictionary or an array of them).
+let private layoutBox (element: PdfDictionary) =
+    let attributes =
+        match element.Get(PdfName.A, true) with
+        | :? PdfDictionary as a -> [ a ]
+        | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do match array.Get(i, true) with :? PdfDictionary as a -> a | _ -> () ]
+        | _ -> []
+    attributes
+    |> List.tryPick (fun a ->
+        match a.GetAsArray PdfName.BBox with
+        | NonNull box when box.Size() = 4 -> Some [| for i in 0..3 -> box.GetAsNumber(i).DoubleValue() |]
+        | _ -> None)
+
+/// Whether the edit's Figure is there already (a copy exported with it, exported again): a Figure
+/// on its page with its alt text, whose box (Layout /BBox) is centred in the region. (Its box can
+/// reach outside the region: content goes in whole when most of it is inside.)
 let already (document: PdfDocument) context (edit: ElementEdit) =
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> false
@@ -57,13 +93,14 @@ let already (document: PdfDocument) context (edit: ElementEdit) =
         walk root context
         |> Seq.exists (fun visit ->
             let e = visit.Element
-            match e.GetAsArray marker, e.GetAsString PdfName.Alt with
-            | NonNull box, NonNull alt when box.Size() = 5 && alt.ToUnicodeString() = edit.Alt ->
-                let expected = [| float edit.Page; edit.Box.Left; edit.Box.Bottom; edit.Box.Right; edit.Box.Top |]
-                // Reviews save boxes to a tenth of a point. A carried edit must still
-                // recognise the exact region originally drawn before that roundtrip.
-                expected |> Array.mapi (fun i n -> Math.Round(box.GetAsNumber(i).DoubleValue(), 1) = Math.Round(n, 1)) |> Array.forall id
-            | _ -> false)
+            visit.Page = Some edit.Page
+            && PdfName.Figure.Equals(e.GetAsName PdfName.S)
+            && (match e.GetAsString PdfName.Alt with NonNull alt -> alt.ToUnicodeString() = edit.Alt | Null -> false)
+            && (match layoutBox e with
+                | Some [| l; b; r; t |] ->
+                    let x, y = (l + r) / 2.0, (b + t) / 2.0
+                    x >= edit.Box.Left && x <= edit.Box.Right && y >= edit.Box.Bottom && y <= edit.Box.Top
+                | _ -> false))
 
 /// Whole marked-content sequences and unmarked drawing units are indivisible. Include one only
 /// when every actual painted box in it is more than half covered by the selection.
@@ -74,20 +111,20 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
         elif edit.Box.PageNumber <> edit.Page
              || not ([edit.Box.Left; edit.Box.Bottom; edit.Box.Right; edit.Box.Top] |> List.forall Double.IsFinite)
              || edit.Box.Right <= edit.Box.Left || edit.Box.Top <= edit.Box.Bottom then
-            Error "the region must be a finite rectangle on the selected page"
+            Error "the region isn't a rectangle on its page"
         elif String.IsNullOrWhiteSpace edit.Alt then
             Error "enter alt text describing the figure"
         elif (not (isNull edit.Retag) && edit.Retag <> "Figure")
              || not (isNull edit.Text) || edit.Exclude || edit.Move.IsSome || not edit.MergeWith.IsEmpty || not edit.Cells.IsEmpty then
-            Error "a Figure region edit accepts its page, box, Figure tag and alt text only; use separate edits for other changes"
+            Error "this edit only takes a page, a region and alt text"
         elif isNull (document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot) then
-            Error "this operation needs a tagged PDF; use Suggest Structure for an untagged PDF"
+            Error "the PDF has no tags: Suggest Structure… tags it from its layout"
         else
             let page = document.GetPage edit.Page
             if page.GetRotation() <> 0 then
-                Error "rotated pages aren't supported for this operation"
+                Error "turned (rotated) pages aren't supported yet"
             elif page.GetCropBox().GetLeft() <> 0f || page.GetCropBox().GetBottom() <> 0f then
-                Error "pages with an offset crop box aren't supported for this operation"
+                Error "pages whose visible area is offset (their crop box) aren't supported yet"
             else
                 let bytes = page.GetContentBytes()
                 let resources = page.GetResources()
@@ -107,17 +144,20 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                 | xobjects -> isNull (xobjects.GetAsStream name)
                             | _ -> true)
                 if hasMissingXObject then
-                    fail "a painted item's extent couldn't be read; unknown content can't be treated as empty"
+                    fail "something on the page can't be measured (an image or form that can't be read), so what's in the region isn't known"
                 let drawn = if hasMissingXObject then Dictionary<int, List<Drawn>>() else drawnForRegion bytes resources
                 let owners = (ParentTree.tagged document context).MarkedContent
                 let beyond = ResizeArray<iText.Kernel.Geom.Rectangle>()
+                // What the selected content draws, for the Figure's box.
+                let selectedBoxes = ResizeArray<iText.Kernel.Geom.Rectangle>()
+                // (A shading's extent can't be measured: one in the selection is refused below;
+                // elsewhere on the page it's left as it is.)
+                let shadings = operations |> Seq.exists (fun op -> op.Name = "sh")
                 for index in 0 .. operations.Count - 1 do
                     let op = operations[index]
-                    if op.Name = "sh" then
-                        fail "this page contains shading whose painted extent is unknown; it needs manual review"
-                    elif (op.Name = "Do" || op.Name = inlineImage || textShowing.Contains op.Name) && not (drawn.ContainsKey index) then
-                        fail "a painted item's extent couldn't be read; unknown content can't be treated as empty"
-                let inspect first last mcid marked supported =
+                    if (op.Name = "Do" || op.Name = inlineImage || textShowing.Contains op.Name) && not (drawn.ContainsKey index) then
+                        fail "something on the page can't be measured (an image or form that can't be read), so what's in the region isn't known"
+                let inspect first last mcid marked described supported =
                     let boxes =
                         [ for i in first .. last do
                               match drawn.TryGetValue i with
@@ -125,21 +165,21 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                               | _ -> () ]
                     let coverages = boxes |> List.map (coverage edit.Box)
                     if coverages |> List.exists Option.isNone then
-                        fail "a painted item's extent couldn't be read; unknown content can't be treated as empty"
+                        fail "something on the page can't be measured (an image or form that can't be read), so what's in the region isn't known"
                     elif not boxes.IsEmpty && (coverages |> List.forall (Option.exists (fun amount -> amount > 0.5))) then
-                        if not supported then fail "the region includes nested or unsupported marked content; its ownership can't be changed safely"
+                        if not supported then
+                            fail "some content in the region is marked in a way that can't be changed safely (marked inside other marked content, or with properties beyond its description)"
                         else
                             match mcid with
                             | Some id when not (owners.ContainsKey((edit.Page, id))) ->
-                                fail "selected marked content has no unambiguous structure owner"
+                                fail "some content in the region is marked as tagged, but isn't in any tag"
                             | _ ->
-                                parts.Add { First = first; Last = last; Mcid = mcid; Marked = marked }
+                                parts.Add { First = first; Last = last; Mcid = mcid; Marked = marked; Described = described }
+                                selectedBoxes.AddRange boxes
                                 beyond.AddRange(boxes |> List.filter (not << contains edit.Box))
                 let mutable i = 0
                 while i < operations.Count do
                     let op = operations[i]
-                    if op.Name = "sh" then
-                        fail "this page contains shading whose painted extent is unknown; it needs manual review"
                     if op.Name = "BMC" || op.Name = "BDC" then
                         let first = i
                         let mutable depth = 1
@@ -151,7 +191,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                             | "EMC" -> depth <- depth - 1
                             | _ -> ()
                             i <- i + 1
-                        if depth <> 0 then fail "the page has unbalanced marked content"
+                        if depth <> 0 then fail "the page's marked content isn't closed properly"
                         else
                             let artifact = op.Operands.Length > 0 && PdfName.Artifact.Equals(op.Operands[0])
                             let mcid = mcidOf resources op
@@ -171,23 +211,29 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                     |> Seq.forall (fun key ->
                                         [PdfName.MCID; PdfName.ActualText; PdfName.Alt; PdfName.Lang; PdfName.Type; PdfName.Subtype; PdfName.BBox; PdfName "Attached"]
                                         |> List.exists key.Equals))
-                            inspect first (i - 1) mcid true (not nested && appearanceSafe && (artifact || mcid.IsSome))
+                            let described =
+                                properties
+                                |> Option.exists (fun p ->
+                                    match p.GetAsString PdfName.ActualText with
+                                    | NonNull text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString()))
+                                    | Null -> false)
+                            inspect first (i - 1) mcid true described (not nested && appearanceSafe && (artifact || mcid.IsSome))
                     elif op.Name = "EMC" then
-                        fail "the page has unbalanced marked content"
+                        fail "the page's marked content isn't closed properly"
                         i <- i + 1
                     else i <- i + 1
                 // Reuse the existing safe boundaries for text objects, paths and images.
                 if why.IsNone then
                     for piece in UntaggedContent.piecesOn page edit.Page do
                         for unit in piece.Units do
-                            inspect unit.First unit.Last None false true
+                            inspect unit.First unit.Last None false false true
                 let selected = List.ofSeq parts
                 // A form may carry its own tags, shared across invocations. Don't relabel it
                 // through a page MCID and silently orphan its stream parent-tree entries.
                 for part in selected do
                     for i in part.First .. part.Last do
                         let op = operations[i]
-                        if op.Name = "sh" then fail "selected shading has an unknown painted extent"
+                        if op.Name = "sh" then fail "the region includes a shading (a gradient) whose extent can't be measured"
                         if op.Name = "Do" && op.Operands.Length > 0 then
                             match op.Operands[0] with
                             | :? PdfName as name ->
@@ -195,23 +241,22 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                 if not (isNull xobjects) then
                                     match xobjects.GetAsStream name with
                                     | NonNull stream when PdfName.Form.Equals(stream.GetAsName PdfName.Subtype) ->
-                                        fail "the region includes a form XObject; shared or internally tagged forms need manual review"
+                                        fail "the region includes a form (a drawing reused from elsewhere, which can carry tags of its own), which needs a person to check"
                                     | _ -> ()
-                            | _ -> fail "an image or form resource couldn't be read"
+                            | _ -> fail "an image or form on the page can't be read"
                 let ids = selected |> List.choose _.Mcid
-                if ids.Length <> (List.distinct ids).Length then fail "an MCID occurs more than once in the selected content"
+                if ids.Length <> (List.distinct ids).Length then fail "some content in the region is marked twice"
                 let occurrences =
                     operations |> Seq.choose (mcidOf resources) |> Seq.countBy id |> dict
                 for id in ids do
                     if occurrences[id] <> 1 then
-                        fail "selected content shares an MCID with another sequence on the page; its ownership needs manual review"
+                        fail "some content in the region shares its mark with other content on the page"
                 // Require exactly one page-content reference in the tree, not just the last
                 // dictionary in a lookup which might hide duplicate ownership.
                 let ownerPairs = ids |> List.map (fun id -> id, owners[(edit.Page, id)])
-                let containers = set ["Document"; "Part"; "Art"; "Sect"; "Div"; "NonStruct"]
                 for owner, selectedIds in ownerPairs |> List.groupBy snd |> List.map (fun (owner, pairs) -> owner, pairs |> List.map fst |> Set.ofList) do
                     let tag = standardTag owner context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
-                    if not (containers.Contains tag) then
+                    if not (holds tag) then
                         let remaining =
                             PdfStructElem(owner).GetKids()
                             |> Seq.exists (fun kid ->
@@ -221,7 +266,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                          && obj.ReferenceEquals(mcr.GetPageObject(), page.GetPdfObject()))
                                 | _ -> true)
                         if remaining then
-                            fail "the region selects only part of a semantic element; enlarge it to include all of that element's content or review the reading order manually"
+                            fail "the region takes only part of a paragraph or other tag: make it cover all of that tag's content, or none of it"
                 let visits = walk (document.GetStructTreeRoot().GetPdfObject()) context |> List.ofSeq
                 for id, owner in ownerPairs do
                     let references =
@@ -231,7 +276,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                             | :? PdfMcr as mcr -> mcr.GetMcid() = id && obj.ReferenceEquals(mcr.GetPageObject(), page.GetPdfObject())
                             | _ -> false)
                         |> Seq.length
-                    if references <> 1 then fail "selected content has ambiguous or unreadable ownership"
+                    if references <> 1 then fail "some content in the region is in more than one tag"
                     if not (isNull (owner.Get PdfName.ActualText) && isNull (owner.Get PdfName.Alt)) then
                         let hasRemaining =
                             PdfStructElem(owner).GetKids()
@@ -239,34 +284,34 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                 match kid with
                                 | :? PdfMcr as mcr -> not (ids |> List.contains (mcr.GetMcid())) || not (obj.ReferenceEquals(mcr.GetPageObject(), page.GetPdfObject()))
                                 | _ -> true)
-                        if hasRemaining then fail "an owner has alt or replacement text covering content outside the selection; it needs manual review"
+                        if hasRemaining then fail "a tag in the region has alt or replacement text that also covers content outside it"
                     let mutable parent = PdfStructElem(owner).GetParent()
                     let mutable child = owner
                     let mutable depth = 0
                     while parent :? PdfStructElem && depth < 200 do
                         let element = parent :?> PdfStructElem
                         if not (element.GetKids() |> Seq.exists (fun k -> match k with :? PdfStructElem as e -> obj.ReferenceEquals(e.GetPdfObject(), child) | _ -> false)) then
-                            fail "a selected element's parent pointer disagrees with its reading-order location"
+                            fail "the tags around the region are inconsistent (a tag names another parent than the one holding it)"
                         if not (isNull (element.GetPdfObject().Get PdfName.ActualText)) then
-                            fail "a wrapper around selected content has replacement text; it needs manual review"
+                            fail "a tag around the region has replacement text, which would hide the Figure's alt text"
                         child <- element.GetPdfObject()
                         parent <- element.GetParent()
                         depth <- depth + 1
-                    if depth = 200 then fail "selected content has a cyclic or excessively deep parent chain"
+                    if depth = 200 then fail "the tags around the region loop back on themselves"
                     elif not (parent :? PdfStructTreeRoot) then
-                        fail "selected content has a missing or unreadable parent pointer"
+                        fail "a tag around the region doesn't name its parent"
                     elif not ((parent :?> PdfStructTreeRoot).GetKids() |> Seq.exists (fun k -> match k with :? PdfStructElem as e -> obj.ReferenceEquals(e.GetPdfObject(), child) | _ -> false)) then
-                        fail "a selected element's parent pointer disagrees with its reading-order location"
+                        fail "the tags around the region are inconsistent (a tag names another parent than the one holding it)"
                 for annotation in page.GetAnnotations() do
                     match annotation.GetRectangle() with
                     | NonNull rect when intersects edit.Box (rect.ToRectangle()) ->
-                        fail "the region includes an annotation or form field; its interactive meaning needs manual review"
+                        fail "the region includes a link, form field or other annotation, which a Figure can't hold"
                     | _ -> ()
                 match why with
                 | Some reason -> Error reason
-                | None when selected.IsEmpty -> Error "no readable painted content was found in the region"
+                | None when selected.IsEmpty -> Error "nothing drawn was found in the region"
                 | None ->
-                    let text = UntaggedContent.textIn page edit.Box |> Option.defaultValue "(text couldn't be read)"
+                    let text = UntaggedContent.textIn page edit.Box |> Option.defaultValue "(its text couldn't be read)"
                     let coordinates (box: iText.Kernel.Geom.Rectangle) =
                         [ box.GetLeft(); box.GetBottom(); box.GetRight(); box.GetTop() ]
                         |> List.map (fun value -> float value |> fun n -> n.ToString("0.##", Globalization.CultureInfo.InvariantCulture))
@@ -274,12 +319,25 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                     let extended =
                         if beyond.Count = 0 then ""
                         else
-                            let boxes = beyond |> Seq.map (fun box -> $"[{coordinates box}] pt") |> String.concat "; "
-                            " Painted bounding box(es) extending beyond the rectangle, from whole items"
-                            + " with each box more than 50% covered (left, bottom, right, top): "
-                            + boxes + "."
+                            let boxes = beyond |> Seq.map (fun box -> $"[{coordinates box}]") |> String.concat "; "
+                            $" Some of it reaches outside the rectangle (each piece goes in whole when most of it is inside), at left, bottom, right, top in points: {boxes}."
+                    let replaced =
+                        if selected |> List.exists _.Described then " Replacement text on some of it is replaced by your alt text." else ""
+                    let shaded =
+                        if shadings then " The page has shadings (gradients), whose extent can't be measured: they're left as they are." else ""
+                    let union =
+                        selectedBoxes
+                        |> Seq.reduce (fun a b ->
+                            iText.Kernel.Geom.Rectangle.GetCommonRectangle([| a; b |]))
+                    // Past every MCID the page's content uses (in the tags or not), and the tags'.
+                    let used =
+                        Seq.append occurrences.Keys (owners.Keys |> Seq.filter (fun (p, _) -> p = edit.Page) |> Seq.map snd)
+                    let nextMcid = if Seq.isEmpty used then 0 else Seq.max used + 1
                     Ok { Parts = selected; Bytes = bytes; Operations = operations; Owners = ownerPairs
-                         Summary = $"{selected.Length} complete content piece(s), including {ids.Length} tagged piece(s).{extended} Text in the region: {text}" }
+                         Box = Some union
+                         NextMcid = nextMcid
+                         Summary =
+                           $"{selected.Length} piece(s) of content, {ids.Length} of them tagged.{extended}{replaced}{shaded} Text in the region: {text}" }
     with
     | :? iText.Kernel.Exceptions.PdfException as ex ->
         Error $"the page content couldn't be read safely: {ex.Message}"
@@ -298,55 +356,75 @@ let apply (document: PdfDocument) context (edit: ElementEdit) =
         | Ok plan ->
             let page = document.GetPage edit.Page
             let root = document.GetStructTreeRoot()
+            let tagOf (dictionary: PdfDictionary) = standardTag dictionary context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
             let figure = PdfStructElem(document, PdfName.Figure, page)
             figure.SetAlt(PdfString(edit.Alt, iText.IO.Font.PdfEncodings.UNICODE_BIG)) |> ignore
-            let savedBox = [|float edit.Page; edit.Box.Left; edit.Box.Bottom; edit.Box.Right; edit.Box.Top|] |> Array.map (fun value -> Math.Round(value, 1))
-            figure.GetPdfObject().Put(marker, PdfArray(savedBox)) |> ignore
-            // The first selected owner determines the reading-order slot. Its siblings and
-            // unrelated paragraphs stay put, even when other owners are in distant branches.
+            // Where it's drawn: its Layout /BBox, which a Figure on one page has (ISO 32000, 14.8.5.4.3).
+            match plan.Box with
+            | Some box ->
+                let layout = PdfDictionary()
+                layout.Put(PdfName.O, PdfName.Layout) |> ignore
+                let edges = [| box.GetLeft(); box.GetBottom(); box.GetRight(); box.GetTop() |] |> Array.map (fun v -> Math.Round(float v, 2))
+                layout.Put(PdfName.BBox, PdfArray(edges)) |> ignore
+                figure.GetPdfObject().Put(PdfName.A, layout) |> ignore
+            | None -> ()
+            let isMcrOf (ids: Set<int>) (kid: IStructureNode) =
+                match kid with
+                | :? PdfMcr as mcr -> ids.Contains(mcr.GetMcid()) && obj.ReferenceEquals(mcr.GetPageObject(), page.GetPdfObject())
+                | _ -> false
+            let isElement (dictionary: PdfDictionary) (kid: IStructureNode) =
+                match kid with
+                | :? PdfStructElem as e -> obj.ReferenceEquals(e.GetPdfObject(), dictionary)
+                | _ -> false
+            let selectedIds = plan.Owners |> List.map fst |> Set.ofList
+            // Into a tag's place among its parent's kids (before or after it), or the root's.
+            let besides (dictionary: PdfDictionary) after =
+                match PdfStructElem(dictionary).GetParent() with
+                | :? PdfStructElem as parent ->
+                    let index = parent.GetKids() |> Seq.tryFindIndex (isElement dictionary) |> Option.defaultValue (parent.GetKids().Count)
+                    parent.AddKid(index + (if after then 1 else 0), figure) |> ignore
+                | _ ->
+                    let index = root.GetKids() |> Seq.tryFindIndex (isElement dictionary) |> Option.defaultValue (root.GetKids().Count)
+                    root.AddKid(index + (if after then 1 else 0), figure) |> ignore
+            // The Figure goes where its first content was read.
             let visits = walk (root.GetPdfObject()) context |> List.ofSeq
-            let first =
-                visits |> List.tryFind (fun v -> plan.Owners |> List.exists (fun (_, o) -> obj.ReferenceEquals(o, v.Element)))
-            let placeNear (dictionary: PdfDictionary) after =
-                let owner = PdfStructElem dictionary
-                let mutable branch = owner
-                let mutable parentNode = owner.GetParent()
-                let containers = set ["Document"; "Part"; "Art"; "Sect"; "Div"; "NonStruct"]
-                let tag dictionary = standardTag dictionary context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
-                if containers.Contains(tag dictionary) then
-                    let index =
-                        if after then owner.GetKids().Count
-                        else
-                            owner.GetKids()
-                            |> Seq.tryFindIndex (fun k -> match k with :? PdfMcr as mcr -> plan.Owners |> List.exists (fun (id, _) -> id = mcr.GetMcid()) | _ -> false)
-                            |> Option.defaultValue 0
-                    owner.AddKid(index, figure) |> ignore
-                else
-                    while parentNode :? PdfStructElem && not (containers.Contains(tag ((parentNode :?> PdfStructElem).GetPdfObject()))) do
-                        branch <- parentNode :?> PdfStructElem
-                        parentNode <- branch.GetParent()
-                    match parentNode with
-                    | :? PdfStructElem as parent ->
-                        let index = parent.GetKids() |> Seq.findIndex (fun k -> match k with :? PdfStructElem as e -> obj.ReferenceEquals(e.GetPdfObject(), branch.GetPdfObject()) | _ -> false)
-                        parent.AddKid(index + (if after then 1 else 0), figure) |> ignore
-                    | _ -> root.AddKid(0, figure) |> ignore
+            let first = visits |> List.tryFind (fun v -> plan.Owners |> List.exists (fun (_, o) -> obj.ReferenceEquals(o, v.Element)))
             match first with
-            | Some visit -> placeNear visit.Element false
+            | Some visit when holds (tagOf visit.Element) ->
+                // A section, cell or item holding the content itself: among its kids, at the first
+                // selected content's place.
+                let owner = PdfStructElem visit.Element
+                let index = owner.GetKids() |> Seq.tryFindIndex (isMcrOf selectedIds) |> Option.defaultValue (owner.GetKids().Count)
+                owner.AddKid(index, figure) |> ignore
+            | Some visit ->
+                // A tag all of whose content it takes: in that tag's place.
+                besides visit.Element false
             | None ->
-                match UntaggedContent.elementBefore document context edit.Page plan.Operations (page.GetResources()) (plan.Parts |> List.minBy _.First).First with
-                | Some(_, previous) -> placeNear previous true
+                // Only content outside the tags: after what was drawn before it.
+                let resources = page.GetResources()
+                let start = (plan.Parts |> List.minBy _.First).First
+                match UntaggedContent.elementBefore document context edit.Page plan.Operations resources start with
+                | Some(at, previous) when holds (tagOf previous) ->
+                    let element = PdfStructElem previous
+                    let ids = mcidOf resources plan.Operations[at] |> Option.toList |> Set.ofList
+                    match element.GetKids() |> Seq.tryFindIndex (isMcrOf ids) with
+                    | Some index -> element.AddKid(index + 1, figure) |> ignore
+                    | None -> element.AddKid(element.GetKids().Count, figure) |> ignore
+                | Some(_, previous) -> besides previous true
                 | None ->
+                    // Nothing before it: first, in the top tag if that's a section (a Document, say).
                     match root.GetKids() |> Seq.tryHead with
-                    | Some(:? PdfStructElem as documentElement) -> documentElement.AddKid(0, figure) |> ignore
+                    | Some(:? PdfStructElem as top) when holds (tagOf (top.GetPdfObject())) -> top.AddKid(0, figure) |> ignore
                     | _ -> root.AddKid(0, figure) |> ignore
             let replacements = Dictionary<int, string>()
             let after = Dictionary<int, string>()
+            let mutable nextMcid = plan.NextMcid
             for part in plan.Parts |> List.sortBy _.First do
                 let id =
                     match part.Mcid with
                     | Some id ->
                         let owner = PdfStructElem(snd (plan.Owners |> List.find (fun (mcid, _) -> mcid = id)))
-                        let index = owner.GetKids() |> Seq.findIndex (fun kid -> match kid with :? PdfMcr as mcr -> mcr.GetMcid() = id && obj.ReferenceEquals(mcr.GetPageObject(), page.GetPdfObject()) | _ -> false)
+                        let index = owner.GetKids() |> Seq.findIndex (isMcrOf (Set.singleton id))
                         owner.RemoveKid(index, true) |> ignore
                         let dictionary = PdfDictionary()
                         dictionary.Put(PdfName.Type, PdfName.MCR) |> ignore
@@ -355,9 +433,11 @@ let apply (document: PdfDocument) context (edit: ElementEdit) =
                         figure.AddKid(PdfMcrDictionary(dictionary, figure)) |> ignore
                         id
                     | None ->
-                        let mcr = PdfMcrNumber(page, figure)
-                        figure.AddKid mcr |> ignore
-                        mcr.GetMcid()
+                        // Numbered past every MCID the page uses: iText only knows those in the tags.
+                        let id = nextMcid
+                        nextMcid <- nextMcid + 1
+                        figure.AddKid(PdfMcrNumber(PdfNumber id, figure)) |> ignore
+                        id
                 replacements[part.First] <- $"\n/Figure <</MCID {id}>> BDC\n"
                 if not part.Marked then after[part.Last] <- "\nEMC\n"
             use output = new MemoryStream()
@@ -374,15 +454,25 @@ let apply (document: PdfDocument) context (edit: ElementEdit) =
             let last = if plan.Operations.Count = 0 then 0L else plan.Operations[plan.Operations.Count - 1].End
             output.Write(plan.Bytes, int last, plan.Bytes.Length - int last)
             page.GetPdfObject().Put(PdfName.Contents, PdfStream(output.ToArray()).MakeIndirect document) |> ignore
-            // Prune only owners and ancestors emptied by this operation. Unrelated siblings
-            // and wrappers with any remaining content are left intact.
+            // Tags this emptied go, and the tags around them it emptied too; but never a section, nor
+            // a table's or list's structure (an empty cell is still a cell), nor anything with content left.
             for _, dictionary in plan.Owners |> List.distinctBy snd do
                 let mutable owner = PdfStructElem dictionary
                 let mutable pruning = true
-                while pruning && owner.GetKids().Count = 0 do
+                while pruning && owner.GetKids().Count = 0 && not (holds (tagOf (owner.GetPdfObject()))) do
                     match owner.GetParent() with
                     | :? PdfStructElem as parent ->
                         parent.RemoveKid owner |> ignore
                         owner <- parent
+                    | :? PdfStructTreeRoot as top ->
+                        // A tag straight under the root (iText's root has no RemoveKid).
+                        let element = owner.GetPdfObject()
+                        match resolve (top.GetPdfObject().Get PdfName.K) with
+                        | :? PdfArray as kids ->
+                            for i in kids.Size() - 1 .. -1 .. 0 do
+                                if obj.ReferenceEquals(resolve (kids.Get i), element) then kids.Remove i
+                        | :? PdfDictionary as only when obj.ReferenceEquals(only, element) -> top.GetPdfObject().Remove PdfName.K |> ignore
+                        | _ -> ()
+                        pruning <- false
                     | _ -> pruning <- false
             true

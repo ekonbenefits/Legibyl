@@ -71,13 +71,14 @@ let ``CLI edits and edits-from write the same region figure and carry its review
         File.ReadAllBytes input |> should equal source
 
 [<Fact>]
-let ``CLI reports boundary refusal and writes no figure copy`` () =
+let ``CLI reports a refused region and writes no figure copy`` () =
     use folder = new Folder()
     let input = folder.File "chart.pdf"
     create input
-    File.WriteAllText(ReviewFile.filePath input, review "[60,550,180,650]")
+    // A region with nothing drawn in it.
+    File.WriteAllText(ReviewFile.filePath input, review "[400,100,450,150]")
     let output = folder.File "refused.pdf"
     let result = run input output (folder.File "report.json") ["--edits"]
     File.Exists output |> should be False
     result.GetProperty("notApplied").EnumerateArray()
-    |> Seq.exists (fun s -> (string (s.GetString())).Contains "crosses the region boundary") |> should be True
+    |> Seq.exists (fun s -> (string (s.GetString())).Contains "nothing drawn was found in the region") |> should be True
