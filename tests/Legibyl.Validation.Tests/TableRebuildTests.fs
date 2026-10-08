@@ -186,7 +186,10 @@ let ``paragraph table conversion refuses one span covering more than one cell`` 
 
 /// Row paragraphs, as some writers tag them: each cell's text in a Span, with an empty Span
 /// (holding nothing) after it; actualText, if given, on the second row's paragraph.
-let private createParagraphRowsWithEmptySpans (path: string) (actualText: string option) =
+/// Two paragraphs as rows, each cell's text in a span followed by an empty span. With perGlyph, the
+/// second row's text is a span per glyph, each with the glyph as its /ActualText, as
+/// summary_merge.v7.pdf's vesting table has it.
+let private createParagraphRowsTagged (path: string) (actualText: string option) (perGlyph: bool) =
     use document = new PdfDocument(new PdfWriter(path))
     document.SetTagged() |> ignore
     document.GetCatalog().SetLang(PdfString "en-US") |> ignore
@@ -194,17 +197,33 @@ let private createParagraphRowsWithEmptySpans (path: string) (actualText: string
     let canvas = PdfCanvas page
     let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
     let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+    let draw (text: string) x y =
+        canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(x, y).ShowText(text).EndText().CloseTag()
+        |> ignore
     for row, values in List.indexed [ [ "Plant"; "Sow" ]; [ "Tomato"; "March" ] ] do
         pointer.AddTag "P" |> ignore
         if row = 1 then actualText |> Option.iter (fun text -> pointer.GetProperties().SetActualText text |> ignore)
         for column, text in List.indexed values do
-            pointer.AddTag "Span" |> ignore
-            canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(80.0 + 150.0 * float column, 680.0 - 24.0 * float row).ShowText(text).EndText().CloseTag()
-            |> ignore
-            pointer.MoveToParent() |> ignore
+            let x = 80.0 + 150.0 * float column
+            let y = 680.0 - 24.0 * float row
+            if perGlyph && row = 1 then
+                let mutable offset = 0.0
+                for glyph in text |> Seq.map string do
+                    pointer.AddTag "Span" |> ignore
+                    pointer.GetProperties().SetActualText glyph |> ignore
+                    draw glyph (x + offset) y
+                    offset <- offset + float (font.GetWidth(glyph, 11f))
+                    pointer.MoveToParent() |> ignore
+            else
+                pointer.AddTag "Span" |> ignore
+                draw text x y
+                pointer.MoveToParent() |> ignore
             pointer.AddTag "Span" |> ignore
             pointer.MoveToParent() |> ignore
         pointer.MoveToParent() |> ignore
+
+let private createParagraphRowsWithEmptySpans (path: string) (actualText: string option) =
+    createParagraphRowsTagged path actualText false
 
 let private conversionOf (path: string) =
     let paragraphs = VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P")
@@ -261,6 +280,19 @@ let ``a row paragraph whose replacement text says only what it draws is converte
         equal
         [ "TR", [ "TH", "Plant"; "TH", "Sow" ]
           "TR", [ "TD", "Tomato"; "TD", "March" ] ]
+
+[<Fact>]
+let ``a row paragraph tagged a glyph to a span, its replacement text what they draw, is converted`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createParagraphRowsTagged input.Path (Some " Tomato March    ") true
+    let edit = conversionOf input.Path
+    ElementEdits.unapplied input.Path [ edit ] |> should be Empty
+
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.AppliedFixes |> should contain "Converted 2 paragraph(s) on page 1 to a table with the checked rows and cells."
+    rows output.Path |> List.map (snd >> List.map fst) |> should equal [ [ "TH"; "TH" ]; [ "TD"; "TD" ] ]
 
 [<Fact>]
 let ``a grid without a row for each paragraph isn't converted, and says why`` () =
