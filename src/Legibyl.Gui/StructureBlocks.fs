@@ -342,8 +342,8 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
                 tagChip
                     (match node.Tag with
                      | "NotInTags" -> "Not in the tags"
-                     | "Disconnected" -> "Disconnected associations — not in reading order"
-                     | "DisconnectedTag" -> "Disconnected tag"
+                     | "Disconnected" -> "Tied to tags that are gone"
+                     | "DisconnectedTag" -> "Tag that's gone"
                      | tag -> tag)
                     borderColor headerColor
                 match findingMarker selection node with

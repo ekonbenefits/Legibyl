@@ -1,4 +1,8 @@
-/// Reverse-only tags are evidence, not another reading-order hierarchy.
+/// Content still tied, by the parent tree, to a tag that isn't in the tags any more (see
+/// ParentTree.disconnected), for Structure… to show after the tags: for each page with any, a
+/// "Disconnected" node holding a "DisconnectedTag" node per tag that's gone, with its content's
+/// text, description and place on the page. To look at, not to edit or move: nothing says where
+/// among its neighbours that tag was read, so showing it doesn't put it back.
 module internal Legibyl.Validation.DisconnectedContent
 
 open System
@@ -34,32 +38,28 @@ let nodes (pdfPath: string) =
     | null -> []
     | _ ->
         let context = createContext document pdfPath
-        ParentTree.inconsistent document context
-        |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
-        |> List.groupBy (fun (page, _, owner, _) ->
-            page, (match owner.GetIndirectReference() with null -> owner.GetHashCode() | reference -> reference.GetObjNumber()))
-        |> List.groupBy (fun ((page, _), _) -> page)
-        |> List.map (fun (page, groups) ->
+        ParentTree.disconnected document context
+        |> List.groupBy _.Page
+        |> List.map (fun (page, gone) ->
             let children =
-                [ for (_, objectNumber), associations in groups do
-                      let _, _, owner, _ = associations.Head
-                      let mcids = associations |> List.map (fun (_, mcid, _, _) -> mcid)
+                [ for tag in gone do
                       let content =
-                          [ for mcid in mcids do
+                          [ for mcid in tag.Mcids do
                                 match context.MarkedContent.TryGetValue((page, mcid)) with
                                 | true, content -> content
                                 | _ -> () ]
                       let geometry = content |> Seq.choose _.Geometry |> unionGeometry |> Option.toObj
-                      let role = match owner.GetAsName PdfName.S with null -> "unknown" | role -> role.GetValue()
-                      let ids = mcids |> List.map string |> String.concat ", "
+                      let name = match tag.Owner.GetAsName PdfName.S with null -> "a tag" | name -> $"<{name.GetValue()}>"
                       let details =
-                          [ $"Disconnected <{role}>, object {objectNumber}, MCID(s) {ids}. Not in the reading order; no position is inferred."
-                            if context.MarkedContent.Unreadable.Contains page then "The page's text could not be read."
+                          [ $"Tied to {name}, which isn't in the tags."
+                            (if tag.Untied then "It draws nothing: Rebuild the parent tree marks it as not read."
+                             else "It's kept: its tag needs putting back where the PDF was made, or in a PDF editor.")
+                            if context.MarkedContent.Unreadable.Contains page then "The page's text couldn't be read."
                             yield! content |> List.map _.Text |> List.filter (String.IsNullOrWhiteSpace >> not) |> List.distinct
-                            for key, label in [PdfName.Alt, "alt"; PdfName.ActualText, "replacement text"] do
-                                match owner.GetAsString key with
+                            for key, label in [ PdfName.Alt, "Alt text"; PdfName.ActualText, "Replacement text" ] do
+                                match tag.Owner.GetAsString key with
                                 | null -> ()
                                 | text -> $"{label}: {text.ToUnicodeString()}" ]
                           |> String.concat "\n"
-                      yield node "DisconnectedTag" details page geometry mcids.Length [] ]
-            node "Disconnected" "Disconnected associations — outside the reading order. Review these separately; Rebuild the parent tree clears only demonstrably empty or explicitly decorative content and reports meaningful content it cannot place." page null 0 children)
+                      yield node "DisconnectedTag" details page geometry tag.Mcids.Length [] ]
+            node "Disconnected" $"Page {page}: tied to tags that are gone" page null 0 children)

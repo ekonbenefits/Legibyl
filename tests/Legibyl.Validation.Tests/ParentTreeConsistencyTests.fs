@@ -72,7 +72,8 @@ let private create (path: string) role orphan draw description =
 
 let private warnings path =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Findings
-    |> Seq.filter (fun f -> f.Specification = "Legibyl" && f.TestNumber = 9)
+    // The parent tree's (9), and content tied to a tag that's gone (17).
+    |> Seq.filter (fun f -> f.Specification = "Legibyl" && (f.TestNumber = 9 || f.TestNumber = 17))
     |> List.ofSeq
 
 let private render path =
@@ -93,15 +94,19 @@ let ``meaningful reverse-only tags are shown separately without adding a reading
     let original = File.ReadAllBytes input.Path
     let tree = VeraPdfValidator().ReadStructureTree input.Path |> notNull
     let group = tree.Children |> Seq.find (fun node -> node.Tag = "Disconnected")
-    group.Content |> should haveSubstring "outside the reading order"
+    group.Content |> should equal "Page 1: tied to tags that are gone"
     let shown = group.Children |> Seq.exactlyOne
     shown.Tag |> should equal "DisconnectedTag"
+    shown.Content |> should haveSubstring "Tied to <P>, which isn't in the tags."
+    shown.Content |> should haveSubstring "It's kept"
     shown.Content |> should haveSubstring "Important disclosure text."
-    shown.Content |> should haveSubstring "MCID(s) 1"
     shown.PageNumber.Value |> should equal 1
     shown.Geometry |> should not' (be Null)
+    // Its own warning, Structure-17: kept content, so no fix offered.
     let warning = warnings input.Path |> List.exactlyOne
-    warning.ErrorMessage |> should haveSubstring "MCID(s) 1"
+    warning.TestNumber |> should equal 17
+    warning.ErrorMessage |> should startWith "Page 1: content tied to <P>, which isn't in the tags."
+    warning.FixOptions |> should equal PdfFixOptions.None
     warning.Geometry |> should not' (be Null)
     allNodes tree |> List.filter (fun node -> node.Tag = "P") |> should haveLength 1
     File.ReadAllBytes input.Path |> should equal original
@@ -353,3 +358,13 @@ let ``an empty paragraph naming neither its parent nor its page has its content 
     use document = new PdfDocument(new PdfReader(output.Path))
     Encoding.Latin1.GetString(document.GetPage(1).GetContentBytes()) |> should haveSubstring "/Artifact BMC"
     warnings output.Path |> should be Empty
+
+let ``content tied to a tag that's gone, and drawing nothing, offers the fix that unties it`` () =
+    use input = new TempPdf()
+    create input.Path "P" true "space" false
+
+    let warning = warnings input.Path |> List.exactlyOne
+
+    warning.TestNumber |> should equal 17
+    warning.FixOptions |> should equal PdfFixOptions.ParentTree
+    warning.ErrorMessage |> should haveSubstring "Rebuild the parent tree unties it"

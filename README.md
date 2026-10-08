@@ -447,6 +447,7 @@ new one. All of them:
 | Structure-14 | Adjacent Span tags that split a word inside a text block | `join-split-words`, when the block's text is recoverable |
 | Structure-15 | Paragraphs arranged in repeated rows and columns, possibly a table tagged as paragraphs | — (review the page; aligned text can also match) |
 | Structure-16 | Tags that don't start with a single Document tag (a PDF before 2.0; in PDF 2.0 it's veraPDF's 8.2.5.2) | `document-root` |
+| Structure-17 | Content still tied to a tag that isn't in the tags any more | `parent-tree`, where it draws nothing (otherwise its tag needs putting back) |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -1314,7 +1315,12 @@ an `Untagged` node per piece (strokes drawn together are one piece: a border in
 sixty strokes is one), with its `page`, `box`, and what it is as `content` ("a
 fill, 612 × 792 pt (the whole page)", "a line, 468 × 2 pt", "an image, 60 × 60
 pt", or its text). Only a person can tell a background from a chart, so these are
-never marked on their own: mark each with an edit (below). `--format text`
+never marked on their own: mark each with an edit (below). After those, for each
+page with content still tied to a tag that isn't in the tags any more (see the
+parent tree), a `Disconnected` node ("Page 1: tied to tags that are gone")
+holding a `DisconnectedTag` node per such tag, with its page, `box`, and as
+`content` the tag it was, whether Rebuild the parent tree unties it, and its text
+and descriptions. They're to look at: nothing says where those tags were read. `--format text`
 prints an indented outline instead. A file with no structure tree (untagged)
 has `"structure": null` and exits `1`.
 
