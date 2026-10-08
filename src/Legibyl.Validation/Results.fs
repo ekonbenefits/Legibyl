@@ -10,7 +10,7 @@ module PdfFixDescriptions =
     let Describe (options: PdfFixOptions) : string list =
         [ PdfFixOptions.TagFromLayout, "Tag an untagged document from each page's layout"
           PdfFixOptions.QrLinks, "Link QR codes to the web addresses they encode"
-          PdfFixOptions.ParentTree, "Reconcile the parent tree with the tags, keeping meaningful content and clearing obsolete associations"
+          PdfFixOptions.ParentTree, "Rebuild the parent tree, so the tags are found for the content they hold"
           PdfFixOptions.RoleMap, "Map the PDF's own tag names to standard tags, and fix a broken role map"
           PdfFixOptions.DocumentRoot, "Put the tags under a single Document tag at the top of the structure"
           PdfFixOptions.Language, "Declare the document's language, detected from its text"

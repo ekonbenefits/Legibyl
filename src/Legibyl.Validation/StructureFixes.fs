@@ -14,56 +14,55 @@ open Legibyl.Validation.Interop
 open Legibyl.Validation.StructureTreeObjects
 
 /// Removes, below dictionary, every element isTarget accepts that has nothing visible below it
-/// (empty /P, empty TOCI); returns how many were removed.
-let rec private removeEmptyInside document isTarget (dictionary: PdfDictionary) context inheritedPage : int =
+/// (empty /P, empty TOCI) and that discard allows (see ParentTree.discardable: nothing drawn, no
+/// description); returns how many were removed. Each goes out of its parent's /K here, and into
+/// removed, whose content ElementEdits.makeArtifacts then marks as not read, all at once.
+let rec private removeEmptyInside discard (removed: ResizeArray<PdfDictionary>) isTarget (dictionary: PdfDictionary) context inheritedPage : int =
     match dictionary.Get(PdfName.K) with
     | null -> 0
     | kids ->
         let pageNumber = structElemPage dictionary context inheritedPage
-        match resolve kids with
+        match kids with
         // A single child: shouldRemoveEmpty has already cleaned up inside it, so keep its
         // count (the array case below counts its own children instead).
         | :? PdfDictionary ->
-            match shouldRemoveEmpty document isTarget kids context pageNumber with
+            match shouldRemoveEmpty discard removed isTarget kids context pageNumber with
             | true, removedFromChild ->
                 match resolve kids with
-                | :? PdfDictionary as child -> ElementEdits.makeArtifacts document context [child]
+                | :? PdfDictionary as child -> removed.Add child
                 | _ -> ()
                 dictionary.Remove(PdfName.K) |> ignore
                 removedFromChild + 1
             | false, removedFromChild -> removedFromChild
-        | _ -> removeEmptyFromKids document isTarget kids context pageNumber
+        | _ -> removeEmptyFromKids discard removed isTarget kids context pageNumber
 
-and private removeEmptyFromKids document isTarget (kids: PdfObject) context inheritedPage : int =
+and private removeEmptyFromKids discard removed isTarget (kids: PdfObject) context inheritedPage : int =
     match resolve kids with
     | :? PdfArray as array ->
-        let mutable removed = 0
+        let mutable count = 0
         for i in array.Size() - 1 .. -1 .. 0 do
             let child = resolve (array.Get i)
-            let remove, childRemoved = shouldRemoveEmpty document isTarget child context inheritedPage
+            let remove, childRemoved = shouldRemoveEmpty discard removed isTarget child context inheritedPage
             if remove then
                 match child with
-                | :? PdfDictionary as child ->
-                    ElementEdits.makeArtifacts document context [child]
-                    // A missing /P cannot locate the element in its parent.
-                    if i < array.Size() && obj.ReferenceEquals(resolve (array.Get i), child) then array.Remove i
-                | _ -> array.Remove i
-                removed <- removed + 1
-            removed <- removed + childRemoved
-        removed
-    | :? PdfDictionary as dictionary -> removeEmptyInside document isTarget dictionary context inheritedPage
+                | :? PdfDictionary as child -> removed.Add child
+                | _ -> ()
+                array.Remove i
+                count <- count + 1
+            count <- count + childRemoved
+        count
+    | :? PdfDictionary as dictionary -> removeEmptyInside discard removed isTarget dictionary context inheritedPage
     | _ -> 0
 
 /// Cleans up obj's own children first, then reports whether obj itself is an empty element
-/// isTarget accepts (plus how many were removed below it).
-and private shouldRemoveEmpty document isTarget (obj: PdfObject | null) context inheritedPage : bool * int =
+/// isTarget accepts, and discard allows (plus how many were removed below it).
+and private shouldRemoveEmpty discard removed isTarget (obj: PdfObject | null) context inheritedPage : bool * int =
     match resolve obj with
     | :? PdfDictionary as dictionary ->
         let pageNumber = structElemPage dictionary context inheritedPage
-        let removedFromChildren = removeEmptyInside document isTarget dictionary context pageNumber
-        isTarget dictionary context
-        && isSubtreeEmpty dictionary context pageNumber
-        && ParentTree.canDiscard document context dictionary pageNumber, removedFromChildren
+        let removedFromChildren = removeEmptyInside discard removed isTarget dictionary context pageNumber
+        isTarget dictionary context && isSubtreeEmpty dictionary context pageNumber && discard dictionary pageNumber,
+        removedFromChildren
     | _ -> false, 0
 
 // ---- Link /Contents ----
@@ -313,9 +312,12 @@ let private removeEmpty isTarget (describe: int -> string) (document: PdfDocumen
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     | null -> []
     | structTreeRoot ->
-        match removeEmptyInside document isTarget structTreeRoot context None with
+        let removed = ResizeArray<PdfDictionary>()
+        match removeEmptyInside (ParentTree.discardable document context) removed isTarget structTreeRoot context None with
         | 0 -> []
-        | removed -> [ describe removed ]
+        | count ->
+            ElementEdits.makeArtifacts document context (List.ofSeq removed)
+            [ describe count ]
 
 let private removeEmptyParagraphs =
     removeEmpty isParagraph (fun removed -> $"Removed {removed} empty /P structure element(s).")
