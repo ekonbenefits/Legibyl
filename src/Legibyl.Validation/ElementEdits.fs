@@ -659,3 +659,19 @@ let figureRegionPreview (pdfPath: string) (box: StructureGeometry) : Result<stri
               MergeWith = []; Retag = "Figure"; Exclude = false; Move = None; Cells = [] }
         FigureRegion.plan document context edit |> Result.map _.Summary
     with ex -> Error $"the PDF couldn't be read: {ex.Message}"
+
+/// Why the paragraphs at boxes (one page, first to last) can't be made a table whatever cells are
+/// checked, if they can't: for Structure… to say before it runs the table-structure model. None
+/// when they can, or when they aren't found (the conversion says why, if it's kept).
+let paragraphTableRefusal (pdfPath: string) (boxes: StructureGeometry list) : string option =
+    match boxes with
+    | first :: rest when not rest.IsEmpty ->
+        try
+            use document = new PdfDocument(new PdfReader(pdfPath))
+            let context = createContext document pdfPath
+            let edit: ElementEdit =
+                { Page = first.PageNumber; Tag = "P"; Box = first; Alt = null; Text = null
+                  MergeWith = rest; Retag = "Table"; Exclude = false; Move = None; Cells = [] }
+            mergeRun document context edit |> Option.bind (ParagraphTableRebuild.paragraphsRefusal context)
+        with _ -> None
+    | _ -> None
