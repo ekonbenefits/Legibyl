@@ -407,7 +407,7 @@ let ``multiple forward references to one MCID are refused as ambiguous`` () =
             | _ -> false
         duplicate (rawRoot document) |> should equal true)
     |> List.exactlyOne
-    |> fun reason -> Assert.Contains("is in more than one tag", reason)
+    |> fun reason -> Assert.Contains("is listed twice in one tag", reason)
 
 [<Fact>]
 let ``a form, optional content or an attached file is refused, saying why`` () =
@@ -614,3 +614,44 @@ let ``an encrypted file is refused, saying so, before anything is validated`` ()
     Append.refusals [ folder.File "garden.pdf"; folder.File "jardin.pdf" ]
     |> List.map (fun refusal -> Option.ofObj refusal.File |> Option.map Path.GetFileName |> Option.defaultValue "", refusal.Reason)
     |> should equal [ "jardin.pdf", "It's encrypted: save a copy without a password, then join that." ]
+
+[<Fact>]
+let ``tags that loop back on themselves are refused, not walked forever`` () =
+    refusedWith (fun document ->
+        let root = rawRoot document
+        let top =
+            root.GetAsDictionary PdfName.K
+            |> Option.ofObj
+            |> Option.defaultWith (fun () -> root.GetAsArray(PdfName.K).GetAsDictionary 0)
+        // The first tag below the top one holds the top one again.
+        let first = top.GetAsArray(PdfName.K).GetAsDictionary 0
+        let kids = PdfArray()
+        kids.Add(first.Get(PdfName.K, false))
+        kids.Add top
+        first.Put(PdfName.K, kids) |> ignore
+        first.SetModified() |> ignore)
+    |> List.exactlyOne
+    |> fun reason -> Assert.Contains("the tags loop back on themselves", reason)
+
+[<Fact>]
+let ``a parent tree entry with no value is refused as damaged`` () =
+    use folder = new Folder()
+    let garden, made, broken = folder.File "garden.pdf", folder.File "made.pdf", folder.File "broken.pdf"
+    createInput garden "Garden" "en-US" "P"
+    createInput made "Jardin" "es-ES" "P"
+    let treeNumber =
+        use document = new PdfDocument(new PdfReader(made))
+        rawRoot(document).GetAsDictionary(PdfName.ParentTree).GetIndirectReference().GetObjNumber()
+    // The tree's pairs made odd, byte for byte (so iText can't mend it): its last value blanked
+    // out, "… 1 9 0 R]" becoming "… 1      ]".
+    let text = System.Text.Encoding.Latin1.GetString(File.ReadAllBytes made)
+    let tree = System.Text.RegularExpressions.Regex.Match(text, $@"(?ms)^{treeNumber} 0 obj\b.*?endobj").Value
+    let nums = System.Text.RegularExpressions.Regex.Match(tree, @"/Nums\s*\[[^\]]*?(\d+\s+\d+\s+R)\s*\]")
+    nums.Success |> should be True
+    let last = nums.Groups[1]
+    let odd = nums.Value.Substring(0, last.Index - nums.Index) + String(' ', last.Length) + nums.Value.Substring(last.Index - nums.Index + last.Length)
+    File.WriteAllBytes(broken, System.Text.Encoding.Latin1.GetBytes(text.Replace(tree, tree.Replace(nums.Value, odd))))
+    refused [ garden; broken ]
+    |> List.map snd
+    |> List.exactlyOne
+    |> fun reason -> Assert.Contains("part of the parent tree is damaged", reason)

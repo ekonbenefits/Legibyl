@@ -151,6 +151,8 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
         else
             match node.GetAsArray PdfName.Nums with
             | null -> ()
+            // Entries come in pairs: an odd one out is a key with no value.
+            | nums when nums.Size() % 2 = 1 -> fail "part of the parent tree is damaged"
             | nums ->
                 for i in 0 .. 2 .. nums.Size() - 2 do
                     match nums.GetAsNumber i with
@@ -177,8 +179,10 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
             | null -> fail $"the page holding content {mcid} has no parent tree entry"
             | key ->
                 let address = key.IntValue(), mcid
-                if expected.ContainsKey address then fail $"content {mcid} (parent tree entry {fst address}) is in more than one tag"
-                else expected[address] <- element
+                match expected.TryGetValue address with
+                | true, other when same other element -> fail $"content {mcid} (parent tree entry {fst address}) is listed twice in one tag"
+                | true, _ -> fail $"content {mcid} (parent tree entry {fst address}) is in more than one tag"
+                | _ -> expected[address] <- element
     let objects = Dictionary<int, PdfDictionary>()
     let rec visit (element: PdfDictionary) (parent: PdfDictionary) (page: PdfDictionary | null) depth =
         if depth > 512 || not (seen.Add element) then
