@@ -99,7 +99,7 @@ let private transform (matrix: Matrix) (x: float32, y: float32) =
 
 /// Records what each top-level operator of a content stream draws. Content inside a form
 /// XObject counts as its Do operator's.
-type DrawnByOperator() =
+type DrawnByOperator(?strokeBounds: bool) =
     let drawn = Dictionary<int, List<Drawn>>()
     let mutable current = -1
 
@@ -132,7 +132,20 @@ type DrawnByOperator() =
                     [ for subpath in path.GetPath().GetSubpaths() do
                           for segment in subpath.GetSegments() do
                               for point in segment.GetBasePoints() -> transform ctm (float32 (point.GetX()), float32 (point.GetY())) ]
-                this.Add(Path, boxOf points)
+                let box =
+                    boxOf points
+                    |> Option.map (fun box ->
+                        if defaultArg strokeBounds false && (path.GetOperation() &&& PathRenderInfo.STROKE) <> 0 then
+                            // A conservative bound includes joins, caps and transformed line
+                            // width. Region ownership mustn't accept only a stroke's centreline.
+                            let scale =
+                                max (abs (ctm.Get(Matrix.I11)) + abs (ctm.Get(Matrix.I21)))
+                                    (abs (ctm.Get(Matrix.I12)) + abs (ctm.Get(Matrix.I22)))
+                            let join = if path.GetLineJoinStyle() = 0 then max 1f (path.GetMiterLimit()) else 1f
+                            let padding = max 1f (abs (path.GetLineWidth()) * scale * join / 2f)
+                            Rectangle(box.GetLeft() - padding, box.GetBottom() - padding, box.GetWidth() + padding * 2f, box.GetHeight() + padding * 2f)
+                        else box)
+                this.Add(Path, box)
             | _ -> ()
 
         member _.GetSupportedEvents() = null
@@ -150,8 +163,8 @@ type private CountingOperator(inner: IContentOperator, recorder: DrawnByOperator
                 recorder.Depth <- recorder.Depth - 1
 
 /// What each operator of a content stream draws, by its index (as operationsOf numbers them).
-let drawnByOperator (bytes: byte array) (resources: PdfResources) =
-    let recorder = DrawnByOperator()
+let private collectDrawn strokeBounds (bytes: byte array) (resources: PdfResources) =
+    let recorder = DrawnByOperator(strokeBounds)
     let processor = PdfCanvasProcessor(recorder)
     let mutable index = -1
     let next () =
@@ -163,3 +176,8 @@ let drawnByOperator (bytes: byte array) (resources: PdfResources) =
         | inner -> processor.RegisterContentOperator(name, CountingOperator(inner, recorder, next)) |> ignore
     processor.ProcessContent(bytes, resources)
     recorder.Drawn
+
+let drawnByOperator bytes resources = collectDrawn false bytes resources
+
+/// Conservative painted bounds for a user-selected ownership edit, including stroke widths.
+let drawnForRegion bytes resources = collectDrawn true bytes resources

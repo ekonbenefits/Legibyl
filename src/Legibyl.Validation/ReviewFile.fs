@@ -383,7 +383,7 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
               // Tagged regions have their edits applied: a retagged one has its new tag.
               let regionTag = match e.Retag with NonNull tag -> tag | Null -> e.Tag
               let moved =
-                  tagged
+                  (if e.Tag = "FigureRegion" then [] else tagged)
                   |> List.choose (fun t ->
                       match t.Box with
                       | NonNull box when t.Region.Tag = regionTag && t.Region.Geometry.PageNumber = e.Page ->

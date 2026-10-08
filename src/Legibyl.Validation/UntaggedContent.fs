@@ -268,7 +268,7 @@ let describe (piece: Piece) (text: string option) (pageBox: Rectangle) =
     | kind, _ -> $"a {kind.Name}, {size}"
 
 /// The text drawn in a region of a page.
-let private textIn (page: PdfPage) (box: StructureGeometry) =
+let textIn (page: PdfPage) (box: StructureGeometry) =
     try
         let region = Rectangle(float32 box.Left, float32 box.Bottom, float32 (box.Right - box.Left), float32 (box.Top - box.Bottom))
         let filter = iText.Kernel.Pdf.Canvas.Parser.Filter.TextRegionEventFilter region
@@ -320,7 +320,7 @@ let find (document: PdfDocument) (page: int) (box: StructureGeometry) (sameOverl
 
 /// The element whose marked content a page draws last before operator `before`, and where, if
 /// any: where a piece tagged there goes in reading order (after it).
-let private elementBefore (document: PdfDocument) context (pageNumber: int) (operations: List<Operation>) (resources: PdfResources) (before: int) =
+let elementBefore (document: PdfDocument) context (pageNumber: int) (operations: List<Operation>) (resources: PdfResources) (before: int) =
     let owners = (ParentTree.tagged document context).MarkedContent
     seq { before - 1 .. -1 .. 0 }
     |> Seq.tryPick (fun i ->

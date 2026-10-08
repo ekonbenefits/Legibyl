@@ -40,6 +40,7 @@
     <Compile Include="LayoutTagging.fs" />
     <Compile Include="UntaggedContent.fs" />
     <Compile Include="DisconnectedContent.fs" />
+    <Compile Include="FigureRegion.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="TableRebuild.fs" />
     <Compile Include="ParagraphTableRebuild.fs" />
