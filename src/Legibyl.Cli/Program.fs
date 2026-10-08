@@ -686,7 +686,7 @@ let private runAppend (args: AppendArgs) =
                                  IsCompliant = report.IsCompliant
                                  FailedCount = report.FailedCount } |]
                       Refusals = [| for refusal in outcome.Refusals -> { File = refusal.File; Reason = refusal.Reason } |]
-                      Notes = outcome.Joined |> Option.map (fun joined -> Array.ofList (joined.Notes @ joined.NotCarriedOver)) |> Option.defaultValue [||]
+                      Notes = outcome.Joined |> Option.map (_.AllNotes >> Array.ofList) |> Option.defaultValue [||]
                       After = outcome.After |> Option.map compliance |> Option.toObj
                       Failures = failures |> List.map FailureDetail.Of |> Array.ofList
                       Warnings = warnings |> List.map FailureDetail.Of |> Array.ofList
