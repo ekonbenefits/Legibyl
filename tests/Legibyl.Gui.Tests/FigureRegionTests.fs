@@ -129,14 +129,14 @@ let ``drawing a figure region previews asks for alt confirms and allows removal`
                 wait (fun () -> window.OwnedWindows.Count = 1)
                 let prompt = window.OwnedWindows |> Seq.exactlyOne
                 descendants<TextBlock> prompt |> List.exists (fun t -> (string t.Text).Contains "Chart label") |> should be True
-                descendants<TextBlock> prompt |> List.exists (fun t -> (string t.Text).Contains "more than 50% covered") |> should be True
+                descendants<TextBlock> prompt |> List.exists (fun t -> (string t.Text).Contains "most of it is inside") |> should be True
                 let text = descendants<TextBox> prompt |> List.exactlyOne
                 text.Text <- "A rising bar."
                 HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
                 click prompt "OK"
-                wait (fun () -> window.OwnedWindows.Count = 1 && (window.OwnedWindows |> Seq.head |> descendants<Button> |> List.exists (fun b -> string b.Content = "Replace Structure")))
+                wait (fun () -> window.OwnedWindows.Count = 1 && (window.OwnedWindows |> Seq.head |> descendants<Button> |> List.exists (fun b -> string b.Content = "Make It a Figure")))
                 review.Edits |> should be Empty
-                click (window.OwnedWindows |> Seq.exactlyOne) "Replace Structure"
+                click (window.OwnedWindows |> Seq.exactlyOne) "Make It a Figure"
                 wait (fun () -> review.Edits.Length = 1)
                 review.Edits.Head.Tag |> should equal "FigureRegion"
                 review.Edits.Head.Alt |> should equal (Some "A rising bar.")
@@ -146,6 +146,45 @@ let ``drawing a figure region previews asks for alt confirms and allows removal`
                 HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
                 click window "Remove"
                 review.Edits |> should be Empty
+            finally
+                for owned in List.ofSeq window.OwnedWindows do owned.Close()
+                window.Close()))
+
+[<Fact>]
+let ``with the keyboard, selected elements are made a Figure the same way`` () =
+    withPdf (fun path ->
+        let root = VeraPdfValidator().ReadStructureTree path |> nonNull
+        onUiThread (fun () ->
+            let review = DocumentReviews().For path
+            let window = StructureTreeWindow(Tagged root, path, review, ignore)
+            try
+                window.Show()
+                wait (fun () -> descendants<Image> window |> List.exists (fun image -> not (isNull image.Source)))
+                // The chart's group (here the Document round its label), selected as Enter on it does:
+                // one element holding others. (One paragraph alone isn't offered it.)
+                let block =
+                    descendants<Border> window
+                    |> List.find (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "Document" | _ -> false)
+                let label = block.Tag :?> StructureNode
+                block.Focus() |> ignore
+                block.RaiseEvent(KeyEventArgs(RoutedEvent = InputElement.KeyDownEvent, Key = Key.Enter, Source = block))
+                HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+                // An action button, found by its name (its content is an icon and a label).
+                let action =
+                    descendants<Button> window |> List.find (fun b -> string (AutomationProperties.GetName b) = "Replace with Figure…")
+                action.RaiseEvent(Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent))
+                wait (fun () -> window.OwnedWindows.Count = 1)
+                let prompt = window.OwnedWindows |> Seq.exactlyOne
+                let text = descendants<TextBox> prompt |> List.exactlyOne
+                text.Text <- "A rising bar."
+                HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
+                click prompt "OK"
+                wait (fun () -> window.OwnedWindows.Count = 1 && (window.OwnedWindows |> Seq.head |> descendants<Button> |> List.exists (fun b -> string b.Content = "Make It a Figure")))
+                click (window.OwnedWindows |> Seq.exactlyOne) "Make It a Figure"
+                wait (fun () -> review.Edits.Length = 1)
+                review.Edits.Head.Tag |> should equal "FigureRegion"
+                // The region is round what the selected element draws.
+                review.Edits.Head.Box |> should equal (nonNull label.Geometry)
             finally
                 for owned in List.ofSeq window.OwnedWindows do owned.Close()
                 window.Close()))
@@ -228,9 +267,9 @@ let ``drawing a figure region on a wide preview keeps the page still and outline
                 (descendants<TextBox> prompt |> List.exactlyOne).Text <- "A rising bar."
                 HeadlessWindow.pumpUntil TimeSpan.Zero (fun () -> true) |> ignore
                 click prompt "OK"
-                wait (fun () -> window.OwnedWindows.Count = 1 && (window.OwnedWindows |> Seq.head |> descendants<Button> |> List.exists (fun b -> string b.Content = "Replace Structure")))
+                wait (fun () -> window.OwnedWindows.Count = 1 && (window.OwnedWindows |> Seq.head |> descendants<Button> |> List.exists (fun b -> string b.Content = "Make It a Figure")))
                 (dashedOnWindow window |> fst).IsVisible |> should be True
-                click (window.OwnedWindows |> Seq.exactlyOne) "Replace Structure"
+                click (window.OwnedWindows |> Seq.exactlyOne) "Make It a Figure"
                 wait (fun () -> review.Edits.Length = 1)
                 review.Edits.Head.Tag |> should equal "FigureRegion"
                 review.Edits.Head.Box |> should equal expected

@@ -724,38 +724,41 @@ footers (short, in the top or bottom tenth of the page) don't count either way.
 It points to Order Page N by Layout and Move Up / Move Down; there's no auto fix.
 
 **Replace Structure with Figure from Region…**, under the page preview in
-**Structure…**, lets you drag a rectangle around a whole chart or illustration
-and its labels. The region is outlined with dashes (element outlines are solid)
-while you drag and while you confirm. Check it and the text listed in the preview,
-enter alt text, then confirm. This creates one Figure from the whole content
-items selected by the rectangle, even when its labels belong to distant
-Art/Sect/P branches and its drawing is marked as decoration (Artifact) or is
-outside every tag. It does not retag broad wrappers or move unrelated article
-paragraphs. The Figure
-takes the first selected content's place in reading order; the visible artwork
-is unchanged. Inspect its reading order in the exported copy.
+**Structure…**, is for a chart or diagram tagged as dozens of paragraphs and
+spans (`FigureRegion.fs`). Draw a rectangle round it, labels and all, outlined
+with dashes. Or, with the keyboard, select its elements and choose **Replace
+with Figure…**, which takes the region round what they draw. Check what the
+preview lists, give alt text, and confirm. **Export…** then makes what's drawn
+there one Figure with your alt text. Its labels can come from tags far apart in
+the reading order; its drawing can be marked as decoration, or be outside every
+tag. The page looks the same.
 
-This is a pending, user-driven edit, not an auto fix: **Save** keeps it in the
-review, **Export…** applies it to a copy, and **Remove** in the Edits tab undoes
-it before export. CLI `fix --edits` / `--edits-from` applies the same operation
-and guards. In review JSON it is an edit with `"tag": "FigureRegion"`,
-`"retag": "Figure"`, `"page"`, `"box": [left, bottom, right, top]` (PDF points),
-and nonblank `"alt"`.
+- **What goes in:** each piece of content (a marked-content sequence, or a text
+  object, path or image outside one) goes in whole when most of each of its
+  painted boxes is inside the rectangle, and is left out otherwise. A piece
+  reaching outside the rectangle is listed in the preview. A paragraph of the
+  article that only touches the region stays where it is.
+- **Where it's read:** where its first content was. That's inside a section,
+  table cell or list item at that content's place, or in place of the tag it
+  empties. Tags it empties go, but never a section, a table's cells and rows, or
+  a list's items: an emptied cell stays a cell.
+- **Its box:** it gets the box of what it draws (its Layout `/BBox`), which a
+  Figure needs, so readers and checkers know where it is. An edit already made
+  is found again by that box, so exporting a copy again doesn't make it twice.
+- **What it refuses, saying why:** a region that takes only part of a paragraph
+  or other tag; content in more than one tag, or marked inside other marked
+  content; a form (a drawing reused from elsewhere, which can carry its own
+  tags); a link, form field or other annotation; a shading (gradient) in the
+  selection, whose extent can't be measured; an image that can't be read;
+  turned (rotated) pages and pages whose visible area is offset. Shadings
+  elsewhere on the page are left as they are. Replacement text on the selected
+  content gives way to your alt text, and the preview says so.
 
-Indivisible marked-content sequences, text objects and drawings are included
-only when **each actual painted bounding box is more than 50% covered** by the
-rectangle; items at 50% or less, including items wholly outside it, are left
-out. A selected item is kept whole, so its visible part outside the rectangle
-is included too; the preview lists the left, bottom, right and top bounds
-(PDF points) of each painted box extending outside it. For a
-sequence or text object with several painted boxes, every box must pass the
-threshold, so a distant item can't be swept in by a large sparse aggregate
-box. Zero-width or zero-height boxes qualify only when fully inside the
-rectangle. Check the preview and make sure no included item is an article
-paragraph. The visible artwork is never clipped or changed.
-Unknown/unreadable content, shading, nested marked content, form XObjects,
-annotations, rotated pages and offset crop boxes are conservatively refused
-with an explanation. These need manual review rather than guessing ownership.
+It's an edit you make, not an auto fix: **Save** keeps it in the review,
+**Export…** makes it in a copy, and **Remove** in the Edits tab undoes it. The
+CLI's `fix --edits` / `--edits-from` makes it too. In the review's JSON it's an
+edit with `"tag": "FigureRegion"`, `"retag": "Figure"`, `"page"`, `"box": [left,
+bottom, right, top]` (points) and `"alt"`.
 
 Legibyl also looks for likely tables tagged as paragraphs (Structure-15,
 `ParagraphTables.fs`, no model needed): consecutive sibling paragraphs whose

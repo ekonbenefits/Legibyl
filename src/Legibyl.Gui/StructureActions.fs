@@ -469,7 +469,10 @@ type SelectionNeeds =
       /// a person to check.
       RebuildTable: StructureNode -> unit
       /// Converts selected sibling paragraphs into a table after its detected cells are checked.
-      ConvertParagraphsToTable: StructureNode list -> unit }
+      ConvertParagraphsToTable: StructureNode list -> unit
+      /// Replaces what's drawn in a region of a page with one Figure (see FigureRegion), after
+      /// asking for its alt text, as drawing the region does.
+      ReplaceWithFigure: StructureGeometry -> unit }
 
 /// What a screen reader says for the selected element (alt text, replacement text, a link's
 /// description): only those it has, for one element at a time. (F2 on its block opens the first.)
@@ -689,7 +692,32 @@ let otherActions (needs: SelectionNeeds) : Action list =
               (fun () ->
                   let boxes = nodes |> List.map (fun p -> nonNull p.Geometry)
                   needs.SaveEdits (RegionEdits.mergeElements needs.Edits.Current boxes.Head.PageNumber nodes.Head.Tag boxes) |> ignore)
-      | None, _ -> () ]
+      | None, _ -> ()
+      // The keyboard's way to Replace Structure with Figure from Region: the region round what
+      // the selected elements, on one page, draw. For several elements, or one holding others (a
+      // chart's group or section); not for one paragraph alone.
+      match needs.Selected.Current with
+      | nodes when
+          not needs.Suggested
+          && (match nodes with
+              | [] -> false
+              | [ single ] -> single.Children.Count > 0
+              | _ -> true)
+          && nodes |> List.forall (fun n -> not (isNull n.Geometry) && not (List.contains n.Tag [ "StructTreeRoot"; "NotInTags"; "Disconnected"; "DisconnectedTag" ]))
+          && (nodes |> List.map (fun n -> (nonNull n.Geometry).PageNumber) |> List.distinct |> List.length) = 1
+          ->
+          let boxes = nodes |> List.map (fun n -> nonNull n.Geometry)
+          let region =
+              { PageNumber = boxes.Head.PageNumber
+                Left = boxes |> List.map _.Left |> List.min
+                Bottom = boxes |> List.map _.Bottom |> List.min
+                Right = boxes |> List.map _.Right |> List.max
+                Top = boxes |> List.map _.Top |> List.max }
+          action
+              "Replace with Figure…"
+              "Make what the selection draws one Figure, with alt text you give: for a chart or diagram tagged as many paragraphs and spans. The same as drawing a region round it (Replace Structure with Figure from Region…)."
+              (fun () -> needs.ReplaceWithFigure region)
+      | _ -> () ]
 
 /// Under Selected element: what can be done to the selection (what a screen reader says for it;
 /// its place in the reading order, moves; its tag; merging; and for what's drawn outside the tags,
