@@ -691,3 +691,55 @@ let ``an element moves past a sibling that has no place on a page, which stays w
             enabled |> should be True
             order |> should equal [ "Masthead"; "Left column"; "Empty figure" ]
             edits |> should equal [ "P", Some First ]))
+
+[<Fact>]
+let ``a checked grid the conversion can't use is said why, and isn't kept as an edit`` () =
+    onUiThread (fun () ->
+        let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+        Directory.CreateDirectory folder |> ignore
+        try
+            let pdf = Path.Combine(folder, "rows.pdf")
+            // Two row paragraphs, a line each.
+            do
+                use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf))
+                document.SetTagged() |> ignore
+                let page = document.AddNewPage()
+                let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+                let font = iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+                let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+                for row, text in List.indexed [ "Plant  Sow"; "Tomato  March" ] do
+                    pointer.AddTag "P" |> ignore
+                    canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f)
+                        .MoveText(80.0, 680.0 - 24.0 * float row).ShowText(text).EndText().CloseTag() |> ignore
+                    pointer.MoveToParent() |> ignore
+            let root = VeraPdfValidator().ReadStructureTree pdf |> nonNull
+            let rec all (node: StructureNode) = node :: (node.Children |> Seq.collect all |> List.ofSeq)
+            let boxes = all root |> List.filter (fun n -> n.Tag = "P") |> List.map (fun n -> nonNull n.Geometry)
+            // A grid kept from before that the conversion can't use: its cells name another page.
+            let cells = [ for b in boxes -> ({ Tag = "TD"; Box = { b with PageNumber = 2 } }: TableCell) ]
+            let review = Reviews.read pdf
+            review.Edits <- RegionEdits.setParagraphsAsTable [] boxes cells
+            let saved = review.Edits
+            let window = StructureTreeWindow(Tagged root, pdf, review, ignore, Width = 900.0, Height = 700.0)
+            let wait predicate = HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) predicate |> ignore
+            try
+                window.Show()
+                pump ()
+                let blocks = paragraphs window
+                click blocks[0] false
+                click blocks[1] true
+                (descendants<Button> window |> List.find (fun b -> buttonText b = "Check Table Conversion…")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+                wait (fun () -> window.OwnedWindows.Count = 1)
+                // The grid, checked as it is.
+                let dialog = window.OwnedWindows |> Seq.exactlyOne
+                (descendants<Button> dialog |> List.find (fun b -> buttonText b = "OK")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
+                // Then why it can't be used, in a message of its own.
+                wait (fun () -> window.OwnedWindows.Count = 1 && not (obj.ReferenceEquals(Seq.head window.OwnedWindows, dialog)))
+                let message = window.OwnedWindows |> Seq.exactlyOne
+                texts message |> List.exists (fun t -> t.Contains "wasn't applied") |> should be True
+                window.Review.Edits |> should equal saved
+            finally
+                for owned in List.ofSeq window.OwnedWindows do owned.Close()
+                window.Close()
+        finally
+            Directory.Delete(folder, true))
