@@ -411,11 +411,6 @@ module private MainView =
                                         | Some saved when SavedResults.isCurrent saved hash profile ->
                                             SavedResults.toReport saved filePath, hash, Some saved.CheckedAt
                                         | _ -> { validator.Validate(filePath, profile, progress) with ProfileDetected = true }, hash, None)
-                                match fromSaved with
-                                | Some _ -> ()
-                                | None ->
-                                    review.Validation <- Some(SavedResults.ofReport report hash DateTime.Now)
-                                    edited.Set review.IsEdited
                                 checkedAt.Set fromSaved
                                 let rows =
                                     report.Findings
@@ -427,6 +422,14 @@ module private MainView =
                                 let rows =
                                     let counts = rows |> List.countBy (fun r -> r.Clause, r.TestNumber, r.Message) |> Map.ofList
                                     rows |> List.map (fun r -> { r with Occurrences = counts[(r.Clause, r.TestNumber, r.Message)] })
+                                match fromSaved with
+                                | Some _ -> ()
+                                | None ->
+                                    review.Validation <- Some(SavedResults.ofReport report hash DateTime.Now)
+                                    // A PDF that passes with every warning dismissed (or none) has
+                                    // nothing left to do: its result alone isn't a change to keep.
+                                    if report.IsCompliant && rows |> List.forall _.Dismissed then review.TakeValidationAsSaved()
+                                    edited.Set review.IsEdited
                                 outcome.Set(Validated(report, rows))
                                 refreshPending ()
                                 selectFirst rows

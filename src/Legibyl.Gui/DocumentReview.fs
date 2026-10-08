@@ -179,6 +179,12 @@ type DocumentReview(modified: DateTime) =
     /// from what was last saved (changing one back isn't a change), or there's a newer validation.
     member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist) <> this.Saved
 
+    /// Takes the validation it has now as saved, its other changes left as they are: for a result
+    /// that leaves nothing to do, which isn't worth asking to keep (opening the PDF again redoes it).
+    member this.TakeValidationAsSaved() =
+        let dismissed, edits, title, roleMap, attachments, autoFixes, _, checklist = this.Saved
+        this.Saved <- (dismissed, edits, title, roleMap, attachments, autoFixes, this.ValidationStamp, checklist)
+
     /// Takes what it has now as what's saved.
     member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
 
