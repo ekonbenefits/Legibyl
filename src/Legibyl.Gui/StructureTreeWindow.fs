@@ -352,47 +352,62 @@ module private StructureView =
                     showPage selected.Current
                 }
 
+            /// Replace Structure with Figure from Region, for a region drawn on the page or round the
+            /// selected elements: shows what it takes, asks for alt text, and keeps it as an edit.
+            /// What goes wrong is said, not lost (it's started and left to run).
             let figureFromRegion (box: StructureGeometry) =
                 task {
                     let title = "Replace Structure with Figure from Region"
-                    let! preview =
-                        Task.Run(fun () ->
-                            match ElementEdits.figureRegionPreview sourceFilePath box with
-                            | Error reason -> Error reason
-                            | Ok summary ->
-                                // The page alone, so the dashed outline over it is all that's marked.
-                                try Ok(summary, renderer.RenderPageWithRegions(sourceFilePath, box.PageNumber, Seq.empty<PageRegion>, previewScale))
-                                with ex -> Error $"the selected region couldn't be rendered: {ex.Message}")
                     let finish () =
                         figureBox.Set None
                         showPage selected.Current
-                    match preview with
-                    | Error reason ->
-                        do! Dialogs.showMessage window $"This region can't be replaced: {reason}." title
-                        finish ()
-                    | Ok(summary, bytes) ->
-                        use stream = new MemoryStream(bytes)
-                        let image = new Bitmap(stream)
-                        // Not replaced by a page render still on its way.
-                        previewVersion.Set(previewVersion.Current + 1)
-                        previewImage.Set(Some image)
-                        figureBox.Set(Some box)
-                        previewNote.Set $"Selected region on page {box.PageNumber}, outlined with dashes. Check the artwork inside it before confirming."
-                        let! alt = Dialogs.promptText window title
-                                       (summary + "\n\nWhole indivisible items are included when each of their painted boxes is more than 50% covered by the dashed rectangle; items at 50% or less are left out. The whole item is kept, including any part extending beyond the rectangle, and those painted boxes are listed above. Check that no included item is an article paragraph. The visible artwork stays unchanged. Enter the alt text a screen reader should announce:")
-                                       "" "Describe the chart's meaning"
-                        match alt with
-                        | Some text when not (String.IsNullOrWhiteSpace text) ->
-                            let! confirmed = Dialogs.showMessageWithAction window
-                                                ($"Replace the selected content with one Figure described as:\n\n{text}\n\nIt goes at the first selected content's place in reading order. This is a pending edit: Save keeps it in the review; Export… applies it to a copy. Remove it in the Edits tab to undo.")
-                                                title "Replace Structure"
-                            figureBox.Set None
-                            if confirmed then do! saveEdits (RegionEdits.replaceWithFigure edits.Current box text)
-                            else showPage selected.Current
-                        | Some _ ->
-                            do! Dialogs.showMessage window "Alt text is required; no edit was added." title
+                    try
+                        let! preview =
+                            Task.Run(fun () ->
+                                match ElementEdits.figureRegionPreview sourceFilePath box with
+                                | Error reason -> Error reason
+                                | Ok summary ->
+                                    // The page alone, so the dashed outline over it is all that's marked.
+                                    try Ok(summary, renderer.RenderPageWithRegions(sourceFilePath, box.PageNumber, Seq.empty<PageRegion>, previewScale))
+                                    with ex -> Error $"the page couldn't be shown: {ex.Message}")
+                        match preview with
+                        | Error reason ->
+                            do! Dialogs.showMessage window $"This region can't be made a Figure: {reason}." title
                             finish ()
-                        | None -> finish ()
+                        | Ok(summary, bytes) ->
+                            use stream = new MemoryStream(bytes)
+                            let image = new Bitmap(stream)
+                            // Not replaced by a page render still on its way.
+                            previewVersion.Set(previewVersion.Current + 1)
+                            previewImage.Set(Some image)
+                            figureBox.Set(Some box)
+                            previewNote.Set $"The region on page {box.PageNumber}, outlined with dashes. Check what's inside it before going on."
+                            let! alt =
+                                Dialogs.promptText
+                                    window
+                                    title
+                                    (summary
+                                     + "\n\nEach piece of content goes in whole when most of it is inside the dashed rectangle, and is left out otherwise. Check nothing in it is text that should stay text, like a paragraph of the article. The page will look the same. The alt text a screen reader should read for it:")
+                                    ""
+                                    "Say what the chart shows"
+                            match alt with
+                            | Some text when not (String.IsNullOrWhiteSpace text) ->
+                                let! confirmed =
+                                    Dialogs.showMessageWithAction
+                                        window
+                                        $"Make the region one Figure, described as:\n\n{text}\n\nIt's read where its first content was. Save keeps the edit in the review, Export… makes it in a copy, and the Edits tab removes it."
+                                        title
+                                        "Make It a Figure"
+                                figureBox.Set None
+                                if confirmed then do! saveEdits (RegionEdits.replaceWithFigure edits.Current box text)
+                                else showPage selected.Current
+                            | Some _ ->
+                                do! Dialogs.showMessage window "It needs alt text, so no edit was added." title
+                                finish ()
+                            | None -> finish ()
+                    with ex ->
+                        do! Dialogs.showMessage window $"The region couldn't be made a Figure: {ex.Message}" title
+                        finish ()
                 }
 
             let editNode (node: StructureNode) (kind: EditKind) =
@@ -972,7 +987,8 @@ module private StructureView =
                   EditNode = editNode
                   RoleMap = fun () -> review.RoleMap
                   RebuildTable = rebuildTable
-                  ConvertParagraphsToTable = convertParagraphsToTable }
+                  ConvertParagraphsToTable = convertParagraphsToTable
+                  ReplaceWithFigure = fun box -> figureFromRegion box |> ignore }
             /// A tagged PDF's selected element's moves in the reading order.
             let moves () = if isSuggested then [] else StructureActions.moveActions (orderNeeds ())
             menuFill.Value <-
@@ -1217,7 +1233,7 @@ module private StructureView =
                                         Button.create [
                                             Button.content (if drawingFigure.Current then "Cancel Drawing Figure Region" else "Replace Structure with Figure from Region…")
                                             Button.isEnabled shownPage.Current.IsSome
-                                            ToolTip.tip "Draw around the chart or illustration, including its labels. An item is included only if every painted box is more than 50% covered; items at 50% or less are left out. Export applies the pending edit to a copy."
+                                            ToolTip.tip "Draw round a chart or diagram, labels and all, to make what's drawn there one Figure with alt text you give. Each piece goes in whole when most of it is inside. With the keyboard: select its elements and choose Replace with Figure…. Export… makes it in a copy."
                                             Button.onClick (fun _ ->
                                                 let drawing = not drawingFigure.Current
                                                 drawingFigure.Set drawing
