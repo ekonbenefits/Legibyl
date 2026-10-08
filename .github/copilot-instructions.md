@@ -27,6 +27,7 @@
 ## Code and tests
 
 - Everything is F#, in modules; tests are xUnit v3 with FsUnit.
+- **Name tags, content operators and destination kinds by their constants** (`Tags.Figure`, `ContentOperators.BDC`, `Destinations.FitR`), not string literals, so a misspelt one doesn't compile. Tests can write them as literals: they check what's written.
 - **Tests build their PDFs themselves** (iText). Never commit real documents or screenshots of them: the repository will be public.
 - The test projects can't see internal modules. Test through the public API: `VeraPdfValidator().Validate`, `.Fix`, `.ReadStructureTree`.
 - **A test for a guard should fail without it.** Take the guard out once and see the test fail.
