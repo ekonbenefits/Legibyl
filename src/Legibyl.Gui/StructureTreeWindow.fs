@@ -495,6 +495,20 @@ module private StructureView =
                     }
                     |> ignore
 
+            /// texts (the tags' text in each of cells), each cell with none given the page's text
+            /// there: its words, else what OCR reads (a font without its characters' Unicode, say).
+            /// As given if the page can't be read: the text is only shown, to check the grid by.
+            let withPageTexts (page: int) (cells: TableCell list) (texts: string list) : Task<string list> =
+                if texts |> List.forall ((<>) "") then
+                    Task.FromResult texts
+                else
+                    Task.Run(fun () ->
+                        try
+                            use suggester = new LayoutSuggester(sourceFilePath)
+                            let read = suggester.CellTexts(page, [ for cell in cells -> cell.Box ])
+                            List.map2 (fun text read -> if text = "" then read else text) texts read
+                        with _ -> texts)
+
             /// A tagged table's rows and cells rebuilt from the page: found by the table-structure
             /// model (the cells kept from before, if it was rebuilt already), shown for a person to
             /// check, and kept as the table's edit.
@@ -540,9 +554,10 @@ module private StructureView =
                                 // Each piece in the cell a rebuild puts it in (its middle's, else the nearest).
                                 let boxes = [ for cell in cells -> cell.Box ]
                                 let placed = drawn node |> List.map (fun (text, g) -> TableGrid.cellFor boxes (Some g), text)
-                                let texts =
+                                let! texts =
                                     [ for index in 0 .. cells.Length - 1 ->
                                           placed |> List.filter (fst >> (=) index) |> List.map snd |> String.concat " " ]
+                                    |> withPageTexts box.PageNumber cells
                                 match! TableRebuildDialog.show window cells texts with
                                 | Some checkedCells -> do! saveEdits (RegionEdits.setCells edits.Current box.PageNumber node.Tag box checkedCells)
                                 | None -> ()
@@ -621,7 +636,8 @@ module private StructureView =
                                     window.Cursor <- new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Wait)
                                     let! found =
                                         match kept with
-                                        | Some cells -> Task.FromResult(Some cells)
+                                        // One row a paragraph, as the conversion needs, where a grid kept from before hasn't.
+                                        | Some cells -> Task.FromResult(Some(TableGrid.fitRows boxes cells))
                                         | None ->
                                             Task.Run(fun () ->
                                                 if not (TableModel.isDownloaded ()) then
@@ -629,7 +645,9 @@ module private StructureView =
                                                 use suggester = new LayoutSuggester(sourceFilePath)
                                                 suggester.TableCells(region.PageNumber, region)
                                                 |> Option.map (List.map (fun (header, geometry) ->
-                                                    ({ Tag = (if header then "TH" else "TD"); Box = geometry }: TableCell))))
+                                                    ({ Tag = (if header then "TH" else "TD"); Box = geometry }: TableCell)))
+                                                // The model misses rows (a header row especially): one row a paragraph.
+                                                |> Option.map (TableGrid.fitRows boxes))
                                     window.Cursor <- cursor
                                     match found with
                                     | Some cells when not cells.IsEmpty ->
@@ -643,9 +661,10 @@ module private StructureView =
                                             nodes
                                             |> List.collect drawn
                                             |> List.map (fun (text, geometry) -> TableGrid.cellFor cellBoxes (Some geometry), text)
-                                        let texts =
+                                        let! texts =
                                             [ for index in 0 .. cells.Length - 1 ->
                                                   placed |> List.filter (fst >> (=) index) |> List.map snd |> String.concat " " ]
+                                            |> withPageTexts region.PageNumber cells
                                         match! TableRebuildDialog.showAs
                                                     window
                                                     "Convert Paragraphs to Table"
@@ -653,7 +672,21 @@ module private StructureView =
                                                     cells
                                                     texts with
                                         | Some checkedCells ->
-                                            do! saveEdits (RegionEdits.setParagraphsAsTable edits.Current boxes checkedCells)
+                                            let next = RegionEdits.setParagraphsAsTable edits.Current boxes checkedCells
+                                            // A grid Export can't put the paragraphs' content in isn't kept as an edit that never
+                                            // applies. (A PDF that can't be read here is checked again on Export.)
+                                            let! problems =
+                                                Task.Run(fun () ->
+                                                    try ElementEdits.unapplied sourceFilePath (RegionEdits.toElementEdits [ List.last next ])
+                                                    with _ -> [])
+                                            if problems.IsEmpty then
+                                                do! saveEdits next
+                                            else
+                                                do!
+                                                    Dialogs.showMessage
+                                                        window
+                                                        (String.concat " " problems)
+                                                        "Convert Paragraphs to Table"
                                         | None -> ()
                                     | Some _ ->
                                         do! Dialogs.showMessage window "The table-structure model found no rows or cells in this region." "Convert Paragraphs to Table"
