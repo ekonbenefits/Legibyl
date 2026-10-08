@@ -115,7 +115,7 @@ let ``disconnected text is visible separately and cannot be moved as a reading-o
         onUiThread (fun () ->
             let window = show disconnected
             try
-                texts window |> List.exists (fun text -> text.Contains "Disconnected associations") |> should be True
+                texts window |> List.exists (fun text -> text.Contains "Tied to tags that are gone") |> should be True
                 texts window |> List.exists (fun text -> text.Contains "Disconnected disclosure.") |> should be True
                 let block =
                     descendants<Border> window

@@ -20,8 +20,9 @@
 /// missing bookmarks, Structure-7; the parent tree, Structure-9; figures in pieces, Structure-10;
 /// figures that draw nothing, Structure-11; pages read out of order, Structure-12; pages whose
 /// text couldn't be read, Structure-13; words split across Span boundaries, Structure-14; tables
-/// tagged as aligned paragraphs, Structure-15; and no single Document tag at the top,
-/// Structure-16) are added in `run` directly, and their messages to messageFor.
+/// tagged as aligned paragraphs, Structure-15; no single Document tag at the top, Structure-16;
+/// and content tied to a tag that's gone, Structure-17) are added in `run` directly, and their
+/// messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -221,32 +222,50 @@ let private parentTreeFindings (document: PdfDocument) context =
     | Some missing ->
         let pages = if missing.Pages = 1 then "1 page with tagged content has" else $"{missing.Pages} pages with tagged content have"
         let objects = if missing.Objects = 1 then "1 tagged annotation has" else $"{missing.Objects} tagged annotations have"
+        // Content tied to a tag that's gone is Structure-17's, not this one's.
+        let wrong =
+            ParentTree.inconsistent document context |> List.filter (fun (_, _, _, expected) -> expected.IsSome) |> List.length
         let detail =
             [ if missing.TreeMissing then "The parent tree is missing."
               if missing.Pages > 0 then $"{pages} missing or incorrect entries in it."
-              if missing.Objects > 0 then $"{objects} missing or incorrect entries in it." ]
-            @ [ if missing.Associations > 0 then $"{missing.Associations} piece(s) of content are tied to the wrong tag, or to one that isn't in the tags." ]
+              if missing.Objects > 0 then $"{objects} missing or incorrect entries in it."
+              if wrong > 0 then $"{wrong} piece(s) of content are tied to the wrong tag." ]
             |> String.concat " "
-        let disconnected =
-            ParentTree.inconsistent document context
-            |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
-            |> List.groupBy (fun (page, _, owner, _) -> page, owner)
-        [ if missing.Pages > 0 || missing.Objects > 0 || disconnected.IsEmpty then
-              yield warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null
-          for (page, owner), associations in disconnected do
-              let mcids = associations |> List.map (fun (_, mcid, _, _) -> mcid)
-              let ids = mcids |> List.map string |> String.concat ", "
-              let geometry =
-                  mcids
-                  |> Seq.choose (fun mcid ->
-                      match context.MarkedContent.TryGetValue((page, mcid)) with
-                      | true, content -> content.Geometry
-                      | _ -> None)
-                  |> unionGeometry |> Option.toObj
-              let role = match owner.GetAsName PdfName.S with null -> "unknown" | role -> role.GetValue()
-              yield warning ParentTreeMessage
-                  $"Page {page}, MCID(s) {ids}: <{role}> is disconnected from the reading order. Shown separately under Disconnected associations in Structure. Rebuild the parent tree clears only empty or explicitly decorative associations; meaningful content is kept and reported."
-                  "StructTreeRoot" 9 PdfFixOptions.ParentTree geometry ]
+        if missing.TreeMissing || missing.Pages > 0 || missing.Objects > 0 || wrong > 0 then
+            [ warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null ]
+        else
+            []
+
+// ---- Structure-17: content tied to a tag that isn't in the tags any more ----
+
+[<Literal>]
+let private DisconnectedMessage =
+    "Content still tied to a tag that isn't in the tags any more (one taken out without its parent tree entries), so a screen reader skips it or reads it out of place. Structure… shows it on its own, under Tied to tags that are gone."
+
+/// Each page's content tied to a tag that's gone, by that tag: the fix offered only where it acts.
+let private disconnectedFindings (document: PdfDocument) context =
+    [ for gone in ParentTree.disconnected document context do
+          let geometry =
+              gone.Mcids
+              |> Seq.choose (fun mcid ->
+                  match context.MarkedContent.TryGetValue((gone.Page, mcid)) with
+                  | true, content -> content.Geometry
+                  | _ -> None)
+              |> unionGeometry
+              |> Option.toObj
+          let tag = match gone.Owner.GetAsName PdfName.S with null -> "a tag" | name -> $"<{name.GetValue()}>"
+          let what =
+              if gone.Untied then
+                  "It draws nothing, so Rebuild the parent tree unties it and marks it as not read."
+              else
+                  "It draws something or has a description, so it's kept: its tag needs putting back where the PDF was made, or in a PDF editor."
+          warning
+              DisconnectedMessage
+              $"Page {gone.Page}: content tied to {tag}, which isn't in the tags. {what}"
+              "StructTreeRoot"
+              17
+              (if gone.Untied then PdfFixOptions.ParentTree else PdfFixOptions.None)
+              geometry ]
 
 // ---- Structure-10: a picture tagged in pieces, as many small figures (see SplitFigures) ----
 
@@ -422,6 +441,7 @@ let run (document: PdfDocument) context : RuleViolation list =
                       warning check.Message null finding.Location check.TestNumber check.FixOptions (Option.toObj finding.Geometry)
                   | None -> ()
           yield! parentTreeFindings document context
+          yield! disconnectedFindings document context
           yield! tocHeadingFindings document context
           yield! paragraphListFindings document context
           yield! splitFigureFindings document context
@@ -468,6 +488,7 @@ let messageFor (testNumber: int) : string option =
         | 14 -> Some SplitWordSpansMessage
         | 15 -> Some ParagraphTableMessage
         | 16 -> Some DocumentRootMessage
+        | 17 -> Some DisconnectedMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

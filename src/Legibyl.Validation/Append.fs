@@ -1132,7 +1132,8 @@ let join (files: string list) (output: string) (options: Options) : Joined =
 let differences (part: Part) (index: int) (input: StructureNode) (joined: StructureNode) : string list =
     let name = Path.GetFileName part.File
     // The elements, not the content outside them the reader adds (see UntaggedContent.nodes).
-    let children (node: StructureNode) = node.Children |> Seq.filter (fun child -> child.Tag <> "NotInTags") |> List.ofSeq
+    let children (node: StructureNode) =
+        node.Children |> Seq.filter (fun child -> child.Tag <> "NotInTags" && child.Tag <> "Disconnected") |> List.ofSeq
     // An input's part: its Document's children, else its root's.
     let ownParts (root: StructureNode) =
         match children root with
