@@ -264,13 +264,15 @@ type StructElemVisit =
 
 /// Every dictionary below the StructTreeRoot, parents before children.
 let walk (structTreeRoot: PdfDictionary) context : StructElemVisit seq =
-    let rec visitKids (kids: PdfObject | null) path inheritedPage : StructElemVisit seq =
+    // Each element once: tags that loop back on themselves (or a tag in two places) would
+    // otherwise be walked forever. Per walk through, so walking again sees them all again.
+    let rec visitKids (visited: HashSet<PdfDictionary>) (kids: PdfObject | null) path inheritedPage : StructElemVisit seq =
         match resolve kids with
         | :? PdfArray as array ->
             let items =
                 [| for i in 0 .. array.Size() - 1 ->
                        match resolve (array.Get i) with
-                       | :? PdfDictionary as dictionary -> Some(dictionary, $"{path}[{i}]")
+                       | :? PdfDictionary as dictionary when not (visited.Contains dictionary) -> Some(dictionary, $"{path}[{i}]")
                        | _ -> None |]
 
             let visitAt i =
@@ -284,22 +286,27 @@ let walk (structTreeRoot: PdfDictionary) context : StructElemVisit seq =
             seq {
                 for i in 0 .. items.Length - 1 do
                     match visitAt i with
-                    | Some visit ->
+                    | Some visit when visited.Add visit.Element ->
                         let visit = { visit with NextSibling = if i + 1 < items.Length then visitAt (i + 1) else None }
                         yield visit
-                        yield! visitKids (visit.Element.Get(PdfName.K)) $"{visit.Path}/K" visit.Page
-                    | None -> ()
+                        yield! visitKids visited (visit.Element.Get(PdfName.K)) $"{visit.Path}/K" visit.Page
+                    | _ -> ()
             }
-        | :? PdfDictionary as dictionary ->
+        | :? PdfDictionary as dictionary when not (visited.Contains dictionary) ->
             let visit =
                 { Element = dictionary
                   Path = path
                   Page = structElemPage dictionary context inheritedPage
                   NextSibling = None }
             seq {
-                yield visit
-                yield! visitKids (dictionary.Get(PdfName.K)) $"{path}/K" visit.Page
+                if visited.Add dictionary then
+                    yield visit
+                    yield! visitKids visited (dictionary.Get(PdfName.K)) $"{path}/K" visit.Page
             }
         | _ -> Seq.empty
 
-    visitKids (structTreeRoot.Get(PdfName.K)) "StructTreeRoot/K" (structElemPage structTreeRoot context None)
+    seq {
+        let visited = HashSet<PdfDictionary>(HashIdentity.Reference)
+        visited.Add structTreeRoot |> ignore
+        yield! visitKids visited (structTreeRoot.Get(PdfName.K)) "StructTreeRoot/K" (structElemPage structTreeRoot context None)
+    }
