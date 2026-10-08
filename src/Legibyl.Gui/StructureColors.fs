@@ -37,12 +37,12 @@ let categoryColors =
     let table = Colors.Chocolate, Color.FromRgb(0xFDuy, 0xEAuy, 0xD3uy)
     let figure = Colors.IndianRed, Color.FromRgb(0xFBuy, 0xE1uy, 0xE1uy)
     dict
-        [ for tag in [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6" ] -> tag, heading
-          for tag in [ "P"; "Span" ] -> tag, text
-          for tag in [ "L"; "LI"; "Lbl"; "LBody" ] -> tag, list
-          for tag in [ "TOC"; "TOCI"; "Link"; "Form" ] -> tag, reference
-          for tag in [ "Table"; "TR"; "TH"; "TD" ] -> tag, table
-          yield "Figure", figure ]
+        [ for tag in Tags.headings -> tag, heading
+          for tag in [ Tags.P; Tags.Span ] -> tag, text
+          for tag in [ Tags.L; Tags.LI; Tags.Lbl; Tags.LBody ] -> tag, list
+          for tag in [ Tags.TOC; Tags.TOCI; Tags.Link; Tags.Form ] -> tag, reference
+          for tag in [ Tags.Table; Tags.TR; Tags.TH; Tags.TD ] -> tag, table
+          yield Tags.Figure, figure ]
 
 let colorsFor (tag: string) =
     match categoryColors.TryGetValue tag with
@@ -54,25 +54,25 @@ let brush (color: Color) : IBrush = SolidColorBrush(color)
 /// A tag's outline color on a page overview (0xRRGGBB), strong enough to see on a page.
 let outlineColor (tag: string) =
     match tag with
-    | "H"
-    | "H1"
-    | "H2"
-    | "H3"
-    | "H4"
-    | "H5"
-    | "H6" -> 0xC2185Bu
-    | "P"
-    | "Span" -> 0x1A73E8u
-    | "L"
-    | "LI"
-    | "Lbl"
-    | "LBody" -> 0x00838Fu
-    | "Figure" -> 0x2E7D32u
-    | "Table"
-    | "TR"
-    | "TH"
-    | "TD" -> 0xEF6C00u
-    | "Artifact" -> 0x757575u
+    | Tags.H
+    | Tags.H1
+    | Tags.H2
+    | Tags.H3
+    | Tags.H4
+    | Tags.H5
+    | Tags.H6 -> 0xC2185Bu
+    | Tags.P
+    | Tags.Span -> 0x1A73E8u
+    | Tags.L
+    | Tags.LI
+    | Tags.Lbl
+    | Tags.LBody -> 0x00838Fu
+    | Tags.Figure -> 0x2E7D32u
+    | Tags.Table
+    | Tags.TR
+    | Tags.TH
+    | Tags.TD -> 0xEF6C00u
+    | Tags.Artifact -> 0x757575u
     | _ -> 0x6A1B9Au
 
 

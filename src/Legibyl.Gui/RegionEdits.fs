@@ -69,7 +69,7 @@ let setCells edits page tag box (cells: TableCell list) =
 
 /// A selected page rectangle, not the box of a wrapper in the structure tree.
 let replaceWithFigure (edits: Edit list) (box: StructureGeometry) (alt: string) =
-    update edits box.PageNumber "FigureRegion" box (fun e -> { e with Alt = Some alt; Retag = Some "Figure" })
+    update edits box.PageNumber "FigureRegion" box (fun e -> { e with Alt = Some alt; Retag = Some Tags.Figure })
 
 /// A figure's alt text set, or removed if blank.
 let setAlt edits page tag box (alt: string) =
@@ -153,12 +153,12 @@ let setParagraphsAsTable (edits: Edit list) (boxes: StructureGeometry list) (cel
                |> List.exists (fun box -> (first :: rest) |> List.exists (fun selected -> Boxes.overlap box selected >= SameRegionOverlap))
         (edits |> List.filter (not << involves))
         @ [ { Page = first.PageNumber
-              Tag = "P"
+              Tag = Tags.P
               Box = first
               Alt = None
               Text = None
               MergeWith = rest
-              Retag = Some "Table"
+              Retag = Some Tags.Table
               Exclude = false
               Move = None
               Cells = cells } ]
@@ -166,7 +166,7 @@ let setParagraphsAsTable (edits: Edit list) (boxes: StructureGeometry list) (cel
 
 /// Paragraphs to merge into the first, by box, replacing any merge that involves them.
 let mergeParagraphs (edits: Edit list) (page: int) (boxes: StructureGeometry list) : Edit list =
-    mergeElements edits page "P" boxes
+    mergeElements edits page Tags.P boxes
 
 /// The merge that starts at box on page, if any.
 let findMerge (edits: Edit list) (page: int) (box: StructureGeometry) : Edit option =

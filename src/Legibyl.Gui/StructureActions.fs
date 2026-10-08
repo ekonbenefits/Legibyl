@@ -83,10 +83,10 @@ let editKinds (node: StructureNode) =
     | _ when node.Tag = "Disconnected" || node.Tag = "DisconnectedTag" -> []
     | null -> []
     | _ ->
-        [ if tag = "Link" then LinkDescription
-          elif tag = "Annot" then Description
-          elif tag = "Form" then Tooltip
-          elif tag = "Figure" || tag = "Formula" || not (isNull node.AlternateDescription) then AltText
+        [ if tag = Tags.Link then LinkDescription
+          elif tag = Tags.Annot then Description
+          elif tag = Tags.Form then Tooltip
+          elif tag = Tags.Figure || tag = Tags.Formula || not (isNull node.AlternateDescription) then AltText
           if not (isNull node.ActualText) || hasIconCharacters node.Content then ReplacementText ]
 
 /// What editing it is called: on the selected element's buttons, and its block's right-click menu.
@@ -111,7 +111,7 @@ let fieldNameText (name: string) =
         String.Join(" ", (first.Substring(0, 1).ToUpperInvariant() + first.Substring(1).ToLowerInvariant()) :: (rest |> List.map _.ToLowerInvariant()))
 
 /// The tags a block of text can be given instead, e.g. a heading tagged as a paragraph.
-let offeredRetags = [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "Caption"; "Note"; "BlockQuote" ]
+let offeredRetags = Tags.headings @ [ Tags.P; Tags.Caption; Tags.Note; Tags.BlockQuote ]
 
 /// The tag a screen reader hears for node: one of the PDF's own tag names by the standard tag
 /// chosen for it (roleMap, the Role map tab's), else by its role map's; a standard tag, itself.
@@ -122,7 +122,7 @@ let heardTag (roleMap: Map<string, string>) (node: StructureNode) =
 /// Whether node, which a screen reader hears as heard, can be given another tag.
 let private canRetagAs (suggested: bool) (heard: string) (node: StructureNode) =
     not (isNull node.Geometry)
-    && (if suggested then node.Tag <> "Link" else heard = "H" || List.contains heard offeredRetags)
+    && (if suggested then node.Tag <> Tags.Link else heard = Tags.H || List.contains heard offeredRetags)
 
 /// Whether node can be given another tag: in a tagged PDF, a block of text (one of the PDF's own
 /// tag names by its role map's tag); in a suggested layout, any region (it needs its place on its
@@ -133,7 +133,7 @@ let canRetag (suggested: bool) (node: StructureNode) = canRetagAs suggested (hea
 /// or document, to leave out or keep.
 let regionsIn (nodes: StructureNode list) =
     let rec regions (node: StructureNode) : StructureNode list =
-        if node.Tag = "Link" then []
+        if node.Tag = Tags.Link then []
         elif not (isNull node.Geometry) then [ node ]
         else [ for child in node.Children do yield! regions child ]
     nodes |> List.collect regions
@@ -157,7 +157,7 @@ let movesIn (edits: RegionEdits.Edit list) =
 
 /// The tags whose children keep their order: a table's cells and rows, a table of contents'
 /// entries, which Move Up and Move Down don't change.
-let fixedOrder = set [ "Table"; "THead"; "TBody"; "TFoot"; "TR"; "TOC"; "StructTreeRoot"; "NotInTags"; "Disconnected" ]
+let fixedOrder = set [ Tags.Table; Tags.THead; Tags.TBody; Tags.TFoot; Tags.TR; Tags.TOC; "StructTreeRoot"; "NotInTags"; "Disconnected" ]
 
 /// The positions in order of the longest run of it that's in the order sequence already has
 /// (a longest increasing subsequence of positions).
@@ -223,10 +223,10 @@ let recordOrder (edits: RegionEdits.Edit list) (parent: StructureNode) (order: S
 /// ever not in the PDF yet where they're still apart, as they are wherever a block shows them).
 let mergeLine (edits: RegionEdits.Edit list) (node: StructureNode) =
     match node.Geometry with
-    | NonNull box when node.Tag = "P" || node.Tag = "Figure" ->
-        let noun = if node.Tag = "P" then "paragraph" else "figure"
+    | NonNull box when node.Tag = Tags.P || node.Tag = Tags.Figure ->
+        let noun = if node.Tag = Tags.P then "paragraph" else "figure"
         match RegionEdits.findMerge edits box.PageNumber box with
-        | Some merge when merge.Retag = Some "Table" && not merge.Cells.IsEmpty ->
+        | Some merge when merge.Retag = Some Tags.Table && not merge.Cells.IsEmpty ->
             Some $"✎ converting {merge.MergeWith.Length + 1} paragraphs to a table, not in the PDF yet"
         | Some merge ->
             let others = merge.MergeWith.Length
@@ -236,7 +236,7 @@ let mergeLine (edits: RegionEdits.Edit list) (node: StructureNode) =
                 edits
                 |> List.exists (fun e ->
                     e.Page = box.PageNumber
-                    && e.Retag = Some "Table"
+                    && e.Retag = Some Tags.Table
                     && not e.Cells.IsEmpty
                     && e.MergeWith |> List.exists (fun other -> Boxes.overlap other box >= RegionEdits.SameRegionOverlap))
             if converted then Some "✎ included in a table conversion, not in the PDF yet"
@@ -255,12 +255,12 @@ let mergeLine (edits: RegionEdits.Edit list) (node: StructureNode) =
 let mergeable (nodes: StructureNode list) =
     match nodes with
     | first :: _ :: _ when
-        (first.Tag = "P" || first.Tag = "Figure")
+        (first.Tag = Tags.P || first.Tag = Tags.Figure)
         && nodes
            |> List.forall (fun n ->
                n.Tag = first.Tag
                && isNull n.ActualText
-               && (if n.Tag = "P" then isNull n.AlternateDescription else n.AlternateDescription = first.AlternateDescription)
+               && (if n.Tag = Tags.P then isNull n.AlternateDescription else n.AlternateDescription = first.AlternateDescription)
                && (match n.Geometry, first.Geometry with
                    | NonNull box, NonNull firstBox -> box.PageNumber = firstBox.PageNumber
                    | _ -> false))
@@ -277,7 +277,7 @@ let convertibleToTable (roleMap: Map<string, string>) (nodes: StructureNode list
         nodes
         |> List.forall (fun n ->
             // A paragraph (or a name of the PDF's own for one), with no alt text that says anything.
-            heardTag roleMap n = "P"
+            heardTag roleMap n = Tags.P
             && String.IsNullOrWhiteSpace n.AlternateDescription
             && (match n.Geometry, first.Geometry with
                 | NonNull box, NonNull firstBox -> box.PageNumber = firstBox.PageNumber
@@ -293,15 +293,15 @@ let pendingLines (edit: RegionEdits.Edit) (node: StructureNode) =
       | _ -> ()
       match edit.Alt with
       // A link's or another annotation's is its description; a form field's, its tooltip.
-      | Some alt when (node.Tag = "Link" || node.Tag = "Annot") && alt <> string node.LinkDescription -> "description", alt
-      | Some alt when node.Tag = "Form" && alt <> string node.FormFieldDescription -> "tooltip", alt
-      | Some alt when node.Tag <> "Link" && node.Tag <> "Annot" && node.Tag <> "Form" && alt <> string node.AlternateDescription -> "alt", alt
+      | Some alt when (node.Tag = Tags.Link || node.Tag = Tags.Annot) && alt <> string node.LinkDescription -> "description", alt
+      | Some alt when node.Tag = Tags.Form && alt <> string node.FormFieldDescription -> "tooltip", alt
+      | Some alt when node.Tag <> Tags.Link && node.Tag <> Tags.Annot && node.Tag <> Tags.Form && alt <> string node.AlternateDescription -> "alt", alt
       | _ -> ()
       match edit.Text with
       | Some text when text <> string node.ActualText -> "text", text
       | _ -> ()
       if not edit.Cells.IsEmpty then
-          if edit.Tag = "P" && edit.Retag = Some "Table" then "table conversion", $"checked grid ({edit.Cells.Length} cells)"
+          if edit.Tag = Tags.P && edit.Retag = Some Tags.Table then "table conversion", $"checked grid ({edit.Cells.Length} cells)"
           else "rows and cells", $"rebuilt from the page ({edit.Cells.Length} cells)" ]
 
 /// What the reading-order buttons work on, from the window.
@@ -533,7 +533,7 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
     // What each is heard as: one of the PDF's own tag names by the tag chosen for it, else its map's.
     let roleMap = if needs.Suggested then Map.empty else needs.RoleMap ()
     let heard = heardTag roleMap
-    let figures = needs.Selected.Current |> List.filter (fun n -> heard n = "Figure" && not (isNull n.Geometry))
+    let figures = needs.Selected.Current |> List.filter (fun n -> heard n = Tags.Figure && not (isNull n.Geometry))
     let tagging =
         match needs.Selected.Current with
         | _ when needs.Suggested -> regionsIn needs.Selected.Current |> List.filter (canRetag true)
@@ -557,9 +557,9 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
             | _ -> None
         let tags =
             // A table's cell is a header cell or a data cell: anything else would leave a hole in it.
-            if needs.Suggested && targets |> List.forall (fun n -> TableGrid.isCell n.Tag) then [ "TH"; "TD" ]
+            if needs.Suggested && targets |> List.forall (fun n -> TableGrid.isCell n.Tag) then [ Tags.TH; Tags.TD ]
             elif needs.Suggested then LayoutFile.tags
-            elif targets |> List.forall (fun n -> heard n = "Figure") then [ "Figure"; "Artifact" ]
+            elif targets |> List.forall (fun n -> heard n = Tags.Figure) then [ Tags.Figure; Tags.Artifact ]
             else offeredRetags
         Some
             { Targets = targets
@@ -573,7 +573,7 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
               Tip =
                 (if needs.Suggested then
                      "The tag to give it: H1 (the title), H (a heading, given the next level under the title when tagged, since one page can't tell), H2 to H6, P, LI (a list item), Figure, Table, Caption, Note, Formula, Lbl (a label), or Artifact (page furniture, not read)."
-                 elif targets |> List.forall (fun n -> heard n = "Figure") then
+                 elif targets |> List.forall (fun n -> heard n = Tags.Figure) then
                      "Figure, or Artifact for decoration a screen reader should skip, like a rule, a background or a border: on export, it's still drawn but marked as an artifact, and leaves the tags."
                  else
                      "Give this element another tag, e.g. a heading tagged as a paragraph.")
@@ -586,7 +586,7 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
                                 let box = nonNull node.Geometry
                                 let retagged = RegionEdits.setRetag edits box.PageNumber node.Tag box picked
                                 // An artifact isn't read, so it isn't merged into a neighbour either.
-                                if needs.Suggested && picked = "Artifact" then RegionEdits.setExcluded retagged box.PageNumber node.Tag box false
+                                if needs.Suggested && picked = Tags.Artifact then RegionEdits.setExcluded retagged box.PageNumber node.Tag box false
                                 else retagged)
                             needs.Edits.Current
                         |> needs.SaveEdits
@@ -605,7 +605,7 @@ let otherActions (needs: SelectionNeeds) : Action list =
                   match first.Geometry with
                   | NonNull box ->
                       RegionEdits.findMerge needs.Edits.Current box.PageNumber box
-                      |> Option.exists (fun edit -> edit.Retag = Some "Table" && not edit.Cells.IsEmpty && edit.MergeWith.Length = nodes.Length - 1)
+                      |> Option.exists (fun edit -> edit.Retag = Some Tags.Table && not edit.Cells.IsEmpty && edit.MergeWith.Length = nodes.Length - 1)
                   | Null -> false
               { action
                     (if savedConversion then "Check Table Conversion…" else $"Convert {nodes.Length} Paragraphs to Table…")
@@ -618,7 +618,7 @@ let otherActions (needs: SelectionNeeds) : Action list =
           | _ -> ()
       | _ -> ()
       match needs.Selected.Current with
-      | [ single ] when not needs.Suggested && heardTag (needs.RoleMap ()) single = "Table" && not (isNull single.Geometry) ->
+      | [ single ] when not needs.Suggested && heardTag (needs.RoleMap ()) single = Tags.Table && not (isNull single.Geometry) ->
           let rebuilt = editFor needs.Edits.Current single |> Option.exists (fun e -> not e.Cells.IsEmpty)
           { action
                 (if rebuilt then "Check Rebuilt Rows and Cells…" else "Rebuild Rows and Cells from the Page…")
@@ -661,17 +661,17 @@ let otherActions (needs: SelectionNeeds) : Action list =
               action
                   $"Not Read (Artifact){what}"
                   "Decoration a screen reader should skip, like a background, a rule or a border: on export it's still drawn, but marked as an artifact."
-                  (setAll "Artifact")
+                  (setAll Tags.Artifact)
               action
                   $"Tag as Figure{what}"
                   "It's content, like a chart or a diagram: on export it's tagged as a figure, which then needs alt text."
-                  (setAll "Figure")
+                  (setAll Tags.Figure)
           elif text.Length = pieces.Length then
-              action $"Tag as Paragraph{what}" "Text should be read: on export it's tagged as a paragraph, in reading order after what's tagged before it." (setAll "P")
+              action $"Tag as Paragraph{what}" "Text should be read: on export it's tagged as a paragraph, in reading order after what's tagged before it." (setAll Tags.P)
           if pieces |> List.exists (fun n -> (chosenFor n).IsSome) then
               action "Keep Untagged" "Drop what was chosen for it: it stays outside the tags." (setAll "Untagged")
           match pieces with
-          | [ single ] when chosenFor single = Some "Figure" ->
+          | [ single ] when chosenFor single = Some Tags.Figure ->
               action "Edit Alt Text…" "What a screen reader says for it: what it's for here, in a sentence." (fun () -> needs.EditNode single AltText)
           | [ single ] when not (isUntaggedText single) ->
               action
@@ -686,13 +686,13 @@ let otherActions (needs: SelectionNeeds) : Action list =
           | Some(first :: rest) ->
               let box = nonNull first.Geometry
               RegionEdits.findMerge needs.Edits.Current box.PageNumber box
-              |> Option.filter (fun m -> m.MergeWith.Length = rest.Length && (m.Retag <> Some "Table" || m.Cells.IsEmpty))
+              |> Option.filter (fun m -> m.MergeWith.Length = rest.Length && (m.Retag <> Some Tags.Table || m.Cells.IsEmpty))
           | _ -> None
       let conversion =
           match (if needs.Suggested then None else convertibleToTable (needs.RoleMap()) needs.Selected.Current), pendingMerge with
           | Some(first :: rest), None when needs.Edits.Current |> List.exists (fun edit ->
                   edit.Page = (nonNull first.Geometry).PageNumber
-                  && edit.Retag = Some "Table"
+                  && edit.Retag = Some Tags.Table
                   && not edit.Cells.IsEmpty
                   && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap
                   && edit.MergeWith.Length = rest.Length) ->
@@ -702,12 +702,12 @@ let otherActions (needs: SelectionNeeds) : Action list =
       | Some first, _, _ ->
           action "Don't Convert to Table" "Drop this conversion: the selected paragraphs stay separate." (fun () ->
               needs.SaveEdits (needs.Edits.Current |> List.filter (fun edit ->
-                  not (edit.Retag = Some "Table" && edit.Page = (nonNull first.Geometry).PageNumber && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap))) |> ignore)
+                  not (edit.Retag = Some Tags.Table && edit.Page = (nonNull first.Geometry).PageNumber && Boxes.overlap edit.Box (nonNull first.Geometry) >= RegionEdits.SameRegionOverlap))) |> ignore)
       | None, Some _, Some merge ->
           action "Don't Merge These" "Drop this merge: they stay separate." (fun () ->
               needs.SaveEdits (needs.Edits.Current |> List.filter (fun e -> not (obj.ReferenceEquals(e, merge)))) |> ignore)
       | None, Some nodes, None ->
-          let figures = nodes.Head.Tag = "Figure"
+          let figures = nodes.Head.Tag = Tags.Figure
           action
               (if figures then $"Merge {nodes.Length} Figures" else $"Merge {nodes.Length} Paragraphs")
               (if figures then "Make these one figure: a picture drawn in pieces. Then give the first alt text, or the tag Artifact, for all of them."
@@ -793,7 +793,7 @@ let selectionActions (needs: SelectionNeeds) (moves: Action list) : IView =
             ]
         yield! row (otherActions needs)
         match needs.Selected.Current with
-        | [ single ] when single.Tag = "P" && not needs.Suggested && (otherActions needs).IsEmpty ->
+        | [ single ] when single.Tag = Tags.P && not needs.Suggested && (otherActions needs).IsEmpty ->
             TextBlock.create [
                 TextBlock.text "Shift-click the paragraphs after it to merge them into one."
                 TextBlock.textWrapping TextWrapping.Wrap

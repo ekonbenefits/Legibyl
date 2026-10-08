@@ -61,7 +61,7 @@ let showAs (owner: Window) (title: string) (instructions: string) (cells: TableC
                                             Border.padding 6.0
                                             Theme.resources [
                                                 Border.BorderBrushProperty, Theme.Tokens.Border
-                                                Border.BackgroundProperty, (if tag = "TH" then Theme.Tokens.Fill else Theme.Tokens.Background)
+                                                Border.BackgroundProperty, (if tag = Tags.TH then Theme.Tokens.Fill else Theme.Tokens.Background)
                                             ]
                                             Border.child (
                                                 StackPanel.create [
@@ -70,10 +70,10 @@ let showAs (owner: Window) (title: string) (instructions: string) (cells: TableC
                                                         TextBlock.create [
                                                             TextBlock.text (if text = "" then "(empty)" else text)
                                                             TextBlock.textWrapping TextWrapping.Wrap
-                                                            TextBlock.fontWeight (if tag = "TH" then FontWeight.SemiBold else FontWeight.Normal)
+                                                            TextBlock.fontWeight (if tag = Tags.TH then FontWeight.SemiBold else FontWeight.Normal)
                                                         ]
                                                         ComboBox.create [
-                                                            ComboBox.dataItems [ "TH"; "TD" ]
+                                                            ComboBox.dataItems [ Tags.TH; Tags.TD ]
                                                             ComboBox.selectedItem tag
                                                             AttrBuilder<ComboBox>.CreateProperty<string | null>(
                                                                 Automation.AutomationProperties.NameProperty,

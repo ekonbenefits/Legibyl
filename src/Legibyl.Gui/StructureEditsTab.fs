@@ -97,7 +97,7 @@ let view (needs: Needs) : IView =
                             Top = boxes |> List.map _.Top |> List.max }
                     if boxes |> List.forall paragraphAt then "Not in this PDF yet: Export… writes it to a copy."
                     elif paragraphAt all then "In this PDF."
-                    else if edit.Tag = "Figure" then "These figures aren't in this PDF, so Save can't merge them."
+                    else if edit.Tag = Tags.Figure then "These figures aren't in this PDF, so Save can't merge them."
                     else "These paragraphs aren't in this PDF, so Save can't merge them."
                 else
                     match elementFor edit with
@@ -148,13 +148,13 @@ let view (needs: Needs) : IView =
                                         detailLine $"moved: after {name}" false
                                     | None -> ()
                                     match edit.Alt with
-                                    | Some alt when edit.Tag = "Link" || edit.Tag = "Annot" -> detailLine $"description: \"{alt}\"" false
-                                    | Some alt when edit.Tag = "Form" -> detailLine $"tooltip: \"{alt}\"" false
+                                    | Some alt when edit.Tag = Tags.Link || edit.Tag = Tags.Annot -> detailLine $"description: \"{alt}\"" false
+                                    | Some alt when edit.Tag = Tags.Form -> detailLine $"tooltip: \"{alt}\"" false
                                     | Some alt -> detailLine $"alt: \"{alt}\"" false
                                     | None -> ()
                                     if not edit.Cells.IsEmpty then
-                                        let headers = edit.Cells |> List.filter (fun c -> c.Tag = "TH") |> List.length
-                                        if edit.Tag = "P" && edit.Retag = Some "Table" then
+                                        let headers = edit.Cells |> List.filter (fun c -> c.Tag = Tags.TH) |> List.length
+                                        if edit.Tag = Tags.P && edit.Retag = Some Tags.Table then
                                             detailLine $"table conversion: checked grid, {edit.Cells.Length} cells ({headers} header)" false
                                         else
                                             detailLine $"rows and cells: rebuilt from the page, {edit.Cells.Length} cells ({headers} header)" false
@@ -168,7 +168,7 @@ let view (needs: Needs) : IView =
                                             allNodes
                                             |> List.tryFind (fun node ->
                                                 match node.Geometry with
-                                                | NonNull own when node.Tag = "P" && own.PageNumber = edit.Page ->
+                                                | NonNull own when node.Tag = Tags.P && own.PageNumber = edit.Page ->
                                                     Boxes.overlap own edit.Box >= RegionEdits.SameRegionOverlap
                                                 | _ -> false)
                                             |> Option.bind (fun node -> Option.ofObj node.Content)
@@ -176,10 +176,10 @@ let view (needs: Needs) : IView =
                                                 let text = text.Trim()
                                                 if text.Length > 50 then $", from \"{text[..49]}…\"" else $", from \"{text}\"")
                                             |> Option.defaultValue ""
-                                        if edit.Tag = "P" && edit.Retag = Some "Table" then
+                                        if edit.Tag = Tags.P && edit.Retag = Some Tags.Table then
                                             detailLine $"table conversion: {edit.MergeWith.Length + 1} paragraphs into checked rows{start}" false
                                         else
-                                            let noun = if edit.Tag = "Figure" then "figures" else "paragraphs"
+                                            let noun = if edit.Tag = Tags.Figure then "figures" else "paragraphs"
                                             detailLine $"merge: {edit.MergeWith.Length + 1} {noun} into one{start}" false
                                     detailLine status true
                                 ]

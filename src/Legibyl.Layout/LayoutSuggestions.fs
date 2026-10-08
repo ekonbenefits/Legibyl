@@ -52,24 +52,24 @@ module LayoutSuggestions =
     /// so titles within the document are plain H.
     let tagFor (label: string) =
         match label with
-        | "doc_title" -> "H1"
-        | "paragraph_title" -> "H"
-        | "table" -> "Table"
+        | "doc_title" -> Tags.H1
+        | "paragraph_title" -> Tags.H
+        | "table" -> Tags.Table
         | "image"
         | "chart"
-        | "seal" -> "Figure"
-        | "figure_title" -> "Caption"
+        | "seal" -> Tags.Figure
+        | "figure_title" -> Tags.Caption
         | "footnote"
-        | "vision_footnote" -> "Note"
+        | "vision_footnote" -> Tags.Note
         | "display_formula"
-        | "inline_formula" -> "Formula"
-        | "formula_number" -> "Lbl"
+        | "inline_formula" -> Tags.Formula
+        | "formula_number" -> Tags.Lbl
         | "header"
         | "footer"
         | "number"
         | "header_image"
-        | "footer_image" -> "Artifact"
-        | _ -> "P"
+        | "footer_image" -> Tags.Artifact
+        | _ -> Tags.P
 
     /// A box in the rendered image's pixels (top-left origin) as PDF user space (bottom-left
     /// origin, in points), for a page whose visible area (crop box) has its top-left corner at
@@ -112,7 +112,7 @@ module LayoutSuggestions =
                 let point = centreOf geometry
                 let figure =
                     blocks
-                    |> List.filter (fun b -> b.Tag = "Figure" && b.QrText.IsNone && contains b.Geometry point)
+                    |> List.filter (fun b -> b.Tag = Tags.Figure && b.QrText.IsNone && contains b.Geometry point)
                     |> List.sortBy (fun b -> area b.Geometry)
                     |> List.tryHead
                 match figure with
@@ -121,7 +121,7 @@ module LayoutSuggestions =
                     let code =
                         { Order = 0
                           Label = "qr_code"
-                          Tag = "Figure"
+                          Tag = Tags.Figure
                           Score = 1.0
                           Geometry = geometry
                           Text = ""
@@ -143,7 +143,7 @@ module LayoutSuggestions =
                 Alt = null } ]
 
     /// Whether a suggested tag is for text (so a region with none as text needs OCR).
-    let holdsText (tag: string) = tag <> "Figure" && tag <> "Table" && tag <> "Artifact"
+    let holdsText (tag: string) = tag <> Tags.Figure && tag <> Tags.Table && tag <> Tags.Artifact
 
     /// The bands of region, full width (bottom, top in points, highest first), that none of its
     /// words cover and that are tall enough for a line of their size: where a region with some
@@ -192,7 +192,7 @@ module LayoutSuggestions =
     /// Lists fix, runs of two or more consecutive paragraphs that start at the
     /// same indent with markers forming one list ("•", "1.", "(a)") become list items.
     let findLists (blocks: SuggestedBlock list) : SuggestedBlock list =
-        let isCandidate (block: SuggestedBlock) = block.Tag = "P" && ParagraphLists.startsWithMarker block.Text
+        let isCandidate (block: SuggestedBlock) = block.Tag = Tags.P && ParagraphLists.startsWithMarker block.Text
         let runs =
             (blocks, [])
             ||> List.foldBack (fun block runs ->
@@ -207,7 +207,7 @@ module LayoutSuggestions =
         [ for run in runs do
               match ParagraphLists.numberingOfTexts (run |> List.map _.Text) with
               | Some numbering when isCandidate run.Head ->
-                  for block in run -> { block with Tag = "LI"; ListNumbering = Some numbering }
+                  for block in run -> { block with Tag = Tags.LI; ListNumbering = Some numbering }
               | _ -> yield! run ]
 
     /// The bitmap's pixels as tightly packed RGB, which the detector takes.
@@ -242,7 +242,7 @@ module LayoutSuggestions =
     /// The layout suggested for pdfPath's pages, with title (e.g. its own, or its first H1's text).
     let toLayoutFile (pdfPath: string) (pages: PageSuggestion list) (title: string option) : LayoutFile.SavedLayout =
         let region (blocks: SuggestedBlock list) index (block: SuggestedBlock) : LayoutFile.SavedRegion =
-            let figure = block.Tag = "Figure"
+            let figure = block.Tag = Tags.Figure
             { Order = block.Order
               Tag = block.Tag
               Box = boxOf block.Geometry
@@ -297,7 +297,7 @@ module LayoutSuggestions =
         | [] ->
             pages
             |> List.collect _.Blocks
-            |> List.tryFind (fun block -> block.Tag = "H1" && not (String.IsNullOrWhiteSpace block.Text))
+            |> List.tryFind (fun block -> block.Tag = Tags.H1 && not (String.IsNullOrWhiteSpace block.Text))
             |> Option.map _.Text.Trim()
 
 /// Reads text drawn as outlines or pixels, with Tesseract and its English model (shipped in
@@ -685,7 +685,7 @@ type LayoutSuggester(pdfPath: string) =
                             qrScale
                             crop
                             [ for box, region in List.zip (List.ofSeq boxes) regions ->
-                                  (if LayoutSuggestions.tagFor box.Label = "Figure" then Some QrCodes.decode else None), region ]
+                                  (if LayoutSuggestions.tagFor box.Label = Tags.Figure then Some QrCodes.decode else None), region ]
                         |> List.zip regions
                         |> List.choose (fun (region, text) -> text |> Option.map (fun text -> text, region))
                     let onPage = [ for text, bounds in QrCodes.decodeAll bitmap -> text, points bounds ]
@@ -700,10 +700,10 @@ type LayoutSuggester(pdfPath: string) =
             // none (drawn as outlines, or a scan) has each cell read with OCR.
             let withCells (blocks: SuggestedBlock list) =
                 match highResolution, tables.Value with
-                | NonNull bitmap, Some session when blocks |> List.exists (fun b -> b.Tag = "Table") ->
+                | NonNull bitmap, Some session when blocks |> List.exists (fun b -> b.Tag = Tags.Table) ->
                     [ for block in blocks do
                           yield block
-                          if block.Tag = "Table" then
+                          if block.Tag = Tags.Table then
                               match cellsIn bitmap crop pageNumber tableMargin block.Geometry with
                               | Some cells when not cells.IsEmpty ->
                                   let texts = LayoutSuggestions.assignText (List.map snd cells) words
@@ -716,7 +716,7 @@ type LayoutSuggester(pdfPath: string) =
                                       yield
                                           { Order = 0
                                             Label = (if header then "table_header_cell" else "table_cell")
-                                            Tag = (if header then "TH" else "TD")
+                                            Tag = (if header then Tags.TH else Tags.TD)
                                             Score = block.Score
                                             Geometry = g
                                             Text = defaultArg read text
