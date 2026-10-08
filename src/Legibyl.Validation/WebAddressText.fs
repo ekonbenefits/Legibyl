@@ -37,7 +37,7 @@ type Found =
       Top: float
       /// The MCIDs of its glyphs, each once (-1 for glyphs in none).
       Mcids: int list
-      /// Whether it's all of its one marked content's text (whitespace aside).
+      /// Whether each of its marked content is all of it (whitespace aside): no other text shares it.
       WholeRun: bool }
 
 /// "http(s)://" or "www.", not inside a word, a number or an e-mail address, up to whitespace.
@@ -131,7 +131,12 @@ let find (glyphs: Glyph array) : Found list =
           let glyphs = [ for i in m.Index .. last do match from[i] with Some glyph -> glyph | None -> () ] |> List.distinct
           if written <> "" && not glyphs.IsEmpty then
               let mcids = glyphs |> List.map _.Mcid |> List.distinct
-              let own = String.Concat(glyphs |> List.map (fun glyph -> glyph.Value.Replace(" ", "")))
+              // Each marked content's part of the address, to see whether it's all of its text.
+              let part mcid = String.Concat(glyphs |> List.filter (fun glyph -> glyph.Mcid = mcid) |> List.map (fun glyph -> glyph.Value.Replace(" ", "")))
+              let all mcid =
+                  match runs.TryGetValue mcid with
+                  | true, run -> run.ToString() = part mcid
+                  | _ -> part mcid = ""
               yield
                   { Text = written
                     Left = glyphs |> List.map _.Left |> List.min
@@ -139,7 +144,4 @@ let find (glyphs: Glyph array) : Found list =
                     Right = glyphs |> List.map _.Right |> List.max
                     Top = glyphs |> List.map _.Top |> List.max
                     Mcids = mcids
-                    WholeRun =
-                      match mcids with
-                      | [ mcid ] when mcid >= 0 -> runs[mcid].ToString() = own
-                      | _ -> false } ]
+                    WholeRun = mcids |> List.forall (fun mcid -> mcid >= 0 && all mcid) } ]
