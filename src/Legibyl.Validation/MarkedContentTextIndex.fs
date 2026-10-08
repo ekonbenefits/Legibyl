@@ -20,6 +20,18 @@ open UglyToad.PdfPig.Core
 
 type MarkedContentInfo = { Text: string; Geometry: StructureGeometry option }
 
+/// A glyph a page draws, in the order it draws them: what it reads as, its box, its baseline and
+/// size, and the marked content it's in (its innermost MCID; -1 for none).
+type PageLetter =
+    { Value: string
+      Left: float
+      Bottom: float
+      Right: float
+      Top: float
+      Baseline: float
+      Size: float
+      Mcid: int }
+
 /// What each (page number, MCID) draws.
 type Index() =
     inherit Dictionary<int * int, MarkedContentInfo>()
@@ -30,6 +42,10 @@ type Index() =
 
     /// What PdfPig said about the first page it couldn't read, if any.
     member val UnreadableReason: string option = None with get, set
+
+    /// Each readable page's glyphs, in the order it draws them, for reading its text across
+    /// marked content (a web address split between spans, say).
+    member val Letters = Dictionary<int, PageLetter array>()
 
 let private geometry pageNumber left bottom right top =
     { PageNumber = pageNumber; Left = left; Bottom = bottom; Right = right; Top = top }
@@ -118,6 +134,27 @@ let private concatenateLetters (letters: IReadOnlyList<Letter>) =
         previous <- Some letter
     sb.ToString()
 
+/// A page's glyphs as PageLetters, each with the innermost marked content it's in.
+let private pageLetters (page: Page) =
+    let mcids = Dictionary<int, int>()
+    let rec mark (elements: IReadOnlyList<MarkedContentElement>) =
+        for element in elements do
+            for letter in element.Letters do
+                mcids[letter.TextSequence] <- element.MarkedContentIdentifier
+            // Inner marked content after its outer, so the innermost is kept.
+            mark element.Children
+    mark (page.GetMarkedContents())
+    [| for letter in page.Letters |> Seq.sortBy _.TextSequence ->
+           let box = if hasArea letter.GlyphRectangle then letter.GlyphRectangle else whitespaceRectangle letter
+           { Value = letter.Value
+             Left = min box.Left box.Right
+             Bottom = min box.Bottom box.Top
+             Right = max box.Left box.Right
+             Top = max box.Bottom box.Top
+             Baseline = letter.StartBaseLine.Y
+             Size = (if letter.PointSize > 0.0 then letter.PointSize else max 1.0 letter.GlyphRectangle.Height)
+             Mcid = match mcids.TryGetValue letter.TextSequence with | true, mcid -> mcid | _ -> -1 } |]
+
 let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedContentElement>) (index: Index) =
     for element in elements do
         let text = concatenateLetters element.Letters
@@ -137,10 +174,15 @@ let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
         // A page PdfPig can't read is left out, and said to be, rather than ending the reading of
         // every page after it; it's read into one of its own first, so none of it is kept.
         let page = Index()
-        match (try Ok(indexMarkedContent pageNumber ((document.GetPage pageNumber).GetMarkedContents()) page) with ex -> Error ex.Message) with
-        | Ok() ->
+        let read () =
+            let pdfPage = document.GetPage pageNumber
+            indexMarkedContent pageNumber (pdfPage.GetMarkedContents()) page
+            pageLetters pdfPage
+        match (try Ok(read ()) with ex -> Error ex.Message) with
+        | Ok letters ->
             for KeyValue(key, info) in page do
                 index[key] <- info
+            index.Letters[pageNumber] <- letters
         | Error reason ->
             index.Unreadable.Add pageNumber |> ignore
             if index.UnreadableReason.IsNone then index.UnreadableReason <- Some reason

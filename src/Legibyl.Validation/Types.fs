@@ -95,7 +95,11 @@ type PdfFixOptions =
     /// Puts the tags at the top of the structure under a single Document tag, the way into them PDF
     /// 2.0 asks for (and checkers like PAC look for); nothing else moves. See DocumentRoot.
     | DocumentRoot = 67108864
-    | All = 134217727
+    /// Links web addresses a page shows as text that nothing links: a link annotation over each,
+    /// going to it, and a Link tag holding its text and the annotation (see UnlinkedUrls). Only
+    /// an address that's all of its tagged text; others are left, and reported.
+    | LinkUrls = 134217728
+    | All = 268435455
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.

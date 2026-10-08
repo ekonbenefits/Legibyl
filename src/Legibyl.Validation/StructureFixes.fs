@@ -625,8 +625,10 @@ let private setLanguageFromText (document: PdfDocument) context =
 ///      the item before lists are found (a line starting with a marker is never joined on).
 ///   4. Lists.
 ///   5. Bookmarks, after headings are recovered, so those get bookmarks too. Then your edits,
-///      once nothing else will move the elements they're for. Then links' and bookmarks'
-///      targets (PDF 2.0 only), once the elements they land on won't move or merge.
+///      once nothing else will move the elements they're for. Then web addresses shown as text
+///      are linked, before the tab order and links' descriptions, which then cover the new
+///      links too. Then links' and bookmarks' targets (PDF 2.0 only), once the elements they
+///      land on won't move or merge.
 ///   6. The rest touch pages, annotations, fonts and the Info dictionary rather than
 ///      paragraphs, so their order among themselves doesn't matter (except that a contents
 ///      link is described from its own text before any is from a web page's title)...
@@ -1224,6 +1226,7 @@ let orderedFixes
           ElementEdits.apply document context edits
           @ (title |> Option.map (ElementEdits.applyTitle document) |> Option.defaultValue [])
           @ Attachments.apply document attachments)
+      PdfFixOptions.LinkUrls, UnlinkedUrls.apply
       PdfFixOptions.LinkTargets, (fun document context -> LinkTargets.apply document (LinkTargets.find document context))
       PdfFixOptions.Tabs, setAnnotationTabOrder
       PdfFixOptions.LinkContents, describeTocLinks
@@ -1251,6 +1254,7 @@ let private readsText =
           PdfFixOptions.EmptyTocEntries
           PdfFixOptions.JoinSplitParagraphs
           PdfFixOptions.JoinSplitWords
+          PdfFixOptions.LinkUrls
           PdfFixOptions.Lists
           PdfFixOptions.Bookmarks
           PdfFixOptions.LinkContents ]

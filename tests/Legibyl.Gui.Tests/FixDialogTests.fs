@@ -139,6 +139,7 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
               "Tag lists"
               "Table header scope"
               "Add bookmarks"
+              "Link web addresses"
               "Point links at their tags"
               "Tab order for annotations"
               "Embed fonts"
