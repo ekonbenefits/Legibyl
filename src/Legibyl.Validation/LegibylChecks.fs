@@ -21,7 +21,8 @@
 /// figures that draw nothing, Structure-11; pages read out of order, Structure-12; pages whose
 /// text couldn't be read, Structure-13; words split across Span boundaries, Structure-14; tables
 /// tagged as aligned paragraphs, Structure-15; no single Document tag at the top, Structure-16;
-/// and content tied to a tag that's gone, Structure-17) are added in `run` directly, and their
+/// content tied to a tag that's gone, Structure-17; and web addresses shown as text that nothing
+/// links, Structure-18, which untagged documents get too) are added in `run` directly, and their
 /// messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
@@ -425,7 +426,7 @@ let private unlinkedUrlFindings (document: PdfDocument) context =
               match candidate.Left with
               | None -> PdfFixOptions.LinkUrls, $"Page {candidate.Page}: \"{candidate.Text}\"."
               | Some why -> PdfFixOptions.None, $"Page {candidate.Page}: \"{candidate.Text}\". Not fixable here: {why}."
-          warning UnlinkedUrlMessage detail "StructTreeRoot" 18 fixes candidate.Geometry ]
+          warning UnlinkedUrlMessage detail candidate.Location 18 fixes candidate.Geometry ]
 
 // ---- Structure-13: pages whose text couldn't be read ----
 
@@ -446,10 +447,12 @@ let private unreadableTextFindings context =
               null ]
     | _ -> []
 
-/// Runs every check in `all` over the document's structure tree, then the document-wide ones.
+/// Runs every check in `all` over the document's structure tree, then the document-wide ones;
+/// for an untagged document, only those that go by the pages' text alone.
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
-    | null -> []
+    // Untagged: only what's on the pages, its web addresses (the fix needs tags to link them).
+    | null -> unlinkedUrlFindings document context @ unreadableTextFindings context
     | structTreeRoot ->
         let visits = walk structTreeRoot context |> List.ofSeq
         // An empty tag the fix would keep (it draws something, or has a description) is still

@@ -19,6 +19,7 @@
     <Compile Include="ValidationReportTextFormatter.fs" />
     <Compile Include="Interop.fs" />
     <Compile Include="ValidatorLog.fs" />
+    <Compile Include="WebAddressText.fs" />
     <Compile Include="MarkedContentTextIndex.fs" />
     <Compile Include="StructureTreeObjects.fs" />
     <Compile Include="SplitWordSpans.fs" />
