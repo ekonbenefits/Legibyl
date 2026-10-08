@@ -26,9 +26,10 @@ type Candidate =
       /// Where it is, as its warning says (and a dismissal names it by): the path of the element
       /// its text is in, then the address; or its page, then the address.
       Location: string
-      /// The marked content (MCID) that's all of it, and the element it belongs to, when the fix
-      /// can tag it as a link: then it moves under a new Link element.
-      Run: (int * PdfDictionary) option
+      /// The marked content (MCIDs, in reading order) that's all of it, and the element they
+      /// belong to, side by side among its kids, when the fix can tag it as a link: then they move
+      /// under a new Link element.
+      Run: (int list * PdfDictionary) option
       /// Why the fix leaves it, when it does.
       Left: string option }
 
@@ -106,25 +107,35 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
                             Right = address.Right
                             Top = address.Top }
                       if not (links.Value |> List.exists (mostlyUnder geometry)) then
+                          let owners =
+                              [ for mcid in address.Mcids ->
+                                    match tagged.Value.MarkedContent.TryGetValue((pageNumber, mcid)) with
+                                    | true, owner when mcid >= 0 -> Some owner
+                                    | _ -> None ]
+                          // The one element all its pieces belong to, if they're all tagged.
                           let owner =
-                              match address.Mcids with
-                              | [ mcid ] when mcid >= 0 ->
-                                  match tagged.Value.MarkedContent.TryGetValue((pageNumber, mcid)) with
-                                  | true, owner -> Some(mcid, owner)
-                                  | _ -> None
+                              match owners with
+                              | Some first :: rest when rest |> List.forall (function Some other -> obj.ReferenceEquals(other, first) | None -> false) ->
+                                  Some(address.Mcids, first)
                               | _ -> None
+                          // Its pieces' places among the owner's kids, when each is there.
+                          let indexes (mcids: int list, owner) = mcids |> List.map (fun mcid -> kidIndex owner mcid pageNumber context)
+                          let sideBySide (indexes: int option list) =
+                              indexes |> List.pairwise |> List.forall (function Some a, Some b -> b = a + 1 | _ -> false)
                           let run, left =
                               match owner with
                               | _ when not isTagged -> None, Some "the PDF isn't tagged: tagging it comes first"
-                              | _ when address.Mcids.Length > 1 ->
-                                  None, Some "it's drawn in more than one piece, which would have to be joined to tag it as a link"
-                              | None -> None, Some "its text isn't in the tags"
+                              | None when owners |> List.exists Option.isNone -> None, Some "its text isn't in the tags"
+                              | None ->
+                                  None, Some "it's drawn in more than one piece, in different tags, which would have to be joined to tag it as a link"
                               | Some _ when not address.WholeRun ->
                                   None, Some "it's part of a longer piece of text, which would have to be split to tag the address alone"
                               | Some(_, owner) when inLink owner context ->
                                   None, Some "it's tagged as a link already, with no link annotation to follow"
-                              | Some(mcid, owner) when (kidIndex owner mcid pageNumber context).IsNone ->
+                              | Some run when indexes run |> List.exists Option.isNone ->
                                   None, Some "its tag holds it in a way the fix doesn't change"
+                              | Some run when not (sideBySide (indexes run)) ->
+                                  None, Some "its pieces aren't side by side in its tag, in the order they're read"
                               | Some run -> Some run, None
                           let location =
                               match owner |> Option.bind (fun (_, owner) -> match paths.Value.TryGetValue owner with | true, path -> Some path | _ -> None) with
@@ -148,18 +159,22 @@ let apply (document: PdfDocument) (context: Context) =
     let mutable linked = 0
     for candidate in candidates do
         match candidate.Run, candidate.Left with
-        | Some(mcid, owner), _ ->
+        | Some(mcids, owner), _ ->
             let page = document.GetPage candidate.Page
             let element = PdfStructElem owner
-            match kidIndex owner mcid candidate.Page context with
-            | Some index ->
+            match mcids |> List.map (fun mcid -> kidIndex owner mcid candidate.Page context) with
+            | Some index :: _ as indexes when indexes |> List.forall Option.isSome ->
                 // iText unties the content by its owner's own page; one it takes from an ancestor
                 // (the address's page, as kidIndex found) is written on it first.
                 if isNull (owner.GetAsDictionary PdfName.Pg) then owner.Put(PdfName.Pg, page.GetPdfObject()) |> ignore
-                element.RemoveKid index |> ignore
+                // The pieces are side by side (see find): taken out from the last, so the others
+                // keep their places.
+                for i in List.rev (List.choose id indexes) do
+                    element.RemoveKid i |> ignore
                 let link = PdfStructElem(document, PdfName.Link, page)
                 element.AddKid(index, link) |> ignore
-                link.AddKid(PdfMcrNumber(PdfNumber mcid, link)) |> ignore
+                for mcid in mcids do
+                    link.AddKid(PdfMcrNumber(PdfNumber mcid, link)) |> ignore
                 let g = candidate.Geometry
                 let annotation = PdfLinkAnnotation(iText.Kernel.Geom.Rectangle(float32 g.Left, float32 g.Bottom, float32 (g.Right - g.Left), float32 (g.Top - g.Bottom)))
                 annotation.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI candidate.Address) |> ignore
@@ -173,7 +188,7 @@ let apply (document: PdfDocument) (context: Context) =
                 // Its annotations in the order of the tags, as PDF/UA asks of a page with them.
                 page.GetPdfObject().Put(PdfName.Tabs, PdfName.S) |> ignore
                 linked <- linked + 1
-            | None -> ()
+            | _ -> ()
         | None, Some why -> context.Notes.Add $"Page {candidate.Page}: \"{candidate.Text}\" isn't linked: {why}."
         | None, None -> ()
     match linked with

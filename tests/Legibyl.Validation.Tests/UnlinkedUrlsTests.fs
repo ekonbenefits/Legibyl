@@ -100,7 +100,7 @@ let ``an address split across spans is found whole, and left unfixed`` () =
     unlinked pdf.Path
     |> should
         equal
-        [ "Page 1: \"https://example.org/plan\". Not fixable here: it's drawn in more than one piece, which would have to be joined to tag it as a link.", false ]
+        [ "Page 1: \"https://example.org/plan\". Not fixable here: it's drawn in more than one piece, in different tags, which would have to be joined to tag it as a link.", false ]
 
 [<Fact>]
 let ``the fix links each address that's all of its tagged text, the page looks the same, and the rest are reported`` () =
@@ -220,6 +220,59 @@ let ``an address goes on past a gap to a hyphen touching the rest of it, and isn
     named input.Path |> should equal [ "https://example.org/go/dol-diversification", false; "https://example.org/plan", false ]
 
     validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed |> should be False
+
+/// One P on a page, of marked content drawn at x, y, one after another, each piece's text.
+let private paragraphOfPieces (path: string) (pieces: (float * float * string) list) =
+    tagged path (fun document pointer font ->
+        let page = document.AddNewPage()
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+        pointer.SetPageForTagging(page).AddTag "P" |> ignore
+        for x, y, text in pieces do
+            canvas.OpenTag(pointer.GetTagReference()) |> ignore
+            show canvas font x y text
+            canvas.CloseTag() |> ignore)
+
+[<Fact>]
+let ``an address drawn in pieces side by side in one tag is linked whole, the page looking the same`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    let width (text: string) = float ((iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA).GetWidth(text, 12f))
+    let after (text: string) = 72.0 + width text
+    paragraphOfPieces
+        input.Path
+        [ 72.0, 700.0, "Visit "
+          after "Visit ", 700.0, "https://example.org/"
+          after "Visit https://example.org/", 700.0, "garden"
+          after "Visit https://example.org/garden", 700.0, "/beds" ]
+    named input.Path |> should equal [ "https://example.org/garden/beds", true ]
+
+    let result = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls)
+
+    result.AppliedFixes |> should contain "Linked 1 web address shown as text, to where it goes."
+    named output.Path |> should be Empty
+    let failed (path: string) = validator.Value.Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    Set.difference (failed output.Path) (failed input.Path) |> should be Empty
+    render output.Path |> should equal (render input.Path)
+    // The P reads "Visit ", then a Link holding the address's three pieces and the annotation.
+    let paragraph = (validator.Value.ReadStructureTree output.Path |> notNull).Children[0].Children[0]
+    // (The tree's text puts a space between pieces of marked content.)
+    (string paragraph.Content, [ for child in paragraph.Children -> child.Tag, (string child.Content).Replace(" ", ""), string child.LinkUri, child.ContentLeafCount ])
+    |> should equal ("Visit ", [ "Link", "https://example.org/garden/beds", "https://example.org/garden/beds", 4 ])
+
+[<Fact>]
+let ``an address whose pieces aren't side by side in their tag isn't linked, and says why`` () =
+    use pdf = new TempPdf()
+    let width (text: string) = float ((iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA).GetWidth(text, 12f))
+    // Its second piece is drawn after the next line's text, so the tag holds another piece between.
+    paragraphOfPieces
+        pdf.Path
+        [ 72.0, 700.0, "https://example.org/"
+          72.0, 680.0, "Open daily."
+          72.0 + width "https://example.org/", 700.0, "garden" ]
+    unlinked pdf.Path
+    |> should
+        equal
+        [ "Page 1: \"https://example.org/garden\". Not fixable here: its pieces aren't side by side in its tag, in the order they're read.", false ]
 
 [<Fact>]
 let ``an address drawn right to left is read left to right, whole`` () =
