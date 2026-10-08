@@ -58,20 +58,39 @@ let ``another PDF opens in its own window, and one already open is brought forwa
 
 [<Fact>]
 let ``the File menu opens, closes, saves and exports, in step with the buttons`` () =
-    withTwoPdfs (fun first _ ->
+    withTwoPdfs (fun passing failing ->
         onUiThread (fun () ->
             let window = HeadlessWindow.show 1200.0 720.0
-            HeadlessWindow.openPdf window first
+            HeadlessWindow.openPdf window failing
             let items = fileMenu window
             let enabled name = (items |> List.find (fst >> (=) name) |> snd).IsEnabled
             let saveAtFirst, exportAtFirst = enabled "Save", enabled "Export…"
             window.Close()
+            for asked in List.ofSeq window.OwnedWindows do asked.Close()
 
             items |> List.map fst |> should equal [ "Open…"; "Open Recent"; "Append PDFs…"; "Close Window"; "Save"; "Export…" ]
-            // The validation just run is kept by Save (see SavedResults); nothing to export until
-            // there's a change or a fix chosen.
+            // The validation just run, of a PDF with things to do, is kept by Save (see
+            // SavedResults); nothing to export until there's a change or a fix chosen.
             saveAtFirst |> should be True
             exportAtFirst |> should be False))
+
+[<Fact>]
+let ``a PDF that passes with nothing to do opens with nothing to save, and closes without asking`` () =
+    withTwoPdfs (fun passing _ ->
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window passing
+            let save = (fileMenu window |> List.find (fst >> (=) "Save") |> snd).IsEnabled
+            let title = window.Title
+            window.Close()
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 2.0) (fun () -> window.OwnedWindows.Count > 0) |> ignore
+            let asked = [ for owned in window.OwnedWindows -> owned.Title ]
+            for owned in List.ofSeq window.OwnedWindows do owned.Close()
+
+            title |> should equal "pdfua1-pass.pdf — Legibyl"
+            save |> should be False
+            asked |> should be Empty
+            window.IsVisible |> should be False))
 
 [<Fact>]
 let ``a PDF asked for before the window is shown opens once it is, in an empty window first`` () =
