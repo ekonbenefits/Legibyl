@@ -237,3 +237,43 @@ let ``a turned page's table cells aren't looked for, and it's said why`` () =
 
     (fun () -> suggester.TableCells(1, region) |> ignore)
     |> should (throwWithMessage "its page is turned (rotated), which finding a table's cells doesn't handle yet") typeof<InvalidOperationException>
+
+[<Fact>]
+let ``a cell's text is the page's words in it, and only an empty cell is read by OCR`` () =
+    match TextRecognition.createEngine () with
+    | None -> Assert.Skip "Tesseract has no native library for this platform."
+    | Some engine ->
+        (engine :> IDisposable).Dispose()
+        use pdf = new TempPdf()
+        do
+            use document = new PdfDocument(new PdfWriter(pdf.Path))
+            let page = document.AddNewPage PageSize.LETTER
+            let canvas = PdfCanvas page
+            let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+            for text, x in [ "Plant", 80.0; "Sow", 230.0 ] do
+                canvas.BeginText().SetFontAndSize(font, 14f).MoveText(x, 700.0).ShowText(text).EndText() |> ignore
+            // Text only as pixels, which OCR can read.
+            let picture (text: string) (box: Rectangle) =
+                use bitmap = new SkiaSharp.SKBitmap(480, 120)
+                use drawing = new SkiaSharp.SKCanvas(bitmap)
+                drawing.Clear SkiaSharp.SKColors.White
+                use skFont = new SkiaSharp.SKFont(SkiaSharp.SKTypeface.Default, 72f)
+                use paint = new SkiaSharp.SKPaint(Color = SkiaSharp.SKColors.Black, IsAntialias = true)
+                drawing.DrawText(text, 20f, 90f, skFont, paint)
+                use image = SkiaSharp.SKImage.FromBitmap bitmap
+                use png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
+                canvas.AddImageFittedIntoRectangle(iText.IO.Image.ImageDataFactory.Create(png.ToArray()), box, false) |> ignore
+            // "Tomato" where the page has no words: OCR reads it.
+            picture "Tomato" (Rectangle(80f, 630f, 120f, 30f))
+            // "Reap" beside the word "Sow": that cell has words, so it isn't read by OCR, and stays "Sow".
+            picture "Reap" (Rectangle(270f, 692f, 70f, 22f))
+        use suggester = new LayoutSuggester(pdf.Path)
+        let cell left bottom right top : Legibyl.Validation.StructureGeometry =
+            { PageNumber = 1; Left = left; Bottom = bottom; Right = right; Top = top }
+
+        let texts =
+            suggester.CellTexts(1, [ cell 70.0 690.0 200.0 720.0; cell 220.0 690.0 350.0 720.0; cell 70.0 625.0 210.0 665.0; cell 220.0 625.0 350.0 665.0 ])
+
+        // The words kept as they are (not "Sow Reap"); the cell with only a picture of text read; the
+        // empty one left empty.
+        texts |> should equal [ "Plant"; "Sow"; "Tomato"; "" ]
