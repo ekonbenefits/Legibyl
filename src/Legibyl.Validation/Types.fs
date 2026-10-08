@@ -92,8 +92,9 @@ type PdfFixOptions =
     /// Gives a text block replacement text assembled from its Span children when their boundary
     /// splits a word; only applies where every span's text can be recovered exactly.
     | JoinSplitWords = 33554432
-    /// Puts the tags at the top of the structure under a single Document tag, the way into them PDF
-    /// 2.0 asks for (and checkers like PAC look for); nothing else moves. See DocumentRoot.
+    /// Puts the tags at the top of the structure under a single Document tag, one element that's the
+    /// whole document for a screen reader to start from (as PDF 2.0 asks for); nothing else moves.
+    /// See DocumentRoot.
     | DocumentRoot = 67108864
     /// Links web addresses a page shows as text that nothing links: a link annotation over each,
     /// going to it, and a Link tag holding its text and the annotation (see UnlinkedUrls). Only

@@ -398,7 +398,7 @@ let private readingJumpFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private DocumentRootMessage =
-    "The tags don't start with a single Document tag, a screen reader's way into them, which checkers like PAC look for; an auto fix can put them under one."
+    "The tags don't start with a single Document tag, so there's no one element that's the whole document for a screen reader to start from; an auto fix can put them under one."
 
 /// A PDF before 2.0 whose structure doesn't start with a single Document tag. (A PDF 2.0 file's is a
 /// failure veraPDF reports: PDF/UA-2's 8.2.5.2.)
