@@ -38,7 +38,7 @@ let private plan context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
         && box.Right > box.Left
         && box.Top > box.Bottom
     if cells.IsEmpty || (cells |> List.exists (fun cell -> not (TableGrid.isCell cell.Tag) || not (validBox cell.Box))) then
-        None
+        Error "the checked cells aren't table cells on their page"
     else
       let parent = PdfStructElem run.Parent
       let paragraphs =
@@ -70,6 +70,27 @@ let private plan context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
               | [] -> geometryOf context run.Page node |> Option.toList
               | children -> children |> List.collect leafGeometries
           | _ -> geometryOf context run.Page node |> Option.toList
+      // An element holding no content (an empty Span, say) is nowhere on the page: it goes with
+      // the piece before it (or after, first), so it can't stop the conversion.
+      let rec holdsContent (node: IStructureNode | null) =
+          match node with
+          | null -> false
+          | :? PdfStructElem as element -> kidsOf element |> List.exists holdsContent
+          | _ -> true
+      let piecesOf (paragraph: PdfStructElem) =
+          let raw =
+              kidsOf paragraph
+              |> List.map (fun kid -> kid, geometryOf context run.Page kid, leafGeometries kid)
+          raw
+          |> List.mapi (fun index ((kid, _, _) as piece) ->
+              if holdsContent kid then
+                  piece
+              else
+                  let before = raw |> List.take index |> List.rev
+                  let after = raw |> List.skip (index + 1)
+                  match before @ after |> List.tryFind (fun (other, _, _) -> holdsContent other) with
+                  | Some(_, geometry, leaves) -> kid, geometry, leaves
+                  | None -> piece)
       let contents =
           paragraphs
           |> List.map (fun paragraph ->
@@ -77,18 +98,11 @@ let private plan context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
               let row =
                   box
                   |> Option.map rowOfGeometry
-              let pieces =
-                  kidsOf paragraph
-                  |> List.map (fun kid -> kid, geometryOf context run.Page kid, leafGeometries kid)
-              row, paragraph, pieces)
+              row, paragraph, piecesOf paragraph)
       let assignedRows = contents |> List.choose (fun (row, _, _) -> row) |> List.sort
-      let invalid =
-          paragraphs.Length < 2
-          || assignedRows <> [ 0 .. rowCount - 1 ]
-          || (paragraphs |> List.exists (fun paragraph -> standaloneKeys |> List.exists (fun key -> paragraph.GetPdfObject().ContainsKey key)))
-          || (rowBoxes |> List.exists (fun (_, boxes) -> boxes.IsEmpty))
-          || (contents
-             |> List.exists (fun (row, _, pieces) ->
+      let misplaced () =
+          contents
+          |> List.exists (fun (row, _, pieces) ->
                  match row with
                  | None -> true
                  | Some row ->
@@ -110,11 +124,16 @@ let private plan context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
                                        leaf.PageNumber <> run.Page
                                        || rowOfGeometry leaf <> row
                                        || TableGrid.cellFor cellBoxes (Some leaf) <> assigned))))
-             )
-      if invalid then
-          None
+      if paragraphs.Length < 2 then
+          Error "a table needs at least two paragraphs"
+      elif assignedRows <> [ 0 .. rowCount - 1 ] || (rowBoxes |> List.exists (fun (_, boxes) -> boxes.IsEmpty)) then
+          Error $"the checked grid doesn't have a row for each paragraph ({rowCount} row(s) for {paragraphs.Length} paragraphs)"
+      elif paragraphs |> List.exists (fun paragraph -> standaloneKeys |> List.exists (fun key -> paragraph.GetPdfObject().ContainsKey key)) then
+          Error "a paragraph has its own replacement text, alt text, expansion or ID (/ActualText, /Alt, /E or /ID), which can't be split among cells"
+      elif misplaced () then
+          Error "some of their content isn't drawn within one cell of its row"
       else
-          Some
+          Ok
               { Parent = parent
                 Paragraphs = paragraphs
                 OrderedCells = ordered
@@ -123,7 +142,13 @@ let private plan context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
                   [ for row, paragraph, pieces in contents ->
                         row.Value, paragraph, [ for node, geometry, _ in pieces -> node, geometry.Value ] ] }
 
-let canConvert context run cells = plan context run cells |> Option.isSome
+/// Why the paragraphs in run can't be converted to a table of cells, or None if they can.
+let refusal context run cells =
+    match plan context run cells with
+    | Ok _ -> None
+    | Error why -> Some why
+
+let canConvert context run cells = (refusal context run cells).IsNone
 
 let private moveKid (parent: PdfStructElem) (node: IStructureNode) =
     match node with
@@ -136,8 +161,8 @@ let private moveKid (parent: PdfStructElem) (node: IStructureNode) =
 /// Converts paragraphs from a validated consecutive run. None means the edit is unsafe to apply.
 let convert (document: PdfDocument) context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
     match plan context run cells with
-    | None -> None
-    | Some conversion ->
+    | Error _ -> None
+    | Ok conversion ->
         let page = document.GetPage run.Page
         for _, paragraph, pieces in conversion.Contents do
             for _ in pieces do paragraph.RemoveKid 0 |> ignore

@@ -181,8 +181,76 @@ let ``paragraph table conversion refuses one span covering more than one cell`` 
     ElementEdits.pending input.Path [ edit ] |> should equal 0
     let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
 
-    result.NotApplied |> Seq.exists (fun note -> note.Contains "can't be assigned safely") |> should be True
+    result.NotApplied |> Seq.exists (fun note -> note.Contains "isn't drawn within one cell of its row") |> should be True
     VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P") |> List.length |> should equal 2
+
+/// Row paragraphs, as some writers tag them: each cell's text in a Span, with an empty Span
+/// (holding nothing) after it; actualText, if given, on the second row's paragraph.
+let private createParagraphRowsWithEmptySpans (path: string) (actualText: string option) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.SetTagged() |> ignore
+    document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+    let page = document.AddNewPage PageSize.LETTER
+    let canvas = PdfCanvas page
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    let pointer = document.GetTagStructureContext().GetAutoTaggingPointer().SetPageForTagging page
+    for row, values in List.indexed [ [ "Plant"; "Sow" ]; [ "Tomato"; "March" ] ] do
+        pointer.AddTag "P" |> ignore
+        if row = 1 then actualText |> Option.iter (fun text -> pointer.GetProperties().SetActualText text |> ignore)
+        for column, text in List.indexed values do
+            pointer.AddTag "Span" |> ignore
+            canvas.OpenTag(pointer.GetTagReference()).BeginText().SetFontAndSize(font, 11f).MoveText(80.0 + 150.0 * float column, 680.0 - 24.0 * float row).ShowText(text).EndText().CloseTag()
+            |> ignore
+            pointer.MoveToParent() |> ignore
+            pointer.AddTag "Span" |> ignore
+            pointer.MoveToParent() |> ignore
+        pointer.MoveToParent() |> ignore
+
+let private conversionOf (path: string) =
+    let paragraphs = VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P")
+    { Page = 1
+      Tag = "P"
+      Box = paragraphs.Head.Geometry |> notNull
+      Alt = null
+      Text = null
+      MergeWith = paragraphs.Tail |> List.map (fun paragraph -> paragraph.Geometry |> notNull)
+      Retag = "Table"
+      Exclude = false
+      Move = None
+      Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+
+[<Fact>]
+let ``empty spans in row paragraphs go with the content beside them, and don't stop the conversion`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createParagraphRowsWithEmptySpans input.Path None
+    let edit = conversionOf input.Path
+    ElementEdits.unapplied input.Path [ edit ] |> should be Empty
+
+    let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
+
+    result.AppliedFixes |> should contain "Converted 2 paragraph(s) on page 1 to a table with the checked rows and cells."
+    rows output.Path
+    |> should
+        equal
+        [ "TR", [ "TH", "Plant"; "TH", "Sow" ]
+          "TR", [ "TD", "Tomato"; "TD", "March" ] ]
+
+[<Fact>]
+let ``a row paragraph with its own replacement text isn't converted, and says why`` () =
+    use input = new TempPdf()
+    createParagraphRowsWithEmptySpans input.Path (Some "Tomato March")
+    let notes = ElementEdits.unapplied input.Path [ conversionOf input.Path ]
+    notes |> should haveLength 1
+    notes.Head |> should haveSubstring "/ActualText"
+
+[<Fact>]
+let ``a grid without a row for each paragraph isn't converted, and says why`` () =
+    use input = new TempPdf()
+    createParagraphRowsWithEmptySpans input.Path None
+    let notes = ElementEdits.unapplied input.Path [ { conversionOf input.Path with Cells = [ cell "TD" 0 0; cell "TD" 0 1 ] } ]
+    notes |> should haveLength 1
+    notes.Head |> should haveSubstring "a row for each paragraph"
 
 [<Fact>]
 let ``a table with cells outside rows is rebuilt as rows of the cells checked, its text in them, and passes`` () =
