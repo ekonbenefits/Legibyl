@@ -25,7 +25,7 @@ let names (inRoleMap: string -> bool) (root: StructureNode) : (string * int * st
     let found = Collections.Generic.Dictionary<string, int * string option>()
     let order = ResizeArray<string>()
     let rec walk (node: StructureNode) =
-        if not (RoleMaps.standardTags.Contains node.Tag) && not (notNames.Contains node.Tag) && inRoleMap node.Tag then
+        if not (Tags.standard.Contains node.Tag) && not (notNames.Contains node.Tag) && inRoleMap node.Tag then
             match found.TryGetValue node.Tag with
             | true, (uses, role) -> found[node.Tag] <- (uses + 1, role |> Option.orElse (Option.ofObj node.Role))
             | _ ->
@@ -42,7 +42,7 @@ let tags =
         [ "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "H"; "P"; "L"; "LI"; "Lbl"; "LBody"; "Caption"; "Note"; "Figure"; "Formula"
           "Table"; "TR"; "TH"; "TD"; "THead"; "TBody"; "TFoot"; "Link"; "Span"; "Quote"; "BlockQuote"; "Code"
           "TOC"; "TOCI"; "Index"; "Sect"; "Div"; "Art"; "Part"; "Document"; "NonStruct" ]
-    common @ (RoleMaps.standardTags |> Set.toList |> List.filter (fun tag -> not (List.contains tag common)))
+    common @ (Tags.standard |> Set.toList |> List.filter (fun tag -> not (List.contains tag common)))
 
 /// What the tab needs: the structure, the review its choices go in, and what to call when one's
 /// made.

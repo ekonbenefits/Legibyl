@@ -230,15 +230,6 @@ let readFrom (path: string) : SavedFile option =
 /// The fields an edit can have.
 let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mergeWith"; "moveAfter"; "moveAfterPage"; "moveFirst"; "cells" ]
 
-/// The tags an edit can give (retag): PDF's standard structure types, and Artifact for a
-/// suggested region that's page furniture.
-let retagTags =
-    set [ "Document"; "Part"; "Art"; "Sect"; "Div"; "BlockQuote"; "Caption"; "TOC"; "TOCI"; "Index"; "NonStruct"; "Private"
-          "P"; "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "L"; "LI"; "Lbl"; "LBody"
-          "Table"; "TR"; "TH"; "TD"; "THead"; "TBody"; "TFoot"
-          "Span"; "Quote"; "Note"; "Reference"; "BibEntry"; "Code"; "Link"; "Annot"; "Ruby"; "RB"; "RT"; "RP"; "Warichu"; "WT"; "WP"
-          "Figure"; "Formula"; "Form"; "Artifact" ]
-
 /// What's wrong with a review's edits as written (json), which reading it would otherwise pass
 /// over: fields an edit doesn't have (e.g. "description": a link's description is its "alt"),
 /// retags to tags that aren't standard, and role map entries to tags that aren't. Empty when
@@ -250,7 +241,7 @@ let problems (json: string) : string list =
          | true, map when map.ValueKind = JsonValueKind.Object ->
              [ for entry in map.EnumerateObject() do
                    let tag = if entry.Value.ValueKind = JsonValueKind.String then entry.Value.GetString() |> string else ""
-                   if not (RoleMaps.standardTags.Contains tag) then
+                   if not (Tags.standard.Contains tag) then
                        $"roleMap maps \"{entry.Name}\" to \"{tag}\", which isn't a standard tag (e.g. H1 to H6, P, LI, Figure, Caption, Note)." ]
          | _ -> [])
         @
@@ -273,7 +264,7 @@ let problems (json: string) : string list =
                                   $"edits[{index}].cells[{c}] is a \"{tag}\", not a header cell (TH) or a data cell (TD)."
                       | _ -> ()
                       match edit.TryGetProperty "retag" with
-                      | true, retag when retag.ValueKind = JsonValueKind.String && not (retagTags.Contains(retag.GetString() |> string)) ->
+                      | true, retag when retag.ValueKind = JsonValueKind.String && not (Tags.retagTargets.Contains(retag.GetString() |> string)) ->
                           $"edits[{index}] retags to \"{retag.GetString()}\", which isn't a standard tag (e.g. H1 to H6, P, LI, Figure, Caption, Note, Artifact)."
                       | _ -> () ]
         | _ -> []

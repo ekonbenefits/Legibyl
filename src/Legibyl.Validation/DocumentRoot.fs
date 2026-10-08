@@ -61,7 +61,7 @@ let find (document: PdfDocument) context : Top option =
             // the role map makes it.
             let tag (e: PdfDictionary) =
                 match e.GetAsName(PdfName.S).GetValue() with
-                | name when RoleMaps.standardTags.Contains name -> name
+                | name when Tags.standard.Contains name -> name
                 | _ -> standardTag e context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
             match elements with
             | [ single ] when tag single = "Document" ->

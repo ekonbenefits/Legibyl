@@ -11,15 +11,6 @@ open System.Collections.Generic
 open System.Text.RegularExpressions
 open iText.Kernel.Pdf
 
-/// PDF's standard structure types (ISO 32000-1, 14.8.4): what a role map has to end at, and
-/// mustn't map from.
-let standardTags =
-    set [ "Document"; "Part"; "Art"; "Sect"; "Div"; "BlockQuote"; "Caption"; "TOC"; "TOCI"; "Index"; "NonStruct"; "Private"
-          "P"; "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "L"; "LI"; "Lbl"; "LBody"
-          "Table"; "TR"; "TH"; "TD"; "THead"; "TBody"; "TFoot"
-          "Span"; "Quote"; "Note"; "Reference"; "BibEntry"; "Code"; "Link"; "Annot"; "Ruby"; "RB"; "RT"; "RP"; "Warichu"; "WT"; "WP"
-          "Figure"; "Formula"; "Form" ]
-
 /// The standard tag each common writer's name stands for, by the name with its case, spaces and
 /// punctuation taken away.
 let private known =
@@ -91,7 +82,7 @@ let private known =
 let guess (name: string) : string option =
     let plain = Regex.Replace(name.ToLowerInvariant(), "[^\\p{L}\\p{N}]", "")
     let level = Regex.Match(plain, "^(heading|head|h|überschrift|titre|titulo|título)([1-6])(?![0-9])")
-    if standardTags.Contains name then
+    if Tags.standard.Contains name then
         Some name
     elif level.Success then
         Some $"H{level.Groups[2].Value}"
@@ -100,7 +91,7 @@ let guess (name: string) : string option =
     else
         match known.TryGetValue plain with
         | true, tag -> Some tag
-        | _ -> standardTags |> Seq.tryFind (fun tag -> tag.ToLowerInvariant() = plain)
+        | _ -> Tags.standard |> Seq.tryFind (fun tag -> tag.ToLowerInvariant() = plain)
 
 /// The tag names a document's structure elements use (in the PDF 1.7 namespace: not those an /NS
 /// puts in another), each with how many use it.
@@ -169,7 +160,7 @@ let repair (document: PdfDocument) : Repair =
             | map -> map
         let target (name: string) = match map.GetAsName(PdfName name) with null -> None | role -> Some(role.GetValue())
         // A standard tag mapped: it means itself.
-        let remapped = [ for key in List.ofSeq (map.KeySet()) do if standardTags.Contains(key.GetValue()) then key.GetValue() ]
+        let remapped = [ for key in List.ofSeq (map.KeySet()) do if Tags.standard.Contains(key.GetValue()) then key.GetValue() ]
         for name in remapped do
             map.Remove(PdfName name) |> ignore
         // The names in a circle: following the map from one comes back to it.
@@ -177,7 +168,7 @@ let repair (document: PdfDocument) : Repair =
             let rec follow (current: string) (visited: Set<string>) =
                 match target current with
                 | Some next when next = name -> true
-                | Some next when not (visited.Contains next) && not (standardTags.Contains next) -> follow next (visited.Add next)
+                | Some next when not (visited.Contains next) && not (Tags.standard.Contains next) -> follow next (visited.Add next)
                 | _ -> false
             follow name (set [ name ])
         let circling = [ for key in List.ofSeq (map.KeySet()) do if inCircle (key.GetValue()) then key.GetValue() ]
@@ -197,7 +188,7 @@ let repair (document: PdfDocument) : Repair =
             | None -> map.Remove(PdfName name) |> ignore
         // Where a name's mapping ends: a standard tag, or a name not mapped.
         let rec ends (name: string) (depth: int) =
-            if standardTags.Contains name || depth > 64 then name
+            if Tags.standard.Contains name || depth > 64 then name
             else match target name with Some next -> ends next (depth + 1) | None -> name
         // Each name mapped, with its tag.
         let mapped = Dictionary<string, string>()
@@ -205,7 +196,7 @@ let repair (document: PdfDocument) : Repair =
         let record (key: string) (tag: string) (_: int) = mapped[key] <- tag
         for KeyValue(name, uses) in used do
             let last = ends name 0
-            if not (standardTags.Contains last) then
+            if not (Tags.standard.Contains last) then
                 // What the name it ends at says (which mends every name ending there), else its own.
                 match guess last, guess name with
                 | Some tag, _ ->
@@ -220,7 +211,7 @@ let repair (document: PdfDocument) : Repair =
         // How many elements a mapping serves: those whose name's mapping, as it is now, goes through it.
         let serves (key: string) =
             let rec through (name: string) (depth: int) =
-                name = key || (depth < 64 && not (standardTags.Contains name) && match target name with Some next -> through next (depth + 1) | None -> false)
+                name = key || (depth < 64 && not (Tags.standard.Contains name) && match target name with Some next -> through next (depth + 1) | None -> false)
             used |> Seq.sumBy (fun (KeyValue(name, uses)) -> if through name 0 then uses else 0)
         { Mapped = [ for KeyValue(name, tag) in mapped -> name, tag, serves name ] |> List.sort
           Remapped = remapped
@@ -243,7 +234,7 @@ let choose (document: PdfDocument) (chosen: Map<string, string>) : (string * str
             | map -> map
         let changed =
             [ for KeyValue(name, tag) in chosen do
-                  if standardTags.Contains tag && not (standardTags.Contains name) then
+                  if Tags.standard.Contains tag && not (Tags.standard.Contains name) then
                       match map.GetAsName(PdfName name) with
                       | NonNull current when current.GetValue() = tag -> ()
                       | _ ->
@@ -265,8 +256,8 @@ let pending (pdfPath: string) (chosen: Map<string, string>) : int =
             | root -> root.GetAsDictionary PdfName.RoleMap
         chosen
         |> Seq.filter (fun (KeyValue(name, tag)) ->
-            standardTags.Contains tag
-            && not (standardTags.Contains name)
+            Tags.standard.Contains tag
+            && not (Tags.standard.Contains name)
             && (match map with
                 | null -> true
                 | map -> match map.GetAsName(PdfName name) with NonNull current -> current.GetValue() <> tag | Null -> true))
