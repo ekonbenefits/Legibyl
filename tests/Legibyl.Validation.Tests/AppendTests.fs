@@ -780,3 +780,17 @@ let ``with the empty elements left out, a paragraph whose text changed is still 
         node "StructTreeRoot" null [ node "Document" null [ node "Sect" null [ node "P" "One" []; node "P" "Changed" [] ] ] ]
     Append.differences part 0 input joined
     |> should equal [ "garden.pdf: part 1 › <P> 2: the text was \"Two\", is \"Changed\" in the joined file." ]
+
+[<Fact>]
+let ``a PDF's own tag named NotInTags is compared, and Legibyl's own node of that name isn't`` () =
+    let part: Append.Part = { File = "/tmp/garden.pdf"; FirstPage = 1; Pages = 1; RenamedTags = Map.empty }
+    // Content outside the tags: different in the joined file, and not part of the comparison.
+    let outside (text: string) =
+        { node "NotInTags" null [ { node "Untagged" text [] with Kind = StructureNodeKind.Untagged } ] with
+            Kind = StructureNodeKind.NotInTags }
+    let input =
+        node "StructTreeRoot" null [ node "Document" null [ node "P" "One" []; node "NotInTags" "Two" [] ]; outside "a line" ]
+    let joined =
+        node "StructTreeRoot" null [ node "Document" null [ node "Sect" null [ node "P" "One" []; node "NotInTags" "Changed" [] ] ]; outside "an image" ]
+    Append.differences part 0 input joined
+    |> should equal [ "garden.pdf: part 1 › <NotInTags> 2: the text was \"Two\", is \"Changed\" in the joined file." ]
