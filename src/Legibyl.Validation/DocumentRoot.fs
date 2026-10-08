@@ -1,8 +1,8 @@
-/// A tagged PDF's structure starting with a single Document tag: the way into its tags that PDF
-/// 2.0 asks for (PDF/UA-2's 8.2.5.2, and ISO 32005's rows for what the structure tree root may
-/// hold), and that checkers like PAC look for in any PDF. Tags at the top without one (a Part, say,
-/// or several) are put under a new Document; nothing else moves, so what's read, and in what
-/// order, is the same.
+/// A tagged PDF's structure starting with a single Document tag: one element that is the whole
+/// document, for a screen reader to start from, as PDF 2.0 asks for (PDF/UA-2's 8.2.5.2, and ISO
+/// 32005's rows for what the structure tree root may hold), and worth having in any PDF. Tags at
+/// the top without one (a Part, say, or several) are put under a new Document; nothing else moves,
+/// so what's read, and in what order, is the same.
 module internal Legibyl.Validation.DocumentRoot
 
 open iText.Kernel.Pdf
