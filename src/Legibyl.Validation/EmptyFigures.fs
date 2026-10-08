@@ -11,7 +11,7 @@ open Legibyl.Validation.StructureTreeObjects
 /// Operators that put something on a page: text, a painted path, an image (inline or not), a
 /// form XObject, a shading.
 let private drawing =
-    Set.unionMany [ ContentOperations.textShowing; ContentOperations.pathPainting |> Set.remove "n"; set [ "Do"; "sh"; ContentOperations.inlineImage ] ]
+    Set.unionMany [ ContentOperations.textShowing; ContentOperations.pathPainting |> Set.remove ContentOperators.n; set [ ContentOperators.Do; ContentOperators.sh; ContentOperations.inlineImage ] ]
 
 /// A page's marked content by MCID: those there, and those that draw something (inside it, or
 /// inside marked content inside it).
@@ -23,7 +23,7 @@ let private pageContent (page: PdfPage) =
     let mutable inside: int option list = []
     for operation in operations do
         match operation.Name with
-        | "BDC" ->
+        | ContentOperators.BDC ->
             let mcid = ContentOperations.mcidOf resources operation
             mcid |> Option.iter (found.Add >> ignore)
             inside <- mcid :: inside
@@ -49,8 +49,8 @@ let private pageContent (page: PdfPage) =
                 for mcid in inside do
                     mcid |> Option.iter (drawn.Add >> ignore)
             | _ -> ()
-        | "BMC" -> inside <- None :: inside
-        | "EMC" -> inside <- (match inside with _ :: rest -> rest | [] -> [])
+        | ContentOperators.BMC -> inside <- None :: inside
+        | ContentOperators.EMC -> inside <- (match inside with _ :: rest -> rest | [] -> [])
         | name when drawing.Contains name ->
             for mcid in inside do
                 mcid |> Option.iter (drawn.Add >> ignore)

@@ -125,11 +125,10 @@ let private emptyContent (document: PdfDocument) (context: Context) (page: int) 
     // be read, with no ToUnicode say, reads as nothing, and may well draw something).
     let shown = HashSet<int>()
     let mutable inside: int option list = []
-    let drawing = Set.union (ContentOperations.pathPainting |> Set.remove "n") (set ["Do"; "sh"; ContentOperations.inlineImage])
-    let showing = set [ "Tj"; "TJ"; "'"; "\"" ]
+    let drawing = Set.union (ContentOperations.pathPainting |> Set.remove ContentOperators.n) (set [ContentOperators.Do; ContentOperators.sh; ContentOperations.inlineImage])
     for operation in operations do
         match operation.Name with
-        | "BDC" ->
+        | ContentOperators.BDC ->
             let mcid = ContentOperations.mcidOf resources operation
             mcid |> Option.iter (found.Add >> ignore)
             inside <- mcid :: inside
@@ -149,11 +148,11 @@ let private emptyContent (document: PdfDocument) (context: Context) (page: int) 
                    | null -> false
                    | text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString()))) then
                 for mcid in inside do mcid |> Option.iter (painted.Add >> ignore)
-        | "BMC" -> inside <- None :: inside
-        | "EMC" -> inside <- (match inside with _ :: rest -> rest | [] -> [])
+        | ContentOperators.BMC -> inside <- None :: inside
+        | ContentOperators.EMC -> inside <- (match inside with _ :: rest -> rest | [] -> [])
         | name when drawing.Contains name ->
             for mcid in inside do mcid |> Option.iter (painted.Add >> ignore)
-        | name when showing.Contains name ->
+        | name when ContentOperations.textShowing.Contains name ->
             for mcid in inside do mcid |> Option.iter (shown.Add >> ignore)
         | _ -> ()
     fun mcid ->

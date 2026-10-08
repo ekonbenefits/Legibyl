@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Compile Include="Tags.fs" />
+    <Compile Include="Destinations.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="PdfUaTarget.fs" />
     <Compile Include="PdfLocationParser.fs" />
@@ -24,6 +25,7 @@
     <Compile Include="MarkedContentTextIndex.fs" />
     <Compile Include="StructureTreeObjects.fs" />
     <Compile Include="SplitWordSpans.fs" />
+    <Compile Include="ContentOperators.fs" />
     <Compile Include="ContentOperations.fs" />
     <Compile Include="ContentArtifacts.fs" />
     <Compile Include="ParentTree.fs" />

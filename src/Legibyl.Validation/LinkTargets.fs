@@ -88,10 +88,10 @@ let private landing (document: PdfDocument) (explicit: PdfArray) : (int * float 
         | _ -> None
     let top =
         match explicit.GetAsName 1 |> Option.ofObj |> Option.map _.GetValue() with
-        | Some "XYZ" -> numberAt 3
-        | Some "FitH"
-        | Some "FitBH" -> numberAt 2
-        | Some "FitR" -> numberAt 5
+        | Some Destinations.XYZ -> numberAt 3
+        | Some Destinations.FitH
+        | Some Destinations.FitBH -> numberAt 2
+        | Some Destinations.FitR -> numberAt 5
         | _ -> None
     page |> Option.map (fun page -> page, top)
 

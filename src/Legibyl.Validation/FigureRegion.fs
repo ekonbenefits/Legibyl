@@ -226,7 +226,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                 let hasMissingXObject =
                     operations
                     |> Seq.exists (fun op ->
-                        if op.Name <> "Do" then false
+                        if op.Name <> ContentOperators.Do then false
                         else
                             match op.Operands with
                             | [| :? PdfName as name |] ->
@@ -252,7 +252,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                 // What draws nothing isn't missed: a form drawing nothing (what forms draw is
                 // measured, shadings included), or a TJ with no text in it.
                 let drawsNothing (op: Operation) =
-                    (op.Name = "Do"
+                    (op.Name = ContentOperators.Do
                      && (match op.Operands with
                          | [| :? PdfName as name |] ->
                              match resources.GetResource PdfName.XObject with
@@ -262,13 +262,13 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                  | NonNull stream -> PdfName.Form.Equals(stream.GetAsName PdfName.Subtype)
                                  | Null -> false
                          | _ -> false))
-                    || (op.Name = "TJ"
+                    || (op.Name = ContentOperators.TJ
                         && (match op.Operands with
                             | [| :? PdfArray as items |] -> not (Seq.init (items.Size()) items.Get |> Seq.exists (fun i -> i :? PdfString))
                             | _ -> false))
                 for index in 0 .. operations.Count - 1 do
                     let op = operations[index]
-                    if (op.Name = "Do" || op.Name = inlineImage || op.Name = "sh" || textShowing.Contains op.Name)
+                    if (op.Name = ContentOperators.Do || op.Name = inlineImage || op.Name = ContentOperators.sh || textShowing.Contains op.Name)
                        && not (drawn.ContainsKey index) && not (drawsNothing op) then
                         fail "something on the page can't be measured, so what's in the region isn't known"
                 let inspect first last mcid marked described lang supported =
@@ -299,15 +299,15 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                 let mutable i = 0
                 while i < operations.Count do
                     let op = operations[i]
-                    if op.Name = "BMC" || op.Name = "BDC" then
+                    if op.Name = ContentOperators.BMC || op.Name = ContentOperators.BDC then
                         let first = i
                         let mutable depth = 1
                         let mutable nested = false
                         i <- i + 1
                         while i < operations.Count && depth > 0 do
                             match operations[i].Name with
-                            | "BMC" | "BDC" -> depth <- depth + 1; nested <- true
-                            | "EMC" -> depth <- depth - 1
+                            | ContentOperators.BMC | ContentOperators.BDC -> depth <- depth + 1; nested <- true
+                            | ContentOperators.EMC -> depth <- depth - 1
                             | _ -> ()
                             i <- i + 1
                         if depth <> 0 then fail "the page's marked content isn't closed properly"
@@ -315,7 +315,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                             let artifact = op.Operands.Length > 0 && PdfName.Artifact.Equals(op.Operands[0])
                             let mcid = mcidOf resources op
                             let properties =
-                                if op.Name <> "BDC" || op.Operands.Length < 2 then None
+                                if op.Name <> ContentOperators.BDC || op.Operands.Length < 2 then None
                                 else
                                     match op.Operands[1] with
                                     | :? PdfDictionary as d -> Some d
@@ -342,7 +342,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                 |> Option.map _.ToUnicodeString()
                                 |> Option.filter (String.IsNullOrWhiteSpace >> not)
                             inspect first (i - 1) mcid true described lang (not nested && appearanceSafe && (artifact || mcid.IsSome))
-                    elif op.Name = "EMC" then
+                    elif op.Name = ContentOperators.EMC then
                         fail "the page's marked content isn't closed properly"
                         i <- i + 1
                     else i <- i + 1
@@ -357,8 +357,8 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                     for index in 0 .. operations.Count - 1 do
                         let op = operations[index]
                         let paints =
-                            op.Name = "Do" || op.Name = inlineImage || op.Name = "sh" || textShowing.Contains op.Name
-                            || (pathPainting.Contains op.Name && op.Name <> "n")
+                            op.Name = ContentOperators.Do || op.Name = inlineImage || op.Name = ContentOperators.sh || textShowing.Contains op.Name
+                            || (pathPainting.Contains op.Name && op.Name <> ContentOperators.n)
                         if paints && not (covered.Contains index) then
                             match drawn.TryGetValue index with
                             | true, found when found |> Seq.exists (fun d -> intersects edit.Box d.Box) ->
@@ -370,7 +370,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                 for part in selected do
                     for i in part.First .. part.Last do
                         let op = operations[i]
-                        if op.Name = "Do" && op.Operands.Length > 0 then
+                        if op.Name = ContentOperators.Do && op.Operands.Length > 0 then
                             match op.Operands[0] with
                             | :? PdfName as name ->
                                 let xobjects = resources.GetResource PdfName.XObject

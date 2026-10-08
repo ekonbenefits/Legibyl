@@ -71,7 +71,7 @@ let private visible (box: Rectangle) =
 /// The box around all of boxes, if there are any.
 let private around (boxes: Rectangle list) = match boxes with [] -> None | boxes -> Some(visible (List.reduce union boxes))
 
-let private fills = set [ "f"; "F"; "f*"; "B"; "B*"; "b"; "b*" ]
+let private fills = set [ ContentOperators.f; ContentOperators.F; ContentOperators.fStar; ContentOperators.B; ContentOperators.BStar; ContentOperators.b; ContentOperators.bStar ]
 
 /// Each operator's place: how deep in marked content (0: outside every tag).
 let private depths (operations: List<Operation>) =
@@ -80,9 +80,9 @@ let private depths (operations: List<Operation>) =
     for i in 0 .. operations.Count - 1 do
         depth[i] <- d
         match operations[i].Name with
-        | "BMC"
-        | "BDC" -> d <- d + 1
-        | "EMC" when d > 0 -> d <- d - 1
+        | ContentOperators.BMC
+        | ContentOperators.BDC -> d <- d + 1
+        | ContentOperators.EMC when d > 0 -> d <- d - 1
         | _ -> ()
     depth
 
@@ -100,17 +100,17 @@ let private units (operations: List<Operation>) (drawn: Dictionary<int, List<Dra
     let mutable i = 0
     while i < operations.Count do
         let name = operations[i].Name
-        if depth[i] = 0 && (name = "BMC" || name = "BDC") then
+        if depth[i] = 0 && (name = ContentOperators.BMC || name = ContentOperators.BDC) then
             run <- run + 1
             i <- i + 1
         elif depth[i] > 0 then
             i <- i + 1
-        elif name = "BT" then
+        elif name = ContentOperators.BT then
             // A text object outside every tag, if nothing in it is marked.
             let mutable last = i
-            while last + 1 < operations.Count && operations[last].Name <> "ET" do
+            while last + 1 < operations.Count && operations[last].Name <> ContentOperators.ET do
                 last <- last + 1
-            let marked = seq { i .. last } |> Seq.exists (fun k -> operations[k].Name = "BMC" || operations[k].Name = "BDC")
+            let marked = seq { i .. last } |> Seq.exists (fun k -> operations[k].Name = ContentOperators.BMC || operations[k].Name = ContentOperators.BDC)
             let pieces = boxOf i last |> List.filter (fun d -> d.Kind = ContentKind.Text)
             if not marked && not pieces.IsEmpty then
                 found.Add(run, { First = i; Last = last; Kind = Text; Box = pieces |> List.map _.Box |> List.reduce union })
@@ -120,16 +120,16 @@ let private units (operations: List<Operation>) (drawn: Dictionary<int, List<Dra
                 match box with
                 | Some box -> found.Add(run, { First = first; Last = i; Kind = kind; Box = box })
                 | None -> ()
-            if pathPainting.Contains name && name <> "n" then
+            if pathPainting.Contains name && name <> ContentOperators.n then
                 let mutable first = i
                 while first > 0 && pathConstruction.Contains operations[first - 1].Name do
                     first <- first - 1
                 let box = boxOf i i |> List.map _.Box |> around
                 add first (if fills.Contains name then Fill else Line) box
-            elif name = "sh" then
+            elif name = ContentOperators.sh then
                 // A shading fills what's clipped, often the page.
                 add i Fill (Some pageBox)
-            elif name = inlineImage || name = "Do" then
+            elif name = inlineImage || name = ContentOperators.Do then
                 let pieces = boxOf i i
                 let kind =
                     if pieces |> List.exists (fun d -> d.Kind = ContentKind.Text) then Text
@@ -192,12 +192,12 @@ let private items (page: PdfPage) : IReadOnlyDictionary<int * int, Rectangle> =
     let mutable inRun = false
     for i in 0 .. operations.Count - 1 do
         let name = operations[i].Name
-        if depth[i] = 0 && (name = "BMC" || name = "BDC") then
+        if depth[i] = 0 && (name = ContentOperators.BMC || name = ContentOperators.BDC) then
             chunk <- chunk + 1
             inRun <- false
         elif depth[i] = 0 then
             let isItem =
-                textShowing.Contains name || (pathPainting.Contains name && name <> "n") || name = "sh" || name = inlineImage || name = "Do"
+                textShowing.Contains name || (pathPainting.Contains name && name <> ContentOperators.n) || name = ContentOperators.sh || name = inlineImage || name = ContentOperators.Do
             if isItem then
                 if not inRun then
                     chunk <- chunk + 1
@@ -205,7 +205,7 @@ let private items (page: PdfPage) : IReadOnlyDictionary<int * int, Rectangle> =
                     inRun <- true
                 match drawn.TryGetValue i with
                 | true, pieces when pieces.Count > 0 -> boxes[(chunk, item)] <- pieces |> Seq.map _.Box |> Seq.reduce union
-                | _ when name = "sh" -> boxes[(chunk, item)] <- page.GetCropBox()
+                | _ when name = ContentOperators.sh -> boxes[(chunk, item)] <- page.GetCropBox()
                 | _ -> ()
                 item <- item + 1
     boxes
