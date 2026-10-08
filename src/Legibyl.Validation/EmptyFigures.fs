@@ -27,6 +27,28 @@ let private pageContent (page: PdfPage) =
             let mcid = ContentOperations.mcidOf resources operation
             mcid |> Option.iter (found.Add >> ignore)
             inside <- mcid :: inside
+            // A description on the marked content itself (its /Alt or /ActualText) is something
+            // to read: marking it as not read would lose it.
+            let properties =
+                if operation.Operands.Length < 2 then null
+                else
+                    match operation.Operands[1] with
+                    | :? PdfDictionary as properties -> properties
+                    | :? PdfName as name ->
+                        match resources.GetResource PdfName.Properties with
+                        | null -> null
+                        | all -> all.GetAsDictionary name
+                    | _ -> null
+            match properties with
+            | NonNull properties
+                when [ PdfName.Alt; PdfName.ActualText ]
+                     |> List.exists (fun key ->
+                         match properties.GetAsString key with
+                         | null -> false
+                         | text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString()))) ->
+                for mcid in inside do
+                    mcid |> Option.iter (drawn.Add >> ignore)
+            | _ -> ()
         | "BMC" -> inside <- None :: inside
         | "EMC" -> inside <- (match inside with _ :: rest -> rest | [] -> [])
         | name when drawing.Contains name ->

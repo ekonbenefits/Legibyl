@@ -267,9 +267,8 @@ let ``content of a tag still in the tags, but placed on no page, isn't taken for
     createPieces input.Path [ "More text." ] false (fun _ paragraphs ->
         for p in paragraphs do p.GetPdfObject().Remove PdfName.Pg |> ignore)
 
-    VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).Findings
-    |> Seq.filter (fun f -> f.Specification = "Legibyl" && f.TestNumber = 17)
-    |> should be Empty
+    // Neither the parent tree's warning (9) nor, where it's warned of, Structure-17.
+    warnings input.Path |> should be Empty
 
 [<Fact>]
 let ``a tag that's gone, holding text and a space, is kept whole`` () =
@@ -283,3 +282,49 @@ let ``a tag that's gone, holding text and a space, is kept whole`` () =
 
     result.WasFixed |> should be False
     result.NotApplied |> Seq.exists (fun line -> line.StartsWith "Page 1: 2 piece(s) of content are tied to a tag that isn't in the tags any more, and were kept") |> should be True
+
+[<Fact>]
+let ``a tag that's gone across two pages, a space on one and text on the other, is kept whole`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.SetTagged() |> ignore
+        let first, second = document.AddNewPage(), document.AddNewPage()
+        let top = PdfStructElem(document, PdfName.Document)
+        document.GetStructTreeRoot().AddKid top |> ignore
+        let paragraph = PdfStructElem(document, PdfName.P, first)
+        top.AddKid paragraph |> ignore
+        paragraph.AddKid(PdfMcrNumber(first, paragraph)) |> ignore
+        paragraph.AddKid(PdfMcrDictionary(second, paragraph)) |> ignore
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        for page, text in [ first, " "; second, "Important text." ] do
+            let properties = PdfDictionary()
+            properties.Put(PdfName.MCID, PdfNumber 0) |> ignore
+            PdfCanvas(page).BeginMarkedContent(PdfName.P, properties).BeginText().SetFontAndSize(font, 12f)
+                .MoveText(72.0, 700.0).ShowText(text).EndText().EndMarkedContent() |> ignore
+        // Taken out of the tags, its parent tree entries left.
+        top.GetPdfObject().Remove PdfName.K |> ignore
+
+    let result = fix input.Path output.Path PdfFixOptions.ParentTree
+
+    result.WasFixed |> should be False
+    result.NotApplied |> Seq.filter (fun line -> line.Contains "were kept as they are") |> Seq.length |> should equal 2
+
+[<Fact>]
+let ``an empty paragraph naming neither its parent nor its page has its content marked as not read`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPieces input.Path [ " " ] false (fun top paragraphs ->
+        top.GetPdfObject().Put(PdfName.Pg, (paragraphs.Head.GetPdfObject().GetAsDictionary PdfName.Pg)) |> ignore
+        // The empty one only (iText loses the parent tree entries of a tag that only inherits its
+        // page on any save, whatever the fixes).
+        let empty = paragraphs[1].GetPdfObject()
+        empty.Remove PdfName.Pg |> ignore
+        empty.Remove PdfName.P |> ignore)
+
+    (fix input.Path output.Path PdfFixOptions.EmptyParagraphs).WasFixed |> should be True
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    Encoding.Latin1.GetString(document.GetPage(1).GetContentBytes()) |> should haveSubstring "/Artifact BMC"
+    warnings output.Path |> should be Empty

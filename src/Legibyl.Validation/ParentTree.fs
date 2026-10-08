@@ -180,17 +180,27 @@ let disconnected (document: PdfDocument) context : Disconnected list =
             let test = emptyContent document context page
             empty[page] <- test
             test
-    inconsistent document context
-    |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
-    |> List.groupBy (fun (page, _, owner, _) -> page, owner)
-    |> List.map (fun ((page, owner), content) ->
-        let mcids = content |> List.map (fun (_, mcid, _, _) -> mcid)
-        let artifact = PdfName.Artifact.Equals(owner.GetAsName PdfName.S)
-        { Page = page
-          Owner = owner
-          Mcids = mcids
-          Artifact = artifact
-          Untied = artifact || (not (hasDescription owner) && mcids |> List.forall (emptyOn page)) })
+    let gone = inconsistent document context |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
+    // Each tag that's gone decided over all its content, on every page, then shown a page at a time.
+    let owners = List<PdfDictionary>()
+    let byOwner = Dictionary<PdfDictionary, ResizeArray<int * int>>(HashIdentity.Reference)
+    for page, mcid, owner, _ in gone do
+        match byOwner.TryGetValue owner with
+        | true, content -> content.Add((page, mcid))
+        | _ ->
+            owners.Add owner
+            byOwner[owner] <- ResizeArray [ page, mcid ]
+    [ for owner in owners do
+          let content = List.ofSeq byOwner[owner]
+          let artifact = PdfName.Artifact.Equals(owner.GetAsName PdfName.S)
+          let untied =
+              artifact || (not (hasDescription owner) && content |> List.forall (fun (page, mcid) -> emptyOn page mcid))
+          for page, onPage in content |> List.groupBy fst do
+              { Page = page
+                Owner = owner
+                Mcids = onPage |> List.map snd
+                Artifact = artifact
+                Untied = untied } ]
 
 /// Takes a page's MCID out of iText's parent tree (which it writes on close), whatever tag it's
 /// tied to: by tying it to a tag of the moment, then untying it. That tag is never in the tags,
