@@ -5,7 +5,8 @@
 /// TextLinker.fs): the page's text in lines, a space where the gap between glyphs is a word's;
 /// "http(s)://" or "www." up to whitespace; trailing punctuation off, a closing bracket only when
 /// it isn't balanced. Lines are found by where glyphs are, not the order they're drawn in, and a
-/// glyph drawn twice in one place (as bold is faked) is read once.
+/// glyph drawn twice in one place (as bold is faked) is read once. An address goes on past a gap
+/// on its line to a hyphen that touches more of it (see continuation).
 module internal Legibyl.Validation.WebAddressText
 
 open System
@@ -42,6 +43,11 @@ type Found =
 /// "http(s)://" or "www.", not inside a word, a number or an e-mail address, up to whitespace.
 let private addressPattern =
     Regex(@"(?<![\p{L}\p{N}_@.\-/])(?:https?://|www\.)[^\s<>""']+", RegexOptions.IgnoreCase ||| RegexOptions.CultureInvariant)
+
+/// Where an address goes on past a gap on its line: a hyphen touching a letter or digit
+/// (".../go/dol -diversification", the hyphen set apart as a line is justified). Prose doesn't
+/// start a word with a hyphen; a dash set off as one ("... - then") has a gap after it, too.
+let private continuation = Regex(@"\G {1,2}(-[\p{L}\p{N}][^\s<>""']*)", RegexOptions.CultureInvariant)
 
 /// Trailing punctuation off ("see https://example.org." links the address, not the full stop);
 /// a closing bracket only when it isn't balanced inside, so ".../wiki/Foo_(bar)" stays whole.
@@ -113,8 +119,16 @@ let find (glyphs: Glyph array) : Found list =
                 if not (runs.ContainsKey glyph.Mcid) then runs[glyph.Mcid] <- StringBuilder()
                 runs[glyph.Mcid].Append(glyph.Value.Replace(" ", "")) |> ignore
     [ for m in addressPattern.Matches text do
-          let written = trimTrailing m.Value
-          let glyphs = [ for i in m.Index .. m.Index + written.Length - 1 do match from[i] with Some glyph -> glyph | None -> () ] |> List.distinct
+          // An address that ends a sentence (trailing punctuation off) doesn't go on.
+          let more = if trimTrailing m.Value = m.Value then continuation.Match(text, m.Index + m.Length) else Match.Empty
+          let written, last =
+              if more.Success then
+                  let written = trimTrailing (m.Value + more.Groups[1].Value)
+                  written, more.Groups[1].Index + (written.Length - m.Value.Length) - 1
+              else
+                  let written = trimTrailing m.Value
+                  written, m.Index + written.Length - 1
+          let glyphs = [ for i in m.Index .. last do match from[i] with Some glyph -> glyph | None -> () ] |> List.distinct
           if written <> "" && not glyphs.IsEmpty then
               let mcids = glyphs |> List.map _.Mcid |> List.distinct
               let own = String.Concat(glyphs |> List.map (fun glyph -> glyph.Value.Replace(" ", "")))

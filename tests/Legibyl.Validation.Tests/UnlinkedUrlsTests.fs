@@ -205,6 +205,23 @@ let ``an address is read whole however narrow its letters, as many times as it's
     |> should equal [ "https://example.org/plan" ]
 
 [<Fact>]
+let ``an address goes on past a gap to a hyphen touching the rest of it, and isn't linked in part`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    tagged input.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        // As a justified line sets it: the hyphen a space's width on, touching the rest.
+        let width (text: string) = float (font.GetWidth(text, 12f))
+        let gap = width " " * 1.5
+        inTags pointer page font [ "P"; "Span" ] 72.0 700.0 "https://example.org/go/dol"
+        inTags pointer page font [ "P"; "Span" ] (72.0 + width "https://example.org/go/dol" + gap) 700.0 "-diversification."
+        // A dash set off by gaps on both sides is prose's, not the address's.
+        inTags pointer page font [ "P"; "Span" ] 72.0 680.0 "https://example.org/plan - then the beds.")
+    named input.Path |> should equal [ "https://example.org/go/dol-diversification", false; "https://example.org/plan", false ]
+
+    validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed |> should be False
+
+[<Fact>]
 let ``an address drawn right to left is read left to right, whole`` () =
     use pdf = new TempPdf()
     tagged pdf.Path (fun document pointer font ->
