@@ -63,10 +63,13 @@ and refuses such a file before writing anything, saying which content and parent
 tree entry disagree; the files, and any existing output, are left as they were.
 The CLI reports `status: "refused"` and exits 2; the app shows the same reason.
 
-Export it again with tags from the tool that made it, or have the tags fixed in a
-PDF editor, then check it and join it again. A tag that's only in the parent tree
-can't be put back automatically: nothing says where among its neighbours it was
-read.
+When it's page content tied to the wrong tag, or to one no longer in the tags,
+choose **Rebuild the parent tree** in Auto Fixes… (or `legibyl fix --fixes
+parent-tree`) and join the fixed copy: see the parent tree, below. For anything
+else, or content that fix keeps, export it again with tags from the tool that
+made it, or have the tags fixed in a PDF editor, then check it and join it again.
+A tag that's only in the parent tree can't be put back automatically: nothing says
+where among its neighbours it was read.
 
 ## How it works
 
@@ -479,10 +482,20 @@ tree gives the content, and are fixable by the matching **Rebuild the parent
 tree** fix (`parent-tree`, one of the safe ones, run first): it rebuilds the tree
 from the tags, giving each page `/StructParents` and each tagged annotation a
 `/StructParent`. Nothing on the page changes.
-It also checks individual slots against the forward hierarchy, not just whether
-the page has an entry. Obsolete associations for empty or explicitly decorative
-sequences become real artifacts; meaningful orphan content is kept and reported
-instead of inventing a reading order.
+It checks each piece of content, not just that a page has an entry: content tied
+to the wrong tag is tied to the right one. Content still tied to a tag that's no
+longer in the tags (one cut out without its parent-tree entries) is marked as not
+read when it draws nothing (no path, image, shading, or text that reads as more
+than whitespace) and has no description, or when that tag said it was an
+artifact; the page looks the same. Anything else is kept as it is, and reported:
+nothing says where its tag belonged, so that's for whoever made the PDF to put
+back. (Annotations' and form XObjects' entries aren't checked this way yet.)
+
+Legibyl's own fixes that take tags out (empty paragraphs and contents entries,
+figures that draw nothing, Not Read) now mark their content as not read and
+untie it from the parent tree, rather than leaving it tied to a tag that's gone.
+An empty paragraph or contents entry that draws something, or has a description,
+is left; its warning then says so, rather than offering the fix.
 
 A document that tags headings but has no bookmarks (document outline) gets a
 warning (`Bookmarks.fs`, Structure-7): readers can't jump between its sections
@@ -1110,7 +1123,7 @@ keeps this table in step with it):
 |---|---|---|
 | `tag-from-layout` | Tag an untagged document from each page's layout | uses the layout models |
 | `qr-links` | Link QR codes to the web addresses they encode | with tag-from-layout |
-| `parent-tree` | Reconcile the parent tree with the tags, keeping meaningful content and clearing obsolete associations | safe |
+| `parent-tree` | Rebuild the parent tree, so the tags are found for the content they hold | safe |
 | `document-root` | Put the tags under a single Document tag at the top of the structure | safe |
 | `role-map` | Map the PDF's own tag names to standard tags, and fix a broken role map |  |
 | `language` | Declare the document's language, detected from its text |  |

@@ -105,8 +105,12 @@ let private emptyContent (document: PdfDocument) (context: Context) (page: int) 
     let operations, _ = ContentOperations.operationsOf (pdfPage.GetContentBytes()) resources
     let found = HashSet<int>()
     let painted = HashSet<int>()
+    // Content that shows text: empty only if its text is read as whitespace (a glyph that can't
+    // be read, with no ToUnicode say, reads as nothing, and may well draw something).
+    let shown = HashSet<int>()
     let mutable inside: int option list = []
     let drawing = Set.union (ContentOperations.pathPainting |> Set.remove "n") (set ["Do"; "sh"; ContentOperations.inlineImage])
+    let showing = set [ "Tj"; "TJ"; "'"; "\"" ]
     for operation in operations do
         match operation.Name with
         | "BDC" ->
@@ -133,13 +137,16 @@ let private emptyContent (document: PdfDocument) (context: Context) (page: int) 
         | "EMC" -> inside <- (match inside with _ :: rest -> rest | [] -> [])
         | name when drawing.Contains name ->
             for mcid in inside do mcid |> Option.iter (painted.Add >> ignore)
+        | name when showing.Contains name ->
+            for mcid in inside do mcid |> Option.iter (shown.Add >> ignore)
         | _ -> ()
     fun mcid ->
         found.Contains mcid && not (painted.Contains mcid)
         && not (context.MarkedContent.Unreadable.Contains page)
         && (match context.MarkedContent.TryGetValue((page, mcid)) with
+            | true, content when shown.Contains mcid -> content.Text.Length > 0 && String.IsNullOrWhiteSpace content.Text
             | true, content -> String.IsNullOrWhiteSpace content.Text
-            | _ -> true)
+            | _ -> not (shown.Contains mcid))
 
 let private hasDescription (owner: PdfDictionary) =
     [PdfName.ActualText; PdfName.Alt]
@@ -148,18 +155,32 @@ let private hasDescription (owner: PdfDictionary) =
         | null -> false
         | text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString())))
 
-/// iText owns the in-memory reverse registry. Register then unregister a transient MCR,
-/// rather than editing /ParentTree (which iText rewrites on close). This also works when
-/// the obsolete owner's /K or /P is already missing; no tag is added to the reading order.
-let private forget (document: PdfDocument) (page: int) (mcid: int) =
-    let transient = PdfStructElem(document, PdfName.Span)
-    transient.GetPdfObject().Put(PdfName.P, document.GetStructTreeRoot().GetPdfObject()) |> ignore
-    transient.GetPdfObject().Put(PdfName.Pg, document.GetPage(page).GetPdfObject()) |> ignore
-    transient.AddKid(PdfMcrNumber(PdfNumber mcid, transient)) |> ignore
-    transient.RemoveKid 0 |> ignore
+/// Takes a page's MCID out of iText's parent tree (which it writes on close), whatever tag it's
+/// tied to: by tying it to a tag of the moment, then untying it. That tag is never in the tags,
+/// and dispose frees it, so it isn't written either.
+type private Forgetter(document: PdfDocument) =
+    let transient =
+        lazy
+            (let transient = PdfStructElem(document, PdfName.Span)
+             transient.GetPdfObject().Put(PdfName.P, document.GetStructTreeRoot().GetPdfObject()) |> ignore
+             transient)
+    member _.Forget (page: int) (mcid: int) =
+        let transient = transient.Value
+        transient.GetPdfObject().Put(PdfName.Pg, document.GetPage(page).GetPdfObject()) |> ignore
+        transient.AddKid(PdfMcrNumber(PdfNumber mcid, transient)) |> ignore
+        transient.RemoveKid 0 |> ignore
+    interface IDisposable with
+        member _.Dispose() =
+            if transient.IsValueCreated then
+                match transient.Value.GetPdfObject().GetIndirectReference() with
+                | null -> ()
+                | reference -> reference.SetFree()
 
-/// Pruning a text-empty tag must not hide a drawing it also owns.
-let canDiscard (document: PdfDocument) context (element: PdfDictionary) inheritedPage =
+/// Whether a tag can be taken out of the tags, its content then marked as not read: it and the
+/// tags below it have no description, and their content is on the page and draws nothing (no
+/// text that reads as anything but whitespace, no path, image or shading). So pruning a tag
+/// with no text can't hide a drawing it holds. Each page is read once, for every tag asked about.
+let discardable (document: PdfDocument) context : PdfDictionary -> int option -> bool =
     let pages = Dictionary<int, int -> bool>()
     let empty page mcid =
         match pages.TryGetValue page with
@@ -179,7 +200,7 @@ let canDiscard (document: PdfDocument) context (element: PdfDictionary) inherite
                 not (hasDescription dictionary)
                 && visit (dictionary.Get PdfName.K) (structElemPage dictionary context page) (depth + 1)
             | _ -> false
-    visit element inheritedPage 0
+    fun element inheritedPage -> visit element inheritedPage 0
 
 /// What's missing: whether the parent tree is, and how many pages with tagged content and tagged
 /// objects it has no entry for.
@@ -202,6 +223,12 @@ let find (document: PdfDocument) context : Missing option =
             match key, entries with
             | NonNull key, Some entries -> entries.ContainsKey(key.IntValue())
             | _ -> false
+        // Each page's tagged MCIDs and the tags holding them, grouped once.
+        let onPage =
+            tagged.MarkedContent
+            |> Seq.groupBy (fun (KeyValue((page, _), _)) -> page)
+            |> Seq.map (fun (page, content) -> page, List.ofSeq content)
+            |> dict
         let pagesMissing =
             pages |> List.filter (fun page ->
                 let key = document.GetPage(page).GetPdfObject().GetAsNumber PdfName.StructParents
@@ -211,12 +238,11 @@ let find (document: PdfDocument) context : Missing option =
                         match entries.Value[key |> nonNull |> _.IntValue()] |> resolve with
                         | :? PdfArray as slots -> Some slots
                         | _ -> None
-                    tagged.MarkedContent
-                    |> Seq.exists (fun (KeyValue((p, mcid), owner)) ->
-                        p = page &&
-                        (match slots with
-                         | Some slots when mcid >= 0 && mcid < slots.Size() -> not (obj.ReferenceEquals(slots.GetAsDictionary mcid, owner))
-                         | _ -> true)))
+                    (match onPage.TryGetValue page with | true, content -> content | _ -> [])
+                    |> List.exists (fun (KeyValue((_, mcid), owner)) ->
+                        match slots with
+                        | Some slots when mcid >= 0 && mcid < slots.Size() -> not (obj.ReferenceEquals(slots.GetAsDictionary mcid, owner))
+                        | _ -> true))
         let objectsMissing =
             tagged.Objects.Keys
             |> Seq.filter (fun number ->
@@ -249,6 +275,8 @@ let rebuild (document: PdfDocument) context : string list =
         let mutable discarded = 0
         let emptyPages = Dictionary<int, int -> bool>()
         let byPage = Dictionary<int, HashSet<int>>()
+        let kept = SortedDictionary<int, int>()
+        use forgetter = new Forgetter(document)
         for page, mcid, owner, expected in inconsistent document context do
             let empty =
                 match emptyPages.TryGetValue page with
@@ -259,14 +287,17 @@ let rebuild (document: PdfDocument) context : string list =
                     empty
             let artifact = PdfName.Artifact.Equals(owner.GetAsName PdfName.S)
             if expected.IsSome || artifact || (not (hasDescription owner) && empty mcid) then
-                forget document page mcid
+                forgetter.Forget page mcid
                 if expected.IsNone then
                     match byPage.TryGetValue page with
                     | true, mcids -> mcids.Add mcid |> ignore
                     | _ -> byPage[page] <- HashSet [mcid]
                     discarded <- discarded + 1
             else
-                context.Notes.Add $"Page {page}, MCID {mcid} has content associated with a tag outside the reading order. It was kept: choose its place in Structure before appending."
+                kept[page] <- (match kept.TryGetValue page with | true, n -> n + 1 | _ -> 1)
+        for KeyValue(page, count) in kept do
+            context.Notes.Add
+                $"Page {page}: {count} piece(s) of content are tied to a tag that isn't in the tags any more, and draw something or have a description, so they were kept as they are. Their tag needs putting back where the PDF was made, or in a PDF editor's tags panel."
         ContentArtifacts.mark document byPage
         let entries =
             match resolve ((document.GetStructTreeRoot().GetPdfObject()).Get PdfName.ParentTree) with
@@ -315,4 +346,4 @@ let rebuild (document: PdfDocument) context : string list =
               if missing.TreeMissing then $"Rebuilt the missing parent tree, so the tags are found for {what}."
               else $"Completed the parent tree, so the tags are found for {what}."
           if discarded > 0 then
-              $"Removed {discarded} obsolete parent-tree association(s), marking their empty or explicitly decorative content as artifacts without changing the page." ]
+              $"Untied {discarded} piece(s) of content from tags that aren't in the tags any more, marking them as not read (they draw nothing, or their tag said they were artifacts); the page looks the same." ]

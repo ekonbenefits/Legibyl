@@ -45,7 +45,24 @@ let private create (path: string) role orphan draw description =
         | "text" -> text "Important disclosure text." c
         | "space" -> text " " c
         | "shape" -> c.Rectangle(72.0, 600.0, 30.0, 30.0).Fill() |> ignore
+        // Glyphs drawn in a font that says nothing of the characters they are: read as no text.
+        | "unreadable" -> c.GetContentStream().GetOutputStream().WriteString("BT /Unreadable 12 Tf 72 650 Td <0102> Tj ET\n") |> ignore
         | _ -> c.SaveState().Rectangle(72.0, 600.0, 30.0, 30.0).Clip().EndPath().RestoreState() |> ignore)
+    if draw = "unreadable" then
+        let font = PdfDictionary()
+        font.Put(PdfName.Type, PdfName.Font) |> ignore
+        font.Put(PdfName.Subtype, PdfName.Type1) |> ignore
+        font.Put(PdfName.BaseFont, PdfName "Helvetica") |> ignore
+        let encoding = PdfDictionary()
+        let differences = PdfArray()
+        differences.Add(PdfNumber 1)
+        differences.Add(PdfName "g01")
+        differences.Add(PdfName "g02")
+        encoding.Put(PdfName.Differences, differences) |> ignore
+        font.Put(PdfName.Encoding, encoding) |> ignore
+        let resources = page.GetResources().GetPdfObject()
+        let fonts = resources.GetAsDictionary PdfName.Font |> Option.ofObj |> Option.defaultWith (fun () -> let d = PdfDictionary() in resources.Put(PdfName.Font, d) |> ignore; d)
+        fonts.Put(PdfName "Unreadable", font) |> ignore
     // The old pruning code removed /K directly, leaving iText's reverse registry untouched.
     if orphan then parent.GetPdfObject().GetAsArray(PdfName.K).Remove 1
     if draw = "missing-k" then
@@ -99,6 +116,7 @@ let ``obsolete reverse tags become real artifacts without changing visible or ac
 [<InlineData("Figure", "shape", false)>]
 [<InlineData("Figure", "clip", true)>]
 [<InlineData("P", "actual-text", false)>]
+[<InlineData("P", "unreadable", false)>]
 let ``meaningful orphan content is reported and never silently removed`` role draw description =
     use input = new TempPdf()
     use output = new TempPdf()
@@ -106,7 +124,7 @@ let ``meaningful orphan content is reported and never silently removed`` role dr
     let result = fix input.Path output.Path PdfFixOptions.ParentTree
     result.WasFixed |> should be False
     File.Exists output.Path |> should be False
-    result.NotApplied |> Seq.exists (fun line -> line.Contains "Page 1, MCID 1") |> should be True
+    result.NotApplied |> Seq.exists (fun line -> line.StartsWith "Page 1: 1 piece(s) of content are tied to a tag that isn't in the tags any more") |> should be True
     warnings input.Path |> should haveLength 1
 
 [<Theory>]
@@ -169,3 +187,32 @@ let ``an existing page entry with a null or wrong slot is reconciled to the forw
     let actual = document.GetStructTreeRoot().FindMcrByMcid(document.GetPage(1).GetPdfObject(), 1).GetParent() :?> PdfStructElem
     actual.GetPdfObject().GetIndirectReference().GetObjNumber()
     |> should equal (expected.GetPdfObject().GetIndirectReference().GetObjNumber())
+
+[<Fact>]
+let ``an empty paragraph that draws something is warned of without the fix, which leaves it`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    create input.Path "P" false "shape" false
+    let empty =
+        VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1).Findings
+        |> Seq.filter (fun f -> f.Specification = "Legibyl" && f.TestNumber = 1)
+        |> Seq.exactlyOne
+    empty.FixOptions |> should equal PdfFixOptions.None
+    empty.ErrorMessage |> should startWith "The fix leaves this one"
+
+    (fix input.Path output.Path PdfFixOptions.EmptyParagraphs).WasFixed |> should be False
+
+[<Fact>]
+let ``untying content from a tag that's gone leaves no tag of its own behind`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    create input.Path "P" true "space" false
+
+    (fix input.Path output.Path PdfFixOptions.ParentTree).WasFixed |> should be True
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    [ for i in 1 .. document.GetNumberOfPdfObjects() - 1 do
+          match document.GetPdfObject i with
+          | :? PdfDictionary as d when PdfName.StructElem.Equals(d.GetAsName PdfName.Type) && PdfName.Span.Equals(d.GetAsName PdfName.S) -> d
+          | _ -> () ]
+    |> should be Empty

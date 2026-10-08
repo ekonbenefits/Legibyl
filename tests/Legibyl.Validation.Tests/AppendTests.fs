@@ -351,6 +351,10 @@ let ``passing inputs with orphan parent entries are refused without guessing sib
     Assert.Contains("parent tree entry", refusal.Reason)
     Assert.Contains("isn't in the tags", refusal.Reason)
     Assert.Contains("doesn't fix tags or guess where they belong", refusal.Reason)
+    // Page content tied to a tag that's gone: Rebuild the parent tree is offered; an
+    // annotation's tag that's gone isn't something it fixes.
+    if count = 1 then Assert.Contains("Choose Rebuild the parent tree", refusal.Reason)
+    else Assert.Contains("Export it again with tags", refusal.Reason)
     File.Exists joined |> should equal false
     File.ReadAllBytes orphan |> should equal original
     // A refusal must also leave an existing destination intact.

@@ -137,11 +137,20 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
     let expected = Dictionary<int * int, PdfDictionary>()
     let seen = HashSet<PdfDictionary>(HashIdentity.Reference)
     let mutable problem = None
+    let disagree detail = $"Its tags and its parent tree (which ties the page content to its tags) disagree: {detail}. Joined as it is, some content would lose its tag or get another."
+    /// Something only the tags' maker can put right.
     let fail detail =
         if problem.IsNone then
             problem <-
                 Some
-                    $"Its tags and its parent tree (which ties the page content to its tags) disagree: {detail}. Joined as it is, some content would lose its tag or get another. Export it again with tags from the tool that made it, or have the tags fixed in a PDF editor, then check it and join it again. Appending doesn't fix tags or guess where they belong."
+                    $"{disagree detail} Export it again with tags from the tool that made it, or have the tags fixed in a PDF editor, then check it and join it again. Appending doesn't fix tags or guess where they belong."
+    /// Page content tied to the wrong tag, or to none: Rebuild the parent tree ties it to the tag
+    /// holding it, and unties it from a tag no longer in the tags if it draws nothing.
+    let failContent detail =
+        if problem.IsNone then
+            problem <-
+                Some
+                    $"{disagree detail} Choose Rebuild the parent tree in Auto Fixes… (or legibyl fix --fixes parent-tree), and join the fixed copy: it ties content to the tag holding it, and unties it from tags no longer in the tags where it draws nothing. Content it can't place is kept, and said; its tag then needs putting back where the PDF was made, or in a PDF editor. Appending doesn't fix tags or guess where they belong."
     let same (a: PdfDictionary) (b: PdfDictionary) =
         obj.ReferenceEquals(a, b)
         || (not (isNull (a.GetIndirectReference())) && a.GetIndirectReference().Equals(b.GetIndirectReference()))
@@ -228,7 +237,7 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
     for KeyValue((key, mcid), element) in expected do
         match entries.TryGetValue key with
         | true, (:? PdfArray as array) when mcid >= 0 && mcid < array.Size() && matches (array.Get mcid) element -> ()
-        | _ -> fail $"content {mcid} (parent tree entry {key}) isn't tied to the tag holding it"
+        | _ -> failContent $"content {mcid} (parent tree entry {key}) isn't tied to the tag holding it"
     for KeyValue(key, element) in objects do
         match entries.TryGetValue key with
         | true, value when matches value element -> ()
@@ -241,7 +250,7 @@ let private structureProblem (document: PdfDocument) (root: PdfDictionary) =
                 if not (isNull value) && not (value :? PdfNull) then
                     match expected.TryGetValue((key, mcid)) with
                     | true, element when matches value element -> ()
-                    | _ -> fail $"content {mcid} (parent tree entry {key}) is tied to a tag that isn't in the tags"
+                    | _ -> failContent $"content {mcid} (parent tree entry {key}) is tied to a tag that isn't in the tags"
         | :? PdfDictionary as element ->
             match objects.TryGetValue key with
             | true, expected when same element expected -> ()
@@ -277,7 +286,7 @@ let private read (file: string) : Result<Input, Refusal list> =
                   else
                       let context = StructureTreeObjects.createContext document file
                       match ParentTree.find document context with
-                      | Some missing when missing.TreeMissing -> refuse "Its parent tree (which ties the page content to its tags) is missing. Run Rebuild the parent tree (parent-tree) and append the fixed copy."
+                      | Some missing when missing.TreeMissing -> refuse "Its parent tree (which ties the page content to its tags) is missing. Choose Rebuild the parent tree in Auto Fixes… (or legibyl fix --fixes parent-tree), and join the fixed copy."
                       | _ ->
                           match structureProblem document (catalog.GetAsDictionary PdfName.StructTreeRoot |> nonNull) with
                           | Some reason -> refuse reason

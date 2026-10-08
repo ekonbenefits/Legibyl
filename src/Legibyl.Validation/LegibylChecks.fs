@@ -225,7 +225,7 @@ let private parentTreeFindings (document: PdfDocument) context =
             [ if missing.TreeMissing then "The parent tree is missing."
               if missing.Pages > 0 then $"{pages} missing or incorrect entries in it."
               if missing.Objects > 0 then $"{objects} missing or incorrect entries in it." ]
-            @ [ if missing.Associations > 0 then $"{missing.Associations} content association(s) disagree with the reading order." ]
+            @ [ if missing.Associations > 0 then $"{missing.Associations} piece(s) of content are tied to the wrong tag, or to one that isn't in the tags." ]
             |> String.concat " "
         [ warning ParentTreeMessage detail "StructTreeRoot" 9 PdfFixOptions.ParentTree null ]
 
@@ -383,9 +383,22 @@ let run (document: PdfDocument) context : RuleViolation list =
     | null -> []
     | structTreeRoot ->
         let visits = walk structTreeRoot context |> List.ofSeq
+        // An empty tag the fix would keep (it draws something, or has a description) is still
+        // warned of, but without offering the fix, which would do nothing.
+        let discardable = lazy (ParentTree.discardable document context)
+        let pruned = PdfFixOptions.EmptyParagraphs ||| PdfFixOptions.EmptyTocEntries
         [ for check in all do
               for visit in visits do
                   match check.Inspect context visit with
+                  | Some finding when pruned.HasFlag check.FixOptions && check.FixOptions <> PdfFixOptions.None
+                                      && not (discardable.Value visit.Element visit.Page) ->
+                      warning
+                          check.Message
+                          "The fix leaves this one: it draws something, has a description, or its content isn't on the page. Check it in Structure…."
+                          finding.Location
+                          check.TestNumber
+                          PdfFixOptions.None
+                          (Option.toObj finding.Geometry)
                   | Some finding ->
                       warning check.Message null finding.Location check.TestNumber check.FixOptions (Option.toObj finding.Geometry)
                   | None -> ()
