@@ -580,7 +580,7 @@ let read (pdfPath: string) (progress: IProgress<StructureReadProgress> | null) :
             // And what its pages draw outside every tag, for a person to mark (see UntaggedContent).
             let outside = try UntaggedContent.nodes pdfPath with _ -> []
             // (Read on its own: if it can't be, the tags are shown without it.)
-            let disconnected = try DisconnectedContent.nodes pdfPath with _ -> []
+            let disconnected = try DisconnectedContent.nodes pdfPath context.TextIndex with _ -> []
             let children = Array.concat [tagged; Array.ofList outside; Array.ofList disconnected]
             { Tag = "StructTreeRoot"
               Role = null
