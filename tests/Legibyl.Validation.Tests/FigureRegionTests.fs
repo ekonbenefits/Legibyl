@@ -530,9 +530,115 @@ let ``a shading elsewhere on the page doesn't stop the Figure`` () =
                 iText.Kernel.Pdf.Colorspace.PdfDeviceCs.Rgb(), 400f, 100f, [| 1f; 0f; 0f |], 450f, 150f, [| 0f; 0f; 1f |])
         canvas.SaveState().Rectangle(400.0, 100.0, 50.0, 50.0).Clip().EndPath().PaintShading(shading).RestoreState() |> ignore) input.Path
 
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+/// The page's content, as text.
+let private contentOf (path: string) =
+    use document = new PdfDocument(new PdfReader(path))
+    Text.Encoding.Latin1.GetString(document.GetPage(1).GetContentBytes())
+
+[<Fact>]
+let ``a shading clipped inside the region goes into the Figure, measured by its clip`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    createWith (fun _ _ canvas ->
+        let shading =
+            iText.Kernel.Pdf.Colorspace.Shading.PdfAxialShading(
+                iText.Kernel.Pdf.Colorspace.PdfDeviceCs.Rgb(), 130f, 520f, [| 1f; 0f; 0f |], 170f, 560f, [| 0f; 0f; 1f |])
+        canvas.SaveState().Rectangle(130.0, 520.0, 40.0, 40.0).Clip().EndPath().PaintShading(shading).RestoreState() |> ignore) input.Path
+
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+    // The marked content around the shading is the Figure's.
+    let content = contentOf output.Path
+    let at = Text.RegularExpressions.Regex.Match(content, @"/\w+ sh\b").Index
+    let opened = content.LastIndexOf("BDC", at)
+    content.Substring(content.LastIndexOf('/', content.LastIndexOf("<<", opened)), 7) |> should equal "/Figure"
+    content.Substring(opened, at - opened).Contains "EMC" |> should be False
+
+[<Fact>]
+let ``text in a text object that's only partly marked refuses the region, rather than being left out`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    createWith (fun _ _ canvas ->
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        canvas.BeginText().SetFontAndSize(font, 10f).MoveText(130.0, 540.0)
+            .BeginMarkedContent(PdfName.Artifact).ShowText("Marked").EndMarkedContent()
+            .ShowText(" and not").EndText() |> ignore) input.Path
+
     let result = apply input.Path output.Path [ edit ]
 
-    result.WasFixed |> should be True
+    result.WasFixed |> should be False
+    result.NotApplied |> Seq.exists (fun s -> s.Contains "marked only in part") |> should be True
+
+[<Fact>]
+let ``the Figure goes at the first selected content in reading order, not at a later piece a section holds`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.SetTagged() |> ignore
+        document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+        let page = document.AddNewPage PageSize.LETTER
+        let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+        let canvas = PdfCanvas page
+        let top = PdfStructElem(document, PdfName.Document)
+        document.GetStructTreeRoot().AddKid top |> ignore
+        let section = PdfStructElem(document, PdfName.Sect, page)
+        top.AddKid section |> ignore
+        let mark (holder: PdfStructElem) (value: string) x y =
+            let mcr = PdfMcrNumber(page, holder)
+            holder.AddKid mcr |> ignore
+            let properties = PdfDictionary()
+            properties.Put(PdfName.MCID, PdfNumber(mcr.GetMcid())) |> ignore
+            canvas.BeginMarkedContent(PdfName.P, properties).BeginText().SetFontAndSize(font, 12f).MoveText(x, y).ShowText(value).EndText().EndMarkedContent() |> ignore
+        // A selected label in a paragraph, an unselected paragraph, then a selected label the
+        // section holds itself.
+        for value, x, y in [ "Early label", 75.0, 610.0; "Unrelated", 400.0, 700.0 ] do
+            let paragraph = PdfStructElem(document, PdfName.P, page)
+            section.AddKid paragraph |> ignore
+            mark paragraph value x y
+        mark section "Late label" 75.0 520.0
+
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+    let tree = VeraPdfValidator().ReadStructureTree output.Path |> nonNull |> nodes
+    let section = tree |> List.find (fun n -> n.Tag = "Sect")
+    [ for n in section.Children -> n.Tag, string n.Content ] |> List.map fst |> should equal [ "Figure"; "P" ]
+
+[<Fact>]
+let ``the language its content says is kept on the Figure, and a tag's replacement text is said`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.SetTagged() |> ignore
+        document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+        let page = document.AddNewPage PageSize.LETTER
+        let canvas = PdfCanvas page
+        let top = PdfStructElem(document, PdfName.Document)
+        document.GetStructTreeRoot().AddKid top |> ignore
+        let paragraph = PdfStructElem(document, PdfName.P, page)
+        paragraph.GetPdfObject().Put(PdfName.ActualText, PdfString "Ventas") |> ignore
+        top.AddKid paragraph |> ignore
+        let mcr = PdfMcrNumber(page, paragraph)
+        paragraph.AddKid mcr |> ignore
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber(mcr.GetMcid())) |> ignore
+        properties.Put(PdfName.Lang, PdfString "es-ES") |> ignore
+        canvas.BeginMarkedContent(PdfName.P, properties).BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 12f)
+            .MoveText(75.0, 610.0).ShowText("Ventas").EndText().EndMarkedContent() |> ignore
+
     match ElementEdits.figureRegionPreview input.Path region with
-    | Ok summary -> summary |> should haveSubstring "shadings (gradients)"
+    | Ok summary -> summary |> should haveSubstring "Replacement text on some of it is replaced by your alt text."
     | Error reason -> failwith reason
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    let figure =
+        [ for i in 1 .. document.GetNumberOfPdfObjects() - 1 do
+              match document.GetPdfObject i with
+              | :? PdfDictionary as d when PdfName.Figure.Equals(d.GetAsName PdfName.S) -> d
+              | _ -> () ]
+        |> List.exactlyOne
+    figure.GetAsString(PdfName.Lang).ToUnicodeString() |> should equal "es-ES"

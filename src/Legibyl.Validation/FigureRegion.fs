@@ -35,7 +35,9 @@ type Part =
       Mcid: int option
       Marked: bool
       /// Its marked content had replacement text (/ActualText), which the alt text replaces.
-      Described: bool }
+      Described: bool
+      /// Its marked content's language (/Lang), if it said.
+      Lang: string option }
 
 type Plan =
     { Parts: Part list
@@ -46,6 +48,8 @@ type Plan =
       Box: iText.Kernel.Geom.Rectangle option
       /// The first MCID free on the page: past every one its content uses, in the tags or not.
       NextMcid: int
+      /// The language the selected content and the tags it empties say, if they say one.
+      Lang: string option
       Summary: string }
 
 let private intersects (region: StructureGeometry) (box: iText.Kernel.Geom.Rectangle) =
@@ -150,14 +154,16 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                 let beyond = ResizeArray<iText.Kernel.Geom.Rectangle>()
                 // What the selected content draws, for the Figure's box.
                 let selectedBoxes = ResizeArray<iText.Kernel.Geom.Rectangle>()
-                // (A shading's extent can't be measured: one in the selection is refused below;
-                // elsewhere on the page it's left as it is.)
-                let shadings = operations |> Seq.exists (fun op -> op.Name = "sh")
+                // Every operator some piece covers, considered or not: what's drawn and covered by
+                // none can't be told in or out.
+                let covered = HashSet<int>()
+                // (A shading is measured by the clip it's painted in: see DrawnByOperator.)
                 for index in 0 .. operations.Count - 1 do
                     let op = operations[index]
-                    if (op.Name = "Do" || op.Name = inlineImage || textShowing.Contains op.Name) && not (drawn.ContainsKey index) then
+                    if (op.Name = "Do" || op.Name = inlineImage || op.Name = "sh" || textShowing.Contains op.Name) && not (drawn.ContainsKey index) then
                         fail "something on the page can't be measured (an image or form that can't be read), so what's in the region isn't known"
-                let inspect first last mcid marked described supported =
+                let inspect first last mcid marked described lang supported =
+                    for k in first .. last do covered.Add k |> ignore
                     let boxes =
                         [ for i in first .. last do
                               match drawn.TryGetValue i with
@@ -174,7 +180,7 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                             | Some id when not (owners.ContainsKey((edit.Page, id))) ->
                                 fail "some content in the region is marked as tagged, but isn't in any tag"
                             | _ ->
-                                parts.Add { First = first; Last = last; Mcid = mcid; Marked = marked; Described = described }
+                                parts.Add { First = first; Last = last; Mcid = mcid; Marked = marked; Described = described; Lang = lang }
                                 selectedBoxes.AddRange boxes
                                 beyond.AddRange(boxes |> List.filter (not << contains edit.Box))
                 let mutable i = 0
@@ -217,7 +223,12 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                                     match p.GetAsString PdfName.ActualText with
                                     | NonNull text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString()))
                                     | Null -> false)
-                            inspect first (i - 1) mcid true described (not nested && appearanceSafe && (artifact || mcid.IsSome))
+                            let lang =
+                                properties
+                                |> Option.bind (fun p -> Option.ofObj (p.GetAsString PdfName.Lang))
+                                |> Option.map _.ToUnicodeString()
+                                |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                            inspect first (i - 1) mcid true described lang (not nested && appearanceSafe && (artifact || mcid.IsSome))
                     elif op.Name = "EMC" then
                         fail "the page's marked content isn't closed properly"
                         i <- i + 1
@@ -226,14 +237,26 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                 if why.IsNone then
                     for piece in UntaggedContent.piecesOn page edit.Page do
                         for unit in piece.Units do
-                            inspect unit.First unit.Last None false false true
+                            inspect unit.First unit.Last None false false None true
+                // Something drawn in the region that no piece covers (text outside marked content,
+                // in a text object that also holds some): it can't be told in or out, so it's refused.
+                if why.IsNone then
+                    for index in 0 .. operations.Count - 1 do
+                        let op = operations[index]
+                        let paints =
+                            op.Name = "Do" || op.Name = inlineImage || op.Name = "sh" || textShowing.Contains op.Name
+                            || (pathPainting.Contains op.Name && op.Name <> "n")
+                        if paints && not (covered.Contains index) then
+                            match drawn.TryGetValue index with
+                            | true, found when found |> Seq.exists (fun d -> intersects edit.Box d.Box) ->
+                                fail "some of what's drawn in the region is marked only in part (text in a text object that's partly marked, say), so it can't be told in or out"
+                            | _ -> ()
                 let selected = List.ofSeq parts
                 // A form may carry its own tags, shared across invocations. Don't relabel it
                 // through a page MCID and silently orphan its stream parent-tree entries.
                 for part in selected do
                     for i in part.First .. part.Last do
                         let op = operations[i]
-                        if op.Name = "sh" then fail "the region includes a shading (a gradient) whose extent can't be measured"
                         if op.Name = "Do" && op.Operands.Length > 0 then
                             match op.Operands[0] with
                             | :? PdfName as name ->
@@ -321,10 +344,29 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                         else
                             let boxes = beyond |> Seq.map (fun box -> $"[{coordinates box}]") |> String.concat "; "
                             $" Some of it reaches outside the rectangle (each piece goes in whole when most of it is inside), at left, bottom, right, top in points: {boxes}."
+                    // Replacement text the alt text takes the place of: on the marked content, or on a tag
+                    // whose content all goes (and the tag with it).
+                    let ownerText =
+                        ownerPairs
+                        |> List.exists (fun (_, owner) ->
+                            match owner.GetAsString PdfName.ActualText with
+                            | NonNull text -> not (String.IsNullOrWhiteSpace(text.ToUnicodeString()))
+                            | Null -> false)
                     let replaced =
-                        if selected |> List.exists _.Described then " Replacement text on some of it is replaced by your alt text." else ""
-                    let shaded =
-                        if shadings then " The page has shadings (gradients), whose extent can't be measured: they're left as they are." else ""
+                        if ownerText || (selected |> List.exists _.Described) then " Replacement text on some of it is replaced by your alt text." else ""
+                    // Its language: what the selected content and the tags it empties say, if one.
+                    let langs =
+                        [ yield! selected |> List.choose _.Lang
+                          for _, owner in ownerPairs do
+                              match owner.GetAsString PdfName.Lang with
+                              | NonNull lang when not (String.IsNullOrWhiteSpace(lang.ToUnicodeString())) -> lang.ToUnicodeString()
+                              | _ -> () ]
+                        |> List.distinct
+                    let lang = match langs with [ one ] -> Some one | _ -> None
+                    let languages =
+                        if langs.Length > 1 then
+                            $""" Parts of it say different languages ({String.Join(", ", langs)}): the Figure says none, so its alt text is read in the document's."""
+                        else ""
                     let union =
                         selectedBoxes
                         |> Seq.reduce (fun a b ->
@@ -336,8 +378,9 @@ let plan (document: PdfDocument) context (edit: ElementEdit) : Result<Plan, stri
                     Ok { Parts = selected; Bytes = bytes; Operations = operations; Owners = ownerPairs
                          Box = Some union
                          NextMcid = nextMcid
+                         Lang = lang
                          Summary =
-                           $"{selected.Length} piece(s) of content, {ids.Length} of them tagged.{extended}{replaced}{shaded} Text in the region: {text}" }
+                           $"{selected.Length} piece(s) of content, {ids.Length} of them tagged.{extended}{replaced}{languages} Text in the region: {text}" }
     with
     | :? iText.Kernel.Exceptions.PdfException as ex ->
         Error $"the page content couldn't be read safely: {ex.Message}"
@@ -359,6 +402,8 @@ let apply (document: PdfDocument) context (edit: ElementEdit) =
             let tagOf (dictionary: PdfDictionary) = standardTag dictionary context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
             let figure = PdfStructElem(document, PdfName.Figure, page)
             figure.SetAlt(PdfString(edit.Alt, iText.IO.Font.PdfEncodings.UNICODE_BIG)) |> ignore
+            // The language its content said, kept on the Figure (its alt text is in it).
+            plan.Lang |> Option.iter (fun lang -> figure.GetPdfObject().Put(PdfName.Lang, PdfString lang) |> ignore)
             // Where it's drawn: its Layout /BBox, which a Figure on one page has (ISO 32000, 14.8.5.4.3).
             match plan.Box with
             | Some box ->
@@ -386,19 +431,28 @@ let apply (document: PdfDocument) context (edit: ElementEdit) =
                 | _ ->
                     let index = root.GetKids() |> Seq.tryFindIndex (isElement dictionary) |> Option.defaultValue (root.GetKids().Count)
                     root.AddKid(index + (if after then 1 else 0), figure) |> ignore
-            // The Figure goes where its first content was read.
-            let visits = walk (root.GetPdfObject()) context |> List.ofSeq
-            let first = visits |> List.tryFind (fun v -> plan.Owners |> List.exists (fun (_, o) -> obj.ReferenceEquals(o, v.Element)))
+            // The Figure goes where its first content was read: the first selected content met going
+            // through each tag's kids in order (the tag holding it, and its place there).
+            let rec firstIn (element: PdfStructElem) depth : (PdfStructElem * int) option =
+                if depth > 200 then None
+                else
+                    element.GetKids()
+                    |> Seq.indexed
+                    |> Seq.tryPick (fun (index, kid) ->
+                        match kid with
+                        | kid when isMcrOf selectedIds kid -> Some(element, index)
+                        | :? PdfStructElem as child -> firstIn child (depth + 1)
+                        | _ -> None)
+            let first =
+                root.GetKids()
+                |> Seq.tryPick (fun kid -> match kid with :? PdfStructElem as top -> firstIn top 0 | _ -> None)
             match first with
-            | Some visit when holds (tagOf visit.Element) ->
-                // A section, cell or item holding the content itself: among its kids, at the first
-                // selected content's place.
-                let owner = PdfStructElem visit.Element
-                let index = owner.GetKids() |> Seq.tryFindIndex (isMcrOf selectedIds) |> Option.defaultValue (owner.GetKids().Count)
+            | Some(owner, index) when holds (tagOf (owner.GetPdfObject())) ->
+                // A section, cell or item holding the content itself: at that content's place.
                 owner.AddKid(index, figure) |> ignore
-            | Some visit ->
+            | Some(owner, _) ->
                 // A tag all of whose content it takes: in that tag's place.
-                besides visit.Element false
+                besides (owner.GetPdfObject()) false
             | None ->
                 // Only content outside the tags: after what was drawn before it.
                 let resources = page.GetResources()

@@ -106,6 +106,9 @@ type DrawnByOperator(?strokeBounds: bool) =
     member val Depth = 0 with get, set
     member _.Current with set value = current <- value
     member _.Drawn = drawn
+    /// Whether a shading (sh) is measured by the clip it's painted in (for a region's ownership:
+    /// see FigureRegion), rather than left unmeasured.
+    member _.MeasuresShadings = defaultArg strokeBounds false
 
     member private _.Add(kind, box: Rectangle option) =
         match box with
@@ -114,6 +117,17 @@ type DrawnByOperator(?strokeBounds: bool) =
             | true, list -> list.Add { Kind = kind; Box = box }
             | _ -> drawn[current] <- List [ { Kind = kind; Box = box } ]
         | _ -> ()
+
+    /// A shading painted now: what it covers is the clip it's painted in.
+    member this.Shading(clip: iText.Kernel.Geom.Path | null) =
+        match clip with
+        | null -> ()
+        | clip ->
+            let points =
+                [ for subpath in clip.GetSubpaths() do
+                      for segment in subpath.GetSegments() do
+                          for point in segment.GetBasePoints() -> float32 (point.GetX()), float32 (point.GetY()) ]
+            this.Add(Path, boxOf points)
 
     interface IEventListener with
         member this.EventOccurred(data, eventType) =
@@ -159,6 +173,9 @@ type private CountingOperator(inner: IContentOperator, recorder: DrawnByOperator
             recorder.Depth <- recorder.Depth + 1
             try
                 inner.Invoke(processor, operator, operands)
+                // (The clip iText keeps is in device space already.)
+                if recorder.MeasuresShadings && recorder.Depth = 1 && string operator = "sh" then
+                    recorder.Shading(processor.GetGraphicsState().GetClippingPath())
             finally
                 recorder.Depth <- recorder.Depth - 1
 
@@ -174,6 +191,12 @@ let private collectDrawn strokeBounds (bytes: byte array) (resources: PdfResourc
         match processor.RegisterContentOperator(name, null) with
         | null -> ()
         | inner -> processor.RegisterContentOperator(name, CountingOperator(inner, recorder, next)) |> ignore
+    if recorder.MeasuresShadings then
+        // iText follows the clip only from a clip to start from (as processing a page does):
+        // everywhere, for content processed without its page.
+        let everywhere = iText.Kernel.Geom.Path()
+        everywhere.Rectangle(Rectangle(-1.0e5f, -1.0e5f, 2.0e5f, 2.0e5f))
+        processor.GetGraphicsState().SetClippingPath everywhere
     processor.ProcessContent(bytes, resources)
     recorder.Drawn
 
