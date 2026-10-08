@@ -64,7 +64,7 @@ let find (document: PdfDocument) context : Top option =
                 | name when Tags.standard.Contains name -> name
                 | _ -> standardTag e context |> Option.ofObj |> Option.map _.GetValue() |> Option.defaultValue ""
             match elements with
-            | [ single ] when tag single = "Document" ->
+            | [ single ] when tag single = Tags.Document ->
                 if not (isPdf2 document) then Some Fine
                 elif not (PdfName.Document.Equals(single.GetAsName PdfName.S)) then
                     Some(Left $"its top tag, {single.GetAsName(PdfName.S).GetValue()}, only maps to Document, which PDF 2.0 doesn't count as one")

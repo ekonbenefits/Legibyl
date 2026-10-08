@@ -42,7 +42,7 @@ let private headingLevel (tag: PdfName | null) =
     | null -> None
     | tag ->
         match tag.GetValue() with
-        | "H" -> Some 0 // a heading, but its level comes from nesting, not its tag
+        | Tags.H -> Some 0 // a heading, but its level comes from nesting, not its tag
         | value when Regex.IsMatch(value, "^H[1-6]$") -> Some(int value[1..])
         | _ -> None
 

@@ -41,8 +41,8 @@ type Refusal = { File: string | null; Reason: string }
 /// The tags a part can be, by standard.
 let partTags (profile: PdfProfile) =
     match profile with
-    | PdfProfile.PdfUa2 -> [ "DocumentFragment"; "Sect"; "Part" ]
-    | _ -> [ "Sect"; "Part" ]
+    | PdfProfile.PdfUa2 -> [ Tags.DocumentFragment; Tags.Sect; Tags.Part ]
+    | _ -> [ Tags.Sect; Tags.Part ]
 
 // ---- Reading the inputs ----
 
@@ -415,7 +415,7 @@ let private standardTag (roleMap: PdfDictionary | null) (element: PdfDictionary)
 /// root holds just that, else its root's own elements; and that Document, if there is one.
 let private partSource (root: PdfDictionary) =
     match kidElements root with
-    | [ only ] when standardTag (root.GetAsDictionary PdfName.RoleMap) only = Some "Document" -> kidElements only, Some only
+    | [ only ] when standardTag (root.GetAsDictionary PdfName.RoleMap) only = Some Tags.Document -> kidElements only, Some only
     | tops -> tops, None
 
 /// A PDF object written out to compare by: what two class definitions say.
@@ -1137,7 +1137,7 @@ let differences (part: Part) (index: int) (input: StructureNode) (joined: Struct
     // An input's part: its Document's children, else its root's.
     let ownParts (root: StructureNode) =
         match children root with
-        | [ only ] when only.Tag = "Document" -> children only
+        | [ only ] when only.Tag = Tags.Document -> children only
         | tops -> tops
     let joinedPart =
         match ownParts joined |> List.tryItem index with

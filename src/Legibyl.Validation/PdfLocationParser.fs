@@ -23,32 +23,32 @@ let private ignoreCaseMap (pairs: (string * string) list) =
 
 let private friendlyNames =
     ignoreCaseMap
-        [ "Document", "document root"
-          "Table", "table"
-          "TR", "table row (TR)"
-          "TH", "table header cell (TH)"
-          "TD", "table cell (TD)"
-          "Figure", "figure"
-          "Link", "link"
-          "L", "list"
-          "LI", "list item"
-          "Lbl", "list item label"
-          "LBody", "list item body"
-          "P", "paragraph"
-          "Span", "text span"
-          "Div", "division"
-          "Sect", "section"
-          "Art", "article"
-          "H1", "heading (H1)"
-          "H2", "heading (H2)"
-          "H3", "heading (H3)"
-          "H4", "heading (H4)"
-          "H5", "heading (H5)"
-          "H6", "heading (H6)"
-          "Caption", "caption"
-          "THead", "table header group"
-          "TBody", "table body group"
-          "TFoot", "table footer group" ]
+        [ Tags.Document, "document root"
+          Tags.Table, "table"
+          Tags.TR, "table row (TR)"
+          Tags.TH, "table header cell (TH)"
+          Tags.TD, "table cell (TD)"
+          Tags.Figure, "figure"
+          Tags.Link, "link"
+          Tags.L, "list"
+          Tags.LI, "list item"
+          Tags.Lbl, "list item label"
+          Tags.LBody, "list item body"
+          Tags.P, "paragraph"
+          Tags.Span, "text span"
+          Tags.Div, "division"
+          Tags.Sect, "section"
+          Tags.Art, "article"
+          Tags.H1, "heading (H1)"
+          Tags.H2, "heading (H2)"
+          Tags.H3, "heading (H3)"
+          Tags.H4, "heading (H4)"
+          Tags.H5, "heading (H5)"
+          Tags.H6, "heading (H6)"
+          Tags.Caption, "caption"
+          Tags.THead, "table header group"
+          Tags.TBody, "table body group"
+          Tags.TFoot, "table footer group" ]
 
 let private typeOverrides =
     ignoreCaseMap
@@ -148,7 +148,7 @@ let Parse (locationContext: string | null) : PdfLocation | null =
 
         if breadcrumb.Count = 0 then
             // "root" alone is the document itself.
-            breadcrumb.Add(if isName "root" context then "Document" else context)
+            breadcrumb.Add(if isName "root" context then Tags.Document else context)
 
         { PageNumber = Option.toNullable pageNumber
           ObjectType = Option.toObj objectType

@@ -111,7 +111,7 @@ let current (pdfPath: string) (layout: SavedLayout) : SavedLayout =
 
 /// The tags a region can have. H is a heading whose level tagging decides (the next under the
 /// title); H1 to H6 are kept as they are.
-let tags = [ "H1"; "H"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "LI"; "Figure"; "Table"; "TH"; "TD"; "Caption"; "Note"; "Formula"; "Lbl"; "Artifact" ]
+let tags = [ Tags.H1; Tags.H; Tags.H2; Tags.H3; Tags.H4; Tags.H5; Tags.H6; Tags.P; Tags.LI; Tags.Figure; Tags.Table; Tags.TH; Tags.TD; Tags.Caption; Tags.Note; Tags.Formula; Tags.Lbl; Tags.Artifact ]
 
 let private jsonOptions =
     JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
@@ -138,7 +138,7 @@ let withFigureImages (layoutPath: string) (render: StructureGeometry -> byte arr
                    { page with
                        Regions =
                            [| for region in page.Regions ->
-                                  if region.Tag = "Figure" && region.Box.Length = 4 then
+                                  if region.Tag = Tags.Figure && region.Box.Length = 4 then
                                       Directory.CreateDirectory folder |> ignore
                                       let file = $"p{page.Page}-r{region.Order}.png"
                                       let geometry =
@@ -234,7 +234,7 @@ let covers (layout: SavedLayout) (pageCount: int) =
 /// The tags tagging from a layout writes as they are; any other a region has is written as a
 /// paragraph (P), its text read as text. A table's cells (TH, TD) are written in its rows; a
 /// Table with no cells is a paragraph.
-let taggedAsIs = set [ "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "LI"; "Figure"; "Note"; "Artifact"; "TH"; "TD" ]
+let taggedAsIs = set [ Tags.H; Tags.H1; Tags.H2; Tags.H3; Tags.H4; Tags.H5; Tags.H6; Tags.P; Tags.LI; Tags.Figure; Tags.Note; Tags.Artifact; Tags.TH; Tags.TD ]
 
 /// Why each of edits won't do what it says when tagging from layout: it matches no region (by
 /// page, tag and box), or it retags to a tag tagging writes as a paragraph. Links' descriptions
@@ -242,7 +242,7 @@ let taggedAsIs = set [ "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6"; "P"; "LI"; "Figu
 /// edits on pages the layout doesn't have yet.
 let unmatched (layout: SavedLayout) (edits: ElementEdit list) : string list =
     [ for edit in edits do
-          if edit.Tag <> "Link" && edit.MergeWith.IsEmpty then
+          if edit.Tag <> Tags.Link && edit.MergeWith.IsEmpty then
               match layout.Pages |> Array.tryFind (fun page -> page.Page = edit.Page) with
               | Some page ->
                   let matches =

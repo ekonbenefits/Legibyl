@@ -44,15 +44,15 @@ let read (pdfPath: string) : Facts =
                   | NonNull tag -> yield tag.GetValue(), visit.Element
                   | Null -> () ]
     let count tag = tags |> List.filter (fun (t, _) -> t = tag) |> List.length
-    let figures = tags |> List.filter (fun (t, _) -> t = "Figure")
+    let figures = tags |> List.filter (fun (t, _) -> t = Tags.Figure)
     { Title = title
       Language = language
       Figures = figures.Length
       FiguresWithAlt = figures |> List.filter (fun (_, e) -> not (isNull (e.Get PdfName.Alt))) |> List.length
       Headings =
-        [ for level in [ "H"; "H1"; "H2"; "H3"; "H4"; "H5"; "H6" ] do
+        [ for level in Tags.H :: Tags.headings do
               match count level with
               | 0 -> ()
               | n -> yield level, n ]
-      Tables = count "Table"
-      Links = count "Link" }
+      Tables = count Tags.Table
+      Links = count Tags.Link }

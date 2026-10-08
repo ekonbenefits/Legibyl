@@ -147,7 +147,7 @@ let rec private integerAttribute (key: string) (attributes: COSObject | null) =
 
 /// How many columns or rows a table cell spans: at least 1 (a missing or nonsense span is 1).
 let private cellSpan (key: string) (tag: string) (elem: PDStructElem) =
-    if tag = "TH" || tag = "TD" then
+    if tag = Tags.TH || tag = Tags.TD then
         integerAttribute key (elem.getKey (atom "A")) |> Option.filter (fun n -> n > 1) |> Option.defaultValue 1
     else
         1
@@ -496,9 +496,9 @@ and private toStructureNode (elem: PDStructElem) context inheritedPage depth : S
         |> List.tryPick (fun child -> readLinkTargetInfo child context)
         |> Option.orElseWith (fun () ->
             match geometry with
-            | Some geometry when tag = "Link" -> linkTargetByGeometry geometry context
+            | Some geometry when tag = Tags.Link -> linkTargetByGeometry geometry context
             | _ -> None)
-        |> Option.orElseWith (fun () -> if tag = "TOCI" then firstDescendantLinkTarget children else None)
+        |> Option.orElseWith (fun () -> if tag = Tags.TOCI then firstDescendantLinkTarget children else None)
 
     { Tag = tag
       Role = role

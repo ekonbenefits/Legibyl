@@ -260,7 +260,7 @@ let problems (json: string) : string list =
                                   match cell.ValueKind, (if cell.ValueKind = JsonValueKind.Object then cell.TryGetProperty "tag" else (false, Unchecked.defaultof<JsonElement>)) with
                                   | JsonValueKind.Object, (true, tag) when tag.ValueKind = JsonValueKind.String -> tag.GetString() |> string
                                   | _ -> ""
-                              if tag <> "TH" && tag <> "TD" then
+                              if tag <> Tags.TH && tag <> Tags.TD then
                                   $"edits[{index}].cells[{c}] is a \"{tag}\", not a header cell (TH) or a data cell (TD)."
                       | _ -> ()
                       match edit.TryGetProperty "retag" with
@@ -322,7 +322,7 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
             | NonNull cells ->
                 [ for cell in cells do
                       match geometry cell.Box with
-                      | Some box when cell.Tag = "TH" || cell.Tag = "TD" -> ({ Tag = cell.Tag; Box = box }: TableCell)
+                      | Some box when cell.Tag = Tags.TH || cell.Tag = Tags.TD -> ({ Tag = cell.Tag; Box = box }: TableCell)
                       | _ -> () ]
             | Null -> []
         if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude && move.IsNone && cells.IsEmpty then

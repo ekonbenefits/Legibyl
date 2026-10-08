@@ -240,7 +240,7 @@ let convert (document: PdfDocument) context (run: ParagraphJoins.JoinRun) (cells
                 let element = PdfStructElem(document, PdfName cell.Tag, page)
                 let attributes = PdfDictionary()
                 attributes.Put(PdfName.O, PdfName.Table) |> ignore
-                if cell.Tag = "TH" then attributes.Put(PdfName.Scope, if place.Row = 0 then PdfName.Column else PdfName.Row) |> ignore
+                if cell.Tag = Tags.TH then attributes.Put(PdfName.Scope, if place.Row = 0 then PdfName.Column else PdfName.Row) |> ignore
                 if place.RowSpan > 1 then attributes.Put(PdfName.RowSpan, PdfNumber place.RowSpan) |> ignore
                 if place.ColSpan > 1 then attributes.Put(PdfName.ColSpan, PdfNumber place.ColSpan) |> ignore
                 element.GetPdfObject().Put(PdfName.A, attributes) |> ignore

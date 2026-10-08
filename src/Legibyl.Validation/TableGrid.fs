@@ -81,14 +81,14 @@ let fitRows (rows: StructureGeometry list) (cells: TableCell list) : TableCell l
                       (if r = rows.Length - 1 then rows[r].Bottom else (rows[r].Bottom + rows[r + 1].Top) / 2.0) ]
             let header (top, bottom) =
                 let y = (top + bottom) / 2.0
-                cells |> List.exists (fun cell -> cell.Tag = "TH" && y <= cell.Box.Top && y >= cell.Box.Bottom)
+                cells |> List.exists (fun cell -> cell.Tag = Tags.TH && y <= cell.Box.Top && y >= cell.Box.Bottom)
             [ for top, bottom as band in bands do
-                  let tag = if header band then "TH" else "TD"
+                  let tag = if header band then Tags.TH else Tags.TD
                   for l, r in columns ->
                       { Tag = tag; Box = { rows[0] with Left = l; Right = r; Top = top; Bottom = bottom } } ]
 
 /// Whether a tag is a table cell's: a header cell (TH) or a data cell (TD).
-let isCell (tag: string) = tag = "TH" || tag = "TD"
+let isCell (tag: string) = tag = Tags.TH || tag = Tags.TD
 
 /// The cell of cells (by index) a piece drawn at geometry belongs in: the one its middle is in,
 /// else the nearest; the first, for one with no place. As a table's rebuild puts it (see

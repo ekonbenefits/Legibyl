@@ -17,61 +17,61 @@ let private known =
     dict [
         // Paragraphs: Word's, LibreOffice's, InDesign's.
         for name in [ "bodytext"; "textbody"; "normal"; "normalweb"; "para"; "paragraph"; "text"; "standard"; "default"; "defaultparagraphstyle"; "firstparagraph"; "bodytextindent"; "plaintext" ] do
-            name, "P"
-        "title", "H1"
-        "heading", "H"
+            name, Tags.P
+        "title", Tags.H1
+        "heading", Tags.H
         // Lists.
-        "list", "L"
+        "list", Tags.L
         for name in [ "listitem"; "listparagraph"; "listbullet"; "listnumber"; "bullet"; "bulleted"; "numberedlist"; "bulletedlist"; "listcontinue" ] do
-            name, "LI"
+            name, Tags.LI
         for name in [ "listlabel"; "label"; "bulletlabel" ] do
-            name, "Lbl"
+            name, Tags.Lbl
         for name in [ "listbody"; "listitembody" ] do
-            name, "LBody"
+            name, Tags.LBody
         // Captions and notes.
         for name in [ "caption"; "figurecaption"; "tablecaption" ] do
-            name, "Caption"
+            name, Tags.Caption
         for name in [ "footnote"; "footnotetext"; "endnote"; "endnotetext"; "note" ] do
-            name, "Note"
+            name, Tags.Note
         // Figures: Word writes InlineShape for a picture.
         for name in [ "image"; "picture"; "graphic"; "graphics"; "photo"; "chart"; "drawing"; "illustration"; "inlineshape"; "figure" ] do
-            name, "Figure"
+            name, Tags.Figure
         // Tables.
-        "table", "Table"
+        "table", Tags.Table
         for name in [ "tablerow"; "row" ] do
-            name, "TR"
+            name, Tags.TR
         for name in [ "tablecell"; "cell"; "tabledata" ] do
-            name, "TD"
+            name, Tags.TD
         for name in [ "tableheader"; "tableheading"; "tableheadercell"; "headercell" ] do
-            name, "TH"
+            name, Tags.TH
         for name in [ "tablehead"; "tableheaderrow" ] do
-            name, "THead"
-        "tablebody", "TBody"
-        "tablefoot", "TFoot"
+            name, Tags.THead
+        "tablebody", Tags.TBody
+        "tablefoot", Tags.TFoot
         // Contents and index.
         for name in [ "toc"; "tableofcontents"; "contents" ] do
-            name, "TOC"
+            name, Tags.TOC
         for name in [ "tocentry"; "tocitem"; "contentsentry" ] do
-            name, "TOCI"
-        "index", "Index"
+            name, Tags.TOCI
+        "index", Tags.Index
         // Blocks.
         for name in [ "section" ] do
-            name, "Sect"
+            name, Tags.Sect
         for name in [ "article" ] do
-            name, "Art"
+            name, Tags.Art
         for name in [ "division"; "div"; "textbox" ] do
-            name, "Div"
+            name, Tags.Div
         for name in [ "blockquote"; "blocktext"; "quotation" ] do
-            name, "BlockQuote"
+            name, Tags.BlockQuote
         // Inline.
         for name in [ "span"; "emphasis"; "strong"; "em"; "bold"; "italic"; "characterstyle" ] do
-            name, "Span"
+            name, Tags.Span
         for name in [ "link"; "hyperlink" ] do
-            name, "Link"
+            name, Tags.Link
         for name in [ "code"; "sourcecode"; "preformatted"; "htmlpreformatted" ] do
-            name, "Code"
+            name, Tags.Code
         for name in [ "formula"; "equation"; "math" ] do
-            name, "Formula"
+            name, Tags.Formula
     ]
 
 /// The standard tag a PDF's own tag name says it is, if it does: a heading by its level
@@ -87,7 +87,7 @@ let guess (name: string) : string option =
     elif level.Success then
         Some $"H{level.Groups[2].Value}"
     elif Regex.IsMatch(plain, "^(toc|contents)[1-9]$") then
-        Some "TOCI"
+        Some Tags.TOCI
     else
         match known.TryGetValue plain with
         | true, tag -> Some tag
