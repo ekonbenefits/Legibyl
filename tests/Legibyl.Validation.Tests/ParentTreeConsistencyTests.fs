@@ -388,3 +388,18 @@ let ``a tag that's gone, which said it was decoration, says so rather than that 
 
     gone.FixOptions |> should equal PdfFixOptions.ParentTree
     gone.ErrorMessage |> should haveSubstring "Its tag said it was decoration"
+
+[<Fact>]
+let ``each tag that's gone has its own warning, dismissed on its own`` () =
+    use input = new TempPdf()
+    createPieces input.Path [ "One."; "Two." ] false (fun top _ ->
+        let kids = top.GetPdfObject().GetAsArray PdfName.K
+        kids.Remove 2
+        kids.Remove 1)
+
+    let gone = warnings input.Path
+
+    gone |> List.map _.TestNumber |> should equal [ 17; 17 ]
+    gone |> List.map _.LocationContext |> List.distinct |> should haveLength 2
+    // Still read as the structure tree's, where it's shown.
+    gone |> List.forall (fun w -> (nonNull w.Location).Breadcrumb.StartsWith "Structure tree") |> should be True

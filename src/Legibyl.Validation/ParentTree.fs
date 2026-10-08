@@ -16,17 +16,21 @@ type Tagged =
     { /// (page, MCID) -> the element whose content it is.
       MarkedContent: IReadOnlyDictionary<int * int, PdfDictionary>
       /// Annotations (and other objects) the tree holds by /OBJR, by object number.
-      Objects: IReadOnlyDictionary<int, PdfDictionary> }
+      Objects: IReadOnlyDictionary<int, PdfDictionary>
+      /// Every tag in the tags (reached from the root).
+      Reachable: IReadOnlySet<PdfDictionary> }
 
 /// What's tagged, read from the structure tree itself rather than the parent tree.
 let tagged (document: PdfDocument) context : Tagged =
     let markedContent = Dictionary<int * int, PdfDictionary>()
     let objects = Dictionary<int, PdfDictionary>()
+    let reachable = HashSet<PdfDictionary>(HashIdentity.Reference)
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> ()
     | root ->
         for visit in walk root context do
             let element = visit.Element
+            reachable.Add element |> ignore
             if not (isNull (element.GetAsName PdfName.S)) then
                 // Its content: by MCID, by marked-content reference (/MCR, maybe on a page of its
                 // own), or by object reference (/OBJR, an annotation).
@@ -50,7 +54,7 @@ let tagged (document: PdfDocument) context : Tagged =
                     for i in 0 .. kids.Size() - 1 do
                         kid (kids.Get i)
                 | only -> kid only
-    { MarkedContent = markedContent; Objects = objects }
+    { MarkedContent = markedContent; Objects = objects; Reachable = reachable }
 
 /// A number tree's entries, following /Kids.
 let private numbers (tree: PdfDictionary) : IReadOnlyDictionary<int, PdfObject> =
@@ -73,13 +77,19 @@ let private numbers (tree: PdfDictionary) : IReadOnlyDictionary<int, PdfObject> 
     read tree 0
     entries
 
-/// Reverse associations that disagree with the reachable, forward structure tree.
-let inconsistent (document: PdfDocument) context =
-    let forward = tagged document context
+/// The page content the parent tree ties to another tag than the one holding it (forward, what
+/// tagged read): (page, MCID, the tag it's tied to, the tag holding it, if any). None for a PDF
+/// with no tags.
+let rec inconsistentWith (forward: Tagged) (document: PdfDocument) =
+    match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
+    | null -> []
+    | _ -> inconsistentIn forward document
+
+and private inconsistentIn (forward: Tagged) (document: PdfDocument) =
     let root = document.GetStructTreeRoot().GetPdfObject()
-    // The tags in the tags: content tied to one of them, though not where its content was found
-    // (no page anywhere, say), isn't tied to a tag that's gone, and is left alone.
-    let reachable = HashSet<PdfDictionary>(seq { for visit in walk root context -> visit.Element }, HashIdentity.Reference)
+    // Content tied to a tag in the tags, though not where its content was found (no page
+    // anywhere, say), isn't tied to a tag that's gone, and is left alone.
+    let reachable = forward.Reachable
     let entries =
         match root.GetAsDictionary PdfName.ParentTree with
         | null -> Dictionary<int, PdfObject>() :> IReadOnlyDictionary<_, _>
@@ -100,6 +110,8 @@ let inconsistent (document: PdfDocument) context =
                       | _ -> ()
               | _ -> ()
           | _ -> () ]
+
+let inconsistent (document: PdfDocument) context = inconsistentWith (tagged document context) document
 
 /// Empty/whitespace text is not enough: a sequence may also paint an image or a path.
 /// Only sequences actually present on a readable page, with no painting, can be discarded.
@@ -171,7 +183,8 @@ type Disconnected =
       Artifact: bool
       Untied: bool }
 
-let disconnected (document: PdfDocument) context : Disconnected list =
+/// Content tied to a tag that's gone, from inconsistent's answer (all).
+let disconnectedFrom (all: (int * int * PdfDictionary * PdfDictionary option) list) (document: PdfDocument) context : Disconnected list =
     let empty = Dictionary<int, int -> bool>()
     let emptyOn page =
         match empty.TryGetValue page with
@@ -180,7 +193,7 @@ let disconnected (document: PdfDocument) context : Disconnected list =
             let test = emptyContent document context page
             empty[page] <- test
             test
-    let gone = inconsistent document context |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
+    let gone = all |> List.filter (fun (_, _, _, expected) -> expected.IsNone)
     // Each tag that's gone decided over all its content, on every page, then shown a page at a time.
     let owners = List<PdfDictionary>()
     let byOwner = Dictionary<PdfDictionary, ResizeArray<int * int>>(HashIdentity.Reference)
@@ -201,6 +214,8 @@ let disconnected (document: PdfDocument) context : Disconnected list =
                 Mcids = onPage |> List.map snd
                 Artifact = artifact
                 Untied = untied } ]
+
+let disconnected (document: PdfDocument) context = disconnectedFrom (inconsistent document context) document context
 
 /// Takes a page's MCID out of iText's parent tree (which it writes on close), whatever tag it's
 /// tied to: by tying it to a tag of the moment, then untying it. That tag is never in the tags,
@@ -257,12 +272,12 @@ type Missing =
       Objects: int
       Associations: int }
 
-/// What the parent tree lacks, if the structure tree tags any content it doesn't resolve.
-let find (document: PdfDocument) context : Missing option =
+/// What the parent tree lacks, from what tagged and inconsistentWith read (forward, all).
+let findWith (forward: Tagged) (all: (int * int * PdfDictionary * PdfDictionary option) list) (document: PdfDocument) : Missing option =
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> None
     | root ->
-        let tagged = tagged document context
+        let tagged = forward
         let pages = tagged.MarkedContent.Keys |> Seq.map fst |> Seq.distinct |> List.ofSeq
         let tree = match resolve (root.Get PdfName.ParentTree) with :? PdfDictionary as tree -> Some tree | _ -> None
         let entries = tree |> Option.map numbers
@@ -300,7 +315,7 @@ let find (document: PdfDocument) context : Missing option =
                     || not (Object.ReferenceEquals(resolve entries.Value[(key |> nonNull).IntValue()], tagged.Objects[number]))
                 | _ -> false)
             |> Seq.length
-        let associations = inconsistent document context
+        let associations = all
         if pagesMissing.IsEmpty && objectsMissing = 0 && associations.IsEmpty then
             None
         else
@@ -315,8 +330,15 @@ let find (document: PdfDocument) context : Missing option =
 /// /ParentTreeNextKey when the document is saved. iText reads the marked content it knows from
 /// the parent tree, so without one it would write an empty one. Tagged annotations whose
 /// /StructParent the tree has no entry for get a new one. Returns what it did, if anything.
+/// What the parent tree lacks, if the structure tree tags any content it doesn't resolve.
+let find (document: PdfDocument) context : Missing option =
+    let forward = tagged document context
+    findWith forward (inconsistentWith forward document) document
+
 let rebuild (document: PdfDocument) context : string list =
-    match find document context with
+    let forward = tagged document context
+    let all = inconsistentWith forward document
+    match findWith forward all document with
     | None -> []
     | Some missing ->
         let mutable discarded = 0
@@ -324,10 +346,10 @@ let rebuild (document: PdfDocument) context : string list =
         let kept = SortedDictionary<int, int>()
         use forgetter = new Forgetter(document)
         // Content tied to the wrong tag: untied here, and tied to the right one below.
-        for page, mcid, _, expected in inconsistent document context do
+        for page, mcid, _, expected in all do
             if expected.IsSome then forgetter.Forget page mcid
         // Content tied to a tag that's gone: untied, and marked as not read, a tag at a time.
-        for gone in disconnected document context do
+        for gone in disconnectedFrom all document context do
             if gone.Untied then
                 for mcid in gone.Mcids do
                     forgetter.Forget gone.Page mcid

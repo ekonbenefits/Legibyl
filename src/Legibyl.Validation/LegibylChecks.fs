@@ -216,15 +216,24 @@ let private missingBookmarkFindings (document: PdfDocument) context =
 let private ParentTreeMessage =
     "The tags exist but the PDF doesn't say which page content each covers (its parent tree is missing or incomplete), so the tags read as untagged. An auto fix can rebuild it from the tags."
 
-let private parentTreeFindings (document: PdfDocument) context =
-    match ParentTree.find document context with
+/// The tags as reached from the root, and the content the parent tree ties elsewhere: read once,
+/// for Structure-9 and Structure-17 both.
+type private Ties = Lazy<ParentTree.Tagged * (int * int * PdfDictionary * PdfDictionary option) list>
+
+let private ties (document: PdfDocument) context : Ties =
+    lazy
+        (let forward = ParentTree.tagged document context
+         forward, ParentTree.inconsistentWith forward document)
+
+let private parentTreeFindings (document: PdfDocument) (ties: Ties) =
+    let forward, all = ties.Value
+    match ParentTree.findWith forward all document with
     | None -> []
     | Some missing ->
         let pages = if missing.Pages = 1 then "1 page with tagged content has" else $"{missing.Pages} pages with tagged content have"
         let objects = if missing.Objects = 1 then "1 tagged annotation has" else $"{missing.Objects} tagged annotations have"
         // Content tied to a tag that's gone is Structure-17's, not this one's.
-        let wrong =
-            ParentTree.inconsistent document context |> List.filter (fun (_, _, _, expected) -> expected.IsSome) |> List.length
+        let wrong = all |> List.filter (fun (_, _, _, expected) -> expected.IsSome) |> List.length
         let detail =
             [ if missing.TreeMissing then "The parent tree is missing."
               if missing.Pages > 0 then $"{pages} missing or incorrect entries in it."
@@ -243,8 +252,8 @@ let private DisconnectedMessage =
     "Content still tied to a tag that isn't in the tags any more (one taken out without its parent tree entries), so a screen reader skips it or reads it out of place. Structure… shows it on its own, under Tied to tags that are gone."
 
 /// Each page's content tied to a tag that's gone, by that tag: the fix offered only where it acts.
-let private disconnectedFindings (document: PdfDocument) context =
-    [ for gone in ParentTree.disconnected document context do
+let private disconnectedFindings (document: PdfDocument) context (ties: Ties) =
+    [ for gone in ParentTree.disconnectedFrom (snd ties.Value) document context do
           let geometry =
               gone.Mcids
               |> Seq.choose (fun mcid ->
@@ -261,10 +270,16 @@ let private disconnectedFindings (document: PdfDocument) context =
                   "It draws nothing, so Rebuild the parent tree unties it and marks it as not read."
               else
                   "It draws something or has a description, so it's kept: its tag needs putting back where the PDF was made, or in a PDF editor."
+          // Its own place, so dismissing it leaves the others: the page, and the tag (by its object
+          // number), as a location veraPDF's parser reads ("Structure tree → Page 1 → …").
+          let which =
+              match gone.Owner.GetIndirectReference() with
+              | null -> $"""K[{gone.Mcids |> List.map string |> String.concat "-"}]"""
+              | reference -> $"K[{reference.GetObjNumber()}]"
           warning
               DisconnectedMessage
               $"Page {gone.Page}: content tied to {tag}, which isn't in the tags. {what}"
-              "StructTreeRoot"
+              $"StructTreeRoot/pages[{gone.Page - 1}]/{which}"
               17
               (if gone.Untied then PdfFixOptions.ParentTree else PdfFixOptions.None)
               geometry ]
@@ -442,8 +457,9 @@ let run (document: PdfDocument) context : RuleViolation list =
                   | Some finding ->
                       warning check.Message null finding.Location check.TestNumber check.FixOptions (Option.toObj finding.Geometry)
                   | None -> ()
-          yield! parentTreeFindings document context
-          yield! disconnectedFindings document context
+          let ties = ties document context
+          yield! parentTreeFindings document ties
+          yield! disconnectedFindings document context ties
           yield! tocHeadingFindings document context
           yield! paragraphListFindings document context
           yield! splitFigureFindings document context
