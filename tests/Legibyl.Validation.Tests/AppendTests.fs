@@ -749,6 +749,7 @@ let ``empty elements a file has before its content aren't reported as reading di
 /// A structure node: with text, a leaf a reader meets; with neither text nor children, empty.
 let private node (tag: string) (text: string | null) (children: StructureNode list) : StructureNode =
     { Tag = tag
+      Kind = (if tag = "StructTreeRoot" then StructureNodeKind.Root else StructureNodeKind.Element)
       Role = null
       AlternateDescription = null
       ActualText = null

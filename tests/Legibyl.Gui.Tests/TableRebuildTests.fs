@@ -18,6 +18,7 @@ let private rect left bottom right top : StructureGeometry =
 
 let private node (tag: string) (content: string | null) (geometry: StructureGeometry | null) (children: StructureNode list) =
     { Tag = tag
+      Kind = (if tag = "StructTreeRoot" then StructureNodeKind.Root else StructureNodeKind.Element)
       Role = null
       AlternateDescription = null
       ActualText = null

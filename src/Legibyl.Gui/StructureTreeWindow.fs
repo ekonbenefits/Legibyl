@@ -251,7 +251,7 @@ module private StructureView =
                                                   { Geometry = nonNull element.Geometry
                                                     Label = if leftOut then $"× {i + 1} {tag}" else $"{i + 1} {tag}"
                                                     // Not a region of its own, not read, or outside every tag: grey.
-                                                    Color = if leftOut || tag = Tags.Artifact || tag = "Untagged" then leftOutColor else outlineColor tag
+                                                    Color = if leftOut || tag = Tags.Artifact || (isUntagged element && tag = ElementEdits.UntaggedTag) then leftOutColor else outlineColor tag
                                                     // Outside every tag (whatever's chosen for it): dashed.
                                                     Dashed = isUntagged element
                                                     Emphasised = within element
@@ -967,8 +967,8 @@ module private StructureView =
             let ordering = ctx.useState false
             /// The element whose children are the tagged PDF's top level (its Document), if there's one.
             let topLevel () =
-                match root.Current.Children |> Seq.filter (fun n -> n.Tag <> "NotInTags" && n.Tag <> "Disconnected") |> List.ofSeq with
-                | [ document ] when not (fixedOrder.Contains document.Tag) -> Some document
+                match root.Current.Children |> Seq.filter (fun n -> n.Kind = StructureNodeKind.Element) |> List.ofSeq with
+                | [ document ] when not (keepsOrder document) -> Some document
                 | _ -> None
             /// Suggests page's reading order from its layout, to accept or not.
             let orderByLayout (page: int) =

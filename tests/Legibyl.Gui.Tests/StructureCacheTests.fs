@@ -9,6 +9,7 @@ open Legibyl.Validation
 
 let private tree () =
     { Tag = "StructTreeRoot"
+      Kind = StructureNodeKind.Root
       Role = null
       AlternateDescription = null
       ActualText = null

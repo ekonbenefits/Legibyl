@@ -40,7 +40,12 @@ type EditKind =
 
 
 /// Whether it's a piece of what a page draws outside every tag.
-let isUntagged (node: StructureNode) = node.Tag = "Untagged"
+let isUntagged (node: StructureNode) = node.Kind = StructureNodeKind.Untagged
+
+/// Whether node is content still tied to tags that are gone, or its page's group of it: to look
+/// at, not to edit.
+let isDisconnected (node: StructureNode) =
+    node.Kind = StructureNodeKind.Disconnected || node.Kind = StructureNodeKind.DisconnectedTag
 
 /// Whether a piece outside the tags is text, which is never made decoration.
 let isUntaggedText (node: StructureNode) = (string node.Content).StartsWith "text "
@@ -80,7 +85,7 @@ let editKinds (node: StructureNode) =
     // (One of the PDF's own tag names by what its role map makes it: an Image mapped to Figure.)
     let tag = match node.Role with NonNull role -> role | Null -> node.Tag
     match node.Geometry with
-    | _ when node.Tag = "Disconnected" || node.Tag = "DisconnectedTag" -> []
+    | _ when isDisconnected node -> []
     | null -> []
     | _ ->
         [ if tag = Tags.Link then LinkDescription
@@ -156,8 +161,14 @@ let movesIn (edits: RegionEdits.Edit list) =
     edits |> List.choose (fun e -> e.Move |> Option.map (fun move -> e.Page, e.Tag, e.Box, move))
 
 /// The tags whose children keep their order: a table's cells and rows, a table of contents'
-/// entries, which Move Up and Move Down don't change.
-let fixedOrder = set [ Tags.Table; Tags.THead; Tags.TBody; Tags.TFoot; Tags.TR; Tags.TOC; "StructTreeRoot"; "NotInTags"; "Disconnected" ]
+/// entries.
+let private orderedTags = set [ Tags.Table; Tags.THead; Tags.TBody; Tags.TFoot; Tags.TR; Tags.TOC ]
+
+/// Whether node's children keep their order, which Move Up and Move Down don't change: a
+/// table's, a table of contents', and those of Legibyl's own nodes (the root, the content
+/// outside the tags, and what's tied to tags that are gone).
+let keepsOrder (node: StructureNode) =
+    node.Kind <> StructureNodeKind.Element || orderedTags.Contains node.Tag
 
 /// The positions in order of the longest run of it that's in the order sequence already has
 /// (a longest increasing subsequence of positions).
@@ -387,7 +398,7 @@ let private moving (needs: OrderBarNeeds) =
     match needs.Selected with
     | [ single ] when not (isNull single.Geometry) && not (isUntagged single) ->
         match needs.Parents.TryGetValue single with
-        | true, parent when not (fixedOrder.Contains parent.Tag) ->
+        | true, parent when not (keepsOrder parent) ->
             let order = orderedChildren needs.Edits parent
             let index = order |> List.findIndex (fun n -> obj.ReferenceEquals(n, single))
             // The sibling it moves past: the nearest with a place on a page (one with none,
@@ -427,7 +438,7 @@ let moveActions (needs: OrderBarNeeds) : Action list =
             (fun () -> move false) with
           Enabled = (match moving with Some(_, _, _, _, after) -> after.IsSome | None -> false)
           Keys = Some(KeyGesture(Key.Down, KeyModifiers.Alt)) } ]
-    |> List.filter (fun _ -> needs.Selected |> List.forall (fun node -> node.Tag <> "Disconnected" && node.Tag <> "DisconnectedTag"))
+    |> List.filter (fun _ -> needs.Selected |> List.forall (isDisconnected >> not))
 
 // For a tagged PDF's shown page: put in the order its layout reads, or back in the order it was
 // tagged in.
@@ -726,7 +737,7 @@ let otherActions (needs: SelectionNeeds) : Action list =
               | [] -> false
               | [ single ] -> single.Children.Count > 0
               | _ -> true)
-          && nodes |> List.forall (fun n -> not (isNull n.Geometry) && not (List.contains n.Tag [ "StructTreeRoot"; "NotInTags"; "Disconnected"; "DisconnectedTag" ]))
+          && nodes |> List.forall (fun n -> not (isNull n.Geometry) && (n.Kind = StructureNodeKind.Element || n.Kind = StructureNodeKind.Untagged))
           && (nodes |> List.map (fun n -> (nonNull n.Geometry).PageNumber) |> List.distinct |> List.length) = 1
           ->
           let boxes = nodes |> List.map (fun n -> nonNull n.Geometry)

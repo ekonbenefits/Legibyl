@@ -1,6 +1,7 @@
 namespace Legibyl.Validation
 
 open System
+open System.Text.Json.Serialization
 
 type FindingSeverity =
     | Failure = 0
@@ -328,6 +329,25 @@ type LinkDestination =
       Right: Nullable<float>
       Bottom: Nullable<float> }
 
+/// What a structure node is: an element of the PDF's tags, or one of Legibyl's own nodes shown
+/// beside them. A PDF can name its own tags anything ("Untagged" included), so Legibyl's own
+/// nodes are told apart by their kind, never by their tag.
+[<JsonConverter(typeof<JsonStringEnumConverter>)>]
+type StructureNodeKind =
+    /// An element of the PDF's tags.
+    | Element = 0
+    /// The structure tree root (its tag is "StructTreeRoot").
+    | Root = 1
+    /// A page's content outside every tag (its tag is "NotInTags"): an Untagged node per piece.
+    | NotInTags = 2
+    /// A piece of content outside every tag (its tag is "Untagged", as a review's edits name it).
+    | Untagged = 3
+    /// A page's content still tied to tags that aren't in the tags any more (its tag is
+    /// "Disconnected"): a DisconnectedTag node per tag that's gone.
+    | Disconnected = 4
+    /// A tag that's gone, with the content still tied to it (its tag is "DisconnectedTag").
+    | DisconnectedTag = 5
+
 /// One node of a tagged PDF's logical structure tree (the Catalog's StructTreeRoot) —
 /// the same semantic hierarchy (headings, paragraphs, lists, tables, links, etc.) and
 /// reading order that assistive technology (screen readers) uses to present the
@@ -338,6 +358,8 @@ type StructureNode =
       /// (e.g. "H1", "P", "L", "Table", "TH"). This is the value that determines the
       /// element's semantic role to a screen reader.
       Tag: string
+      /// Whether it's an element of the PDF's tags, or one of Legibyl's own nodes beside them.
+      Kind: StructureNodeKind
       /// If this element uses a custom (non-standard) tag that is role-mapped to a
       /// different standard tag within the same namespace, the mapped-to tag name;
       /// otherwise null (no distinct mapping worth reporting).

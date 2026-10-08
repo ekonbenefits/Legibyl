@@ -79,7 +79,7 @@ let place (root: StructureNode) (findings: RuleViolation list) : IReadOnlyDictio
             | NonNull region ->
                 let untagged = aboutUntagged finding
                 nodes
-                |> List.filter (fun n -> (n.Tag = "Untagged") = untagged && coverage (nonNull n.Geometry) region >= 0.5)
+                |> List.filter (fun n -> (n.Kind = StructureNodeKind.Untagged) = untagged && coverage (nonNull n.Geometry) region >= 0.5)
                 |> List.sortBy (fun n -> area (nonNull n.Geometry))
                 |> List.tryHead
             | Null -> elementNamed root finding

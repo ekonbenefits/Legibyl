@@ -297,7 +297,7 @@ let sortUntagged (root: StructureNode) =
     { root with
         Children =
             [| for child in root.Children ->
-                   if child.Tag = "NotInTags" then { child with Children = child.Children |> List.ofSeq |> List.sortBy decorationRank |> Array.ofList }
+                   if child.Kind = StructureNodeKind.NotInTags then { child with Children = child.Children |> List.ofSeq |> List.sortBy decorationRank |> Array.ofList }
                    else child |] }
 
 /// Blocks the Layout view draws up front. Big documents' deeper levels start collapsed
@@ -340,11 +340,11 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
             WrapPanel.margin (0.0, 0.0, 0.0, 4.0)
             WrapPanel.children [
                 tagChip
-                    (match node.Tag with
-                     | "NotInTags" -> "Not in the tags"
-                     | "Disconnected" -> "Tied to tags that are gone"
-                     | "DisconnectedTag" -> "Tag that's gone"
-                     | tag -> tag)
+                    (match node.Kind with
+                     | StructureNodeKind.NotInTags -> "Not in the tags"
+                     | StructureNodeKind.Disconnected -> "Tied to tags that are gone"
+                     | StructureNodeKind.DisconnectedTag -> "Tag that's gone"
+                     | _ -> node.Tag)
                     borderColor headerColor
                 match findingMarker selection node with
                 | Some marker -> marker
@@ -435,9 +435,9 @@ let rec element (selection: Selection) (margin: Thickness) (childLevels: int) (n
 /// stacked (in the order the moves give them, unless their order is fixed).
 and childViews (selection: Selection) (childLevels: int) (node: StructureNode) : IView list =
     match node.Tag with
-    | Tags.TOC -> [ tocGrid selection node ]
-    | Tags.Table -> [ tableGrid selection node ]
-    | tag when fixedOrder.Contains tag ->
+    | Tags.TOC when node.Kind = StructureNodeKind.Element -> [ tocGrid selection node ]
+    | Tags.Table when node.Kind = StructureNodeKind.Element -> [ tableGrid selection node ]
+    | _ when keepsOrder node ->
         [ for child in node.Children -> element selection (Thickness(0.0, 0.0, 0.0, 6.0)) (childLevels - 1) child ]
     | _ ->
         // Its own component, so a move re-renders just these. Keyed by the node: a component

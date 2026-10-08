@@ -217,6 +217,15 @@ let ``structure nodes say where they are as edits do: page and box`` () =
         [ for v in figure.GetProperty("box").EnumerateArray() -> v.GetDouble() ] |> should haveLength 4)
 
 [<Fact>]
+let ``structure nodes say what kind they are: the root, and the PDF's own elements`` () =
+    withTaggedPdf (fun pdf ->
+        let _, result = run [ "structure"; pdf ]
+        let root = result.Value.GetProperty "structure"
+        root.GetProperty("kind").GetString() |> should equal "Root"
+        [ for child in root.GetProperty("children").EnumerateArray() -> child.GetProperty("kind").GetString() ]
+        |> should contain "Element")
+
+[<Fact>]
 let ``validate reports compliance, with nothing about fixes`` () =
     withTaggedPdf (fun pdf ->
         let code, result = run [ "validate"; pdf ]

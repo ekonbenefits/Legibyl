@@ -156,3 +156,31 @@ let ``a Pages export: with its parent tree rebuilt and what's outside its tags m
 
     untagged output.Path |> should be Empty
     render output.Path |> should equal (render pdf)
+
+[<Fact>]
+let ``a PDF's own tags named Untagged and NotInTags are elements, told apart from Legibyl's own nodes by their kind`` () =
+    use pdf = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(pdf.Path))
+        document.SetTagged() |> ignore
+        let page = document.AddNewPage()
+        let canvas = PdfCanvas(page)
+        let font = PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+        let root = document.GetStructTreeRoot()
+        root.AddRoleMapping("Untagged", "P") |> ignore
+        root.AddRoleMapping("NotInTags", "P") |> ignore
+        let documentElement = root.AddKid(PdfStructElem(document, PdfName.Document))
+        for y, tag in [ 700.0, "Untagged"; 670.0, "NotInTags" ] do
+            let element = documentElement.AddKid(PdfStructElem(document, PdfName tag, page))
+            let reference = PdfMcrNumber(page, element)
+            element.AddKid reference |> ignore
+            let properties = PdfDictionary()
+            properties.Put(PdfName.MCID, PdfNumber(reference.GetMcid())) |> ignore
+            canvas.BeginMarkedContent(PdfName tag, properties).BeginText().SetFontAndSize(font, 12f).MoveText(72.0, y).ShowText(tag).EndText().EndMarkedContent()
+            |> ignore
+        canvas.BeginText().SetFontAndSize(font, 12f).MoveText(72.0, 500.0).ShowText("Text outside every tag.").EndText() |> ignore
+    let tree = VeraPdfValidator().ReadStructureTree pdf.Path |> notNull
+    tree.Kind |> should equal StructureNodeKind.Root
+    let kinds tag = nodes tree |> List.filter (fun n -> n.Tag = tag) |> List.map _.Kind
+    kinds "Untagged" |> should equal [ StructureNodeKind.Element; StructureNodeKind.Untagged ]
+    kinds "NotInTags" |> should equal [ StructureNodeKind.Element; StructureNodeKind.NotInTags ]

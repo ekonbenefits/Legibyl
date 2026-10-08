@@ -1350,7 +1350,10 @@ carries the review. `--edits-from <path>` does the same with another review: a
 
 Reads each PDF's tagged structure tree (the semantic heading/paragraph/list/
 table/link hierarchy a screen reader uses), without validating it. Each node
-has its `tag`, the visible text it directly owns as `content` (matched by page +
+has its `tag`, its `kind` (`Element` for the PDF's own tags, `Root` for the
+structure tree root, and for Legibyl's own nodes, below, `NotInTags`, `Untagged`,
+`Disconnected` or `DisconnectedTag`: a PDF can use those names for its own tags,
+so tell them apart by `kind`), the visible text it directly owns as `content` (matched by page +
 MCID), `alt`, `actualText`, language, role-map, `linkDescription` for a link,
 and where it is: `page` and `box` (left, bottom, right, top, in points — the way
 edits name it), with the fuller `geometry`. `/Form` nodes also include widget
