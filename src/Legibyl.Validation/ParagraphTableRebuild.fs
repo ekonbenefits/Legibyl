@@ -19,6 +19,26 @@ type private Conversion =
 
 let private standaloneKeys = [ PdfName.ActualText; PdfName.Alt; PdfName.E; PdfName.ID ]
 
+let private spaced (text: string) = Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim()
+
+/// Whether paragraph's replacement text (/ActualText) says only what its content draws, spacing
+/// aside: then it adds nothing, and nothing is lost when the paragraph's content is split among
+/// cells and the paragraph is gone.
+let private redundantActualText context page (paragraph: PdfStructElem) =
+    match paragraph.GetPdfObject().GetAsString PdfName.ActualText with
+    | null -> false
+    | text ->
+        let drawn = spaced (extractText (paragraph.GetPdfObject().Get PdfName.K) context (Some page))
+        drawn <> "" && spaced (text.ToUnicodeString()) = drawn
+
+/// Whether paragraph says something of its own the cells it's split among couldn't: replacement
+/// text other than what it draws, alt text, an expansion, or an ID something may refer to.
+let private standalone context page (paragraph: PdfStructElem) =
+    standaloneKeys
+    |> List.exists (fun key ->
+        paragraph.GetPdfObject().ContainsKey key
+        && not (key.Equals PdfName.ActualText && redundantActualText context page paragraph))
+
 let private kidsOf (element: PdfStructElem) = List.ofSeq (element.GetKids())
 
 let private geometryOf context page (node: IStructureNode) =
@@ -128,8 +148,8 @@ let private plan context (run: ParagraphJoins.JoinRun) (cells: TableCell list) =
           Error "a table needs at least two paragraphs"
       elif assignedRows <> [ 0 .. rowCount - 1 ] || (rowBoxes |> List.exists (fun (_, boxes) -> boxes.IsEmpty)) then
           Error $"the checked grid doesn't have a row for each paragraph ({rowCount} row(s) for {paragraphs.Length} paragraphs)"
-      elif paragraphs |> List.exists (fun paragraph -> standaloneKeys |> List.exists (fun key -> paragraph.GetPdfObject().ContainsKey key)) then
-          Error "a paragraph has its own replacement text, alt text, expansion or ID (/ActualText, /Alt, /E or /ID), which can't be split among cells"
+      elif paragraphs |> List.exists (standalone context run.Page) then
+          Error "a paragraph has its own replacement text (other than the text it draws), alt text, expansion or ID (/ActualText, /Alt, /E or /ID), which can't be split among cells"
       elif misplaced () then
           Error "some of their content isn't drawn within one cell of its row"
       else
