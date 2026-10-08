@@ -183,8 +183,9 @@ let ``with the keyboard, selected elements are made a Figure the same way`` () =
                 click (window.OwnedWindows |> Seq.exactlyOne) "Make It a Figure"
                 wait (fun () -> review.Edits.Length = 1)
                 review.Edits.Head.Tag |> should equal "FigureRegion"
-                // The region is round what the selected element draws.
-                review.Edits.Head.Box |> should equal (nonNull label.Geometry)
+                // The region is round what the selected element draws, with 4 points' room.
+                let g = nonNull label.Geometry
+                review.Edits.Head.Box |> should equal { g with Left = g.Left - 4.0; Bottom = g.Bottom - 4.0; Right = g.Right + 4.0; Top = g.Top + 4.0 }
             finally
                 for owned in List.ofSeq window.OwnedWindows do owned.Close()
                 window.Close()))

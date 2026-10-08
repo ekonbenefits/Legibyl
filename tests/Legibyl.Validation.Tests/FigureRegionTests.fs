@@ -642,3 +642,151 @@ let ``the language its content says is kept on the Figure, and a tag's replaceme
               | _ -> () ]
         |> List.exactlyOne
     figure.GetAsString(PdfName.Lang).ToUnicodeString() |> should equal "es-ES"
+
+/// A tagged page built by build, given the document, its page, a canvas, a font, and a way to tag
+/// a line of text in a tag (its value at x, y).
+let private build (path: string) (build: PdfDocument -> PdfPage -> (PdfStructElem -> string -> float -> float -> unit) -> PdfStructElem -> unit) =
+    use document = new PdfDocument(new PdfWriter(path))
+    document.SetTagged() |> ignore
+    document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+    let page = document.AddNewPage PageSize.LETTER
+    let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
+    let canvas = PdfCanvas page
+    let top = PdfStructElem(document, PdfName.Document)
+    document.GetStructTreeRoot().AddKid top |> ignore
+    let mark (holder: PdfStructElem) (value: string) x y =
+        let mcr = PdfMcrNumber(page, holder)
+        holder.AddKid mcr |> ignore
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber(mcr.GetMcid())) |> ignore
+        canvas.BeginMarkedContent(PdfName.Span, properties).BeginText().SetFontAndSize(font, 12f).MoveText(x, y).ShowText(value).EndText().EndMarkedContent() |> ignore
+    build document page mark top
+
+let private child (document: PdfDocument) (page: PdfPage) (parent: PdfStructElem) (tag: PdfName) =
+    let element = PdfStructElem(document, tag, page)
+    parent.AddKid element |> ignore
+    element
+
+[<Fact>]
+let ``a caption in a table holds the Figure: never straight in the table, nor a new table failure`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    build input.Path (fun document page mark top ->
+        let table = child document page top PdfName.Table
+        mark (child document page table PdfName.Caption) "Chart title" 75.0 630.0
+        let row = child document page table PdfName.TR
+        mark (child document page (child document page row PdfName.TD) PdfName.P) "Jan" 75.0 610.0)
+    let rules (path: string) = VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+    let tree = VeraPdfValidator().ReadStructureTree output.Path |> nonNull |> nodes
+    let table = tree |> List.find (fun n -> n.Tag = "Table")
+    [ for n in table.Children -> n.Tag ] |> should equal [ "Caption"; "TR" ]
+    [ for n in (Seq.head table.Children).Children -> n.Tag ] |> should equal [ "Figure" ]
+    Set.difference (rules output.Path) (rules input.Path) |> should be Empty
+
+[<Fact>]
+let ``tags whose page only the tag above them names are made a Figure, not a failure`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    build input.Path (fun document page mark top ->
+        let paragraphs = [ for value, x in [ "Jan", 75.0; "Feb", 200.0 ] -> let p = child document page top PdfName.P in mark p value x 610.0; p ]
+        top.GetPdfObject().Put(PdfName.Pg, page.GetPdfObject()) |> ignore
+        for p in paragraphs do p.GetPdfObject().Remove PdfName.Pg |> ignore)
+
+    let result = apply input.Path output.Path [ edit ]
+
+    result.WasFixed |> should be True
+    VeraPdfValidator().ReadStructureTree output.Path |> nonNull |> nodes |> List.filter (fun n -> n.Tag = "Figure") |> should haveLength 1
+
+[<Fact>]
+let ``a paragraph with a span in it, all in the region, is taken whole`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    build input.Path (fun document page mark top ->
+        let paragraph = child document page top PdfName.P
+        mark paragraph "Revenue " 75.0 610.0
+        mark (child document page paragraph PdfName.Span) "(USD)" 140.0 610.0)
+
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+    let tags = VeraPdfValidator().ReadStructureTree output.Path |> nonNull |> nodes |> List.map _.Tag
+    tags |> should contain "Figure"
+    tags |> should not' (contain "P")
+
+[<Fact>]
+let ``a picture already described the same way in the region doesn't make the edit look made`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    build input.Path (fun document page mark top ->
+        // An image's Figure, with the edit's alt text and a box in the region.
+        let figure = child document page top PdfName.Figure
+        figure.SetAlt(PdfString edit.Alt) |> ignore
+        let layout = PdfDictionary()
+        layout.Put(PdfName.O, PdfName.Layout) |> ignore
+        layout.Put(PdfName.BBox, PdfArray([| 150.0; 500.0; 230.0; 580.0 |])) |> ignore
+        figure.GetPdfObject().Put(PdfName.A, layout) |> ignore
+        let mcr = PdfMcrNumber(page, figure)
+        figure.AddKid mcr |> ignore
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber(mcr.GetMcid())) |> ignore
+        PdfCanvas(page).BeginMarkedContent(PdfName.Figure, properties).Rectangle(150.0, 500.0, 80.0, 80.0).Fill().EndMarkedContent() |> ignore
+        // And labels beside it, in paragraphs.
+        mark (child document page top PdfName.P) "Jan" 75.0 610.0)
+
+    let result = apply input.Path output.Path [ edit ]
+
+    result.WasFixed |> should be True
+    VeraPdfValidator().ReadStructureTree output.Path |> nonNull |> nodes |> List.map _.Tag |> should not' (contain "P")
+
+[<Fact>]
+let ``an empty form and a TJ with no text elsewhere on the page don't refuse the region`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    createWith (fun _ page canvas ->
+        let empty = iText.Kernel.Pdf.Xobject.PdfFormXObject(Rectangle(0f, 0f, 10f, 10f))
+        canvas.AddXObjectAt(empty, 500f, 100f) |> ignore
+        // A TJ that only moves (no text), in a text object with a font.
+        canvas.BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 12f).MoveText(500.0, 50.0) |> ignore
+        canvas.GetContentStream().GetOutputStream().WriteString("[-250] TJ\n") |> ignore
+        canvas.EndText() |> ignore) input.Path
+
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+[<Fact>]
+let ``a language only part of the content says isn't given to the Figure`` () =
+    use input = new PdfFile()
+    use output = new PdfFile()
+    build input.Path (fun document page mark top ->
+        mark (child document page top PdfName.P) "Jan" 75.0 610.0
+        // A second label, in Spanish.
+        let p = child document page top PdfName.P
+        let mcr = PdfMcrNumber(page, p)
+        p.AddKid mcr |> ignore
+        let properties = PdfDictionary()
+        properties.Put(PdfName.MCID, PdfNumber(mcr.GetMcid())) |> ignore
+        properties.Put(PdfName.Lang, PdfString "es-ES") |> ignore
+        PdfCanvas(page).BeginMarkedContent(PdfName.Span, properties).BeginText().SetFontAndSize(PdfFontFactory.CreateFont StandardFonts.HELVETICA, 12f)
+            .MoveText(200.0, 610.0).ShowText("Febrero").EndText().EndMarkedContent() |> ignore)
+
+    (apply input.Path output.Path [ edit ]).WasFixed |> should be True
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    [ for i in 1 .. document.GetNumberOfPdfObjects() - 1 do
+          match document.GetPdfObject i with
+          | :? PdfDictionary as d when PdfName.Figure.Equals(d.GetAsName PdfName.S) -> d.Get PdfName.Lang
+          | _ -> () ]
+    |> List.exactlyOne
+    |> should be Null
+
+[<Fact>]
+let ``the preview lists the text going in, and what in the region is left out`` () =
+    use input = new PdfFile()
+    create input.Path
+    // The February label (210 to about 258) mostly outside.
+    match ElementEdits.figureRegionPreview input.Path { region with Right = 225.0 } with
+    | Ok summary ->
+        summary |> should haveSubstring "Text going in: January"
+        summary |> should haveSubstring "Left out, mostly outside the rectangle: February"
+    | Error reason -> failwith reason
