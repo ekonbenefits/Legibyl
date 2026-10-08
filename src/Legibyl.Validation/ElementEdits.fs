@@ -584,9 +584,10 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
                   match mergeRun document context edit with
                   | None ->
                       $"Your conversion of the paragraphs from the {describe edit} wasn't applied: they aren't consecutive paragraphs under one parent here."
-                  | Some run when not (ParagraphTableRebuild.canConvert context run edit.Cells) ->
-                      $"Your conversion of the paragraphs from the {describe edit} wasn't applied: their content can't be assigned safely to the checked cells."
-                  | Some _ -> ()
+                  | Some run ->
+                      match ParagraphTableRebuild.refusal context run edit.Cells with
+                      | Some why -> $"Your conversion of the paragraphs from the {describe edit} wasn't applied: {why}."
+                      | None -> ()
           for edit in outside do
               match outsideFound |> List.tryFind (fun (e, _) -> obj.ReferenceEquals(e, edit)) with
               | Some(_, piece) when piece.Kind = UntaggedContent.Text && edit.Retag = "Artifact" ->
