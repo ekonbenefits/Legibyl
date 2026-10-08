@@ -274,6 +274,102 @@ let ``an address whose pieces aren't side by side in their tag isn't linked, and
         equal
         [ "Page 1: \"https://example.org/garden\". Not fixable here: its pieces aren't side by side in its tag, in the order they're read.", false ]
 
+/// The P's kids (the first page's, under the Document): a piece of marked content by the text it
+/// draws, an element by its tag.
+let private paragraphKids (path: string) =
+    use document = new PdfDocument(new PdfReader(path))
+    let drawn mcid =
+        let text = System.Text.StringBuilder()
+        let listener =
+            { new iText.Kernel.Pdf.Canvas.Parser.Listener.IEventListener with
+                member _.EventOccurred(data, _) =
+                    match data with
+                    | :? iText.Kernel.Pdf.Canvas.Parser.Data.TextRenderInfo as info when info.GetMcid() = mcid -> text.Append(info.GetText()) |> ignore
+                    | _ -> ()
+                member _.GetSupportedEvents() = null }
+        iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent(document.GetPage 1)
+        string text
+    let paragraph = (document.GetStructTreeRoot().GetKids()[0] :?> Tagging.PdfStructElem).GetKids()[0] :?> Tagging.PdfStructElem
+    [ for kid in paragraph.GetKids() ->
+          match kid with
+          | :? Tagging.PdfMcr as mcr -> drawn (mcr.GetMcid())
+          | :? Tagging.PdfStructElem as element -> element.GetRole().GetValue()
+          | _ -> "?" ]
+
+/// Linking input to output: the fix applied, no warning left, no new failures, the page the same.
+let private linksAlike (input: string) (output: string) =
+    let result = validator.Value.Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.LinkUrls)
+    result.AppliedFixes |> should contain "Linked 1 web address shown as text, to where it goes."
+    named output |> should be Empty
+    let failed (path: string) = validator.Value.Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    Set.difference (failed output) (failed input) |> should be Empty
+    render output |> should equal (render input)
+
+[<Fact>]
+let ``an address whose last piece goes on with a full stop is linked whole, the full stop split off after it`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    let width (text: string) = float ((iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA).GetWidth(text, 12f))
+    let after (text: string) = 72.0 + width text
+    // As a justified line sets it: the hyphen a gap on, each piece its own text object.
+    paragraphOfPieces
+        input.Path
+        [ 72.0, 700.0, "Visit "
+          after "Visit ", 700.0, "https://example.org/go/dol"
+          after "Visit https://example.org/go/dol " + 1.0, 700.0, "-"
+          after "Visit https://example.org/go/dol -" + 1.0, 700.0, "diversification."
+          after "Visit https://example.org/go/dol -diversification. " + 1.0, 700.0, "Open daily." ]
+    named input.Path |> should equal [ "https://example.org/go/dol-diversification", true ]
+
+    linksAlike input.Path output.Path
+
+    paragraphKids output.Path |> should equal [ "Visit "; "Link"; "."; "Open daily." ]
+    let link = (validator.Value.ReadStructureTree output.Path |> notNull).Children[0].Children[0].Children[0]
+    ((string link.Content).Replace(" ", ""), string link.LinkUri)
+    |> should equal ("https://example.org/go/dol-diversification", "https://example.org/go/dol-diversification")
+
+[<Fact>]
+let ``an address's full stop is split off inside the text object its pieces share, its spacing kept`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    tagged input.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+        pointer.SetPageForTagging(page).AddTag "P" |> ignore
+        canvas.BeginText().SetFontAndSize(font, 12f).MoveText(72.0, 700.0) |> ignore
+        let piece (draw: unit -> unit) =
+            canvas.OpenTag(pointer.GetTagReference()) |> ignore
+            draw ()
+            canvas.CloseTag() |> ignore
+        piece (fun () -> canvas.ShowText "See " |> ignore)
+        // Kerned: the full stop drawn a little nearer.
+        piece (fun () ->
+            canvas.ShowText(PdfArray(ResizeArray<PdfObject> [ PdfString "https://example.org/beds" :> PdfObject; PdfNumber 80; PdfString "." ])) |> ignore)
+        piece (fun () -> canvas.ShowText " Open daily." |> ignore)
+        canvas.EndText() |> ignore)
+    named input.Path |> should equal [ "https://example.org/beds", true ]
+
+    linksAlike input.Path output.Path
+
+    paragraphKids output.Path |> should equal [ "See "; "Link"; "."; " Open daily." ]
+
+[<Fact>]
+let ``an address's full stop with something drawn after it in the same piece isn't split off, and says why`` () =
+    use pdf = new TempPdf()
+    tagged pdf.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+        pointer.SetPageForTagging(page).AddTag "P" |> ignore
+        canvas.OpenTag(pointer.GetTagReference()) |> ignore
+        show canvas font 72.0 700.0 "https://example.org/beds."
+        // An underline, in the same piece.
+        canvas.Rectangle(72.0, 698.0, 150.0, 0.5).Fill() |> ignore
+        canvas.CloseTag() |> ignore)
+    unlinked pdf.Path
+    |> should
+        equal
+        [ "Page 1: \"https://example.org/beds\". Not fixable here: the \".\" after it is drawn in the same piece, and can't be split off: something is drawn after it, in the same piece.", false ]
+
 [<Fact>]
 let ``an address one of whose pieces is read on both sides of another isn't linked, and says why`` () =
     use input = new TempPdf()

@@ -27,6 +27,7 @@
     <Compile Include="SplitWordSpans.fs" />
     <Compile Include="ContentOperators.fs" />
     <Compile Include="ContentOperations.fs" />
+    <Compile Include="MarkedContentSplit.fs" />
     <Compile Include="ContentArtifacts.fs" />
     <Compile Include="ParentTree.fs" />
     <Compile Include="RoleMaps.fs" />

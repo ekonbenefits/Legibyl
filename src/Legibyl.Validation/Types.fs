@@ -98,7 +98,8 @@ type PdfFixOptions =
     | DocumentRoot = 67108864
     /// Links web addresses a page shows as text that nothing links: a link annotation over each,
     /// going to it, and a Link tag holding its text and the annotation (see UnlinkedUrls). Only
-    /// an address whose tagged text is its own, in one piece or in pieces side by side in one tag;
+    /// an address whose tagged text is its own, in one piece or in pieces side by side in one tag
+    /// (punctuation drawn after it in its last piece is split off into a piece of its own first);
     /// others are left, and reported.
     | LinkUrls = 134217728
     | All = 268435455
