@@ -258,8 +258,8 @@ let tag
             let owners = Array.create operations.Count None
             for i in 0 .. operations.Count - 1 do
                 match drawn.TryGetValue i with
-                | true, pieces when operations[i].Name <> "n" -> owners[i] <- Some(operatorOwner regions cellsOf pageHasText pieces)
-                | _ when operations[i].Name = "sh" -> owners[i] <- Some Artifact
+                | true, pieces when operations[i].Name <> ContentOperators.n -> owners[i] <- Some(operatorOwner regions cellsOf pageHasText pieces)
+                | _ when operations[i].Name = ContentOperators.sh -> owners[i] <- Some Artifact
                 | _ -> ()
             let mutable painter = None
             for i in operations.Count - 1 .. -1 .. 0 do
@@ -407,10 +407,10 @@ let tag
             let mutable textStart = -1
             for k in 0 .. operations.Count - 1 do
                 match operations[k].Name with
-                | "q" -> saves.Push k
-                | "Q" when saves.Count > 0 -> ends[saves.Pop()] <- k
-                | "BT" -> textStart <- k
-                | "ET" when textStart >= 0 ->
+                | ContentOperators.q -> saves.Push k
+                | ContentOperators.Q when saves.Count > 0 -> ends[saves.Pop()] <- k
+                | ContentOperators.BT -> textStart <- k
+                | ContentOperators.ET when textStart >= 0 ->
                     ends[textStart] <- k
                     textStart <- -1
                 | _ -> ()
@@ -419,7 +419,7 @@ let tag
             let markedBefore = Array.zeroCreate (operations.Count + 1)
             for k in 0 .. operations.Count - 1 do
                 let name = operations[k].Name
-                markedBefore[k + 1] <- markedBefore[k] + (if name = "BMC" || name = "BDC" || name = "EMC" then 1 else 0)
+                markedBefore[k + 1] <- markedBefore[k] + (if name = ContentOperators.BMC || name = ContentOperators.BDC || name = ContentOperators.EMC then 1 else 0)
             for KeyValue(first, last) in ends do
                 if markedBefore[last + 1] = markedBefore[first] then
                     let inner = seq { for k in first .. last -> owners[k] } |> Seq.choose id |> Seq.distinct |> Seq.truncate 2 |> List.ofSeq
@@ -466,11 +466,11 @@ let tag
                     if boundaries.Contains operation.Name then close ()
                     // Content already marked as an artifact stays as it is.
                     match operation.Name with
-                    | "BMC"
-                    | "BDC" ->
+                    | ContentOperators.BMC
+                    | ContentOperators.BDC ->
                         let text = Encoding.Latin1.GetString(bytes, int operation.Start, int (operation.End - operation.Start))
                         if insideArtifact > 0 || text.Contains "/Artifact" then insideArtifact <- insideArtifact + 1
-                    | "EMC" ->
+                    | ContentOperators.EMC ->
                         if insideArtifact > 0 then insideArtifact <- insideArtifact - 1
                     | _ -> ()
                     match owners[i] with

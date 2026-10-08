@@ -308,7 +308,7 @@ type PdfRegionRenderer() =
                 // How much of the page below a destination's top edge to mark.
                 let band = 28.0
                 let rect, note =
-                    if destination.Kind = "FitR" && destination.Left.HasValue && destination.Top.HasValue
+                    if destination.Kind = Destinations.FitR && destination.Left.HasValue && destination.Top.HasValue
                        && destination.Right.HasValue && destination.Bottom.HasValue then
                         PdfRectangle(destination.Left.Value, destination.Bottom.Value, destination.Right.Value, destination.Top.Value),
                         "Highlighted the area the link shows."

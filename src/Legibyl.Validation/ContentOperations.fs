@@ -42,22 +42,26 @@ let operationsOf (bytes: byte array) (resources: PdfResources) =
     operations, bytes.LongLength
 
 /// Path construction, and clipping, before a path is painted.
-let pathConstruction = set [ "m"; "l"; "c"; "v"; "y"; "h"; "re"; "W"; "W*" ]
+let pathConstruction =
+    set [ ContentOperators.m; ContentOperators.l; ContentOperators.c; ContentOperators.v; ContentOperators.y
+          ContentOperators.h; ContentOperators.re; ContentOperators.W; ContentOperators.WStar ]
 
 /// Path painting (and "n", ending a path without painting it).
-let pathPainting = set [ "S"; "s"; "f"; "F"; "f*"; "B"; "B*"; "b"; "b*"; "n" ]
+let pathPainting =
+    set [ ContentOperators.S; ContentOperators.s; ContentOperators.f; ContentOperators.F; ContentOperators.fStar
+          ContentOperators.B; ContentOperators.BStar; ContentOperators.b; ContentOperators.bStar; ContentOperators.n ]
 
 /// An inline image (BI, its dictionary, ID, its data, EI): iText's parser reads it as one
 /// operation, by its last operator.
 [<Literal>]
-let inlineImage = "EI"
+let inlineImage = ContentOperators.EI
 
 /// Operators that show text.
-let textShowing = set [ "Tj"; "TJ"; "'"; "\"" ]
+let textShowing = set [ ContentOperators.Tj; ContentOperators.TJ; ContentOperators.NextLineTj; ContentOperators.SpacedNextLineTj ]
 
 /// A marked-content operator's MCID (BDC's properties, inline or in the resources' /Properties).
 let mcidOf (resources: PdfResources) (operation: Operation) : int option =
-    if operation.Name <> "BDC" || operation.Operands.Length < 2 then
+    if operation.Name <> ContentOperators.BDC || operation.Operands.Length < 2 then
         None
     else
         let properties: PdfDictionary option =
@@ -71,7 +75,9 @@ let mcidOf (resources: PdfResources) (operation: Operation) : int option =
         properties |> Option.bind (fun properties -> properties.GetAsNumber PdfName.MCID |> Option.ofObj |> Option.map _.IntValue())
 
 /// Operators a marked-content sequence mustn't straddle.
-let boundaries = set [ "BT"; "ET"; "q"; "Q"; "BMC"; "BDC"; "EMC"; "BX"; "EX" ]
+let boundaries =
+    set [ ContentOperators.BT; ContentOperators.ET; ContentOperators.q; ContentOperators.Q; ContentOperators.BMC
+          ContentOperators.BDC; ContentOperators.EMC; ContentOperators.BX; ContentOperators.EX ]
 
 // ---- Where each piece of content is drawn ----
 
@@ -179,7 +185,7 @@ type private CountingOperator(inner: IContentOperator, recorder: DrawnByOperator
                 inner.Invoke(processor, operator, operands)
                 // (The clip iText keeps is in device space already.)
                 // (At any depth: one painted inside a form counts as its Do's.)
-                if recorder.MeasuresShadings && string operator = "sh" then
+                if recorder.MeasuresShadings && string operator = ContentOperators.sh then
                     recorder.Shading(processor.GetGraphicsState().GetClippingPath())
             finally
                 recorder.Depth <- recorder.Depth - 1

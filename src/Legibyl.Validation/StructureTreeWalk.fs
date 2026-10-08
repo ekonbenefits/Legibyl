@@ -38,10 +38,10 @@ let private linkDestination (pageNumber: int) (kind: string) (number: int -> flo
     let none = Nullable()
     let left, top, right, bottom =
         match kind with
-        | "XYZ" -> at 2, at 3, none, none
-        | "FitH" | "FitBH" -> none, at 2, none, none
-        | "FitV" | "FitBV" -> at 2, none, none, none
-        | "FitR" -> at 2, at 5, at 4, at 3
+        | Destinations.XYZ -> at 2, at 3, none, none
+        | Destinations.FitH | Destinations.FitBH -> none, at 2, none, none
+        | Destinations.FitV | Destinations.FitBV -> at 2, none, none, none
+        | Destinations.FitR -> at 2, at 5, at 4, at 3
         | _ -> none, none, none, none
     { PageNumber = pageNumber
       Kind = kind
