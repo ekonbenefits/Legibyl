@@ -140,20 +140,23 @@ let declared (document: PdfDocument) =
 /// A tag's language, without its region or script ("es-MX" -> "es").
 let primary (tag: string) = tag.Split('-').[0].Trim().ToLowerInvariant()
 
+/// The detector of all 53 (see detect), as detectAmong checks it against.
+let private detector' = detector
+
 /// Detectors that tell only some languages apart, by their codes.
 let private among = Collections.Concurrent.ConcurrentDictionary<string, LanguageDetector>()
 
-/// The language a short text (a paragraph, a heading) is in, among these languages (tags) only:
-/// told apart far more surely than among all 53. None unless it has three words or more and the
-/// detector is all but certain.
-let detectAmong (tags: string list) (text: string) : string option =
-    let codes =
-        tags
-        |> List.choose (fun tag -> languages |> Seq.tryFind (fun kv -> fst kv.Value = primary tag) |> Option.map _.Key)
-        |> List.distinct
-        |> List.sort
+/// The language a short text (a paragraph, a heading) is in, among the one it's read in and
+/// others (tags) only: told apart far more surely than among all 53. None unless it has three
+/// words or more and the detector is all but certain; unless the language it's read in is one
+/// detection knows (Catalan isn't: its text would be taken for Spanish); and unless the detector
+/// of all 53 doesn't strongly prefer another language (Portuguese, Italian, or text a font
+/// garbles, which two languages alone would take for one of them).
+let detectAmong (readIn: string) (others: string list) (text: string) : string option =
+    let codeOf (tag: string) = languages |> Seq.tryFind (fun kv -> fst kv.Value = primary tag) |> Option.map _.Key
+    let codes = readIn :: others |> List.choose codeOf |> List.distinct |> List.sort
     let words = text.Split((null: char array | null), StringSplitOptions.RemoveEmptyEntries) |> Array.filter (Seq.exists Char.IsLetter)
-    if codes.Length < 2 || words.Length < 3 || (text |> Seq.filter Char.IsLetter |> Seq.length) < 15 then
+    if (codeOf readIn).IsNone || codes.Length < 2 || words.Length < 3 || (text |> Seq.filter Char.IsLetter |> Seq.length) < 15 then
         None
     else
         let detector =
@@ -167,7 +170,11 @@ let detectAmong (tags: string list) (text: string) : string option =
             )
         let candidates = lock detector (fun () -> detector.DetectAll text |> List.ofSeq)
         match candidates |> List.sortByDescending _.Probability with
-        | best :: _ when best.Probability >= 0.99 -> Some(tagFor best.Language)
+        | best :: _ when best.Probability >= 0.99 ->
+            let all = detector'.Value
+            match lock all (fun () -> all.DetectAll text |> List.ofSeq) |> List.sortByDescending _.Probability with
+            | top :: _ when not (List.contains top.Language codes) && top.Probability >= 0.9 -> None
+            | _ -> Some(tagFor best.Language)
         | _ -> None
 
 /// The languages detection knows: each one's tag and its name in English.
