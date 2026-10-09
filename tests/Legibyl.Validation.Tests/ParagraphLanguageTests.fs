@@ -4,6 +4,7 @@ open iText.IO.Font.Constants
 open iText.Kernel.Font
 open iText.Kernel.Pdf
 open iText.Layout.Element
+open iText.Kernel.Pdf.Tagging
 open Xunit
 open FsUnit.Xunit
 open Legibyl.Validation
@@ -117,3 +118,66 @@ let ``a passage too short to tell is left as it is`` () =
     use pdf = new TempPdf()
     createPdf pdf.Path "en-US" [ "The garden is open on Saturdays for all the families."; "Hola amigos"; "Gracias" ]
     passages pdf.Path |> should be Empty
+
+let private render (path: string) =
+    use document = new Legibyl.Rendering.PdfiumDocument(path)
+    use page = document.Render(1, 1f)
+    page.Pixels |> Array.map (fun c -> c.Red, c.Green, c.Blue, c.Alpha)
+
+let private failures (path: string) =
+    VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+
+[<Fact>]
+let ``Spanish in a heading, a list item and a table cell is marked on the block that holds it, the page the same and nothing worse`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    use again = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        document.SetTagged() |> ignore
+        document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+        use layout = new iText.Layout.Document(document)
+        layout.SetFont(PdfFontFactory.CreateFont(StandardFonts.HELVETICA, "WinAnsi")) |> ignore
+        let heading = Paragraph "Horario de apertura del jardín comunitario"
+        heading.GetAccessibilityProperties().SetRole StandardRoles.H1 |> ignore
+        layout.Add heading |> ignore
+        layout.Add(Paragraph "The community garden is open on Saturday mornings for every family.") |> ignore
+        let list = List()
+        list.Add(ListItem "Traiga guantes, agua y un sombrero para el sol.") |> ignore
+        list.Add(ListItem "Bring gloves, water and a hat for the sun.") |> ignore
+        layout.Add list |> ignore
+        let table = Table(2)
+        table.AddCell(Cell().Add(Paragraph "Opening hours on Saturdays")) |> ignore
+        table.AddCell(Cell().Add(Paragraph "Los sábados por la mañana, de ocho a doce")) |> ignore
+        layout.Add table |> ignore
+    // (The list item's text is in a paragraph inside its body: that's the block marked.)
+    let marked =
+        [ "H1", "Horario de apertura"; "P", "Traiga guantes"; "P", "Los sábados" ]
+
+    VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.PassageLanguages) |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let rec all (node: StructureNode) : StructureNode list = node :: [ for child in node.Children do yield! all child ]
+    let rec text (node: StructureNode) = string node.Content + String.concat "" [ for child in node.Children -> text child ]
+    [ for node in all root do
+          if not (isNull node.Language) then node.Tag, (text node).Substring(0, min 20 (text node).Length) ]
+    |> List.map (fun (tag, start) -> tag, marked |> List.exists (fun (t, s) -> t = tag && start.StartsWith s))
+    |> should equal [ "H1", true; "P", true; "P", true ]
+    Set.difference (failures output.Path) (failures input.Path) |> should be Empty
+    render output.Path |> should equal (render input.Path)
+    // Marked, it has nothing left to do: no copy written.
+    (VeraPdfValidator().Fix(output.Path, PdfProfile.PdfUa1, again.Path, PdfFixOptions.PassageLanguages)).WasFixed |> should be False
+
+[<Fact>]
+let ``a short document that says no language is declared in the one most of its passages are in, though its first is in another`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    // A short flyer: too little text for the whole to tell, its passages two thirds English.
+    createPdf input.Path "" [ "Bienvenidos a todos amigos"; "The garden opens on Saturdays"; "Bring your gloves and water" ]
+
+    let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Language)
+
+    result.AppliedFixes |> Seq.exists (fun (line: string) -> line.Contains "the language most of its passages are in") |> should be True
+
+    use document = new PdfDocument(new PdfReader(output.Path))
+    document.GetCatalog().GetPdfObject().GetAsString(PdfName.Lang).ToUnicodeString() |> should equal "en"
