@@ -163,3 +163,38 @@ let ``a link with no description at all fails WCAG 2.2 at level A, not only AAA'
     linkPurpose |> List.map (fun f -> f.Specification, f.Severity) |> should equal [ "WCAG 2.2 A", FindingSeverity.Failure ]
     (linkPurpose.Head.ErrorMessage |> notNull) |> should haveSubstring "2.4.4"
     report.MeetsWcag |> should be False
+
+[<Fact>]
+let ``white text on a JPEG 2000 picture is measured against the picture, not the page under it`` () =
+    use pdf = new TempPdf()
+    // White words over a navy banner, a JPEG 2000 image: PDFium draws it, so the words are
+    // measured against navy (about 14 to 1), where a renderer without a JPEG 2000 reader would
+    // leave it out and measure white on white.
+    do
+        use document = new PdfUADocument(new PdfWriter(pdf.Path), PdfUAConfig(PdfUAConformance.PDF_UA_1, "Garden Banner", "en-US"))
+        let font =
+            iText.Kernel.Font.PdfFontFactory.CreateFont(
+                corpusFile (Path.Combine("fonts", "Lato-Regular.ttf")),
+                iText.IO.Font.PdfEncodings.WINANSI,
+                iText.Kernel.Font.PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED
+            )
+        use layout = new iText.Layout.Document(document)
+        layout.SetFont font |> ignore
+        let banner = Image(iText.IO.Image.ImageDataFactory.Create(corpusFile (Path.Combine("images", "navy.jp2"))))
+        banner.SetFixedPosition(1, 72f, 500f).ScaleToFit(450f, 150f) |> ignore
+        banner.GetAccessibilityProperties().SetRole iText.Kernel.Pdf.Tagging.StandardRoles.ARTIFACT |> ignore
+        layout.Add banner |> ignore
+        let words = Paragraph("White words on the navy banner.").SetFontColor(DeviceRgb(0xFF, 0xFF, 0xFF)).SetFontSize 20f
+        words.SetFixedPosition(1, 96f, 560f, 400f) |> ignore
+        layout.Add words |> ignore
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    report.WcagFailures |> Seq.map _.RuleId |> should not' (contain "1.4.3-1")
+    report.MeetsWcag |> should be True
+
+[<Fact>]
+let ``WCAG's contrast check draws pages with PDFium: PDFBox isn't in veraPDF's assembly`` () =
+    let verapdf = System.Reflection.Assembly.Load "verapdf"
+    verapdf.GetType "org.apache.pdfbox.pdmodel.PDDocument" |> should be Null
+    verapdf.GetType "legibyl.wcag.PageRasterizers" |> should not' (be Null)

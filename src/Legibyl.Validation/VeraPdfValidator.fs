@@ -28,9 +28,11 @@ module internal VeraPdf =
                 if not initialised then
                     // Before veraPDF logs anything: what it logs is kept, not printed.
                     ValidatorLog.install ()
-                    // WCAG's contrast check renders pages with PDFBox, through Java's AWT, whose
-                    // native graphics crash the process under IKVM unless it's headless. Legibyl
-                    // never shows anything through AWT.
+                    // WCAG's contrast check draws pages with PDFium (see java/README.md).
+                    legibyl.wcag.PageRasterizers.set ContrastRasterizer.rasterizer
+                    // Nothing draws through Java's AWT now (its BufferedImage holds PDFium's
+                    // pixels), but its native graphics crash the process under IKVM unless it's
+                    // headless, so it stays so.
                     java.lang.System.setProperty("java.awt.headless", "true") |> ignore
                     VeraGreenfieldFoundryProvider.initialise ()
                     // Each validation profile is shared process-wide and builds its rule lookup

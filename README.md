@@ -310,7 +310,7 @@ Every validation also runs WCAG 2.2's machine checks, veraPDF's own
 `WCAG-2-2-Machine` profile less its copy of PDF/UA-1's rules: PDF/UA is checked
 on its own, as above). They're the same for PDF 1.x and PDF 2.0 files:
 contrast (1.4.3: at least 4.5 to 1, or 3 to 1 for large text, measured on the
-page as veraPDF renders it with Apache PDFBox), text too small to read (1.4.4),
+page as Legibyl draws it with PDFium), text too small to read (1.4.4),
 characters repeated to lay text out (1.3.1), pages in mixed orientations
 (1.3.4), figures with no bounding box (1.4.10), links with no description, or
 one that's only their address (2.4.9), and empty
@@ -344,12 +344,13 @@ CLI's JSON has `meetsWcag` and `wcagFailedCount` beside `isCompliant` (still
 PDF/UA's), and its exit code is 1 unless both pass. Appending checks PDF/UA
 only, as joining is about PDF/UA's tags.
 
-The WCAG checks render every page, so validating takes about three times as
-long as PDF/UA alone. Two things make them run under IKVM: Java's AWT is
-headless (its native graphics crash the process otherwise), and a stand-in of
-Legibyl's own replaces jai-imageio's JPEG 2000 reader, whose JJ2000 licence
-Legibyl doesn't ship; the contrast check leaves JPEG 2000 images out of the page
-(`src/Legibyl.Validation/java/README.md`).
+The contrast check draws every page, with PDFium (as Legibyl draws pages
+everywhere else) rather than the Apache PDFBox veraPDF uses: Legibyl's copy of
+veraPDF's `ContrastRatioConsumer` asks .NET for the pages
+(`src/Legibyl.Validation/java/README.md`). It draws a page in a millisecond or
+two, draws JPEG 2000 images (so text over one is measured against it), and
+leaves PDFBox and its image readers out of Legibyl. Even so, validating takes
+longer than PDF/UA alone.
 
 ## GUI results view
 

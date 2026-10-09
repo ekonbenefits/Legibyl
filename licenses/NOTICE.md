@@ -41,11 +41,11 @@ veraPDF's bundled fat jar in turn includes third-party dependencies
 under their own respective open-source licenses. Consult the individual
 project pages for full license texts of those transitive dependencies.
 
-## veraPDF's WCAG 2.2 checks, Apache PDFBox and image readers
+## veraPDF's WCAG 2.2 checks
 
-Compiled into the same assembly as veraPDF (each downloaded unmodified from
-Maven Central, pinned by SHA-256 in `src/Legibyl.Validation/Legibyl.Validation.fsproj`;
-see `lib/vendor/verapdf-jars/README.md`):
+Compiled into the same assembly as veraPDF (each downloaded from Maven Central,
+pinned by SHA-256 in `src/Legibyl.Validation/Legibyl.Validation.fsproj`; see
+`lib/vendor/verapdf-jars/README.md`):
 
 - **veraPDF `wcag-validation` and `wcag-algorithms` 1.28.1**
   (<https://github.com/veraPDF/veraPDF-validation>,
@@ -54,18 +54,16 @@ see `lib/vendor/verapdf-jars/README.md`):
   (<https://github.com/veraPDF/veraPDF-validation-profiles>), committed unmodified
   as `src/Legibyl.Validation/Profiles/WCAG-2-2-Machine.xml`. Copyright (c)
   2015-2026, veraPDF Consortium; dual-licensed GPLv3+ / MPLv2+, as veraPDF above.
-- **Apache PDFBox and FontBox 2.0.24** (<https://pdfbox.apache.org/>) and
-  **Apache Commons Logging 1.2**: Apache License 2.0 (`LICENSE.Apache`).
-- **jbig2-imageio 3.0.3** (Apache PDFBox's JBIG2 reader): Apache License 2.0.
-- **jai-imageio-core 1.4.0** (<https://github.com/jai-imageio/jai-imageio-core>):
-  BSD 3-clause license, Copyright (c) 2005 Sun Microsystems, Inc., with its
-  disclaimer that the software is not designed or intended for use in the
-  design, construction, operation or maintenance of any nuclear facility.
 
-Legibyl does **not** bundle jai-imageio-jpeg2000, whose JJ2000 licence grants no
-rights for products that don't conform to the JPEG 2000 standard. In its place
-is Legibyl's own stand-in class (`src/Legibyl.Validation/java/`, AGPL-3.0 or
-later, like the rest of Legibyl), which reads no JPEG 2000 images.
+`wcag-algorithms` is modified: one class, `ContrastRatioConsumer`, is taken out
+of its jar at build time and replaced by Legibyl's modified copy, which draws
+pages with PDFium instead of Apache PDFBox. Its source is
+`src/Legibyl.Validation/java/org/verapdf/wcag/algorithms/semanticalgorithms/consumers/ContrastRatioConsumer.java`,
+under veraPDF's licence (GPL-3.0-or-later or MPL-2.0, as its header says); the
+hook it calls (`src/Legibyl.Validation/java/legibyl/`) is Legibyl's own,
+AGPL-3.0 or later. Both are compiled into `src/Legibyl.Validation/java/wcag-contrast.jar`.
+The rest of `wcag-algorithms`, and `wcag-validation`, are unmodified. Apache
+PDFBox and the image readers veraPDF's class used aren't included.
 
 ## IKVM.NET
 
