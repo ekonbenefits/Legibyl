@@ -634,8 +634,14 @@ let ``progress is said on stderr: a line per stage and how each file went, as JS
 
         let _, plain = stderrOf [ "validate"; pdf; other; "--output"; report; "--progress"; "plain" ]
         let _, json = stderrOf [ "validate"; pdf; other; "--output"; report; "--progress"; "json" ]
-        let _, quiet = stderrOf [ "validate"; pdf; "--output"; report; "--quiet" ]
+        let quietly = Path.Combine(folder, "quietly.pdf")
+        File.Copy(pdf, quietly)
+        let _, quiet = stderrOf [ "validate"; quietly; "--output"; report; "--quiet" ]
         let wrong, said = stderrOf [ "validate"; pdf; "--progress"; "loud" ]
+        let wrongQuietly, saidQuietly = stderrOf [ "validate"; pdf; "--progress"; "loud"; "--quiet" ]
+        let notAPdf = Path.Combine(folder, "notes.pdf")
+        File.WriteAllText(notAPdf, "not a PDF")
+        let _, quietError = stderrOf [ "validate"; notAPdf; "--output"; report; "--quiet" ]
 
         // (Which stages are seen depends on how fast it goes: some are.)
         plain |> List.exists (fun line -> line.StartsWith "[1/2] garden.pdf: Validating") |> should be True
@@ -647,7 +653,43 @@ let ``progress is said on stderr: a line per stage and how each file went, as JS
               | _ -> () ]
         |> List.map (fun (file, outcome) -> Path.GetFileName(string file), (string outcome).StartsWith "FAIL")
         |> should equal [ "garden.pdf", true; "other.pdf", true ]
+        // Where nothing's counted (a file's done, say), no position: not "at 0 of 0".
+        for e in events do
+            match e.TryGetProperty "total" with
+            | true, total -> total.GetInt32() |> should be (greaterThan 0)
+            | _ -> e.TryGetProperty "at" |> fst |> should be False
+        events |> List.exists (fun e -> fst (e.TryGetProperty "done") && fst (e.TryGetProperty "total")) |> should be False
         // (Tests run side by side: lines other runs write on stderr may be among these.)
-        quiet |> List.filter (fun line -> line.Contains "garden.pdf") |> should be Empty
+        quiet |> List.filter (fun line -> line.Contains "quietly.pdf") |> should be Empty
         wrong |> should equal 64
-        said |> should contain "error: Unknown --progress 'loud'. Expected auto, line, plain, json or none.")
+        said |> should contain "error: Unknown --progress 'loud'. Expected auto, line, plain, json or none."
+        // With --quiet as well.
+        wrongQuietly |> should equal 64
+        saidQuietly |> should contain "error: Unknown --progress 'loud'. Expected auto, line, plain, json or none."
+        // A file that couldn't be done is said even with --quiet.
+        quietError |> List.exists (fun line -> line.StartsWith $"error: {notAPdf}: ") |> should be True)
+
+[<Fact>]
+let ``a stage that runs on is said again every few seconds, redirected, without anything new to say`` () =
+    let original = Console.Error
+    use writer = new StringWriter()
+    Console.SetError writer
+    try
+        let reporter = Legibyl.Cli.Progress.Reporter(Legibyl.Cli.Progress.Plain, 1)
+        reporter.Begin "slow.pdf"
+        reporter.Status "Reading the titles of linked pages"
+        Threading.Thread.Sleep(TimeSpan.FromSeconds 6.5)
+        reporter.Done "PASS"
+        // And not after it's done.
+        Threading.Thread.Sleep(TimeSpan.FromSeconds 5.5)
+    finally
+        Console.SetError original
+    let lines =
+        writer.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries)
+        // (Tests run side by side: lines other runs write on stderr may be among these.)
+        |> Array.filter (fun line -> line.StartsWith "slow.pdf")
+        |> List.ofArray
+    lines |> should haveLength 3
+    lines[0] |> should equal "slow.pdf: Reading the titles of linked pages"
+    lines[1] |> should startWith "slow.pdf: Reading the titles of linked pages (still working, "
+    lines[2] |> should equal "slow.pdf: PASS"

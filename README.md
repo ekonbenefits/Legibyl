@@ -1138,6 +1138,7 @@ legibyl fix <files>… [--ua 1|2] [--fixes safe|all|none|names] [--edits | --edi
 legibyl structure <files>… [--format json|text] [--output path] [--progress auto|line|plain|json|none | --quiet]
 legibyl layout suggest <file> [--output layout.json] [--figure-images] [--progress auto|line|plain|json|none | --quiet]
 legibyl layout apply <file> --layout layout.json [--ua 1|2] [--edits | --edits-from review] [--fixes names] [--output out.pdf] [--format json|text] [--report path] [--progress auto|line|plain|json|none | --quiet]
+legibyl append <files>… [--output joined.pdf] [--title text] [--lang tag] [--part-tag tag] [--format json|text] [--report path] [--verbose] [--progress auto|line|plain|json|none | --quiet]
 legibyl list fixes [--format text|json]
 legibyl list languages [--format text|json]
 ```
@@ -1167,11 +1168,12 @@ stderr (stdout stays the report): on a terminal, one line rewritten as it goes
 (`[2/5] garden.pdf: Validating: page 37 of 200`); redirected, a line per stage
 and a line every few seconds while one runs on, so a long run doesn't look hung.
 Each file ends with a line saying how it went (`PASS`, `FAIL, 3 failed`, `fixed →
-garden.v2.pdf (FAIL 3 → PASS)`, `ERROR, …`). `--progress json` gives one JSON
-object a line instead (`file`, `index`, `count`, `stage`, `at` of `total` in
-`unit`, or `done`, and `elapsedMs`), for an agent to read; `--progress line` or
-`plain` chooses either way; `--quiet` (`--progress none`) says nothing but
-errors. A model download says MB received of the total, and is given up on, as
+garden.v2.pdf (FAIL 3 → PASS)`), or `error: garden.pdf: …` if it couldn't be
+done. `--progress json` gives one JSON object a line instead (`file`, `index`,
+`count`, `stage`, with `at` of `total` in `unit` where that's counted, or `done`,
+`ERROR, …` for a file that couldn't be done; and `elapsedMs`), for an agent to
+read; `--progress line` or `plain` chooses either way; `--quiet` (`--progress
+none`) says nothing but errors. A model download says MB received of the total, and is given up on, as
 timed out, after a minute with no data.
 
 ### validate
