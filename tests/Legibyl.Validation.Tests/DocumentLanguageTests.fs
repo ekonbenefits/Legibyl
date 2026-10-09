@@ -20,6 +20,11 @@ let private french =
       "primaire essaient de nouvelles choses avec leur famille, avec des parents"
       "bénévoles comme vous. Camping, spéléologie, escalade et randonnée." ]
 
+let private spanish =
+    [ "Aventuras, insignias y compañerismo: niños de preescolar a quinto grado"
+      "prueban cosas nuevas junto a sus familias, guiados por padres voluntarios como usted."
+      "¿Campamentos, cuevas, escalada y caminatas? ¡Sí, y también la carrera de autos de pino!" ]
+
 /// A one-page PDF of these lines, with /Lang if given.
 let private createPdf (path: string) (lines: string list) (language: string option) =
     use document = new PdfDocument(new PdfWriter(path))
@@ -78,3 +83,11 @@ let ``undetermined language findings are fixable by declaring the language`` () 
     let language = report.Findings |> Seq.filter (fun f -> not f.Passed && f.Message.Contains "Natural language") |> List.ofSeq
     language |> should not' (be Empty)
     language |> List.forall (fun f -> f.FixOptions.HasFlag PdfFixOptions.Language) |> should be True
+
+[<Fact>]
+let ``Spanish text is declared Spanish`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPdf input.Path spanish None
+    fixLanguage input.Path output.Path |> ignore
+    declaredLanguage output.Path |> should equal (Some "es")

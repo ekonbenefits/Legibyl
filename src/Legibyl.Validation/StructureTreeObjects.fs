@@ -15,6 +15,8 @@ type Context =
       MarkedContent: MarkedContentTextIndex.Index
       /// The StructTreeRoot's /RoleMap: custom tag -> the tag it stands for.
       RoleMap: IReadOnlyDictionary<PdfName, PdfName>
+      /// The document's language (the catalog's /Lang), if it says.
+      Language: string option
       /// What fixes found and couldn't change (a font left as it is), said to the user as not
       /// applied: a note doesn't make a change.
       Notes: List<string> }
@@ -54,6 +56,10 @@ let createContextWith (document: PdfDocument) (markedContent: MarkedContentTextI
     { PageNumberByObject = pageNumberIndex document
       MarkedContent = markedContent
       RoleMap = roleMap document
+      Language =
+        match document.GetCatalog().GetPdfObject().GetAsString PdfName.Lang with
+        | NonNull language when not (String.IsNullOrWhiteSpace(language.ToUnicodeString())) -> Some(language.ToUnicodeString().Trim())
+        | _ -> None
       Notes = List<string>() }
 
 let createContext (document: PdfDocument) (pdfPath: string) =
@@ -92,6 +98,19 @@ let ancestorPage (dictionary: PdfDictionary) context =
             match structElemPage dictionary context None with
             | Some page -> Some page
             | None -> climb (dictionary.GetAsDictionary(PdfName.P)) (depth + 1)
+    climb dictionary 0
+
+/// The language a structure element's text is in: its own /Lang, else its nearest ancestor's
+/// (following /P), else the document's.
+let languageOf (dictionary: PdfDictionary) context =
+    let rec climb (dictionary: PdfDictionary | null) depth =
+        match dictionary with
+        | null -> context.Language
+        | _ when depth > 200 -> context.Language
+        | dictionary ->
+            match dictionary.GetAsString PdfName.Lang with
+            | NonNull language when not (String.IsNullOrWhiteSpace(language.ToUnicodeString())) -> Some(language.ToUnicodeString().Trim())
+            | _ -> climb (dictionary.GetAsDictionary(PdfName.P)) (depth + 1)
     climb dictionary 0
 
 /// An annotation's /Rect as geometry on pageNumber.
