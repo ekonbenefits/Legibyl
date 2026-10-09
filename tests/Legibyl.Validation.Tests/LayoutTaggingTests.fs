@@ -222,6 +222,23 @@ let ``text OCR read is marked with the language it reads as, a short piece with 
     [ for paragraph in (root.Children |> Seq.exactlyOne).Children -> paragraph.Language ] |> should equal [ "es"; "es" ]
 
 [<Fact>]
+let ``text OCR read, too short to tell, is marked with the language a person chose, not the one the PDF says`` () =
+    use made = new TempPdf()
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createOutlined made.Path
+    do
+        use document = new PdfDocument(new PdfReader(made.Path), new PdfWriter(input.Path))
+        document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+    let outlined = { region "P" (70.0, 695.0, 280.0, 715.0) null with ActualText = "Horario" }
+
+    VeraPdfValidator(LayoutSource = FixedLayout [ outlined ], Language = "es").Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.TagFromLayout)
+    |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    ((root.Children |> Seq.exactlyOne).Children |> Seq.exactlyOne).Language |> should equal "es"
+
+[<Fact>]
 let ``a heading drawn in pieces is one marked sequence, and a wrapped line reads with a space`` () =
     use input = new TempPdf()
     use output = new TempPdf()

@@ -171,13 +171,16 @@ let private writtenTag (region: LayoutRegion) hasTitle =
 /// the report lines; empty (and nothing worth keeping written) if the document was already
 /// tagged. With linkQrCodes, a QR code that encodes a web address also gets a link going
 /// there; with titles, its description names the title of the page it goes to. onPage hears
-/// (page, page count) as each page's regions are asked for.
+/// (page, page count) as each page's regions are asked for. chosen is the language a person chose
+/// for the document, if they did: it's the one its descriptions are written in, and its OCR'd
+/// text's where that's too short to tell.
 let tag
     (pdfPath: string)
     (outputPath: string)
     (source: IPageLayoutSource)
     (linkQrCodes: bool)
     (titles: IPageTitleSource option)
+    (chosen: string option)
     (onPage: int -> int -> unit)
     : string list * TaggedRegion list =
     use reader = new PdfReader(pdfPath)
@@ -229,12 +232,14 @@ let tag
         let pageTitle address = LinkTitles.titleFor pageTitles address
         // The language Legibyl writes its own descriptions in: the document's, where its
         // language pack has the words (else English).
-        let language = LanguagePacks.writtenIn document
-        // The language of text OCR read, where a piece is too short to tell on its own: the
-        // document's, else what all of it reads as together, else the pages' text's, else English.
+        let language = chosen |> Option.orElseWith (fun () -> LanguagePacks.writtenIn document)
+        // The language of text OCR read, where a piece is too short to tell on its own: the one
+        // chosen, else the document's, else what all of it reads as together, else the pages'
+        // text's, else English.
         let recognizedLanguage =
             lazy
-                (DocumentLanguage.declared document
+                (chosen
+                 |> Option.orElseWith (fun () -> DocumentLanguage.declared document)
                  |> Option.orElseWith (fun () ->
                      DocumentLanguage.detect (
                          String.Join(" ", [ for regions in regionsByPage do for region in regions do match region.ActualText with NonNull text -> text | Null -> () ])
