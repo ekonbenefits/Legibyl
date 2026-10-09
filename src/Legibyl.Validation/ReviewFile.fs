@@ -287,6 +287,8 @@ let problems (json: string) : string list =
                           && not (Text.RegularExpressions.Regex.IsMatch(language.GetString() |> string, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"))
                           ->
                           $"edits[{index}] has lang \"{language.GetString()}\", which isn't a language tag (e.g. es, en-US)."
+                      | true, language when language.ValueKind <> JsonValueKind.String && language.ValueKind <> JsonValueKind.Null ->
+                          $"edits[{index}] has lang {language.GetRawText()}, which isn't a language tag (e.g. \"es\", \"en-US\")."
                       | _ -> ()
                       match edit.TryGetProperty "retag" with
                       | true, retag when retag.ValueKind = JsonValueKind.String && not (Tags.retagTargets.Contains(retag.GetString() |> string)) ->

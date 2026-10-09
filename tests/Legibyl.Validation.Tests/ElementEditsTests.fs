@@ -394,3 +394,5 @@ let ``a language given an element's text is written to it, and kept in the revie
     (ReviewFile.toElementEdit saved |> Option.map _.Lang) |> should equal (Some "es")
     ReviewFile.problems """{ "version": 1, "edits": [ { "page": 1, "tag": "P", "box": [70, 695, 300, 715], "lang": "es_MX" } ] }"""
     |> should equal [ "edits[0] has lang \"es_MX\", which isn't a language tag (e.g. es, en-US)." ]
+    ReviewFile.problems """{ "version": 1, "edits": [ { "page": 1, "tag": "P", "box": [70, 695, 300, 715], "lang": 123 } ] }"""
+    |> should equal [ "edits[0] has lang 123, which isn't a language tag (e.g. \"es\", \"en-US\")." ]
