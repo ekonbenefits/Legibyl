@@ -20,6 +20,8 @@
     <Compile Include="Results.fs" />
     <Compile Include="ValidationReportTextFormatter.fs" />
     <Compile Include="Interop.fs" />
+    <Compile Include="Pdfium.fs" />
+    <Compile Include="ContrastRasterizer.fs" />
     <Compile Include="ValidatorLog.fs" />
     <Compile Include="WebAddressText.fs" />
     <Compile Include="MarkedContentTextIndex.fs" />
@@ -90,6 +92,11 @@
     <!-- Used only to read marked-content text runs (by page + MCID) for structure-tree
          content extraction; pure managed, Apache 2.0, no native/PDFium dependency. -->
     <PackageReference Include="PdfPig" />
+    <!-- PDFium draws pages (Chrome's renderer; BSD-3), from bblanchon's native builds for
+         Windows, Linux and macOS: for WCAG's contrast check here, and for Legibyl.Rendering. -->
+    <PackageReference Include="bblanchon.PDFium.Linux" />
+    <PackageReference Include="bblanchon.PDFium.macOS" />
+    <PackageReference Include="bblanchon.PDFium.Win32" />
     <!-- Reads RuleGuide.yaml (MIT). -->
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
@@ -103,27 +110,27 @@
     <VeraPdfJar>$(VeraPdfJarDir)$(VeraPdfJarName)</VeraPdfJar>
   </PropertyGroup>
 
-  <!-- veraPDF's WCAG 2.2 checks and what they render pages with, pinned here (see
-       lib/vendor/verapdf-jars/README.md), cached beside the veraPDF jar. The WCAG model is found
-       by name (Class.forName) from veraPDF's own code, so they're all compiled into one assembly
-       with it. jpeg2000-stub.jar is Legibyl's own stand-in for jai-imageio-jpeg2000 (see
-       java/README.md). -->
+  <!-- veraPDF's WCAG 2.2 checks, pinned here (see lib/vendor/verapdf-jars/README.md), cached
+       beside the veraPDF jar. The WCAG model is found by name (Class.forName) from veraPDF's own
+       code, so they're compiled into one assembly with it. Their contrast check draws pages with
+       PDFium, through java/wcag-contrast.jar (see java/README.md): wcag-algorithms goes in
+       without veraPDF's own ContrastRatioConsumer, which drew them with PDFBox. -->
   <ItemGroup>
     <VeraPdfWcagJar Include="org/verapdf/wcag-validation/$(VeraPdfVersion)/wcag-validation-$(VeraPdfVersion).jar" Sha256="56C45553D313A369BE7D027CE539B40B119783B910E1CB51B12CCC99A61B769A" />
     <VeraPdfWcagJar Include="org/verapdf/wcag-algorithms/$(VeraPdfVersion)/wcag-algorithms-$(VeraPdfVersion).jar" Sha256="D03E7493D51AB770B3B33FC3EA7E730D6ABABD8E63B46DBFBD6F8BE7FA11D4DA" />
-    <VeraPdfWcagJar Include="org/apache/pdfbox/pdfbox/$(PdfBoxVersion)/pdfbox-$(PdfBoxVersion).jar" Sha256="3C2C0553EC0E7533C490B4C952E1AF113621DE5275AF6E380E11D0D9A0A4F3D6" />
-    <VeraPdfWcagJar Include="org/apache/pdfbox/fontbox/$(PdfBoxVersion)/fontbox-$(PdfBoxVersion).jar" Sha256="2E8C0A569A90B04734FBC0C805D77F4EC03F98C11F5705055CCD7718C1953D68" />
-    <VeraPdfWcagJar Include="commons-logging/commons-logging/1.2/commons-logging-1.2.jar" Sha256="DADDEA1EA0BE0F56978AB3006B8AC92834AFEEFBD9B7E4E6316FCA57DF0FA636" />
-    <VeraPdfWcagJar Include="com/github/jai-imageio/jai-imageio-core/1.4.0/jai-imageio-core-1.4.0.jar" Sha256="8AD3C68E9EFFFB10AC87FF8BC589ADF64B04A729C5194C079EFD0643607FD72A" />
-    <VeraPdfWcagJar Include="org/apache/pdfbox/jbig2-imageio/3.0.3/jbig2-imageio-3.0.3.jar" Sha256="C80110FDA57128563D3D0656BFF78DA8BF35A934CF54EDFA10E8B76FC6389929" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <WcagAlgorithmsJar>$(VeraPdfJarDir)wcag-algorithms-$(VeraPdfVersion).jar</WcagAlgorithmsJar>
+    <WcagAlgorithmsRepacked>$(VeraPdfJarDir)wcag-algorithms-$(VeraPdfVersion)-legibyl.jar</WcagAlgorithmsRepacked>
+  </PropertyGroup>
 
   <ItemGroup>
     <IkvmReference Include="$(VeraPdfJar)"
                    AssemblyName="verapdf"
                    AssemblyVersion="$(VeraPdfVersion).0"
                    AssemblyFileVersion="$(VeraPdfVersion).0"
-                   Compile="$(VeraPdfJar);@(VeraPdfWcagJar->'$(VeraPdfJarDir)%(Filename)%(Extension)');$(MSBuildProjectDirectory)/java/jpeg2000-stub.jar" />
+                   Compile="$(VeraPdfJar);$(VeraPdfJarDir)wcag-validation-$(VeraPdfVersion).jar;$(WcagAlgorithmsRepacked);$(MSBuildProjectDirectory)/java/wcag-contrast.jar" />
     <!-- veraPDF's WCAG 2.2 machine-checkable rules, as its v1.28.1 release has them (see
          WcagProfile). -->
     <EmbeddedResource Include="Profiles/WCAG-2-2-Machine.xml" LogicalName="WCAG-2-2-Machine.xml" />
@@ -133,6 +140,24 @@
     <DownloadFile SourceUrl="https://repo1.maven.org/maven2/%(VeraPdfWcagJar.Identity)" DestinationFolder="$(VeraPdfJarDir)" DestinationFileName="%(VeraPdfWcagJar.Filename)%(VeraPdfWcagJar.Extension).download" Retries="3" Condition="!Exists('$(VeraPdfJarDir)%(VeraPdfWcagJar.Filename)%(VeraPdfWcagJar.Extension)')" />
     <VerifyFileHash File="$(VeraPdfJarDir)%(VeraPdfWcagJar.Filename)%(VeraPdfWcagJar.Extension).download" Hash="%(VeraPdfWcagJar.Sha256)" Algorithm="SHA256" Condition="!Exists('$(VeraPdfJarDir)%(VeraPdfWcagJar.Filename)%(VeraPdfWcagJar.Extension)')" />
     <Move SourceFiles="$(VeraPdfJarDir)%(VeraPdfWcagJar.Filename)%(VeraPdfWcagJar.Extension).download" DestinationFiles="$(VeraPdfJarDir)%(VeraPdfWcagJar.Filename)%(VeraPdfWcagJar.Extension)" Condition="!Exists('$(VeraPdfJarDir)%(VeraPdfWcagJar.Filename)%(VeraPdfWcagJar.Extension)')" />
+  </Target>
+
+  <!-- wcag-algorithms less veraPDF's ContrastRatioConsumer (and its DataPoint), so the one in
+       java/wcag-contrast.jar is the only one. -->
+  <Target Name="RepackWcagAlgorithms" AfterTargets="FetchVeraPdfWcagJars" BeforeTargets="GetIkvmReferenceItemsFromIkvmReferences" Condition="!Exists('$(WcagAlgorithmsRepacked)')">
+    <PropertyGroup>
+      <_WcagRepackDir>$(VeraPdfJarDir)wcag-algorithms-repack/</_WcagRepackDir>
+    </PropertyGroup>
+    <RemoveDir Directories="$(_WcagRepackDir)" />
+    <Unzip SourceFiles="$(WcagAlgorithmsJar)" DestinationFolder="$(_WcagRepackDir)" />
+    <ItemGroup>
+      <_WcagConsumerClass Include="$(_WcagRepackDir)org/verapdf/wcag/algorithms/semanticalgorithms/consumers/ContrastRatioConsumer*.class" />
+    </ItemGroup>
+    <Error Condition="'@(_WcagConsumerClass)' == ''" Text="wcag-algorithms has no ContrastRatioConsumer to replace: compare veraPDF's new release with java/README.md." />
+    <Delete Files="@(_WcagConsumerClass)" />
+    <ZipDirectory SourceDirectory="$(_WcagRepackDir)" DestinationFile="$(WcagAlgorithmsRepacked).tmp" Overwrite="true" />
+    <Move SourceFiles="$(WcagAlgorithmsRepacked).tmp" DestinationFiles="$(WcagAlgorithmsRepacked)" />
+    <RemoveDir Directories="$(_WcagRepackDir)" />
   </Target>
 
   <Target Name="FetchVeraPdfJar" BeforeTargets="GetIkvmReferenceItemsFromIkvmReferences" Condition="!Exists('$(VeraPdfJar)')">

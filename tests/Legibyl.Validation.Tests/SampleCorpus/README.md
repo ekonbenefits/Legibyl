@@ -76,3 +76,7 @@ PDF/UA-1:
 
 To update, copy the same files from a newer upstream commit and update the
 commit above.
+
+`images/navy.jp2` is a plain navy rectangle, made for this project with macOS's `sips` (from a
+BMP of one colour) as a JPEG 2000 image. `WcagTests` draws white text over it, to check that
+WCAG's contrast check measures text against the image, not the white page under it.

@@ -14,11 +14,8 @@
   <ItemGroup>
     <!-- Pure managed PDF parsing (text, positions, annotations) - Apache 2.0. -->
     <PackageReference Include="PdfPig" />
-    <!-- PDFium draws pages (Chrome's renderer; BSD-3), from bblanchon's native builds for
-         Windows, Linux and macOS, into SkiaSharp bitmaps. -->
-    <PackageReference Include="bblanchon.PDFium.Linux" />
-    <PackageReference Include="bblanchon.PDFium.macOS" />
-    <PackageReference Include="bblanchon.PDFium.Win32" />
+    <!-- PDFium (from Legibyl.Validation, which draws with it too) draws pages into SkiaSharp
+         bitmaps. -->
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
