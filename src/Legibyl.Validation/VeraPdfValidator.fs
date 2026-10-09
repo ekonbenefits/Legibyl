@@ -611,6 +611,7 @@ type VeraPdfValidator() =
     // as non-nullable.
     let mutable review: Func<Collections.Generic.IReadOnlyList<TaggedRegion>, string | null> | null = null
     let mutable title: string | null = null
+    let mutable language: string | null = null
     // veraPDF's one-time setup (a second or two) happens on first use, not here, so a validator
     // can be made on a UI thread; Warm does it ahead of time.
 
@@ -633,6 +634,13 @@ type VeraPdfValidator() =
     member _.Title
         with get (): string | null = title
         and set (value: string | null) = title <- value
+
+    /// The language a person chose for the document (Structure…'s Document language, a review's
+    /// "language", or the CLI's --lang): Fix declares it (the Language fix, which it runs then),
+    /// in place of any it says or its text reads as; null for none.
+    member _.Language
+        with get (): string | null = language
+        and set (value: string | null) = language <- value
 
     /// The standard tag a person chose for each of the PDF's own tag names (Structure…'s Role
     /// map, or a review's "roleMap"), which the ApplyEdits fix writes to its role map before the
@@ -696,9 +704,11 @@ type VeraPdfValidator() =
         ensureInitialised ()
         if options = PdfFixOptions.None then
             raise (VeraPdfValidationException "At least one fix option must be selected.")
+        // A language a person chose is declared, whatever else is asked for.
+        let options = if String.IsNullOrWhiteSpace this.Language then options else options ||| PdfFixOptions.Language
 
         let structuralOptions =
-            StructureFixes.orderedFixes this.PageTitleSource None [] None Map.empty Map.empty |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
+            StructureFixes.orderedFixes this.PageTitleSource None [] None None Map.empty Map.empty |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
         let steps =
@@ -790,6 +800,7 @@ type VeraPdfValidator() =
                             layout
                             (List.ofSeq this.Edits)
                             (Option.ofObj this.Title)
+                            (Option.ofObj this.Language |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.map _.Trim())
                             (this.RoleMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
                             (this.Attachments |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
                     unneeded <- nothingToDo

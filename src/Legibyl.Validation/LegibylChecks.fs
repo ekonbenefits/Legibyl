@@ -21,9 +21,9 @@
 /// figures that draw nothing, Structure-11; pages read out of order, Structure-12; pages whose
 /// text couldn't be read, Structure-13; words split across Span boundaries, Structure-14; tables
 /// tagged as aligned paragraphs, Structure-15; no single Document tag at the top, Structure-16;
-/// content tied to a tag that's gone, Structure-17; and web addresses shown as text that nothing
-/// links, Structure-18, which untagged documents get too) are added in `run` directly, and their
-/// messages to messageFor.
+/// content tied to a tag that's gone, Structure-17; web addresses shown as text that nothing
+/// links, Structure-18, which untagged documents get too; and a declared language the text isn't
+/// in, Structure-19, as well) are added in `run` directly, and their messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -428,6 +428,24 @@ let private unlinkedUrlFindings (document: PdfDocument) context =
               | Some why -> PdfFixOptions.None, $"Page {candidate.Page}: \"{candidate.Text}\". Not fixable here: {why}."
           warning UnlinkedUrlMessage detail candidate.Location 18 fixes candidate.Geometry ]
 
+// ---- Structure-19: a declared language the text isn't in ----
+
+[<Literal>]
+let private LanguageMismatchMessage =
+    "The document says it's in one language, but its text reads as another, so a screen reader reads it all with the wrong voice; an auto fix can declare the language its text reads as, or choose the language in Structure…."
+
+let private languageMismatchFindings (document: PdfDocument) context =
+    match DocumentLanguage.mismatch document context with
+    | Some(said, reads) ->
+        [ warning
+              LanguageMismatchMessage
+              $"It says {DocumentLanguage.describe said}, but its text reads as {DocumentLanguage.describe reads}."
+              "StructTreeRoot"
+              19
+              PdfFixOptions.Language
+              null ]
+    | None -> []
+
 // ---- Structure-13: pages whose text couldn't be read ----
 
 [<Literal>]
@@ -452,7 +470,7 @@ let private unreadableTextFindings context =
 let run (document: PdfDocument) context : RuleViolation list =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
     // Untagged: only what's on the pages, its web addresses (the fix needs tags to link them).
-    | null -> unlinkedUrlFindings document context @ unreadableTextFindings context
+    | null -> unlinkedUrlFindings document context @ unreadableTextFindings context @ languageMismatchFindings document context
     | structTreeRoot ->
         let visits = walk structTreeRoot context |> List.ofSeq
         // An empty tag the fix would keep (it draws something, or has a description) is still
@@ -502,7 +520,8 @@ let run (document: PdfDocument) context : RuleViolation list =
                   15
                   PdfFixOptions.None
                   (Option.toObj candidate.Geometry)
-          yield! documentRootFindings document context ]
+          yield! documentRootFindings document context
+          yield! languageMismatchFindings document context ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
 let messageFor (testNumber: int) : string option =
@@ -526,6 +545,7 @@ let messageFor (testNumber: int) : string option =
         | 16 -> Some DocumentRootMessage
         | 17 -> Some DisconnectedMessage
         | 18 -> Some UnlinkedUrlMessage
+        | 19 -> Some LanguageMismatchMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

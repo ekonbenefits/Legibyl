@@ -165,6 +165,11 @@ type SavedFile =
       [<JsonPropertyName "title">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       Title: string | null
+      /// The document's language as a person chose it in Structure… ("es-MX"), which Export…
+      /// declares.
+      [<JsonPropertyName "language">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Language: string | null
       /// The standard tag a person chose for each of the PDF's own tag names (Structure…'s Role
       /// map), which Export… writes to its role map: "Heading1": "H1".
       [<JsonPropertyName "roleMap">]
@@ -281,7 +286,7 @@ let isEmpty (file: SavedFile) =
         | Null -> true
     // Fixes chosen as none is still a choice, as is none dismissed (over a review carried inside
     // the PDF that has some).
-    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && (match file.RoleMap with null -> true | map -> map.Count = 0)
+    isNull file.DismissedWarnings && none file.Edits && isNull file.Title && isNull file.Language && (match file.RoleMap with null -> true | map -> map.Count = 0)
     && (match file.Attachments with null -> true | edits -> edits.Count = 0)
     && isNull file.Layout && isNull file.Fixes && isNull file.Validation && isNull file.Checklist
 

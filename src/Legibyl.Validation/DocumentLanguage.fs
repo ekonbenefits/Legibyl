@@ -118,12 +118,16 @@ let detect (text: string) : string option =
         | best :: _ when best.Probability >= MinimumProbability -> Some(tagFor best.Language)
         | _ -> None
 
-/// The pages' text, enough of it to detect the language from.
+/// The pages' text, enough of it to detect the language from (pages whose text can't be read
+/// left out).
 let private pagesText (document: PdfDocument) =
     let text = StringBuilder()
     let mutable page = 1
     while text.Length < SampleLength && page <= document.GetNumberOfPages() do
-        text.Append(PdfTextExtractor.GetTextFromPage(document.GetPage page)).Append(' ') |> ignore
+        try
+            text.Append(PdfTextExtractor.GetTextFromPage(document.GetPage page)).Append(' ') |> ignore
+        with _ ->
+            ()
         page <- page + 1
     text
 
@@ -132,6 +136,12 @@ let declared (document: PdfDocument) =
     match document.GetCatalog().GetPdfObject().GetAsString PdfName.Lang with
     | NonNull language when not (String.IsNullOrWhiteSpace(language.ToUnicodeString())) -> Some(language.ToUnicodeString().Trim())
     | _ -> None
+
+/// The languages detection knows: each one's tag and its name in English.
+let known () = languages.Values |> List.ofSeq
+
+/// The language the document's pages' text reads as, if that's clear.
+let readsAs (document: PdfDocument) = (pagesText document).ToString() |> detect
 
 /// The language the document's text is in: the one it says, else the one its pages' text reads
 /// as, if that's clear.
@@ -152,3 +162,22 @@ let sample (document: PdfDocument) context =
                     | null -> ()
                     | value -> text.Append(value.ToUnicodeString()).Append(' ') |> ignore
     text.ToString()
+
+/// A tag's language, without its region or script ("es-MX" -> "es").
+let primary (tag: string) = tag.Split('-').[0].Trim().ToLowerInvariant()
+
+/// The language the document says it's in and the one its text reads as, when they're different
+/// languages (not just regions of one) and the text clearly reads as the other.
+let mismatch (document: PdfDocument) context =
+    match declared document with
+    | Some said ->
+        match detect (sample document context) with
+        | Some reads when primary reads <> primary said -> Some(said, reads)
+        | _ -> None
+    | None -> None
+
+/// "es-MX" -> "es-MX (Spanish)": a tag as a message gives it, named where it's known.
+let describe (tag: string) =
+    match nameOf (primary tag) with
+    | name when name = primary tag -> tag
+    | name -> $"{tag} ({name})"

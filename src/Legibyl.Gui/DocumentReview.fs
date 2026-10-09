@@ -36,18 +36,18 @@ type DocumentReview(modified: DateTime) =
     /// The last validation's result (see SavedResults): as saved next to the PDF, or a newer one
     /// Save hasn't kept yet.
     member val Validation: ReviewFile.SavedValidation option = None with get, set
-    /// What was last saved (or read): the dismissals, edits, title, role map, auto fixes and which
-    /// validation.
+    /// What was last saved (or read): the dismissals, edits, title and language, role map, auto
+    /// fixes and which validation.
     member val private Saved:
         Dismissals.Dismissed
         * RegionEdits.Edit list
-        * string option
+        * (string option * string option)
         * Map<string, string>
         * Map<string, Attachments.AttachmentEdit>
         * PdfFixOptions option
         * (string * DateTime) option
         * (string * Set<string>) option =
-        (Map.empty, [], None, Map.empty, Map.empty, None, None, None) with get, set
+        (Map.empty, [], (None, None), Map.empty, Map.empty, None, None, None) with get, set
 
     /// Which validation it has: the file checked, and when.
     member private this.ValidationStamp = this.Validation |> Option.map (fun v -> v.Hash, v.CheckedAt)
@@ -93,6 +93,8 @@ type DocumentReview(modified: DateTime) =
     member this.TitleLookup = this.Titles :> Collections.Generic.IReadOnlyDictionary<string, string>
     /// The document title as edited on the suggested structure (saved next to the PDF), if it was.
     member val Title: string option = None with get, set
+    /// The document's language as a person chose it in Structure… ("es-MX"), if they did.
+    member val Language: string option = None with get, set
     /// The standard tag chosen for each of the PDF's own tag names (Structure…'s Role map).
     member val RoleMap: Map<string, string> = Map.empty with get, set
     /// What's given the PDF's attached files and media clips, by key (Structure…'s Attachments).
@@ -116,7 +118,7 @@ type DocumentReview(modified: DateTime) =
 
     /// Whether a person has decided anything here (an edit or a title), so the layout the edits
     /// are on is worth recording next to the PDF.
-    member this.HasDecisions = this.LayoutKept || not this.Edits.IsEmpty || this.Title.IsSome
+    member this.HasDecisions = this.LayoutKept || not this.Edits.IsEmpty || this.Title.IsSome || this.Language.IsSome
 
     /// The review as Save keeps it: the layout is recorded only once something's decided.
     member this.ToFile(pdfPath: string) : ReviewFile.SavedFile =
@@ -127,6 +129,7 @@ type DocumentReview(modified: DateTime) =
             if this.Dismissed.IsEmpty && not this.CarriedDismissed.IsEmpty then [||] else Dismissals.toSaved this.Dismissed
           Edits = (if edits.Length = 0 then null else edits)
           Title = Option.toObj this.Title
+          Language = Option.toObj this.Language
           RoleMap = (if this.RoleMap.IsEmpty then null else Collections.Generic.Dictionary<string, string>(this.RoleMap))
           Attachments = (if this.Attachments.IsEmpty then null else Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>(this.Attachments))
           Layout = (if this.HasDecisions then this.ToLayout pdfPath |> Option.toObj else null)
@@ -164,6 +167,7 @@ type DocumentReview(modified: DateTime) =
             { own with
                 Edits = (if edits.Length = 0 then null else edits)
                 Title = (if isNull own.Title then carried.Title else own.Title)
+                Language = (if isNull own.Language then carried.Language else own.Language)
                 RoleMap = (if isNull own.RoleMap then carried.RoleMap else own.RoleMap)
                 Attachments = (if isNull own.Attachments then carried.Attachments else own.Attachments)
                 Fixes = own.Fixes }
@@ -177,7 +181,7 @@ type DocumentReview(modified: DateTime) =
 
     /// Whether there are changes Save hasn't kept: the dismissals, edits, title, role map or auto fixes differ
     /// from what was last saved (changing one back isn't a change), or there's a newer validation.
-    member this.IsEdited = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist) <> this.Saved
+    member this.IsEdited = (this.Dismissed, this.Edits, (this.Title, this.Language), this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist) <> this.Saved
 
     /// Takes the validation it has now as saved, its other changes left as they are: for a result
     /// that leaves nothing to do, which isn't worth asking to keep (opening the PDF again redoes it).
@@ -186,11 +190,11 @@ type DocumentReview(modified: DateTime) =
         this.Saved <- (dismissed, edits, title, roleMap, attachments, autoFixes, this.ValidationStamp, checklist)
 
     /// Takes what it has now as what's saved.
-    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
+    member this.MarkSaved() = this.Saved <- (this.Dismissed, this.Edits, (this.Title, this.Language), this.RoleMap, this.Attachments, this.AutoFixes, this.ValidationStamp, this.Checklist)
 
     /// A person's decisions in the review, which every exported copy carries: the dismissals,
-    /// edits, title, role map, attachments and auto fixes.
-    member private this.Decisions = (this.Dismissed, this.Edits, this.Title, this.RoleMap, this.Attachments, this.AutoFixes)
+    /// edits, title, language, role map, attachments and auto fixes.
+    member private this.Decisions = (this.Dismissed, this.Edits, (this.Title, this.Language), this.RoleMap, this.Attachments, this.AutoFixes)
 
     /// What was last exported: the decisions as they were when a copy carrying them was written,
     /// and the checklist too if the copy carried it (one carrying only the steps checked carries
@@ -198,7 +202,7 @@ type DocumentReview(modified: DateTime) =
     member val private Exported:
         ((Dismissals.Dismissed
           * RegionEdits.Edit list
-          * string option
+          * (string option * string option)
           * Map<string, string>
           * Map<string, Attachments.AttachmentEdit>
           * PdfFixOptions option)
@@ -238,10 +242,11 @@ type DocumentReview(modified: DateTime) =
     member val TextLanguage: Threading.Tasks.Task<string option> = Threading.Tasks.Task.FromResult None with get, set
 
     /// A QR code's alt text as prefilled: where it links, named by its page's title if read, in
-    /// the PDF's language as tagging writes it (English until its language is known).
+    /// the PDF's language as tagging writes it (the one a person chose, if they did; English until
+    /// its language is known).
     member this.QrAlt(qrText: string) =
-        let language = if this.TextLanguage.IsCompletedSuccessfully then this.TextLanguage.Result else None
-        fst (LinkTitles.qrAltText this.TitleLookup language qrText)
+        let read = if this.TextLanguage.IsCompletedSuccessfully then this.TextLanguage.Result else None
+        fst (LinkTitles.qrAltText this.TitleLookup (this.Language |> Option.orElse read) qrText)
 
     /// A web link's description as prefilled: its page's title, if read; "" if not.
     member this.LinkPrefill(address: string) =
@@ -276,6 +281,7 @@ type DocumentReviews() =
             | Some saved ->
                 review.Edits <- RegionEdits.editsIn saved
                 review.Title <- Option.ofObj saved.Title
+                review.Language <- Option.ofObj saved.Language
                 review.RoleMap <-
                     match saved.RoleMap with
                     | NonNull map -> map |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq

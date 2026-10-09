@@ -598,17 +598,39 @@ let private setDocumentTitle fromFirstPage (document: PdfDocument) _ =
       | None -> ()
       if displayDocTitleSet then "Set /DisplayDocTitle so readers show the document title rather than the file name." ]
 
-let private setLanguageFromText (document: PdfDocument) context =
-    if DocumentLanguage.isDeclared document then
+/// Declares the language a person chose for the document (Structure…'s Document language, a
+/// review's "language", or the CLI's --lang); says so, or nothing if it has it already.
+let private declareChosen (language: string) (document: PdfDocument) (context: Context) =
+    if DocumentLanguage.declared document = Some language then
         []
     else
-        match DocumentLanguage.detect (DocumentLanguage.sample document context) with
-        | Some language ->
+        document.GetCatalog().GetPdfObject().Put(PdfName.Lang, PdfString language) |> ignore
+        context.Language <- Some language
+        [ $"Declared the document's language as {DocumentLanguage.describe language}, as you chose." ]
+
+/// The document's language: the one a person chose; else, where it says none, the one its text
+/// reads as; else, where it says one its text clearly isn't in (see Structure-19), that one in
+/// its place.
+let private setLanguage (chosen: string option) (document: PdfDocument) context =
+    match chosen with
+    | Some language -> declareChosen language document context
+    | None ->
+        // (So the fixes after it read the text in it.)
+        let declare (language: string) =
             document.GetCatalog().GetPdfObject().Put(PdfName.Lang, PdfString language) |> ignore
-            // So the fixes after it read the text in it.
             context.Language <- Some language
-            [ $"Declared the document's language as {language} ({DocumentLanguage.nameOf language}), detected from its text." ]
-        | None -> []
+        if DocumentLanguage.isDeclared document then
+            match DocumentLanguage.mismatch document context with
+            | Some(said, reads) ->
+                declare reads
+                [ $"Declared the document's language as {DocumentLanguage.describe reads}, which its text reads as, in place of {DocumentLanguage.describe said}." ]
+            | None -> []
+        else
+            match DocumentLanguage.detect (DocumentLanguage.sample document context) with
+            | Some language ->
+                declare language
+                [ $"Declared the document's language as {DocumentLanguage.describe language}, detected from its text." ]
+            | None -> []
 
 /// Legibyl's own fixes, in the order they run. Each takes the open document and returns a
 /// line per change it made. The order matters where one fix changes what another sees:
@@ -1205,6 +1227,7 @@ let orderedFixes
     (layout: PageLayout option)
     (edits: ElementEdit list)
     (title: string option)
+    (language: string option)
     (roleMap: Map<string, string>)
     (attachments: Map<string, Attachments.AttachmentEdit>)
     : (PdfFixOptions * (PdfDocument -> Context -> string list)) list =
@@ -1213,7 +1236,7 @@ let orderedFixes
       // A person's role map first: the RoleMap fix maps what's left.
       PdfFixOptions.ApplyEdits, chooseRoles roleMap
       PdfFixOptions.RoleMap, mapRoles
-      PdfFixOptions.Language, setLanguageFromText
+      PdfFixOptions.Language, setLanguage language
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.EmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.EmptyTocEntries, removeEmptyTocEntries
@@ -1269,6 +1292,7 @@ let applyFixes
     (layout: PageLayout option)
     (edits: ElementEdit list)
     (title: string option)
+    (language: string option)
     (roleMap: Map<string, string>)
     (attachments: Map<string, Attachments.AttachmentEdit>)
     : string list * PdfFixOptions list * string list =
@@ -1281,7 +1305,7 @@ let applyFixes
     let unreadable = context.MarkedContent.Unreadable
     let mutable unreadableNoted = false
     let results =
-        [ for option, apply in orderedFixes titles layout edits title roleMap attachments do
+        [ for option, apply in orderedFixes titles layout edits title language roleMap attachments do
               if options.HasFlag option then
                   let notes = context.Notes.Count
                   let lines = apply document context

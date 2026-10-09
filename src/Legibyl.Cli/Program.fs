@@ -324,6 +324,8 @@ type private FixRequest =
       ReviewAsked: bool
       /// `layout apply`'s layout, to tag from.
       Layout: LayoutFile.SavedLayout option
+      /// --lang's language, declared in place of the review's or any the PDF says.
+      Language: string option
       Output: string option }
 
 let private compliance (report: ValidationReport) = { IsCompliant = report.IsCompliant; FailedCount = report.FailedCount }
@@ -364,8 +366,13 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
         [ if request.ReviewAsked && review.IsNone then
               $"No edits were applied: there's no {Path.GetFileName(ReviewFile.filePath file)} next to it, and no review inside it." ]
     let reviewLayout = review |> Option.bind (fun review -> Option.ofObj review.Layout)
+    // The language chosen: --lang's, else the review's.
+    let language =
+        request.Language
+        |> Option.orElse (review |> Option.bind (fun review -> Option.ofObj review.Language) |> Option.filter (String.IsNullOrWhiteSpace >> not))
     let options =
         request.Fixes
+        ||| (if language.IsSome then PdfFixOptions.Language else PdfFixOptions.None)
         ||| (if request.Layout.IsSome || reviewLayout.IsSome then PdfFixOptions.TagFromLayout else PdfFixOptions.None)
         ||| (match review with
              | Some review when
@@ -416,6 +423,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
         try
             try
                 layout |> Option.iter (fun source -> validator.LayoutSource <- source)
+                validator.Language <- Option.toObj language
                 match review with
                 | Some review ->
                     validator.Edits <- ReviewFile.edits review
@@ -470,6 +478,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
             validator.LayoutSource <- null
             validator.Edits <- []
             validator.Title <- null
+            validator.Language <- null
             validator.RoleMap <- Collections.Generic.Dictionary<string, string>()
             validator.Attachments <- Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>()
             validator.Review <- null
@@ -542,8 +551,12 @@ type private FixArgs =
       Fixes: string option
       Edits: bool
       EditsFrom: string option
+      Lang: string option
       Output: string option
       Verbose: bool }
+
+/// Whether tag is a language tag (BCP 47): a language, then subtags, e.g. en, en-US, zh-Hant-TW.
+let private isLanguageTag (tag: string) = RegularExpressions.Regex.IsMatch(tag, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$")
 
 let private runFix (args: FixArgs) =
     use _ = printingLog args.Verbose
@@ -553,6 +566,8 @@ let private runFix (args: FixArgs) =
         usageError (sidecarProblems args.Edits args.Files).Value
     elif args.Output.IsSome && args.Files.Length > 1 then
         usageError "--output names one fixed copy: use it with a single file (several get their next versions)."
+    elif args.Lang |> Option.exists (isLanguageTag >> not) then
+        usageError $"--lang takes a language tag, e.g. es-MX, not '{args.Lang.Value}'."
     else
         match args.EditsFrom |> Option.map reviewFrom with
         | Some(Error message) -> usageError message
@@ -566,6 +581,7 @@ let private runFix (args: FixArgs) =
                   Review = review |> Option.bind Result.toOption
                   ReviewAsked = args.Edits
                   Layout = None
+                  Language = args.Lang
                   Output = args.Output }
                 args.Format
                 args.Report
@@ -649,7 +665,7 @@ let private runAppend (args: AppendArgs) =
         | Some tag, _ when not (List.contains tag (Append.partTags profile)) ->
             usageError $"""--part-tag for {PdfUaTarget.displayName profile} is one of {String.Join(", ", Append.partTags profile)}, not '{tag}'."""
         // A language tag (BCP 47): a language, then subtags, e.g. en, en-US, zh-Hant-TW.
-        | _, Some lang when not (RegularExpressions.Regex.IsMatch(lang, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$")) ->
+        | _, Some lang when not (isLanguageTag lang) ->
             usageError $"--lang takes a language tag, e.g. en-US, not '{lang}'."
         | _ ->
             let output = args.Output |> Option.defaultWith (fun () -> nextVersion files.Head)
@@ -776,6 +792,7 @@ let private runApply (args: ApplyArgs) =
                   Review = review |> Option.bind Result.toOption
                   ReviewAsked = args.Edits
                   Layout = Some layout
+                  Language = None
                   Output = args.Output }
                 args.Format
                 args.Report
@@ -924,6 +941,10 @@ let private fixCommand =
                 and! fixes = fixesOption "safe"
                 and! edits = editsOption ()
                 and! editsFrom = editsFromOption ()
+                and! lang =
+                    optionMaybe "--lang"
+                    |> desc "The document's language, e.g. es-MX: declared (the language fix), in place of a review's or any it says."
+                    |> helpName "tag"
                 and! output = optionMaybe "--output" |> desc "The fixed copy's path (one file only)." |> helpName "path"
                 and! ua = uaOption ()
                 and! format = formatOption ()
@@ -937,6 +958,7 @@ let private fixCommand =
                       Fixes = fixes
                       Edits = edits
                       EditsFrom = editsFrom
+                      Lang = lang
                       Output = output
                       Verbose = verbose }
             }
