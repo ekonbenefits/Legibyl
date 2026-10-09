@@ -545,5 +545,5 @@ let ``each address is dismissed on its own`` () =
     let review: ReviewFile.SavedFile =
         { Version = 1
           DismissedWarnings = [| { Rule = ReviewFile.dismissalRule first; Location = ReviewFile.dismissalLocation first; Message = first.Message } |]
-          Edits = null; Title = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+          Edits = null; Title = null; Language = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
     warnings |> List.filter (ReviewFile.dismisses review) |> should equal [ first ]

@@ -82,6 +82,7 @@ let private writeReview (path: string) (alt: string) =
           DismissedWarnings = null
           Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null} |]
           Title = null
+          Language = null
           RoleMap = null; Attachments = null
           Layout = null
           Fixes = null
@@ -111,6 +112,7 @@ let ``--edits with a figure retagged Artifact makes it decoration`` () =
               DismissedWarnings = null
               Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = null; Text = null; MergeWith = null; Retag = "Artifact"; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null} |]
               Title = null
+              Language = null
               RoleMap = null; Attachments = null
               Layout = null
               Fixes = null
@@ -133,6 +135,7 @@ let ``--edits gives a tagged PDF the review's title`` () =
               DismissedWarnings = null
               Edits = null
               Title = "The Community Garden"
+              Language = null
               RoleMap = null; Attachments = null
               Layout = null
               Fixes = null
@@ -161,7 +164,7 @@ let ``--edits writes a review that only gives an attached file a description`` (
         let edits = Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>()
         edits["the document: notes.txt"] <- { FileName = null; Description = "What to bring"; ContentType = null }
         let review: ReviewFile.SavedFile =
-            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; RoleMap = null; Attachments = edits
+            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; Language = null; RoleMap = null; Attachments = edits
               Layout = null; Fixes = null; Validation = null; Checklist = null }
         File.WriteAllText(ReviewFile.filePath pdf, ReviewFile.toJson review)
         let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
@@ -181,6 +184,19 @@ let ``--edits-from reads another review, such as an earlier version's`` () =
         run [ "fix"; pdf; "--edits-from"; other; "--fixes"; "none"; "--output"; copy ] |> ignore
 
         figureAlt copy |> should equal (Some "Seedlings in a tray"))
+
+[<Fact>]
+let ``--lang declares the language given, with no other fixes, and a tag that isn't one is a usage error`` () =
+    withTaggedPdf (fun pdf ->
+        let copy = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "out.pdf")
+
+        let _, result = run [ "fix"; pdf; "--lang"; "es-MX"; "--fixes"; "none"; "--output"; copy ]
+
+        strings result.Value "applied" |> should contain "Declared the document's language as es-MX (Spanish), as you chose."
+        do
+            use document = new PdfDocument(new PdfReader(copy))
+            document.GetCatalog().GetPdfObject().GetAsString(PdfName.Lang).ToUnicodeString() |> should equal "es-MX"
+        Legibyl.Cli.Program.main [| "fix"; pdf; "--lang"; "Spanish please" |] |> should equal 64)
 
 [<Fact>]
 let ``--edits without a review says there's nothing to apply`` () =
@@ -432,7 +448,7 @@ let ``validate reports the steps a person checked, carried in a copy Legibyl wro
     withTaggedPdf (fun pdf ->
         let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
         let review: ReviewFile.SavedFile =
-            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+            { Version = 1; DismissedWarnings = null; Edits = null; Title = null; Language = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
         ReviewFile.checkedCopy pdf copy review (SavedResults.hashOf pdf) (set [ "title"; "headings" ]) (DateTime(2026, 9, 27))
 
         let _, original = run [ "validate"; pdf ]
@@ -518,7 +534,7 @@ let private withWarning (test: string -> unit) =
 let private dismissing (rule: string) : ReviewFile.SavedFile =
     { Version = 1
       DismissedWarnings = [| { Rule = rule; Location = ReviewFile.AnyLocation; Message = "" } |]
-      Edits = null; Title = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
+      Edits = null; Title = null; Language = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
 
 let private warningRules (result: JsonElement) =
     [ for w in result.GetProperty("warnings").EnumerateArray() ->

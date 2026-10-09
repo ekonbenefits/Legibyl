@@ -56,8 +56,8 @@ module Checklist =
                   | Some(tag, None) -> $"Language: {tag}"
                   | None -> "No language declared"
               )
-            What = "Is it the language the text is in? If not, set it where the PDF was made (Auto Fixes… › Declare the language only adds one where there's none)."
-            InStructure = false }
+            What = "Is it the language the text is in? If not, choose it in Structure… › Document language, and Export…."
+            InStructure = true }
           if facts.Figures > 0 then
               { Id = "alt-text"
                 Title = "Alt text"

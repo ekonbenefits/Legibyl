@@ -83,7 +83,7 @@ rules:
   - clause: "7.2"
     tests: [2, 21, 22, 23, 24, 25, 30, 31, 32, 33, 34]
     meaning: "The language of some text isn't declared (the page's text, or alt text, a bookmark, a link's description, the metadata), so a screen reader may read it with the wrong voice and pronunciation."
-    whatToDo: "Choose Declare the language in Auto Fixes… (it needs enough text to tell the language), or set the document's language in the tool that made it."
+    whatToDo: "Choose the document's language in Structure…, or choose Declare the language in Auto Fixes… (which, without a choice, needs enough text to tell the language)."
 
   - clause: "7.2"
     tests: [29]
@@ -331,7 +331,7 @@ pdfUa2Rules:
   - clause: "8.4.4"
     tests: [1]
     meaning: "The document's language isn't declared, so a screen reader may read it with the wrong voice and pronunciation."
-    whatToDo: "Choose Declare the language in Auto Fixes… (it needs enough text to tell the language), or set the document's language in the tool that made it."
+    whatToDo: "Choose the document's language in Structure…, or choose Declare the language in Auto Fixes… (which, without a choice, needs enough text to tell the language)."
 
   - clause: "8.4.4"
     tests: [2]

@@ -1492,6 +1492,12 @@ module private StructureView =
             // from what's prefilled is saved, and Export writes it.
             let titleEdit = ctx.useState review.Title
             let documentCandidates = ctx.useStateLazy(fun () -> try DocumentTitles.candidates sourceFilePath with _ -> []).Current
+            // The language the PDF says it's in and the one its text reads as; a person's choice.
+            let languageFacts = ctx.useStateLazy(fun () -> LanguagePacks.ofFile sourceFilePath).Current
+            let languageEdit = ctx.useState review.Language
+            // As it was when the window opened, as written (es-MX, say): one of the choices.
+            let openedLanguage = ctx.useStateLazy(fun () -> review.Language).Current
+            let languageChoices = ctx.useStateLazy(fun () -> LanguagePacks.choices ()).Current
             // PDF/UA's title failures (no title in the metadata; the file name shown in its place),
             // marked on the title's row.
             let titleFindings =
@@ -1595,6 +1601,99 @@ module private StructureView =
                     ]
                 ]
 
+            /// The document's language: the one it'll be declared as (a person's choice, else the
+            /// one it says, else the one its text reads as), to choose; and, where what it says
+            /// isn't what its text reads as, or it says none, what Export… does about it.
+            let languageRow (review: DocumentReview) =
+                let declared, reads = languageFacts
+                let primary (tag: string) = tag.Split('-').[0].ToLowerInvariant()
+                let nameOf (tag: string) =
+                    languageChoices |> List.tryFind (fun (t, _) -> t = primary tag) |> Option.map snd |> Option.defaultValue tag
+                let label (tag: string) = $"{nameOf tag} ({tag})"
+                let current = languageEdit.Current |> Option.orElse declared |> Option.orElse reads
+                // Every language to choose, after the ones it says and was chosen as they're written
+                // (en-US, say): the same list whatever's chosen, so the choice stays shown.
+                let tags =
+                    (Option.toList declared @ Option.toList openedLanguage) @ (languageChoices |> List.map fst)
+                    |> List.distinctBy (fun tag -> tag.ToLowerInvariant())
+                let choose (tag: string) =
+                    // What it says already isn't a change.
+                    let next = if Some tag = declared then None else Some tag
+                    if next <> languageEdit.Current then
+                        languageEdit.Set next
+                        review.Language <- next
+                        onEditsChanged ()
+                let hint =
+                    match languageEdit.Current, declared, reads with
+                    | Some _, _, _ -> None
+                    | None, Some said, Some textReads when primary said <> primary textReads ->
+                        Some($"It says {nameOf said}, but its text reads as {nameOf textReads}: a screen reader reads it all with the wrong voice.", Some textReads)
+                    | None, None, Some textReads -> Some($"It says none: Declare the language, in Auto Fixes…, declares {nameOf textReads}, which its text reads as.", None)
+                    | None, None, None -> Some("It says none, and there isn't enough text to tell: choose it.", None)
+                    | _ -> None
+                Grid.create [
+                    Grid.columnDefinitions "Auto,*"
+                    Grid.rowDefinitions "Auto,Auto"
+                    Grid.children [
+                        TextBlock.create [
+                            TextBlock.text "Document language"
+                            TextBlock.fontWeight FontWeight.SemiBold
+                            TextBlock.verticalAlignment VerticalAlignment.Center
+                            TextBlock.margin (0.0, 0.0, 10.0, 0.0)
+                        ]
+                        ComboBox.create [
+                            Grid.column 1
+                            ComboBox.minWidth 220.0
+                            ComboBox.horizontalAlignment HorizontalAlignment.Left
+                            ComboBox.dataItems (tags |> List.map label)
+                            ComboBox.selectedIndex (
+                                match current with
+                                | Some tag -> tags |> List.tryFindIndex (fun t -> t.ToLowerInvariant() = tag.ToLowerInvariant()) |> Option.defaultValue -1
+                                | None -> -1
+                            )
+                            AttrBuilder<ComboBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, "Document language", ValueNone)
+                            ToolTip.tip "The language a screen reader reads the document in. Export… declares it (/Lang); Save keeps a change next to the PDF."
+                            ComboBox.onSelectedItemChanged (
+                                (fun item ->
+                                    match item with
+                                    | :? string as picked ->
+                                        tags |> List.tryFind (fun tag -> label tag = picked) |> Option.iter choose
+                                    | _ -> ()),
+                                SubPatchOptions.Always
+                            )
+                        ]
+                        match hint with
+                        | Some(text, useInstead) ->
+                            WrapPanel.create [
+                                Grid.row 1
+                                Grid.column 1
+                                WrapPanel.margin (0.0, 4.0, 0.0, 0.0)
+                                WrapPanel.children [
+                                    yield
+                                        TextBlock.create [
+                                            TextBlock.text text
+                                            TextBlock.textWrapping TextWrapping.Wrap
+                                            TextBlock.verticalAlignment VerticalAlignment.Center
+                                            TextBlock.margin (0.0, 0.0, 6.0, 0.0)
+                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                        ]
+                                        :> IView
+                                    match useInstead with
+                                    | Some tag ->
+                                        yield
+                                            Button.create [
+                                                Button.padding (8.0, 2.0)
+                                                Button.content $"Use {nameOf tag}"
+                                                Button.onClick ((fun _ -> choose tag), SubPatchOptions.Always)
+                                            ]
+                                            :> IView
+                                    | None -> ()
+                                ]
+                            ]
+                        | None -> ()
+                    ]
+                ]
+
             /// For a suggested layout: that it isn't tagged yet, how far finding it has got, and
             /// the layout model to download first if it isn't yet.
             let banner (review: DocumentReview) (prefetcher: LayoutPrefetcher) =
@@ -1677,6 +1776,7 @@ module private StructureView =
                             | Some(review, prefetcher) ->
                                 banner review prefetcher
                                 titleRow review
+                                languageRow review
                             | None ->
                                 TextBlock.create [
                                     TextBlock.textWrapping TextWrapping.Wrap
@@ -1686,6 +1786,7 @@ module private StructureView =
                                          + "Blocks with failures or warnings are marked: the ticks beside the scroll bar, and the arrows below the blocks (Shift+F8, F8), go to them; Page and its arrows (Alt+Page Up, Alt+Page Down) go page by page.")
                                 ]
                                 titleRow review
+                                languageRow review
                         ]
                     ]
                     TabControl.create [

@@ -91,3 +91,46 @@ let ``Spanish text is declared Spanish`` () =
     createPdf input.Path spanish None
     fixLanguage input.Path output.Path |> ignore
     declaredLanguage output.Path |> should equal (Some "es")
+
+/// Structure-19's warnings: each one's detail, and whether the fix is offered.
+let private mismatches (path: string) =
+    VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
+    |> Seq.filter (fun finding -> finding.Specification = "Legibyl" && finding.TestNumber = 19)
+    |> Seq.map (fun finding -> string finding.ErrorMessage, finding.FixOptions = PdfFixOptions.Language)
+    |> List.ofSeq
+
+[<Fact>]
+let ``Spanish text in a document that says it's English is warned about, and the fix declares Spanish in its place`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPdf input.Path spanish (Some "en-US")
+    mismatches input.Path |> should equal [ "It says en-US (English), but its text reads as es (Spanish).", true ]
+
+    let result = fixLanguage input.Path output.Path
+
+    result.AppliedFixes |> should contain "Declared the document's language as es (Spanish), which its text reads as, in place of en-US (English)."
+    declaredLanguage output.Path |> should equal (Some "es")
+    mismatches output.Path |> should be Empty
+
+[<Fact>]
+let ``a document that says the language its text is in, or a region of it, isn't warned about or changed`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPdf input.Path spanish (Some "es-MX")
+    mismatches input.Path |> should be Empty
+    (fixLanguage input.Path output.Path).WasFixed |> should be False
+
+[<Fact>]
+let ``the language a person chose is declared, in place of the one it says or its text reads as, whatever fixes are asked for`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    use again = new TempPdf()
+    createPdf input.Path spanish (Some "en-US")
+
+    let result = VeraPdfValidator(Language = "es-MX").Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Metadata)
+
+    result.AppliedFixes |> should contain "Declared the document's language as es-MX (Spanish), as you chose."
+    declaredLanguage output.Path |> should equal (Some "es-MX")
+    // Chosen again, it has it already: nothing to say.
+    let again' = VeraPdfValidator(Language = "es-MX").Fix(output.Path, PdfProfile.PdfUa1, again.Path, PdfFixOptions.Language)
+    again'.AppliedFixes |> Seq.filter (fun (line: string) -> line.Contains "language") |> should be Empty

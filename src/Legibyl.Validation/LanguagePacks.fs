@@ -204,3 +204,17 @@ let writtenInFile (pdfPath: string) =
         use document = new PdfDocument(new PdfReader(pdfPath))
         writtenIn document
     with _ -> None
+
+/// The languages a person can choose for a document: those Legibyl can detect and those with a
+/// pack, each its tag and name, by name.
+let choices () =
+    let packs = fst installed.Value |> List.map (fun pack -> pack.Tag, pack.Name)
+    DocumentLanguage.known () @ packs |> List.distinctBy (fun (tag, _) -> tag.ToLowerInvariant()) |> List.sortBy snd
+
+/// The language a PDF says it's in, and the one its pages' text reads as (if that's clear); both
+/// None if it can't be read.
+let ofFile (pdfPath: string) =
+    try
+        use document = new PdfDocument(new PdfReader(pdfPath))
+        DocumentLanguage.declared document, DocumentLanguage.readsAs document
+    with _ -> None, None

@@ -192,7 +192,7 @@ module private MainView =
             let pending = ctx.useState noChanges
             // The last count of edits not in a tagged PDF: (path, its last write, edits, count).
             // Counting reads the PDF, so it's only done again when one of those changes.
-            let pendingCount = ctx.useStateLazy(fun () -> ref (None: (string * DateTime * ElementEdit list * string option * Map<string, string> * Map<string, Attachments.AttachmentEdit> * int) option)).Current
+            let pendingCount = ctx.useStateLazy(fun () -> ref (None: (string * DateTime * ElementEdit list * string option * string option * Map<string, string> * Map<string, Attachments.AttachmentEdit> * int) option)).Current
             // The Structure window open for each PDF, and those being read or opened.
             let structureWindows = ctx.useStateLazy(fun () -> Collections.Generic.Dictionary<string, Window>()).Current
             let structureOpening = ctx.useStateLazy(fun () -> Collections.Generic.HashSet<string>()).Current
@@ -346,7 +346,7 @@ module private MainView =
                     match selectedFile.Current, outcome.Current with
                     | Some path, Validated(report, _) when report.FixableCount PdfFixOptions.TagFromLayout > 0 ->
                         let review = layoutReviews.For path
-                        let changes = review.Edits.Length + (if review.Title.IsSome then 1 else 0)
+                        let changes = review.Edits.Length + (if review.Title.IsSome then 1 else 0) + (if review.Language.IsSome then 1 else 0)
                         // Tagged from on Export once it's been suggested (Suggest Structure… opened, or
                         // a layout kept from before), or there are edits on it.
                         pending.Set { Changes = changes; TagsFromReview = review.Pages.Count > 0 || changes > 0 }
@@ -357,19 +357,22 @@ module private MainView =
                                     let review = layoutReviews.For path
                                     let edits = RegionEdits.toElementEdits review.Edits
                                     let title = review.Title |> Option.filter (String.IsNullOrWhiteSpace >> not)
+                                    let language = review.Language
                                     let written = File.GetLastWriteTimeUtc path
                                     let roles = review.RoleMap
                                     let attached = review.Attachments
                                     match pendingCount.Value with
-                                    | Some(p, w, e, t, r, a, count) when p = path && w = written && e = edits && t = title && r = roles && a = attached -> count
+                                    | Some(p, w, e, t, l, r, a, count) when p = path && w = written && e = edits && t = title && l = language && r = roles && a = attached -> count
                                     | _ ->
-                                        // Its edits, and the title and role map given in Structure…, that aren't in it yet.
+                                        // Its edits, and the title, language and role map given in Structure…, that
+                                        // aren't in it yet.
                                         let count =
                                             ElementEdits.pending path edits
                                             + (match title with Some title when ElementEdits.titlePending path title -> 1 | _ -> 0)
+                                            + (match language with Some language when fst (LanguagePacks.ofFile path) <> Some language -> 1 | _ -> 0)
                                             + RoleMaps.pending path roles
                                             + Attachments.pending path attached
-                                        pendingCount.Value <- Some(path, written, edits, title, roles, attached, count)
+                                        pendingCount.Value <- Some(path, written, edits, title, language, roles, attached, count)
                                         count
                                 with
                                 | :? iText.Commons.Exceptions.ITextException
@@ -798,6 +801,7 @@ module private MainView =
                                                     validator.Review <- review.ForCopy sourcePath
                                                     validator.Edits <- RegionEdits.toElementEdits review.Edits
                                                     validator.Title <- (review.Title |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.toObj)
+                                                    validator.Language <- Option.toObj review.Language
                                                     validator.RoleMap <- Collections.Generic.Dictionary<string, string>(review.RoleMap)
                                                     validator.Attachments <- Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>(review.Attachments)
                                                     validator.Fix(sourcePath, profile, outputPath, options, progress))

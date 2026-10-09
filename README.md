@@ -449,6 +449,7 @@ new one. All of them:
 | Structure-16 | Tags that don't start with a single Document tag (a PDF before 2.0; in PDF 2.0 it's veraPDF's 8.2.5.2) | `document-root` |
 | Structure-17 | Content still tied to a tag that isn't in the tags any more | `parent-tree`, where it draws nothing (otherwise its tag needs putting back) |
 | Structure-18 | A web address shown as text that nothing links | `link-urls`, when the address's tagged text is its own (in one piece, or in pieces side by side in one tag; punctuation drawn with it is split off) |
+| Structure-19 | A declared language the text clearly isn't in (Spanish text in a document that says it's English) | `language`, or choose the language in Structure… |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -964,6 +965,15 @@ typed there is saved as `title` and counts as a change not in the PDF yet;
 and `/DisplayDocTitle`, before the title auto fixes, which then leave it. The
 CLI's `fix --edits` does the same with a review's `title`.
 
+Below it, **Document language** shows the language the document says it's in (or,
+where it says none, the one its text reads as), to choose another from those
+Legibyl can detect and those with a [language pack](docs/language-packs.md). Where
+what it says isn't what its text reads as ("It says English, but its text reads
+as Spanish"), **Use Spanish** chooses that. A language chosen is saved as
+`language` and counts as a change not in the PDF yet; **Export…** declares it
+(`/Lang`), whatever auto fixes are chosen. The CLI's `fix --edits` does the
+same with a review's `language`, and `fix --lang es-MX` with the one given.
+
 Figures can be given alt text, and OCR'd text corrected, on the suggested
 structure too: right-click a figure for **Edit Alt Text…** (a QR code's starts
 from where it links), and a region read with OCR for **Edit Replacement Text…**.
@@ -1061,7 +1071,7 @@ command for each job:
 
 ```
 legibyl validate <files>… [--ua 1|2] [--format json|text] [--output report] [--structure] [--all-warnings] [--review path] [--verbose]
-legibyl fix <files>… [--ua 1|2] [--fixes safe|all|none|names] [--edits | --edits-from review] [--output out.pdf] [--format json|text] [--report path] [--verbose]
+legibyl fix <files>… [--ua 1|2] [--fixes safe|all|none|names] [--edits | --edits-from review] [--lang tag] [--output out.pdf] [--format json|text] [--report path] [--verbose]
 legibyl structure <files>… [--format json|text] [--output path]
 legibyl layout suggest <file> [--output layout.json] [--figure-images]
 legibyl layout apply <file> --layout layout.json [--ua 1|2] [--edits | --edits-from review] [--fixes names] [--output out.pdf] [--format json|text] [--report path]
@@ -1184,7 +1194,7 @@ keeps this table in step with it):
 | `parent-tree` | Rebuild the parent tree, so the tags are found for the content they hold | safe |
 | `document-root` | Put the tags under a single Document tag at the top of the structure | safe |
 | `role-map` | Map the PDF's own tag names to standard tags, and fix a broken role map |  |
-| `language` | Declare the document's language, detected from its text |  |
+| `language` | Declare the document's language: the one you chose, or the one its text reads as, where it says none or one its text isn't in |  |
 | `headings-from-toc` | Tag headings the table of contents lists (H1–H6) and point its links at them |  |
 | `empty-paragraphs` | Remove empty paragraph tags |  |
 | `empty-toc-entries` | Remove empty table-of-contents entries |  |
@@ -1351,6 +1361,12 @@ paragraphs and link descriptions go to the elements they're for; an untagged
 file whose review recorded a layout is tagged from it, with its edits. The copy
 carries the review. `--edits-from <path>` does the same with another review: a
 `.legibyl.json` file, or a PDF whose review to use (an earlier version's, say).
+
+`--lang <tag>` declares the document's language (`es-MX`), in place of a
+review's `language` or any the PDF says, with the `language` fix, which then
+runs whatever `--fixes` names. Without it, the `language` fix declares the
+language the text reads as where the PDF says none, or says one its text clearly
+isn't in (Structure-19).
 
 ### structure
 

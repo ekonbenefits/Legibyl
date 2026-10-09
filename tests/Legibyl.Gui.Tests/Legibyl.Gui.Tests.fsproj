@@ -47,6 +47,7 @@
     <Compile Include="AboutTests.fs" />
     <Compile Include="AccessibilityTests.fs" />
     <Compile Include="AppendDialogTests.fs" />
+    <Compile Include="DocumentLanguageRowTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
