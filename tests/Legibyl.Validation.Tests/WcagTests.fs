@@ -231,3 +231,82 @@ let ``characters repeated to lay text out, a rule veraPDF calls cosmetic, are a 
     repeated |> List.map (fun f -> f.Specification, f.TestNumber, f.Severity) |> should equal [ "WCAG 2.2 A", 1, FindingSeverity.Warning ]
     report.WcagFailures |> should be Empty
     report.Passes |> should be True
+
+/// A PDF/UA-1 file of pages, each its size, turned by its /Rotate, with a line of text drawn at
+/// its angle (radians, anticlockwise).
+let private pagesPdf (path: string) (pages: (iText.Kernel.Geom.PageSize * int * float) list) =
+    use document = new PdfUADocument(new PdfWriter(path), PdfUAConfig(PdfUAConformance.PDF_UA_1, "Garden Pages", "en-US"))
+    let font =
+        iText.Kernel.Font.PdfFontFactory.CreateFont(
+            corpusFile (Path.Combine("fonts", "Lato-Regular.ttf")),
+            iText.IO.Font.PdfEncodings.WINANSI,
+            iText.Kernel.Font.PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED
+        )
+    use layout = new iText.Layout.Document(document, (let size, _, _ = pages.Head in size))
+    layout.SetFont font |> ignore
+    pages
+    |> List.iteri (fun i (size, rotate, angle) ->
+        if i > 0 then layout.Add(iText.Layout.Element.AreaBreak size) |> ignore
+        let words = Paragraph($"Page {i + 1} of the garden's guide, with its beds and paths.").SetFontSize 12f
+        words.SetFixedPosition(i + 1, 200f, 300f, 400f).SetRotationAngle angle |> ignore
+        layout.Add words |> ignore)
+    for i, (_, rotate, _) in List.indexed pages do
+        if rotate <> 0 then document.GetPage(i + 1).SetRotation rotate |> ignore
+
+/// WCAG 2.2's 1.3.4 findings: each one's severity and detail.
+let private orientation (report: ValidationReport) =
+    report.Findings |> Seq.filter (fun f -> f.Clause = "1.3.4") |> Seq.map (fun f -> f.Severity, string f.ErrorMessage) |> List.ofSeq
+
+let private portrait = iText.Kernel.Geom.PageSize.LETTER
+let private landscape = iText.Kernel.Geom.PageSize.LETTER.Rotate()
+
+[<Fact>]
+let ``a page of another shape whose text reads upright is a warning for orientation, not a failure`` () =
+    use pdf = new TempPdf()
+    // Wide pages for wide tables, among tall ones, all read upright.
+    pagesPdf pdf.Path [ portrait, 0, 0.0; landscape, 0, 0.0; portrait, 0, 0.0; portrait, 0, 0.0 ]
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    orientation report
+    |> should
+        equal
+        [ FindingSeverity.Warning,
+          "Page 2 is a different shape from most pages. Its text reads upright as it's shown, so nothing on it needs turning: a page this shape for a wide table, say, is fine. Check it's meant to be this shape." ]
+    report.WcagFailures |> should be Empty
+    report.MeetsWcag |> should be True
+
+[<Fact>]
+let ``a page of another shape whose text runs sideways fails orientation, and says so`` () =
+    use pdf = new TempPdf()
+    pagesPdf pdf.Path [ portrait, 0, 0.0; landscape, 0, System.Math.PI / 2.0; portrait, 0, 0.0 ]
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    orientation report
+    |> should
+        equal
+        [ FindingSeverity.Failure, "Page 2 is a different shape from most pages. Most of its text runs sideways or upside down as it's shown, so it has to be turned to be read." ]
+    report.MeetsWcag |> should be False
+
+[<Fact>]
+let ``a page turned by its rotation, its text with it, fails orientation`` () =
+    use pdf = new TempPdf()
+    // Turned a quarter, shown wide, its text drawn upright before the turn: sideways as shown.
+    pagesPdf pdf.Path [ portrait, 0, 0.0; portrait, 90, 0.0; portrait, 0, 0.0 ]
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    orientation report |> List.map fst |> should equal [ FindingSeverity.Failure ]
+    report.MeetsWcag |> should be False
+
+[<Fact>]
+let ``a page turned by its rotation, its text drawn turned back, reads upright: a warning for orientation`` () =
+    use pdf = new TempPdf()
+    // Turned a quarter clockwise, its text drawn a quarter anticlockwise: upright as shown.
+    pagesPdf pdf.Path [ portrait, 0, 0.0; portrait, 90, System.Math.PI / 2.0; portrait, 0, 0.0 ]
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    orientation report |> List.map fst |> should equal [ FindingSeverity.Warning ]
+    report.MeetsWcag |> should be True

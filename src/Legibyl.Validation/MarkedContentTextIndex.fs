@@ -35,6 +35,13 @@ type Index() =
     /// marked content: one split between spans is found whole. Only those are kept, not the glyphs.
     member val Addresses = Dictionary<int, WebAddressText.Found list>()
 
+    /// How each readable page's seen text runs as the page is shown (its /Rotate turning it).
+    member val TextDirections = Dictionary<int, TextDirection>()
+
+/// A page's seen glyphs (not whitespace, not invisible): how many read upright as the page is
+/// shown, and how many are turned (sideways, or upside down) and have to be turned back to be read.
+and TextDirection = { Upright: int; Turned: int }
+
 let private geometry pageNumber left bottom right top =
     { PageNumber = pageNumber; Left = left; Bottom = bottom; Right = right; Top = top }
 
@@ -160,6 +167,19 @@ let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedCon
         if element.Children.Count > 0 then
             indexMarkedContent pageNumber element.Children index
 
+/// How a page's seen text runs as it's shown: each glyph's baseline (PdfPig gives it as the page
+/// is shown, its /Rotate applied) is upright within 45 degrees of left to right, or turned.
+let private textDirection (page: Page) : TextDirection =
+    let mutable upright = 0
+    let mutable turned = 0
+    for letter in page.Letters do
+        let dx = letter.EndBaseLine.X - letter.StartBaseLine.X
+        let dy = letter.EndBaseLine.Y - letter.StartBaseLine.Y
+        if not (String.IsNullOrWhiteSpace letter.Value) && letter.RenderingMode <> TextRenderingMode.Neither && abs dx + abs dy > 1e-6 then
+            let angle = ((Math.Atan2(dy, dx) * 180.0 / Math.PI) % 360.0 + 360.0) % 360.0
+            if angle < 45.0 || angle > 315.0 then upright <- upright + 1 else turned <- turned + 1
+    { Upright = upright; Turned = turned }
+
 /// Builds the index, calling onPage (page number, page count) as each page starts.
 let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
     let index = Index()
@@ -173,12 +193,13 @@ let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
         let read () =
             let pdfPage = document.GetPage pageNumber
             indexMarkedContent pageNumber (pdfPage.GetMarkedContents()) page
-            WebAddressText.find (pageGlyphs pdfPage)
+            WebAddressText.find (pageGlyphs pdfPage), textDirection pdfPage
         match (try Ok(read ()) with ex -> Error ex.Message) with
-        | Ok addresses ->
+        | Ok(addresses, direction) ->
             for KeyValue(key, info) in page do
                 index[key] <- info
             if not addresses.IsEmpty then index.Addresses[pageNumber] <- addresses
+            index.TextDirections[pageNumber] <- direction
         | Error reason ->
             index.Unreadable.Add pageNumber |> ignore
             if index.UnreadableReason.IsNone then index.UnreadableReason <- Some reason

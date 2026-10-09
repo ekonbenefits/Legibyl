@@ -332,6 +332,11 @@ are the rules veraPDF tags `cosmetic`: characters repeated to lay text out
 page's dot leaders, a form's underscores), and that veraPDF doesn't place on
 the page. A
 criterion veraPDF adds that the table doesn't list is a failure, with no level.
+veraPDF's 1.3.4 check only compares pages' shapes, failing those not the shape
+most are; Legibyl checks the page's text as it's shown (its rotation applied):
+reading upright (a wide page for a wide table), the finding is a warning;
+sideways or upside down, or with no text to tell by (a scan), it stays a
+failure, and its detail says which.
 veraPDF's 2.4.9 check fails a link described only by its address, and one with
 no description at all; the second fails 2.4.4 (Link Purpose (In Context), level
 A) too, so Legibyl makes it a failure, named level A, and the first a warning.
