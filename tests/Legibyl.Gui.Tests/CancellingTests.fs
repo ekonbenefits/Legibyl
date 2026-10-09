@@ -55,6 +55,17 @@ let ``validating can be cancelled from the progress row, whose Cancel has the fo
                 // No result, and nothing left running.
                 texts window |> List.exists (fun t -> t.StartsWith "PASS" || t.StartsWith "FAIL") |> should be False
                 cancelButton window |> should equal None
+
+                // Started from Check Again, which has the focus: given back once it's stopped.
+                let checkAgain =
+                    window.GetVisualDescendants() |> Seq.pick (fun v -> match box v with :? Button as b when string b.Content = "Check Again" -> Some b | _ -> None)
+                HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 5.0) (fun () -> checkAgain.IsEffectivelyEnabled) |> ignore
+                checkAgain.Focus() |> ignore
+                checkAgain.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
+                HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> (cancelButton window).IsSome && (cancelButton window).Value.IsFocused) |> ignore
+                (cancelButton window).Value.RaiseEvent(RoutedEventArgs(Button.ClickEvent))
+                HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> (cancelButton window).IsNone && checkAgain.IsFocused) |> ignore
+                checkAgain.IsFocused |> should be True
             finally
                 window.Close())
     finally

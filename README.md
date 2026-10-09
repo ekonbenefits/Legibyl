@@ -399,7 +399,8 @@ take minutes. WCAG 2.2's checks come after the pages ("checking WCAG 2.2
 there, so the bar waits without filling.
 
 Cancel, beside the progress bar, stops validating, reading the structure,
-Export… (its model download too) and Append PDFs… (Escape does the same). It
+Export…'s auto fixes (their model download too) and Append PDFs… (Escape does
+the same). It
 has the focus while they run, and the focus goes back where it was after.
 Stopped, nothing is written: no copy, and no result for a validation. In
 Structure…, the layout models' download has a Cancel of its own, and closing

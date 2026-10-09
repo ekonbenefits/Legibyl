@@ -1119,6 +1119,8 @@ type VeraPdfValidator() =
                         tryDeleteTemporary tempOutput
                         tempMetadataOutput <- null
 
+                // (Cancelled while the last step ran, changing something or not.)
+                cancel.ThrowIfCancellationRequested()
                 let result =
                     { FilePath = pdfPath
                       Profile = profile
