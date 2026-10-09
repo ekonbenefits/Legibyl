@@ -322,7 +322,10 @@ let private runValidate (args: ValidateArgs) =
         results
         |> List.map (fun r ->
             if not (isNull r.Error) then ExitCodes.ToolError
-            elif r.IsCompliant = Nullable false || r.MeetsWcag = Nullable false then ExitCodes.DocumentProblem
+            elif r.IsCompliant = Nullable false then ExitCodes.DocumentProblem
+            // WCAG's checks couldn't run: the tool's fault, not the document's.
+            elif not (isNull r.WcagError) then ExitCodes.ToolError
+            elif r.MeetsWcag = Nullable false then ExitCodes.DocumentProblem
             else ExitCodes.Success)
         |> worst
 
@@ -504,9 +507,11 @@ let private fixText (results: FixOutcome list) =
     let line (text: string) = sb.AppendLine text |> ignore
     let standing (c: Compliance) =
         if c.IsCompliant && c.MeetsWcag then "PASS"
-        elif c.IsCompliant && not (isNull c.WcagError) then $"FAIL, {WcagSpecification.Name} not checked"
-        elif c.IsCompliant then $"FAIL, {c.FailedCount} failed ({WcagSpecification.Name}'s)"
-        else $"FAIL, {c.FailedCount} failed"
+        else
+            let notChecked = if isNull c.WcagError then "" else $"; {WcagSpecification.Name} not checked"
+            if c.IsCompliant && not (isNull c.WcagError) then $"FAIL, {WcagSpecification.Name} not checked"
+            elif c.IsCompliant then $"FAIL, {c.FailedCount} failed ({WcagSpecification.Name}'s)"
+            else $"FAIL, {c.FailedCount} failed{notChecked}"
     for r in results do
         match r.Status, r.Before, r.After with
         | FixStatus.Error, _, _ -> line $"{r.File}: ERROR — {r.Error}"
@@ -523,14 +528,21 @@ let private fixText (results: FixOutcome list) =
             line (noteLine note)
     sb.ToString().TrimEnd('\n', '\r')
 
+/// The exit code for a document's standing: WCAG's checks not running is the tool's fault, not
+/// the document's, unless PDF/UA fails anyway.
+let private standingExit (c: Compliance) =
+    if c.IsCompliant && c.MeetsWcag then ExitCodes.Success
+    elif c.IsCompliant && not (isNull c.WcagError) then ExitCodes.ToolError
+    else ExitCodes.DocumentProblem
+
 /// The exit code for a fix: whether the document it leaves (the copy, else the original)
 /// complies.
 let private fixExit (r: FixOutcome) =
     match r.Status, r.After, r.Before with
     | FixStatus.Error, _, _ -> ExitCodes.ToolError
     | FixStatus.AlreadyTagged, _, _ -> ExitCodes.DocumentProblem
-    | _, NonNull after, _ -> if after.IsCompliant && after.MeetsWcag then ExitCodes.Success else ExitCodes.DocumentProblem
-    | _, Null, NonNull before -> if before.IsCompliant && before.MeetsWcag then ExitCodes.Success else ExitCodes.DocumentProblem
+    | _, NonNull after, _ -> standingExit after
+    | _, Null, NonNull before -> standingExit before
     | _ -> ExitCodes.Success
 
 /// What's wrong with the edits in a review file (see ReviewFile.problems), as one message naming
