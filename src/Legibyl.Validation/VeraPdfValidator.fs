@@ -292,6 +292,9 @@ module internal VeraPdf =
               PdfProfile.PdfUa2, "8.9.2.3-1" ]
 
     /// The link annotations a finding's location names, by object number.
+    /// A WCAG 2.2 finding's link: its page (0-based) and its place among the page's annotations.
+    let private wcagAnnotationPattern = Regex(@"^root/doc\[0\]/pages\[(\d+)\]/annots\[(\d+)\]", RegexOptions.Compiled)
+
     let private linkAnnotationNumbers (locationContext: string | null) =
         match locationContext with
         | NonNull context -> set [ for m in linkAnnotationPattern.Matches context -> int m.Groups[1].Value ]
@@ -424,14 +427,70 @@ module internal VeraPdf =
                                             FixOptions = PdfFixOptions.Title }
                             | _ -> None)
                         |> Option.toList
+                // A WCAG 2.2 finding about a link names it by page and position
+                // ("root/doc[0]/pages[0]/annots[2]"), not by object: the annotation it is.
+                let wcagAnnotation (assertion: RuleViolation) =
+                    match assertion.LocationContext with
+                    | NonNull locationContext when WcagSpecification.isWcag assertion.Specification ->
+                        let found = wcagAnnotationPattern.Match locationContext
+                        if not found.Success then None
+                        else
+                            let page = int found.Groups[1].Value + 1
+                            let index = int found.Groups[2].Value
+                            if page > document.GetNumberOfPages() then None
+                            else
+                                let annotations = document.GetPage(page).GetAnnotations()
+                                if index < annotations.Count then Some(page, annotations[index].GetPdfObject()) else None
+                    | _ -> None
+                // A link whose 2.4.9 finding (above AA: a warning) is because it has no description
+                // at all, not one that's only its address: that fails 2.4.4 (level A) too.
+                let undescribed (annotation: iText.Kernel.Pdf.PdfDictionary) =
+                    let said (text: string | null) = not (String.IsNullOrWhiteSpace text)
+                    let contents = annotation.GetAsString iText.Kernel.Pdf.PdfName.Contents |?> _.ToUnicodeString()
+                    let element =
+                        match annotation.GetIndirectReference() with
+                        | null -> None
+                        | reference ->
+                            match (ParentTree.tagged document context).Objects.TryGetValue(reference.GetObjNumber()) with
+                            | true, element -> Some element
+                            | _ -> None
+                    not (said contents)
+                    && (match element with
+                        | Some element ->
+                            not (said (element.GetAsString iText.Kernel.Pdf.PdfName.Alt |?> _.ToUnicodeString()))
+                            && not (said (StructureTreeObjects.extractText element context (StructureTreeObjects.ancestorPage element context)))
+                        | None -> true)
                 let located =
                     assertions @ missingTitle
                     |> List.map (fun assertion ->
-                        if assertion.Passed then
+                        // Failures, and veraPDF's findings that are warnings (WCAG 2.2's above AA).
+                        if not assertion.IsFinding then
                             assertion
                         else
+                            let annotation = wcagAnnotation assertion
+                            // Named by the annotation's object, as PDF/UA's findings about one are.
+                            let assertion =
+                                match annotation with
+                                | Some(page, dictionary) ->
+                                    match dictionary.GetIndirectReference() with
+                                    | NonNull reference ->
+                                        { assertion with LocationContext = $"{assertion.LocationContext}({reference.GetObjNumber()} 0 obj PDLinkAnnot)" }
+                                    | Null -> assertion
+                                | None -> assertion
+                            let assertion =
+                                match annotation with
+                                | Some(_, dictionary) when assertion.RuleId = "2.4.9-1" && assertion.Severity = FindingSeverity.Warning && undescribed dictionary ->
+                                    { assertion with
+                                        Specification = $"{WcagSpecification.Name} A"
+                                        Passed = false
+                                        Severity = FindingSeverity.Failure
+                                        ErrorMessage = "This link has no description at all (no Contents, alt text or text of its own), so it fails 2.4.4 Link Purpose (In Context), level A, too." }
+                                | _ -> assertion
                             { assertion with
-                                Geometry = FindingGeometry.locate context document assertion |> Option.toObj
+                                Geometry =
+                                    FindingGeometry.locate context document assertion
+                                    |> Option.orElseWith (fun () -> annotation |> Option.bind (fun (page, dictionary) -> StructureTreeObjects.rectGeometry page dictionary))
+                                    |> Option.toObj
                                 Element = FindingGeometry.describe context document assertion |> Option.toObj
                                 FixOptions = fixOptionsFor assertion })
                 // Legibyl's own warnings name their elements the same way.
@@ -530,10 +589,25 @@ module internal VeraPdf =
     let validateWcag (foundry: VeraPDFFoundry) (pdfPath: string) (pageCount: int) (progress: IProgress<ValidationProgress> | null) =
         let profile = wcagProfile.Value
         use parser = foundry.createParser (java.io.File pdfPath, profile.getPDFAFlavour ())
-        let validator = org.verapdf.pdfa.validation.validators.ValidatorFactory.createValidator (profile, -1, false, false, false)
+        // Its error messages kept: they say the measured contrast ratio, the text size, how many
+        // characters repeat.
+        let validator = org.verapdf.pdfa.validation.validators.ValidatorFactory.createValidator (profile, -1, false, true, false)
         match progress with
         | null -> validator.validate parser
         | progress -> withStageProgress (Some ValidationStage.CheckingWcag) validator pageCount progress (fun () -> validator.validate parser)
+
+    /// veraPDF's detail for a finding, in words where it's a measurement: WCAG 2.2's contrast
+    /// ("contrastRatio = 1.6059…") as the ratio it is, and what's needed.
+    let private wcagDetail (specification: string) (clause: string) (detail: string | null) : string | null =
+        match detail with
+        | NonNull detail when specification.StartsWith("WCAG", StringComparison.Ordinal) && clause = "1.4.3" ->
+            let ratio = Regex.Match(detail, @"contrastRatio\s*=\s*([0-9.]+)")
+            match Double.TryParse(ratio.Groups[1].Value, Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture) with
+            | true, value when ratio.Success ->
+                let shown = value.ToString("0.0#", Globalization.CultureInfo.InvariantCulture)
+                $"Contrast {shown} to 1, where at least 4.5 to 1 (3 to 1 for large text: 18 pt, or 14 pt bold) is needed."
+            | _ -> detail
+        | detail -> detail
 
     let toReport (pdfPath: string) profile (result: ValidationResult) (wcag: ValidationResult option) (analysis: LegibylAnalysis) : ValidationReport =
         let assertions =
@@ -556,7 +630,7 @@ module internal VeraPdf =
                         TestNumber = ruleId.getTestNumber ()
                         Passed = aboveTarget || (assertion.getStatus () = TestAssertion.Status.PASSED)
                         Message = assertion.getMessage ()
-                        ErrorMessage = assertion.getErrorMessage ()
+                        ErrorMessage = wcagDetail (ruleId.getSpecification().ToString()) (ruleId.getClause ()) (assertion.getErrorMessage ())
                         LocationContext = assertion.getLocation () |?> _.getContext()
                         Severity = (if aboveTarget then FindingSeverity.Warning else FindingSeverity.Failure)
                         FixOptions = PdfFixOptions.None
@@ -739,7 +813,10 @@ type VeraPdfValidator() =
         (
             pdfPath: string,
             profile: PdfProfile,
-            [<Optional; DefaultParameterValue(null: IProgress<ValidationProgress> | null)>] progress: IProgress<ValidationProgress> | null
+            [<Optional; DefaultParameterValue(null: IProgress<ValidationProgress> | null)>] progress: IProgress<ValidationProgress> | null,
+            /// Whether to run WCAG 2.2's machine checks too, as every validation does but Append's,
+            /// which is about PDF/UA's tags.
+            [<Optional; DefaultParameterValue(true)>] checkWcag: bool
         ) : ValidationReport =
         ensureExists pdfPath
         ensureInitialised ()
@@ -785,10 +862,11 @@ type VeraPdfValidator() =
                                     { p with
                                         Checks = before.Checks + p.Checks
                                         FailedRules = before.FailedRules + p.FailedRules
-                                        ProcessedObjects = before.ProcessedObjects + p.ProcessedObjects } }
+                                        ProcessedObjects = before.ProcessedObjects + p.ProcessedObjects
+                                        Elapsed = before.Elapsed + p.Elapsed } }
                     | progress, _ -> progress
-                let wcag = ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued)
-                toReport pdfPath profile result (Some wcag) (analysis.GetAwaiter().GetResult())))
+                let wcag = if checkWcag then Some(ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued)) else None
+                toReport pdfPath profile result wcag (analysis.GetAwaiter().GetResult())))
             { report with Notes = Array.ofList notes }
         finally
             closeLegibylAnalysis analysis
@@ -822,7 +900,8 @@ type VeraPdfValidator() =
             | NonNull progress ->
                 progress.Report
                     { Stage = stage
-                      Step = 1 + List.findIndex ((=) stage) steps
+                      // Checking the original against WCAG 2.2 is part of checking it.
+                      Step = 1 + List.findIndex ((=) (if stage = FixStage.CheckingWcag then FixStage.CheckingOriginal else stage)) steps
                       Steps = steps.Length
                       Page = page
                       PageCount = pageCount }
@@ -835,7 +914,9 @@ type VeraPdfValidator() =
                     // Pages as they're checked, and all of them once they're done (a short
                     // document can finish before the first page is ever sampled).
                     if p.Stage = ValidationStage.CheckingPages || p.Stage = ValidationStage.Finishing then
-                        report FixStage.CheckingOriginal p.Page p.PageCount }
+                        report FixStage.CheckingOriginal p.Page p.PageCount
+                    elif p.Stage = ValidationStage.CheckingWcag then
+                        report FixStage.CheckingWcag 0 0 }
         let originalReport = this.Validate(pdfPath, profile, validationProgress)
         let appliedFixes = ResizeArray<string>()
         let notApplied = ResizeArray<string>()

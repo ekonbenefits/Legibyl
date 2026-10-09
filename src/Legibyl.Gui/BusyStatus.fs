@@ -44,6 +44,7 @@ let statusText (progress: BusyProgress) : string =
             match progress.Stage with
             | FixStage.CheckingOriginal when pages -> $"{step}checking the original, page {progress.Page:N0} of {progress.PageCount:N0}"
             | FixStage.CheckingOriginal -> $"{step}checking the original…"
+            | FixStage.CheckingWcag -> $"{step}checking the original against {WcagSpecification.Name} (contrast, text size and more)…"
             | FixStage.Tagging when pages -> $"{step}finding page {progress.Page:N0} of {progress.PageCount:N0}'s layout, to tag it"
             | FixStage.Tagging -> $"{step}tagging from the layout…"
             // Only joining split paragraphs reports pages while fixing.

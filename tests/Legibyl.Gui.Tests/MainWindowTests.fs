@@ -344,7 +344,7 @@ let ``a PDF that passes PDF/UA but not WCAG 2.2's contrast fails, saying so, wit
             let items = HeadlessWindow.resultItems window
             window.Close()
 
-            shown |> List.exists (fun t -> t.StartsWith "FAIL — " && t.Contains $" {WcagSpecification.Name} checks failed" && not (t.Contains "PDF/UA-1 checks")) |> should be True
+            shown |> List.exists (fun t -> t.StartsWith "FAIL — " && t.Contains $" {WcagSpecification.Name} check failed" && not (t.Contains "PDF/UA-1 checks")) |> should be True
             items |> List.exists (function PassItem _ -> true | _ -> false) |> should be False)
     finally
         Directory.Delete(folder, true)

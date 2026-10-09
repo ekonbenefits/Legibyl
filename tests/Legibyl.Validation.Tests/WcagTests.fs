@@ -55,8 +55,15 @@ let ``text without enough contrast fails WCAG 2.2, the rest passes, and PDF/UA i
     // It's the light grey line's, and where it is on the page.
     (contrast.Head.LocationContext |> notNull) |> should haveSubstring "Light grey on white is hard to read."
     contrast.Head.Geometry |> should not' (be Null)
+    // The ratio veraPDF measured, in words.
+    (contrast.Head.ErrorMessage |> notNull) |> should startWith "Contrast 1.61 to 1, where at least 4.5 to 1"
     // What it means, from the rule guide.
     (RuleGuide.forFinding contrast.Head |> Option.map _.Meaning |> Option.defaultValue "") |> should haveSubstring "low vision"
+    // PDF/UA's failures are the same, rule for rule and place for place, as without WCAG's pass.
+    let alone = validator.Value.Validate(pdf.Path, (if ua2 then PdfProfile.PdfUa2 else PdfProfile.PdfUa1), checkWcag = false)
+    let ua (r: ValidationReport) = r.PdfUaFailures |> Seq.map (fun f -> f.RuleId, f.LocationContext) |> List.ofSeq
+    ua report |> should equal (ua alone)
+    alone.Assertions |> Seq.filter (fun a -> WcagSpecification.isWcag a.Specification) |> should be Empty
 
 [<Fact>]
 let ``a page with enough contrast everywhere passes PDF/UA and WCAG 2.2`` () =
@@ -103,6 +110,13 @@ let ``a WCAG criterion above level AA is a warning a review can dismiss, not a f
 
     let linkPurpose = report.Findings |> Seq.filter (fun f -> f.RuleId = "2.4.9-1") |> List.ofSeq
     linkPurpose |> List.map (fun f -> f.Specification, f.Severity) |> should equal [ "WCAG 2.2 AAA", FindingSeverity.Warning ]
+    // Placed on the page by its annotation, and offered only the fix for a web link.
+    linkPurpose.Head.Geometry |> should not' (be Null)
+    linkPurpose.Head.FixOptions |> should equal PdfFixOptions.LinkTitlesFromWeb
+    // Saved and read back as the warning it is.
+    let saved = SavedResults.toReport (SavedResults.ofReport report (SavedResults.hashOf pdf.Path) System.DateTime.Now) pdf.Path
+    [ for f in saved.Findings do if f.RuleId = "2.4.9-1" then f.Specification, f.Severity, f.Passed ]
+    |> should equal [ "WCAG 2.2 AAA", FindingSeverity.Warning, true ]
     report.WcagFailures |> should be Empty
     report.Passes |> should be True
     // Dismissed in a review, as any warning is.
@@ -112,3 +126,40 @@ let ``a WCAG criterion above level AA is a warning a review can dismiss, not a f
             [| { Rule = ReviewFile.dismissalRule linkPurpose.Head; Location = ReviewFile.AnyLocation; Message = linkPurpose.Head.Message } |]
           Edits = null; Title = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null; Language = null }
     ReviewFile.dismisses review linkPurpose.Head |> should be True
+
+[<Fact>]
+let ``a link with no description at all fails WCAG 2.2 at level A, not only AAA's warning`` () =
+    use made = new TempPdf()
+    use pdf = new TempPdf()
+    // A picture that's a link (tagged by iText), then its link's description and its alt text
+    // taken away: nothing says where it goes.
+    do
+        use document = new PdfDocument(new PdfWriter(made.Path))
+        document.SetTagged() |> ignore
+        document.GetCatalog().SetLang(PdfString "en-US") |> ignore
+        let square = iText.Kernel.Pdf.Xobject.PdfFormXObject(iText.Kernel.Geom.Rectangle(0f, 0f, 40f, 40f))
+        iText.Kernel.Pdf.Canvas.PdfCanvas(square, document).Rectangle(0.0, 0.0, 40.0, 40.0).Fill() |> ignore
+        let image = Image square
+        image.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI "https://example.org/map") |> ignore
+        use layout = new iText.Layout.Document(document)
+        layout.Add image |> ignore
+    do
+        use document = new PdfDocument(new PdfReader(made.Path), new PdfWriter(pdf.Path))
+        for annotation in document.GetPage(1).GetAnnotations() do
+            annotation.GetPdfObject().Remove PdfName.Contents |> ignore
+        let rec strip (element: iText.Kernel.Pdf.Tagging.IStructureNode) =
+            match element with
+            | :? iText.Kernel.Pdf.Tagging.PdfStructElem as e ->
+                e.GetPdfObject().Remove PdfName.Alt |> ignore
+                for kid in e.GetKids() do
+                    if not (isNull kid) then strip kid
+            | _ -> ()
+        for kid in document.GetStructTreeRoot().GetKids() do
+            strip kid
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    let linkPurpose = report.Findings |> Seq.filter (fun f -> f.RuleId = "2.4.9-1") |> List.ofSeq
+    linkPurpose |> List.map (fun f -> f.Specification, f.Severity) |> should equal [ "WCAG 2.2 A", FindingSeverity.Failure ]
+    (linkPurpose.Head.ErrorMessage |> notNull) |> should haveSubstring "2.4.4"
+    report.MeetsWcag |> should be False

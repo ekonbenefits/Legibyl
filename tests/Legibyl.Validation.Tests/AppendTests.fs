@@ -146,6 +146,8 @@ let ``files with links, figures drawn by Form XObjects and tags inside them join
     outcome.Refusals |> should be Empty
     outcome.Inputs |> List.iter (fun (_, report) -> report.IsCompliant |> should equal true)
     failures outcome |> should be Empty
+    // Appending checks PDF/UA only, not WCAG 2.2's checks.
+    outcome.After.Value.Assertions |> Seq.filter (fun a -> WcagSpecification.isWcag a.Specification) |> should be Empty
     outcome.Differences |> should be Empty
     outcome.Passes |> should equal true
     let joinedParts = parts joined

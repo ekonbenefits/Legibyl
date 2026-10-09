@@ -328,9 +328,17 @@ Legibyl aims at level AA, as laws and policies ask: an A or AA finding is a
 failure, and one above AA (2.4.9 today) is a warning, which a review can dismiss
 and which doesn't stop a PDF passing (`WcagSpecification` in `Results.fs`). A
 criterion veraPDF adds that the table doesn't list is a failure, with no level.
+veraPDF's 2.4.9 check fails a link described only by its address, and one with
+no description at all; the second fails 2.4.4 (Link Purpose (In Context), level
+A) too, so Legibyl makes it a failure, named level A, and the first a warning.
+WCAG's findings are placed on the page like PDF/UA's (a link's by its
+annotation), with veraPDF's detail: the measured contrast ratio, the text's
+size, how many characters repeat. Its redundant-tag rules (4.1.2) aren't offered
+the fixes for empty tags: veraPDF also calls a tag empty when its text couldn't
+be read, so their guide says to look at the tag first.
 
 A PDF passes when it complies with PDF/UA and WCAG 2.2's checks pass: the
-banner and the CLI's first line say which failed ("FAIL — 1 WCAG 2.2 checks
+banner and the CLI's first line say which failed ("FAIL — 1 WCAG 2.2 check
 failed, of 868"; "FAIL (PDF/UA-1 passes; WCAG 2.2: 1 failed; 868 checks)"), the
 CLI's JSON has `meetsWcag` and `wcagFailedCount` beside `isCompliant` (still
 PDF/UA's), and its exit code is 1 unless both pass. Appending checks PDF/UA
@@ -1170,6 +1178,8 @@ non-compliant file):
     "standardFrom": "file",
     "flavourId": "ua1",
     "isCompliant": false,
+    "meetsWcag": true,
+    "wcagFailedCount": 0,
     "totalAssertions": 794,
     "failedCount": 2,
     "failures": [
@@ -1280,8 +1290,8 @@ after:
     "applied": [ "Declared the document's language as en (English), detected from its text." ],
     "notApplied": [],
     "error": null,
-    "before": { "isCompliant": false, "failedCount": 13 },
-    "after": { "isCompliant": false, "failedCount": 7 },
+    "before": { "isCompliant": false, "meetsWcag": false, "failedCount": 13 },
+    "after": { "isCompliant": false, "meetsWcag": true, "failedCount": 7 },
     "validatorNotes": []
   }
 ]

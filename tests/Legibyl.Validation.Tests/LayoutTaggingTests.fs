@@ -403,6 +403,7 @@ let ``a fix reports each step it runs, in order, with pages where there are page
     |> should
         equal
         [ FixStage.CheckingOriginal, 1, 4
+          FixStage.CheckingWcag, 1, 4
           FixStage.Tagging, 2, 4
           FixStage.Fixing, 3, 4
           FixStage.FixingMetadata, 4, 4 ]

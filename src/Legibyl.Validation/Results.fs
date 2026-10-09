@@ -268,6 +268,9 @@ type FixStage =
     | Fixing = 2
     /// veraPDF's metadata fix, which validates the document again as it goes.
     | FixingMetadata = 3
+    /// Checking the original against WCAG 2.2's machine checks, after its pages (part of
+    /// CheckingOriginal's step; no page count).
+    | CheckingWcag = 4
 
 /// How far a fix has got.
 type FixProgress =
