@@ -32,5 +32,5 @@ let chooseFromFileMenu (window: Window) (header: string) =
         (nonNull item.Command).Execute null
         // Saving is done in the background: until the window no longer says it's edited.
         if header = "Save" then
-            Legibyl.Screenshots.HeadlessWindow.pumpUntil (System.TimeSpan.FromSeconds 10.0) (fun () -> not (window.Title.Contains "Edited")) |> ignore
+            Legibyl.Screenshots.HeadlessWindow.pumpUntil (System.TimeSpan.FromSeconds 10.0) (fun () -> not ((string window.Title).Contains "Edited")) |> ignore
     enabled

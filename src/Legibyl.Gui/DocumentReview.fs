@@ -263,6 +263,12 @@ type DocumentReview(modified: DateTime) =
 [<Sealed>]
 type DocumentReviews() =
     let reviews = Collections.Concurrent.ConcurrentDictionary<string, DocumentReview>()
+    // One for each file: its review is read once, and reading one doesn't hold up another's.
+    let locks = Collections.Concurrent.ConcurrentDictionary<string, obj>()
+    let mutable reads = 0
+
+    /// How many times a review has been read from its file (and the PDF), for the tests.
+    member _.Reads = reads
 
     /// Drops this file's review with any changes not saved: it's read again next time.
     member _.Forget(pdfPath: string) = reviews.TryRemove(Path.GetFullPath pdfPath) |> ignore
@@ -274,6 +280,7 @@ type DocumentReviews() =
         let fresh () =
             // The review saved next to the PDF, and the layout recorded with it: its pages that
             // haven't changed since count as found.
+            Threading.Interlocked.Increment &reads |> ignore
             let review = DocumentReview modified
             review.TextLanguage <- Threading.Tasks.Task.Run(fun () -> LanguagePacks.writtenInFile fullPath)
             let file = ReviewFile.readFile (ReviewFile.filePath fullPath)
@@ -316,9 +323,9 @@ type DocumentReviews() =
                 | _ -> review.CarriedDismissed
             review.MarkSaved()
             review
-        // One at a time: read in the background as a file opens, and asked for on the UI thread,
-        // a file's review is read once, and both get the same.
-        lock reviews (fun () ->
+        // One at a time for a file: read in the background as it opens, and asked for on the UI
+        // thread, its review is read once, and both get the same.
+        lock (locks.GetOrAdd(fullPath, fun _ -> obj ())) (fun () ->
             reviews.AddOrUpdate(
                 fullPath,
                 (fun _ -> fresh ()),

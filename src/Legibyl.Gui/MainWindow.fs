@@ -476,17 +476,20 @@ module private MainView =
                     // layout kept with it (each page's text read to see which haven't changed).
                     isBusy.Set true
                     busyProgress.Set(Some(Working $"Opening {Path.GetFileName path}…"))
-                    let! review = Task.Run(fun () -> try Some(layoutReviews.For path) with _ -> None)
+                    let! review = Task.Run(fun () -> try Ok(layoutReviews.For path) with ex -> Error(Dialogs.failureMessage ex))
                     busyProgress.Set None
                     isBusy.Set false
+                    showDismissed.Set false
                     match review with
-                    | Some review ->
+                    | Ok review ->
                         autoFixes.Set review.AutoFixes
                         dismissed.Set review.Dismissed
                         edited.Set review.IsEdited
-                    | None -> ()
-                    showDismissed.Set false
-                    return! runValidation activity false
+                        return! runValidation activity false
+                    // Said, rather than reading it again on the UI thread to fail the same way.
+                    | Error message ->
+                        outcome.Set(ValidationFailed $"Legibyl couldn't open it: {message}")
+                        return None
                 }
 
             /// Keeps the selected file's review in the file next to it; false if it couldn't be

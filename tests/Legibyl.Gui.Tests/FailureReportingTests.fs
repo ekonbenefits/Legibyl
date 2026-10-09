@@ -41,8 +41,17 @@ let ``a review read in the background as a file opens, and asked for at once els
         document.AddNewPage() |> ignore
     try
         let reviews = DocumentReviews()
-        let both = [| for _ in 1..8 -> Threading.Tasks.Task.Run(fun () -> reviews.For pdf) |] |> Threading.Tasks.Task.WhenAll
+        // All asking at the same moment.
+        use start = new Threading.Barrier(8)
+        let both =
+            [| for _ in 1..8 ->
+                   Threading.Tasks.Task.Run(fun () ->
+                       start.SignalAndWait()
+                       reviews.For pdf) |]
+            |> Threading.Tasks.Task.WhenAll
         let found = both.Result
         found |> Array.forall (fun review -> obj.ReferenceEquals(review, found[0])) |> should be True
+        // Read once, not by each that asked.
+        reviews.Reads |> should equal 1
     finally
         File.Delete pdf
