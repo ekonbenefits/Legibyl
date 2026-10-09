@@ -81,6 +81,19 @@ module private StructureView =
     /// Edits change review (Save in the main window keeps it); onEditsChanged is called after each
     /// (so the main window can count them). For a suggested layout, prefetcher finds its pages and
     /// tagged is unused.
+    /// A value read from the PDF in the background, initial until it's read (or if it can't be):
+    /// the window opens without waiting for it.
+    let private readInBackground (ctx: Avalonia.FuncUI.IComponentContext) (initial: 'T) (read: unit -> 'T) : 'T =
+        let value = ctx.useState initial
+        ctx.useEffect (
+            (fun () ->
+                Task.Run(read)
+                    .ContinueWith((fun (t: Task<'T>) -> if t.IsCompletedSuccessfully then value.Set t.Result), TaskScheduler.FromCurrentSynchronizationContext())
+                |> ignore),
+            [ EffectTrigger.AfterInit ]
+        )
+        value.Current
+
     let view
         (window: Window)
         (renderer: PdfRegionRenderer)
@@ -1499,11 +1512,11 @@ module private StructureView =
             // The names the PDF's role map is for, read from it (those an /NS puts in another
             // namespace aren't); all of them if it can't be read.
             let roleMapNames =
-                ctx.useStateLazy(fun () -> if isSuggested then None else try Some(RoleMaps.usedNamesIn sourceFilePath) with _ -> None).Current
+                readInBackground ctx None (fun () -> if isSuggested then None else try Some(RoleMaps.usedNamesIn sourceFilePath) with _ -> None)
             let inRoleMap (name: string) = match roleMapNames with Some names -> names.ContainsKey name | None -> true
             // A tagged PDF's attached files and media clips, read from it; none if it can't be read.
             let attachments =
-                ctx.useStateLazy(fun () -> if isSuggested then [] else try Attachments.list sourceFilePath with _ -> []).Current
+                readInBackground ctx [] (fun () -> if isSuggested then [] else try Attachments.list sourceFilePath with _ -> [])
 
             /// Every edit for this PDF, and whether it's in the PDF yet (see StructureEditsTab).
             let editsTab =
@@ -1537,6 +1550,8 @@ module private StructureView =
             // tagged PDF, its own title (empty if it has none), the others offered. Only a change
             // from what's prefilled is saved, and Export writes it.
             let titleEdit = ctx.useState review.Title
+            // (Read at once, not in the background: only the first page is read, and the title box
+            // has to start from what's prefilled, or filling it in later would count as an edit.)
             let documentCandidates = ctx.useStateLazy(fun () -> try DocumentTitles.candidates sourceFilePath with _ -> []).Current
             // The language the PDF says it's in and the one its text reads as; a person's choice.
             // (Read in the background: a PDF that says none has its pages' text read to tell.)
@@ -1924,7 +1939,14 @@ open StructureView
 /// Edits change review; onEditsChanged is called after each (or a suggested layout's title changed).
 /// findings are marked on the blocks they're about (a tagged PDF's; see FindingMarkers).
 type StructureTreeWindow
-    (source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit, findings: FindingMarkers.Findings) as this =
+    (
+        source: StructureSource,
+        sourceFilePath: string,
+        review: DocumentReview,
+        onEditsChanged: unit -> unit,
+        findings: FindingMarkers.Findings,
+        suggester: LayoutSuggester option
+    ) as this =
     inherit
         HostWindow(
             Title = (match source with Tagged _ -> "Structure" | Suggested -> "Suggested Structure"),
@@ -1939,7 +1961,8 @@ type StructureTreeWindow
     let finding =
         match source with
         | Suggested ->
-            let suggester = new LayoutSuggester(sourceFilePath, review.Language)
+            // The one given (made off the UI thread: it reads the PDF), else one of its own.
+            let suggester = suggester |> Option.defaultWith (fun () -> new LayoutSuggester(sourceFilePath, review.Language))
             Some(suggester, LayoutPrefetcher(suggester, review.Pages))
         | Tagged _ -> None
     // Where Order Page N by Layout gets a page's regions: the layout detector, unless replaced.
@@ -1974,9 +1997,13 @@ type StructureTreeWindow
         with get (): (int -> StructureGeometry list) option = layoutRegions.Value
         and set (value: (int -> StructureGeometry list) option) = layoutRegions.Value <- value
 
+    /// Making its own layout suggester, for a suggested structure.
+    new(source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit, findings: FindingMarkers.Findings) =
+        new StructureTreeWindow(source, sourceFilePath, review, onEditsChanged, findings, None)
+
     /// Without findings to mark.
     new(source: StructureSource, sourceFilePath: string, review: DocumentReview, onEditsChanged: unit -> unit) =
-        new StructureTreeWindow(source, sourceFilePath, review, onEditsChanged, FindingMarkers.none)
+        new StructureTreeWindow(source, sourceFilePath, review, onEditsChanged, FindingMarkers.none, None)
 
     /// A tagged PDF's structure, with a review of its own (read from the file next to it).
     new(root: StructureNode, sourceFilePath: string) =

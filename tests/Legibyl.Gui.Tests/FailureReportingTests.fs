@@ -32,3 +32,17 @@ let ``a PDF gone by the time it's checked says why, rather than leaving the wind
             texts window |> List.exists (fun t -> t.StartsWith "Error: Legibyl couldn't check it:") |> should be True
         finally
             window.Close())
+
+[<Fact>]
+let ``a review read in the background as a file opens, and asked for at once elsewhere, is the same one`` () =
+    let pdf = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}.pdf")
+    do
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(pdf))
+        document.AddNewPage() |> ignore
+    try
+        let reviews = DocumentReviews()
+        let both = [| for _ in 1..8 -> Threading.Tasks.Task.Run(fun () -> reviews.For pdf) |] |> Threading.Tasks.Task.WhenAll
+        let found = both.Result
+        found |> Array.forall (fun review -> obj.ReferenceEquals(review, found[0])) |> should be True
+    finally
+        File.Delete pdf

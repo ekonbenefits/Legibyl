@@ -316,11 +316,14 @@ type DocumentReviews() =
                 | _ -> review.CarriedDismissed
             review.MarkSaved()
             review
-        reviews.AddOrUpdate(
-            fullPath,
-            (fun _ -> fresh ()),
-            (fun _ existing -> if existing.Modified = modified || existing.NeedsSaving then existing else fresh ())
-        )
+        // One at a time: read in the background as a file opens, and asked for on the UI thread,
+        // a file's review is read once, and both get the same.
+        lock reviews (fun () ->
+            reviews.AddOrUpdate(
+                fullPath,
+                (fun _ -> fresh ()),
+                (fun _ existing -> if existing.Modified = modified || existing.NeedsSaving then existing else fresh ())
+            ))
 
 /// Finds every page's layout in the background, one page at a time (each takes seconds): the
 /// page being viewed first, then the pages after it, then any before. So moving to another page
