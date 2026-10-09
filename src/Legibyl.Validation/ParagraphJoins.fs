@@ -60,7 +60,9 @@ let normalizeText (text: string) = Regex.Replace(text, @"\s+", " ").Trim()
 let private packFor (language: string option) = LanguagePacks.forTag (defaultArg language "en")
 
 let private isLikelyStandaloneParagraph (language: string option) (text: string) =
-    let headings = packFor language |> Option.map _.StandaloneHeadings |> Option.defaultValue []
+    // Its pack's words, else English's: one less guard would mean more warnings, not fewer.
+    let headings =
+        packFor language |> Option.orElseWith (fun () -> packFor None) |> Option.map _.StandaloneHeadings |> Option.defaultValue []
     text.Length <= 3
     || headings |> List.exists (fun word -> Regex.IsMatch(text, $@"^{Regex.Escape word}\b", RegexOptions.IgnoreCase))
     || Regex.IsMatch(text, @"^\d+(\.\d+)*\s+\S+")

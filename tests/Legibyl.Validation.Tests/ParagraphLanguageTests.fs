@@ -54,7 +54,11 @@ let ``a Spanish section heading stands on its own, accent or not, where English'
     splits english.Path |> should equal 1
 
 [<Fact>]
-let ``a document in a language with no pack is warned about only for a paragraph going on in lower case`` () =
+let ``a document in a language with no pack is warned about for a paragraph going on in lower case, not for one starting with English's words`` () =
     use pdf = new TempPdf()
-    createPdf pdf.Path "ja" splitBeforeY
+    use lower = new TempPdf()
+    // English's "And" doesn't continue a Japanese sentence; lower case still reads as going on.
+    createPdf pdf.Path "ja" [ "The garden is open on Saturday mornings for"; "And on Sundays in the afternoon, free for all." ]
+    createPdf lower.Path "ja" [ "The garden is open on Saturday mornings for"; "on Sundays in the afternoon, free for all." ]
     splits pdf.Path |> should equal 0
+    splits lower.Path |> should equal 1
