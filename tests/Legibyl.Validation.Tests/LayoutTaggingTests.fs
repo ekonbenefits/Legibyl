@@ -74,7 +74,7 @@ let private tagFromLayout (input: string) (output: string) (source: IPageLayoutS
 
 let private failedRules (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Findings
-    |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure)
+    |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure && f.Specification <> WcagSpecification.Name)
     |> Seq.map _.RuleId
     |> Set.ofSeq
 
@@ -560,7 +560,7 @@ let private reviewedRegions = regions |> List.map (fun r -> if r.Tag = "Figure" 
 let private failedUa2Rules (path: string) =
     let report = VeraPdfValidator().Validate(path, PdfProfile.PdfUa2)
     report.FlavourId |> should equal "ua2"
-    report.FailedAssertions |> Seq.map (fun f -> $"{f.Specification} {f.RuleId}") |> List.ofSeq
+    report.PdfUaFailures |> Seq.map (fun f -> $"{f.Specification} {f.RuleId}") |> List.ofSeq
 
 [<Fact>]
 let ``a PDF 2.0 file tagged from its layout, with the safe fixes, is PDF/UA-2 compliant`` () =

@@ -185,12 +185,14 @@ let ``a tagged PDF's Structure window marks the blocks with failures, and a mark
             structureWindow.Close()
             window.Close()
 
-            // The figure without alt text; and the paragraph, whose font isn't embedded.
+            // The figure without alt text (and, for WCAG 2.2, without a bounding box); and the
+            // paragraph, whose font isn't embedded.
             markedTags |> should equal [ "P"; "Figure" ]
             tip |> should haveSubstring "Failure: ISO 14289-1 7.3, test 1"
             // What it means, from the rule guide.
             tip |> should haveSubstring "a screen reader can only say it's an image"
-            chosen |> should equal (Some("7.3", 1))))
+            // One of the figure's findings.
+            [ Some("7.3", 1); Some("1.4.10", 1) ] |> should contain chosen))
 
 [<Fact>]
 let ``clicking Structure again brings its window forward rather than opening another`` () =

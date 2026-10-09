@@ -2,7 +2,8 @@
 
 # Legibyl
 
-Legibyl checks PDFs for accessibility (PDF/UA-1 and PDF/UA-2) and helps fix them:
+Legibyl checks PDFs for accessibility (PDF/UA-1 and PDF/UA-2, and WCAG 2.2's
+machine-checkable rules, contrast among them) and helps fix them:
 a desktop app (Avalonia, on Windows, Linux and Apple-silicon Macs), and a command-line tool
 for scripts and AI agents. It explains each failure in plain language, fixes
 what it safely can, lets you check and edit the tags a screen reader uses (alt
@@ -302,6 +303,35 @@ for both standards. PDF/UA-2's checks include ISO 32005's rules on which tags
 may contain which. Whether to upgrade a PDF 1.7 file to 2.0 is left to the
 tool that made it.
 
+### WCAG 2.2
+
+Every validation also runs WCAG 2.2's machine checks, veraPDF's own
+(`wcag-validation` and `wcag-algorithms`, from the same veraPDF release, and its
+`WCAG-2-2-Machine` profile less its copy of PDF/UA-1's rules: PDF/UA is checked
+on its own, as above). They're the same for PDF 1.x and PDF 2.0 files:
+contrast (1.4.3: at least 4.5 to 1, or 3 to 1 for large text, measured on the
+page as veraPDF renders it with Apache PDFBox), text too small to read (1.4.4),
+characters repeated to lay text out (1.3.1), pages in mixed orientations
+(1.3.4), figures with no bounding box (1.4.10), links with no description, or
+one that's only their address (2.4.9, a level AAA criterion), and empty
+paragraph, span, heading and contents-entry tags (4.1.2). Their findings are
+named "WCAG 2.2", beside PDF/UA's, with a plain-language guide each
+(`RuleGuide.yaml`'s `wcagRules`).
+
+A PDF passes when it complies with PDF/UA and WCAG 2.2's checks pass: the
+banner and the CLI's first line say which failed ("FAIL — 1 WCAG 2.2 checks
+failed, of 868"; "FAIL (PDF/UA-1 passes; WCAG 2.2: 1 failed; 868 checks)"), the
+CLI's JSON has `meetsWcag` and `wcagFailedCount` beside `isCompliant` (still
+PDF/UA's), and its exit code is 1 unless both pass. Appending checks PDF/UA
+only, as joining is about PDF/UA's tags.
+
+The WCAG checks render every page, so validating takes about three times as
+long as PDF/UA alone. Two things make them run under IKVM: Java's AWT is
+headless (its native graphics crash the process otherwise), and a stand-in of
+Legibyl's own replaces jai-imageio's JPEG 2000 reader, whose JJ2000 licence
+Legibyl doesn't ship; the contrast check leaves JPEG 2000 images out of the page
+(`src/Legibyl.Validation/java/README.md`).
+
 ## GUI results view
 
 Each PDF opens in a window of its own, with its review. Opening a PDF
@@ -336,7 +366,9 @@ Beside it are the checks run so far, how many rules have failed, and the time
 elapsed. veraPDF doesn't publish where it is, so Legibyl reads it from the
 validator's private `objectsContext` field; if a future veraPDF renames it,
 the bar just stays indeterminate (and a test fails). Very large documents can
-take minutes.
+take minutes. WCAG 2.2's checks come after the pages ("checking WCAG 2.2
+(contrast, text size and more)…"): veraPDF doesn't say which page it's on
+there, so the bar waits without filling.
 
 An empty window's details pane lists the steps (open a PDF, read what's found,
 check and edit the structure, choose auto fixes, export a copy).

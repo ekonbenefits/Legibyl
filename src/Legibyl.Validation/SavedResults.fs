@@ -22,9 +22,13 @@ let legibylVersion =
 let private standardOf (profile: PdfProfile) = if profile = PdfProfile.PdfUa2 then "ua2" else "ua1"
 
 /// The report as the review keeps it, for the file with hash, checked at checkedAt.
+/// What a saved result was checked by: veraPDF's version, and that WCAG 2.2's machine checks ran
+/// beside PDF/UA's. One saved before they did isn't current: it's checked again.
+let checkedBy = $"{VeraPdfValidator.EngineVersion}+wcag-2.2"
+
 let ofReport (report: ValidationReport) (hash: string) (checkedAt: DateTime) : ReviewFile.SavedValidation =
     { Hash = hash
-      VeraPdfVersion = VeraPdfValidator.EngineVersion
+      VeraPdfVersion = checkedBy
       LegibylVersion = legibylVersion
       Standard = standardOf report.Profile
       StandardFrom = (if report.ProfileDetected then "file" else "--ua")
@@ -53,7 +57,7 @@ let ofReport (report: ValidationReport) (hash: string) (checkedAt: DateTime) : R
 /// Whether saved is the result for the file with hash, as this build would give it against profile.
 let isCurrent (saved: ReviewFile.SavedValidation) (hash: string) (profile: PdfProfile) =
     saved.Hash = hash
-    && saved.VeraPdfVersion = VeraPdfValidator.EngineVersion
+    && saved.VeraPdfVersion = checkedBy
     && saved.LegibylVersion = legibylVersion
     && saved.Standard = standardOf profile
 

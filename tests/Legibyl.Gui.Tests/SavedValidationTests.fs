@@ -82,7 +82,7 @@ let ``a validation is a change Save keeps, and reopening shows it at once`` () =
 
             editedAfterValidating |> should be True
             saved.Hash |> should equal (SavedResults.hashOf pdf)
-            saved.VeraPdfVersion |> should equal VeraPdfValidator.EngineVersion
+            saved.VeraPdfVersion |> should equal SavedResults.checkedBy
             shown |> should equal (findings - 1)
             said |> should haveSubstring ", as checked "
             editedOnReopening |> should be False))
@@ -100,7 +100,7 @@ let ``a changed file, or another veraPDF, is validated afresh`` () =
             let saidForOtherEngine = banner otherEngine
             closeWithoutSaving otherEngine
             // A byte added after the end: the same PDF to a reader, not to the hash.
-            changeSaved pdf (fun v -> { v with VeraPdfVersion = VeraPdfValidator.EngineVersion })
+            changeSaved pdf (fun v -> { v with VeraPdfVersion = SavedResults.checkedBy })
             File.AppendAllText(pdf, "\n")
             let changed = reopen pdf
             let saidForChanged = banner changed

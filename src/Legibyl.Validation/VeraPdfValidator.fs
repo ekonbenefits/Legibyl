@@ -28,6 +28,10 @@ module internal VeraPdf =
                 if not initialised then
                     // Before veraPDF logs anything: what it logs is kept, not printed.
                     ValidatorLog.install ()
+                    // WCAG's contrast check renders pages with PDFBox, through Java's AWT, whose
+                    // native graphics crash the process under IKVM unless it's headless. Legibyl
+                    // never shows anything through AWT.
+                    java.lang.System.setProperty("java.awt.headless", "true") |> ignore
                     VeraGreenfieldFoundryProvider.initialise ()
                     // Each validation profile is shared process-wide and builds its rule lookup
                     // tables on first use, without locking: a rebuild clears the table while
@@ -52,6 +56,39 @@ module internal VeraPdf =
         | :? VeraPDFException as ex -> raise (VeraPdfValidationException($"{failedTo}: {ex.Message}", ex))
         | :? java.lang.Exception as ex -> raise (VeraPdfValidationException($"{failedTo}: {ex.getMessage ()}", ex))
 
+    /// veraPDF's WCAG 2.2 machine checks, as its v1.28.1 release has them (Profiles/
+    /// WCAG-2-2-Machine.xml), less its copy of PDF/UA-1's rules: PDF/UA is checked on its own, by
+    /// the standard the file's PDF version calls for. What's left (contrast, text size, repeated
+    /// characters, page orientation, figures' boxes, links' descriptions, redundant tags) checks
+    /// PDF 1.x and PDF 2.0 files alike.
+    let wcagProfile: Lazy<ValidationProfile> =
+        lazy
+            (let assembly = typeof<PdfProfile>.Assembly
+             use stream = assembly.GetManifestResourceStream "WCAG-2-2-Machine.xml" |> nonNull
+             let document = Xml.Linq.XDocument.Load stream
+             let ns = document.Root |> nonNull |> _.Name.Namespace
+             for rule in List.ofSeq (document.Descendants(ns + "rule")) do
+                 let specification =
+                     match rule.Element(ns + "id") with
+                     | NonNull id ->
+                         match id.Attribute(Xml.Linq.XName.Get "specification") with
+                         | NonNull attribute -> attribute.Value
+                         | Null -> ""
+                     | Null -> ""
+                 if specification <> "WCAG_2_2" then rule.Remove()
+             use bytes = new java.io.ByteArrayInputStream(Text.Encoding.UTF8.GetBytes(document.ToString()))
+             let profile = Profiles.profileFromXml bytes
+             // Its rule lookup tables built now, on one thread (see ensureInitialised).
+             match Seq.tryHead (javaSeq (profile.getRules ())) with
+             | Some rule -> profile.getRuleByRuleId((rule :?> Rule).getRuleId ()) |> ignore
+             | None -> ()
+             profile)
+
+    /// Legibyl's name for a specification veraPDF names: WCAG 2.2's "WCAG2.2" is "WCAG 2.2" (see
+    /// WcagSpecification); PDF/UA's are as veraPDF gives them.
+    let specificationName (specification: string) =
+        if specification.StartsWith("WCAG", StringComparison.Ordinal) then WcagSpecification.Name else specification
+
     let toJavaFlavour profile =
         match profile with
         | PdfProfile.PdfUa1 -> PDFAFlavour.PDFUA_1
@@ -62,6 +99,12 @@ module internal VeraPdf =
     /// doesn't have.
     let ruleDescription (profile: PdfProfile) (specification: string) (clause: string) (testNumber: int) =
         ensureInitialised ()
+        if specification = WcagSpecification.Name then
+            javaSeq (wcagProfile.Value.getRules ())
+            |> Seq.map (fun item -> item :?> Rule)
+            |> Seq.tryFind (fun rule -> rule.getRuleId().getClause () = clause && rule.getRuleId().getTestNumber () = testNumber)
+            |> Option.map _.getDescription()
+        else
         let table =
             ruleDescriptions.GetOrAdd(
                 profile,
@@ -162,8 +205,19 @@ module internal VeraPdf =
         | Some standard -> dcTitleRule standard = (assertion.Clause, assertion.TestNumber)
         | None -> false
 
+    /// What fixes a WCAG 2.2 rule's failure, by rule: a link with no description (or one that's
+    /// its address), described from its text or its page's title. Its redundant paragraphs and
+    /// contents entries aren't offered the fixes for empty ones: veraPDF calls a paragraph whose
+    /// text couldn't be read empty, which Legibyl's own checks don't (they offer those fixes
+    /// where they apply). Its others (contrast, text size…) have no fix: they're for where the PDF
+    /// was made.
+    let private wcagFixes: Map<string, PdfFixOptions> =
+        Map.ofList [ "2.4.9-1", PdfFixOptions.LinkContents ||| PdfFixOptions.LinkTitlesFromWeb ]
+
     let private determineFixOptions (assertion: RuleViolation) =
         match PdfUaTarget.ofSpecification assertion.Specification with
+        | None when assertion.Specification = WcagSpecification.Name ->
+            wcagFixes |> Map.tryFind assertion.RuleId |> Option.defaultValue PdfFixOptions.None
         | Some standard -> fixesByRule |> Map.tryFind (standard, assertion.RuleId) |> Option.defaultValue PdfFixOptions.None
         // ISO 32005's rows for what the structure tree root may hold ("Table 5. StructTreeRoot-Part"):
         // a single Document at the top is what they ask for.
@@ -416,7 +470,10 @@ module internal VeraPdf =
 
     /// Runs validate, reporting the validator's counters and position to progress every
     /// quarter second and once more when it finishes.
-    let withProgress (validator: PDFAValidator) (pageCount: int) (progress: IProgress<ValidationProgress>) (validate: unit -> 'T) =
+    /// Runs validate, reporting the validator's counters and position to progress every
+    /// quarter second and once more when it finishes, as stage when given (a pass that says
+    /// nothing of its pages, as WCAG's doesn't), else the page it's on.
+    let withStageProgress (stage: ValidationStage option) (validator: PDFAValidator) (pageCount: int) (progress: IProgress<ValidationProgress>) (validate: unit -> 'T) =
         let stopwatch = Diagnostics.Stopwatch.StartNew()
         // veraPDF checks the pages in order, then the rest (e.g. the structure tree). Keep the
         // furthest page seen: while reading, and briefly between pages, there's no current
@@ -435,13 +492,15 @@ module internal VeraPdf =
                 elif onPage.Success && not pastPages then
                     page <- max page (int onPage.Groups[1].Value + 1)
                 let stage =
-                    if pastPages then ValidationStage.Finishing
-                    elif page = 0 then ValidationStage.Preparing
-                    else ValidationStage.CheckingPages
+                    match stage with
+                    | Some stage -> stage
+                    | None when pastPages -> ValidationStage.Finishing
+                    | None when page = 0 -> ValidationStage.Preparing
+                    | None -> ValidationStage.CheckingPages
                 let count (group: int) = int found.Groups[group].Value
                 progress.Report
                     { Stage = stage
-                      Page = page
+                      Page = (if stage = ValidationStage.CheckingWcag then pageCount else page)
                       PageCount = pageCount
                       Checks = count 1
                       FailedRules = count 2
@@ -462,9 +521,23 @@ module internal VeraPdf =
         report true
         result
 
-    let toReport (pdfPath: string) profile (result: ValidationResult) (analysis: LegibylAnalysis) : ValidationReport =
+    /// withStageProgress for PDF/UA's pass: the stage from the page it's on.
+    let withProgress validator pageCount progress validate = withStageProgress None validator pageCount progress validate
+
+    /// WCAG 2.2's machine checks of pdfPath (see wcagProfile), reporting the CheckingWcag stage to
+    /// progress if given.
+    let validateWcag (foundry: VeraPDFFoundry) (pdfPath: string) (pageCount: int) (progress: IProgress<ValidationProgress> | null) =
+        let profile = wcagProfile.Value
+        use parser = foundry.createParser (java.io.File pdfPath, profile.getPDFAFlavour ())
+        let validator = org.verapdf.pdfa.validation.validators.ValidatorFactory.createValidator (profile, -1, false, false, false)
+        match progress with
+        | null -> validator.validate parser
+        | progress -> withStageProgress (Some ValidationStage.CheckingWcag) validator pageCount progress (fun () -> validator.validate parser)
+
+    let toReport (pdfPath: string) profile (result: ValidationResult) (wcag: ValidationResult option) (analysis: LegibylAnalysis) : ValidationReport =
         let assertions =
-            [ for item in javaSeq (result.getTestAssertions ()) do
+            [ for result in result :: Option.toList wcag do
+              for item in javaSeq (result.getTestAssertions ()) do
                   let assertion = item :?> TestAssertion
                   let ruleId = assertion.getRuleId ()
                   // NB: assertion.getLocationContext() is a rarely-populated, model-object-specific
@@ -472,7 +545,7 @@ module internal VeraPdf =
                   // path (e.g. "root/Catalog[0]/StructTreeRoot[0]/.../TH[3]") — the same value
                   // veraPDF's own report writer uses — lives on assertion.getLocation().getContext().
                   let violation =
-                      { Specification = ruleId.getSpecification().ToString()
+                      { Specification = specificationName (ruleId.getSpecification().ToString())
                         Clause = ruleId.getClause ()
                         TestNumber = ruleId.getTestNumber ()
                         Passed = (assertion.getStatus () = TestAssertion.Status.PASSED)
@@ -492,7 +565,7 @@ module internal VeraPdf =
           PdfVersion = PdfUaTarget.pdfVersion pdfPath |> Option.toObj
           // The caller chose it; one that detected it (PdfUaTarget.detect) says so.
           ProfileDetected = false
-          TotalAssertions = result.getTotalAssertions ()
+          TotalAssertions = result.getTotalAssertions () + (wcag |> Option.map _.getTotalAssertions() |> Option.defaultValue 0)
           Assertions = List.toArray (withLegibylAnalysis analysis assertions)
           Notes = [||] }
 
@@ -678,16 +751,38 @@ type VeraPdfValidator() =
                 // each rule, so logging passed checks hides repeated failures on any document
                 // of more than a few pages.
                 let validator = foundry.createValidator (flavour, -1, false, false, false)
+                let pageCount =
+                    match parser with
+                    | :? GFModelParser as parser -> try parser.getPDDocument().getNumberOfPages () with _ -> 0
+                    | _ -> 0
+                // The last progress PDF/UA's pass reported, for WCAG's to count on from.
+                let mutable last: ValidationProgress option = None
                 let result =
                     match progress with
                     | null -> validator.validate parser
                     | progress ->
-                        let pageCount =
-                            match parser with
-                            | :? GFModelParser as parser -> try parser.getPDDocument().getNumberOfPages () with _ -> 0
-                            | _ -> 0
-                        withProgress validator pageCount progress (fun () -> validator.validate parser)
-                toReport pdfPath profile result (analysis.GetAwaiter().GetResult())))
+                        let tracked =
+                            { new IProgress<ValidationProgress> with
+                                member _.Report p =
+                                    last <- Some p
+                                    progress.Report p }
+                        withProgress validator pageCount tracked (fun () -> validator.validate parser)
+                // Then WCAG 2.2's machine checks, with every validation. What veraPDF logs while it
+                // reads the file for them is PDF/UA's notes again, and its WCAG heuristics' workings
+                // ("Semantic span contains child of unexpected semantic type"): left out.
+                let continued: IProgress<ValidationProgress> | null =
+                    match progress, last with
+                    | NonNull progress, Some before ->
+                        { new IProgress<ValidationProgress> with
+                            member _.Report p =
+                                progress.Report
+                                    { p with
+                                        Checks = before.Checks + p.Checks
+                                        FailedRules = before.FailedRules + p.FailedRules
+                                        ProcessedObjects = before.ProcessedObjects + p.ProcessedObjects } }
+                    | progress, _ -> progress
+                let wcag = ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued)
+                toReport pdfPath profile result (Some wcag) (analysis.GetAwaiter().GetResult())))
             { report with Notes = Array.ofList notes }
         finally
             closeLegibylAnalysis analysis

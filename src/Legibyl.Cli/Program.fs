@@ -181,6 +181,8 @@ let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (giv
             { result with
                 FlavourId = report.FlavourId
                 IsCompliant = Nullable report.IsCompliant
+                MeetsWcag = Nullable report.MeetsWcag
+                WcagFailedCount = Nullable(Seq.length report.WcagFailures)
                 TotalAssertions = Nullable report.TotalAssertions
                 FailedCount = Nullable report.FailedCount
                 ValidatorNotes = report.Notes
@@ -235,6 +237,17 @@ let private noteLine (note: ValidatorNote) =
     let times = if note.Count > 1 then $" (×{note.Count})" else ""
     $"  veraPDF noted ({note.Level}, {note.Logger}): {note.Message}{times}"
 
+/// A validated file's first line: PASS when it complies with PDF/UA and WCAG 2.2's machine checks
+/// pass, else FAIL, with how many of each standard's checks failed.
+let private standingLine (r: ValidationResult) =
+    let wcagFailed = r.WcagFailedCount.GetValueOrDefault()
+    let uaFailed = r.FailedCount.GetValueOrDefault() - wcagFailed
+    if r.IsCompliant = Nullable true && r.MeetsWcag = Nullable true then
+        $"{r.File}: PASS ({r.Standard} and {WcagSpecification.Name}, {r.TotalAssertions} checks)"
+    else
+        let standing (name: string) (passes: bool) (failed: int) = if passes then $"{name} passes" else $"{name}: {failed} failed"
+        $"{r.File}: FAIL ({standing r.Standard (r.IsCompliant = Nullable true) uaFailed}; {standing WcagSpecification.Name (r.MeetsWcag = Nullable true) wcagFailed}; {r.TotalAssertions} checks)"
+
 let private validationText (results: ValidationResult list) =
     let sb = StringBuilder()
     let line (text: string) = sb.AppendLine text |> ignore
@@ -246,10 +259,7 @@ let private validationText (results: ValidationResult list) =
         match r.Error with
         | NonNull error -> line $"{r.File}: ERROR — {error}"
         | Null ->
-            line (
-                if r.IsCompliant = Nullable true then $"{r.File}: PASS ({r.Standard}, {r.TotalAssertions} checks)"
-                else $"{r.File}: FAIL ({r.Standard}, {r.FailedCount}/{r.TotalAssertions} checks failed)"
-            )
+            line (standingLine r)
             for prefix, items in [ "", r.Failures; "WARNING ", r.Warnings ] do
                 for f in details items do
                     line $"  {prefix}[{f.Specification} {f.Clause}-{f.TestNumber}] {f.Message}{fixableSuffix f}"
@@ -308,7 +318,7 @@ let private runValidate (args: ValidateArgs) =
         results
         |> List.map (fun r ->
             if not (isNull r.Error) then ExitCodes.ToolError
-            elif r.IsCompliant = Nullable false then ExitCodes.DocumentProblem
+            elif r.IsCompliant = Nullable false || r.MeetsWcag = Nullable false then ExitCodes.DocumentProblem
             else ExitCodes.Success)
         |> worst
 
@@ -328,7 +338,8 @@ type private FixRequest =
       Language: string option
       Output: string option }
 
-let private compliance (report: ValidationReport) = { IsCompliant = report.IsCompliant; FailedCount = report.FailedCount }
+let private compliance (report: ValidationReport) =
+    { IsCompliant = report.IsCompliant; MeetsWcag = report.MeetsWcag; FailedCount = report.FailedCount }
 
 let private nextVersion (file: string) =
     let name = CopyNames.nextVersion file
@@ -487,7 +498,10 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
 let private fixText (results: FixOutcome list) =
     let sb = StringBuilder()
     let line (text: string) = sb.AppendLine text |> ignore
-    let standing (c: Compliance) = if c.IsCompliant then "PASS" else $"FAIL, {c.FailedCount} failed"
+    let standing (c: Compliance) =
+        if c.IsCompliant && c.MeetsWcag then "PASS"
+        elif c.IsCompliant then $"FAIL, {c.FailedCount} failed ({WcagSpecification.Name}'s)"
+        else $"FAIL, {c.FailedCount} failed"
     for r in results do
         match r.Status, r.Before, r.After with
         | FixStatus.Error, _, _ -> line $"{r.File}: ERROR — {r.Error}"
@@ -510,8 +524,8 @@ let private fixExit (r: FixOutcome) =
     match r.Status, r.After, r.Before with
     | FixStatus.Error, _, _ -> ExitCodes.ToolError
     | FixStatus.AlreadyTagged, _, _ -> ExitCodes.DocumentProblem
-    | _, NonNull after, _ -> if after.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
-    | _, Null, NonNull before -> if before.IsCompliant then ExitCodes.Success else ExitCodes.DocumentProblem
+    | _, NonNull after, _ -> if after.IsCompliant && after.MeetsWcag then ExitCodes.Success else ExitCodes.DocumentProblem
+    | _, Null, NonNull before -> if before.IsCompliant && before.MeetsWcag then ExitCodes.Success else ExitCodes.DocumentProblem
     | _ -> ExitCodes.Success
 
 /// What's wrong with the edits in a review file (see ReviewFile.problems), as one message naming

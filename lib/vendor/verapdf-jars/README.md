@@ -24,6 +24,35 @@ module, and third-party dependencies (Jackson, JAXB/`javax.xml.bind`,
 `javax.activation`, etc.) into a single archive. Using the single fat jar
 avoids having to hand-resolve veraPDF's Maven dependency graph.
 
+## WCAG 2.2 checks
+
+Compiled into veraPDF's assembly with it (the `Compile` list of its
+`IkvmReference`), since veraPDF finds its WCAG model by name
+(`Class.forName("org.verapdf.gf.model.impl.sa.GFSAPDFDocument")`). Each is
+downloaded from Maven Central and checked against its SHA-256 in
+`src/Legibyl.Validation/Legibyl.Validation.fsproj` (`VeraPdfWcagJar` items).
+
+| Artifact | Version | SHA-256 |
+|---|---|---|
+| `org.verapdf:wcag-validation` | `1.28.1` (VeraPdfVersion) | `56C45553D313A369BE7D027CE539B40B119783B910E1CB51B12CCC99A61B769A` |
+| `org.verapdf:wcag-algorithms` | `1.28.1` (VeraPdfVersion) | `D03E7493D51AB770B3B33FC3EA7E730D6ABABD8E63B46DBFBD6F8BE7FA11D4DA` |
+| `org.apache.pdfbox:pdfbox` | `2.0.24` (PdfBoxVersion) | `3C2C0553EC0E7533C490B4C952E1AF113621DE5275AF6E380E11D0D9A0A4F3D6` |
+| `org.apache.pdfbox:fontbox` | `2.0.24` (PdfBoxVersion) | `2E8C0A569A90B04734FBC0C805D77F4EC03F98C11F5705055CCD7718C1953D68` |
+| `commons-logging:commons-logging` | `1.2` | `DADDEA1EA0BE0F56978AB3006B8AC92834AFEEFBD9B7E4E6316FCA57DF0FA636` |
+| `com.github.jai-imageio:jai-imageio-core` | `1.4.0` | `8AD3C68E9EFFFB10AC87FF8BC589ADF64B04A729C5194C079EFD0643607FD72A` |
+| `org.apache.pdfbox:jbig2-imageio` | `3.0.3` | `C80110FDA57128563D3D0656BFF78DA8BF35A934CF54EDFA10E8B76FC6389929` |
+
+PDFBox is the version `wcag-algorithms` 1.28.1 was built against (its POM), and
+Jackson is left to veraPDF's own copy in the fat jar (a newer one clashed). The
+JPEG 2000 reader `wcag-algorithms` constructs is Legibyl's stand-in
+(`src/Legibyl.Validation/java/`), not jai-imageio-jpeg2000 (JJ2000 licence).
+veraPDF's `WCAG-2-2-Machine.xml` profile, from its validation-profiles repository
+at tag `v1.28.1`, is committed unmodified in `src/Legibyl.Validation/Profiles/`
+(SHA-256 `9AF0D629A83BC3B7BA0409C9CA07FE48059BBA916B78262BE8977F8DA7A9A1C4`).
+
+To upgrade veraPDF, take its WCAG jars at the same version, the PDFBox version
+their POM names, and the profile at the same tag; update the pins.
+
 ## Why this exact version
 
 `1.28.1` is the latest version of `org.verapdf.apps:greenfield-apps`

@@ -108,7 +108,7 @@ let private run (files: string list) (output: string) (options: Append.Options) 
     Append.run validator.Value files output options ignore
 
 let private failures (outcome: Append.Outcome) =
-    outcome.After |> Option.map (fun after -> [ for f in after.FailedAssertions -> $"{f.Clause}-{f.TestNumber} {f.Message}" ]) |> Option.defaultValue []
+    outcome.After |> Option.map (fun after -> [ for f in after.PdfUaFailures -> $"{f.Clause}-{f.TestNumber} {f.Message}" ]) |> Option.defaultValue []
 
 /// Each page of output renders as its page in the input it came from, pixel for pixel.
 let private rendersAsInputs (outcome: Append.Outcome) =

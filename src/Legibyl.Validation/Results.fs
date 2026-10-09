@@ -103,6 +103,13 @@ type ValidatorNote =
       /// How many times it said it.
       Count: int }
 
+/// WCAG 2.2, as Legibyl's findings name it: veraPDF's WCAG 2.2 machine checks run beside PDF/UA
+/// with every validation (see VeraPdfValidator).
+module WcagSpecification =
+    /// The specification its findings have ("WCAG 2.2"), as PDF/UA's have "ISO 14289-1:2014".
+    [<Literal>]
+    let Name = "WCAG 2.2"
+
 /// The result of validating a single PDF document against a PdfProfile.
 type ValidationReport =
     { FilePath: string
@@ -137,6 +144,21 @@ type ValidationReport =
     member this.FixableCount(option: PdfFixOptions) =
         this.Findings |> Seq.filter (fun a -> a.FixOptions.HasFlag option) |> Seq.length
 
+    /// WCAG 2.2's failures (veraPDF's machine checks: contrast, text size and more), which
+    /// FailedAssertions and FailedCount count too.
+    member this.WcagFailures: RuleViolation seq =
+        this.FailedAssertions |> Seq.filter (fun a -> a.Specification = WcagSpecification.Name)
+
+    /// PDF/UA's failures (and ISO 32005's, which PDF/UA-2 includes): FailedAssertions less WCAG's.
+    member this.PdfUaFailures: RuleViolation seq =
+        this.FailedAssertions |> Seq.filter (fun a -> a.Specification <> WcagSpecification.Name)
+
+    /// Whether WCAG 2.2's machine checks pass.
+    member this.MeetsWcag = Seq.isEmpty this.WcagFailures
+
+    /// Whether the document passes: PDF/UA (IsCompliant) and WCAG 2.2's machine checks.
+    member this.Passes = this.IsCompliant && this.MeetsWcag
+
     member this.WarningCount =
         this.Assertions |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning) |> Seq.length
 
@@ -168,6 +190,11 @@ type ValidationStage =
     | CheckingPages = 1
     /// Past the pages: the structure tree and other document-wide objects.
     | Finishing = 2
+    /// WCAG 2.2's machine checks, after PDF/UA's (see VeraPdfValidator): veraPDF reads the
+    /// document's text and structure again and renders its pages for the contrast check. It says
+    /// nothing of its pages as it goes, so Page stays at PageCount (PDF/UA's are done), and
+    /// Checks and FailedRules count on from PDF/UA's.
+    | CheckingWcag = 3
 
 /// How far a running validation has got. veraPDF checks the pages in order, which is
 /// where nearly all the time goes, so Page of PageCount is a fair measure of progress.

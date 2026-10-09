@@ -104,7 +104,8 @@ let ``Validate reports progress, ending with the final counts`` () =
     last.FailedRules |> should equal (report.FailedAssertions |> Seq.filter (fun f -> f.RuleId <> "7.1-9") |> Seq.distinctBy _.RuleId |> Seq.length)
     last.ProcessedObjects |> should be (greaterThan 0)
     last.QueuedObjects |> should equal 0
-    last.Stage |> should equal ValidationStage.Finishing
+    // WCAG 2.2's machine checks come last, with every validation.
+    last.Stage |> should equal ValidationStage.CheckingWcag
     last.PageCount |> should be (greaterThanOrEqualTo 10)
     last.Page |> should equal last.PageCount
     // Seeing a page mid-run shows Legibyl can still read where veraPDF is (a private field).

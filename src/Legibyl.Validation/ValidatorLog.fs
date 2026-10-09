@@ -14,6 +14,9 @@ type private Record = { Level: string; Logger: string; Message: string }
 /// The records of the validation running here (the flow of one Validate call), if any.
 let private current = AsyncLocal<ConcurrentQueue<Record> | null>()
 
+/// Whether what's logged here (the flow of one quietly call) is left out: neither raised nor kept.
+let private quiet = AsyncLocal<bool>()
+
 /// Each record kept, as it comes (Count 1, its message whole): for a caller to show as it goes,
 /// as the CLI's --verbose prints them. The library itself never writes to the console.
 let recorded = Event<ValidatorNote>()
@@ -26,6 +29,7 @@ type private Collector() =
         match record with
         | null -> ()
         | record when record.getLevel().intValue () < java.util.logging.Level.WARNING.intValue () -> ()
+        | _ when quiet.Value -> ()
         | record ->
             let name = record.getLoggerName () |> Option.ofObj |> Option.defaultValue ""
             let kept =
@@ -75,3 +79,13 @@ let collecting (f: unit -> 'T) : 'T * ValidatorNote list =
         |> Seq.map (fun (r, count) -> { Level = r.Level; Logger = r.Logger; Message = r.Message; Count = count })
         |> List.ofSeq
     result, notes
+
+/// Runs f with what veraPDF logs while it runs left out: neither raised nor kept, as for a second
+/// read of a file whose notes the first gave.
+let quietly (f: unit -> 'T) : 'T =
+    let outer = quiet.Value
+    quiet.Value <- true
+    try
+        f ()
+    finally
+        quiet.Value <- outer

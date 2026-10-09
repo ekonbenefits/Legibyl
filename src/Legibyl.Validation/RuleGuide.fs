@@ -30,7 +30,9 @@ type GuideFile =
       /// PDF/UA-2's (ISO 14289-2).
       PdfUa2Rules: Entry array | null
       /// ISO 32005's, on which tags may contain which, which PDF/UA-2 includes.
-      TagNestingRules: Entry array | null }
+      TagNestingRules: Entry array | null
+      /// WCAG 2.2's machine checks (veraPDF's), which run with every validation.
+      WcagRules: Entry array | null }
 
 /// Each standard's entries, by the start of its specification ("ISO 14289-1"), in order: the
 /// first that matches a failure is its guide.
@@ -41,7 +43,10 @@ let entries: Lazy<(string * Entry list) list> =
          use reader = new StreamReader(stream)
          let deserializer = DeserializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).Build()
          let file = deserializer.Deserialize<GuideFile>(reader)
-         [ "ISO 14289-1", file.Rules; "ISO 14289-2", file.PdfUa2Rules; "ISO 32005", file.TagNestingRules ]
+         [ "ISO 14289-1", file.Rules
+           "ISO 14289-2", file.PdfUa2Rules
+           "ISO 32005", file.TagNestingRules
+           WcagSpecification.Name, file.WcagRules ]
          |> List.map (fun (specification, rules) -> specification, List.ofArray (Option.ofObj rules |> Option.defaultValue [||])))
 
 let private covers (clause: string) (test: int) (entry: Entry) =
@@ -58,6 +63,6 @@ let forRule (specification: string) (clause: string) (test: int) : Guide option 
     |> Option.bind (fun (_, rules) -> rules |> List.tryFind (covers clause test))
     |> Option.map (fun entry -> { Meaning = entry.Meaning; WhatToDo = entry.WhatToDo })
 
-/// The guide for a finding, if it's a PDF/UA failure this covers.
+/// The guide for a finding, if it's a PDF/UA or WCAG 2.2 failure this covers.
 let forFinding (violation: RuleViolation) : Guide option =
     forRule violation.Specification violation.Clause violation.TestNumber

@@ -623,7 +623,11 @@ let private comparison (before: ValidationReport) (after: ValidationReport) : IV
           $"Compliant with {PdfUaTarget.displayNameOfFlavour after.FlavourId}",
           yesNo before.IsCompliant,
           yesNo after.IsCompliant,
-          (if after.IsCompliant = before.IsCompliant then None else Some after.IsCompliant) ]
+          (if after.IsCompliant = before.IsCompliant then None else Some after.IsCompliant)
+          $"Meets {WcagSpecification.Name}'s machine checks",
+          yesNo before.MeetsWcag,
+          yesNo after.MeetsWcag,
+          (if after.MeetsWcag = before.MeetsWcag then None else Some after.MeetsWcag) ]
 
     Grid.create [
         Grid.columnDefinitions "Auto,Auto,Auto,Auto"

@@ -140,7 +140,7 @@ let ``ticks don't carry to another version of the file`` () =
             let progress = passProgress changed
             closeWithoutSaving changed
 
-            progress |> should equal "Passes PDF/UA-1's automated checks"))
+            progress |> should equal "Passes PDF/UA-1 and WCAG 2.2's automated checks"))
 
 [<Fact>]
 let ``a report leads with the checklist and what's been checked`` () =
