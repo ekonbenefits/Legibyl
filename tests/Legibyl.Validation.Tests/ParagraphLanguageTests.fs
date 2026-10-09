@@ -181,3 +181,21 @@ let ``a short document that says no language is declared in the one most of its 
 
     use document = new PdfDocument(new PdfReader(output.Path))
     document.GetCatalog().GetPdfObject().GetAsString(PdfName.Lang).ToUnicodeString() |> should equal "en"
+
+[<Fact>]
+let ``Catalan in a Catalan document, and Portuguese or Italian in an English one, aren't taken for Spanish`` () =
+    use catalan = new TempPdf()
+    use english = new TempPdf()
+    createPdf
+        catalan.Path
+        "ca"
+        [ "El jardí comunitari obre els dissabtes al matí per a totes les famílies del barri."
+          "Porteu guants, aigua i un barret; nosaltres tenim les eines i les llavors." ]
+    createPdf
+        english.Path
+        "en-US"
+        [ "The community garden is open on Saturday mornings for every family."
+          "O jardim comunitário abre aos sábados de manhã para todas as famílias do bairro."
+          "Il giardino comunitario è aperto il sabato mattina per tutte le famiglie del quartiere." ]
+    passages catalan.Path |> should be Empty
+    passages english.Path |> should be Empty

@@ -645,8 +645,8 @@ let private setLanguage (chosen: string option) (document: PdfDocument) context 
 ///   0. The parent tree first, where it's missing: until it's rebuilt, every tag reads as
 ///      untagged. Then a single Document tag at the top, so the fixes after it see the tree as
 ///      it'll be (it moves nothing else). Then the document's language: it only sets /Lang, and
-///      bookmarks need it. Then passages in another language than the document's: once it's
-///      declared, so they're told apart from it.
+///      bookmarks need it. (Passages in another language than the document's are marked after
+///      paragraphs are joined, below, once it's declared.)
 ///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list fix could take it for a list item.
@@ -1245,13 +1245,14 @@ let orderedFixes
       PdfFixOptions.ApplyEdits, chooseRoles roleMap
       PdfFixOptions.RoleMap, mapRoles
       PdfFixOptions.Language, setLanguage language
-      PdfFixOptions.PassageLanguages, PassageLanguages.apply
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.EmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.EmptyTocEntries, removeEmptyTocEntries
       PdfFixOptions.EmptyFigures, EmptyFigures.remove
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
       PdfFixOptions.JoinSplitWords, SplitWordSpans.apply
+      // Once paragraphs are joined: one fragment of a split sentence marked would keep it apart.
+      PdfFixOptions.PassageLanguages, PassageLanguages.apply
       PdfFixOptions.Lists, tagParagraphLists
       PdfFixOptions.TableHeaderScope, scopeTableHeaders
       PdfFixOptions.Bookmarks, addBookmarks

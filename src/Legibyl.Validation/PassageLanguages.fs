@@ -63,9 +63,8 @@ type Passage =
       Text: string
       Geometry: StructureGeometry option }
 
-/// The languages a passage is told apart among: the one it's read in, and those with a pack.
-let private candidates (readIn: string) =
-    readIn :: (fst LanguagePacks.installed.Value |> List.map _.Tag)
+/// The languages a passage is told apart from the one it's read in: those with a pack.
+let private others () = fst LanguagePacks.installed.Value |> List.map _.Tag
 
 /// Each passage (a block of text holding no other, saying no language of its own) and the language
 /// its text reads as, where that's clear; with the language it's read in, if it has one.
@@ -77,8 +76,7 @@ let private passages (document: PdfDocument) context =
               if isBlock visit.Element context && (langOf visit.Element).IsNone && not (holdsBlock visit.Element context) then
                   let text = (extractText visit.Element context visit.Page).Trim()
                   let readIn = inherited document visit.Element
-                  let among = candidates (defaultArg readIn "en")
-                  match DocumentLanguage.detectAmong among text with
+                  match DocumentLanguage.detectAmong (defaultArg readIn "en") (others ()) text with
                   | Some language -> visit, text, language, readIn
                   | None -> () ]
 
