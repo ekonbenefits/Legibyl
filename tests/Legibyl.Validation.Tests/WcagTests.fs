@@ -50,7 +50,8 @@ let ``text without enough contrast fails WCAG 2.2, the rest passes, and PDF/UA i
     report.MeetsWcag |> should be False
     report.Passes |> should be False
     let contrast = report.WcagFailures |> Seq.filter (fun f -> f.RuleId = "1.4.3-1") |> List.ofSeq
-    contrast |> List.map (fun f -> f.Specification) |> should equal [ WcagSpecification.Name ]
+    // Named with its criterion's level.
+    contrast |> List.map (fun f -> f.Specification) |> should equal [ "WCAG 2.2 AA" ]
     // It's the light grey line's, and where it is on the page.
     (contrast.Head.LocationContext |> notNull) |> should haveSubstring "Light grey on white is hard to read."
     contrast.Head.Geometry |> should not' (be Null)
@@ -77,3 +78,37 @@ let ``WCAG 2.2's findings are saved and read back as WCAG's, with their rule's d
 
     saved.MeetsWcag |> should be False
     [ for f in saved.WcagFailures -> f.RuleId, f.Message ] |> should equal [ for f in report.WcagFailures -> f.RuleId, f.Message ]
+
+[<Fact>]
+let ``a WCAG criterion above level AA is a warning a review can dismiss, not a failure`` () =
+    use pdf = new TempPdf()
+    // A link shown, and described, only as its address: WCAG 2.2's 2.4.9 (Link Purpose, Link
+    // Only) is level AAA.
+    do
+        use document = new PdfUADocument(new PdfWriter(pdf.Path), PdfUAConfig(PdfUAConformance.PDF_UA_1, "Garden Links", "en-US"))
+        let font =
+            iText.Kernel.Font.PdfFontFactory.CreateFont(
+                corpusFile (Path.Combine("fonts", "Lato-Regular.ttf")),
+                iText.IO.Font.PdfEncodings.WINANSI,
+                iText.Kernel.Font.PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED
+            )
+        use layout = new iText.Layout.Document(document)
+        layout.SetFont font |> ignore
+        let link = Link("https://example.org/plan", iText.Kernel.Pdf.Action.PdfAction.CreateURI "https://example.org/plan")
+        link.GetLinkAnnotation().SetContents "https://example.org/plan" |> ignore
+        link.GetAccessibilityProperties().SetAlternateDescription "https://example.org/plan" |> ignore
+        layout.Add(Paragraph().Add link) |> ignore
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    let linkPurpose = report.Findings |> Seq.filter (fun f -> f.RuleId = "2.4.9-1") |> List.ofSeq
+    linkPurpose |> List.map (fun f -> f.Specification, f.Severity) |> should equal [ "WCAG 2.2 AAA", FindingSeverity.Warning ]
+    report.WcagFailures |> should be Empty
+    report.Passes |> should be True
+    // Dismissed in a review, as any warning is.
+    let review: ReviewFile.SavedFile =
+        { Version = 1
+          DismissedWarnings =
+            [| { Rule = ReviewFile.dismissalRule linkPurpose.Head; Location = ReviewFile.AnyLocation; Message = linkPurpose.Head.Message } |]
+          Edits = null; Title = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null; Language = null }
+    ReviewFile.dismisses review linkPurpose.Head |> should be True

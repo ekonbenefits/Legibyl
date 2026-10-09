@@ -41,7 +41,7 @@ let ``validate fails a PDF that passes PDF/UA but not WCAG 2.2, and says which``
         result.GetProperty("meetsWcag").GetBoolean() |> should be False
         result.GetProperty("wcagFailedCount").GetInt32() |> should be (greaterThanOrEqualTo 1)
         [ for f in result.GetProperty("failures").EnumerateArray() -> f.GetProperty("specification").GetString(), f.GetProperty("clause").GetString() ]
-        |> should contain ("WCAG 2.2", "1.4.3")
+        |> should contain ("WCAG 2.2 AA", "1.4.3")
         firstLine |> should haveSubstring ": FAIL (PDF/UA-1 passes; WCAG 2.2: "
     finally
         for file in [ pdf; json; text ] do

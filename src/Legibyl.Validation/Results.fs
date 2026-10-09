@@ -106,9 +106,39 @@ type ValidatorNote =
 /// WCAG 2.2, as Legibyl's findings name it: veraPDF's WCAG 2.2 machine checks run beside PDF/UA
 /// with every validation (see VeraPdfValidator).
 module WcagSpecification =
-    /// The specification its findings have ("WCAG 2.2"), as PDF/UA's have "ISO 14289-1:2014".
+    /// The standard's name ("WCAG 2.2"), which its findings' specification starts with, as
+    /// PDF/UA's have "ISO 14289-1:2014".
     [<Literal>]
     let Name = "WCAG 2.2"
+
+    /// The conformance level (A, AA or AAA) of each success criterion veraPDF's machine checks
+    /// test, by criterion.
+    let levels =
+        Map.ofList
+            [ "1.3.1", "A" // Info and Relationships
+              "4.1.2", "A" // Name, Role, Value
+              "1.3.4", "AA" // Orientation
+              "1.4.3", "AA" // Contrast (Minimum)
+              "1.4.4", "AA" // Resize Text
+              "1.4.10", "AA" // Reflow
+              "2.4.9", "AAA" ] // Link Purpose (Link Only)
+
+    /// A success criterion's level, if it's one of levels.
+    let levelOf (criterion: string) = Map.tryFind criterion levels
+
+    /// The specification a finding of criterion has: the standard and the criterion's level
+    /// ("WCAG 2.2 AA"), or the standard alone for a criterion levels doesn't have.
+    let ofCriterion (criterion: string) =
+        match levelOf criterion with
+        | Some level -> $"{Name} {level}"
+        | None -> Name
+
+    /// Whether a finding's specification is WCAG 2.2's (at any level).
+    let isWcag (specification: string) = specification = Name || specification.StartsWith(Name + " ", System.StringComparison.Ordinal)
+
+    /// Whether criterion is above level AA, which Legibyl aims at (as laws and policies do): its
+    /// findings are warnings, which a review can dismiss, not failures.
+    let isAboveTarget (criterion: string) = levelOf criterion = Some "AAA"
 
 /// The result of validating a single PDF document against a PdfProfile.
 type ValidationReport =
@@ -144,14 +174,14 @@ type ValidationReport =
     member this.FixableCount(option: PdfFixOptions) =
         this.Findings |> Seq.filter (fun a -> a.FixOptions.HasFlag option) |> Seq.length
 
-    /// WCAG 2.2's failures (veraPDF's machine checks: contrast, text size and more), which
-    /// FailedAssertions and FailedCount count too.
+    /// WCAG 2.2's failures at levels A and AA (veraPDF's machine checks: contrast, text size and
+    /// more), which FailedAssertions and FailedCount count too. Those above AA are warnings.
     member this.WcagFailures: RuleViolation seq =
-        this.FailedAssertions |> Seq.filter (fun a -> a.Specification = WcagSpecification.Name)
+        this.FailedAssertions |> Seq.filter (fun a -> WcagSpecification.isWcag a.Specification)
 
     /// PDF/UA's failures (and ISO 32005's, which PDF/UA-2 includes): FailedAssertions less WCAG's.
     member this.PdfUaFailures: RuleViolation seq =
-        this.FailedAssertions |> Seq.filter (fun a -> a.Specification <> WcagSpecification.Name)
+        this.FailedAssertions |> Seq.filter (fun a -> not (WcagSpecification.isWcag a.Specification))
 
     /// Whether WCAG 2.2's machine checks pass.
     member this.MeetsWcag = Seq.isEmpty this.WcagFailures

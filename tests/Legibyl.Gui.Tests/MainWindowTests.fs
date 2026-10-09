@@ -223,7 +223,7 @@ let ``the summary above the list counts what the banner does`` () =
         let failed = HeadlessWindow.findings window |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Failure)
         let failures = failed.Length
         // The banner counts each standard's: PDF/UA's, and WCAG 2.2's machine checks'.
-        let wcag = failed |> List.filter (fun r -> r.Violation.Specification = WcagSpecification.Name) |> List.length
+        let wcag = failed |> List.filter (fun r -> WcagSpecification.isWcag r.Violation.Specification) |> List.length
         let counted =
             let parts =
                 [ if failures > wcag then $"{failures - wcag} PDF/UA-1"
