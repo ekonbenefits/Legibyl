@@ -275,6 +275,31 @@ let ``an address whose pieces aren't side by side in their tag isn't linked, and
         [ "Page 1: \"https://example.org/garden\". Not fixable here: its pieces aren't side by side in its tag, in the order they're read.", false ]
 
 [<Fact>]
+let ``an address one of whose pieces is read on both sides of another isn't linked, and says why`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    tagged input.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        let canvas = iText.Kernel.Pdf.Canvas.PdfCanvas page
+        let width (text: string) = float (font.GetWidth(text, 12f))
+        pointer.SetPageForTagging(page).AddTag "P" |> ignore
+        // One marked content draws the address's start and its end, the next one its middle: a
+        // Link holding them in their tag's order would read "https://example.org//beds garden".
+        canvas.OpenTag(pointer.GetTagReference()) |> ignore
+        show canvas font 72.0 700.0 "https://example.org/"
+        show canvas font (72.0 + width "https://example.org/garden") 700.0 "/beds"
+        canvas.CloseTag() |> ignore
+        canvas.OpenTag(pointer.GetTagReference()) |> ignore
+        show canvas font (72.0 + width "https://example.org/") 700.0 "garden"
+        canvas.CloseTag() |> ignore)
+    unlinked input.Path
+    |> should
+        equal
+        [ "Page 1: \"https://example.org/garden/beds\". Not fixable here: a piece of it is read on both sides of another, so its pieces can't be tagged in the address's order.", false ]
+
+    validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed |> should be False
+
+[<Fact>]
 let ``an address drawn right to left is read left to right, whole`` () =
     use pdf = new TempPdf()
     tagged pdf.Path (fun document pointer font ->
