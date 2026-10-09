@@ -91,6 +91,7 @@ module private StructureView =
         (onEditsChanged: unit -> unit)
         (findings: FindingMarkers.Findings)
         (layoutRegions: ((int -> StructureGeometry list) option) ref)
+        (orderSuggester: Lazy<LayoutSuggester>)
         =
         // What's drawn outside every tag, most likely decoration first.
         let tagged = sortUntagged tagged
@@ -997,7 +998,8 @@ module private StructureView =
                                                 downloadProgress.Set(Some 0.0)
                                                 do! LayoutModel.download (Progress<float>(fun fraction -> downloadProgress.Set(Some fraction))) CancellationToken.None
                                                 downloadProgress.Set None
-                                            return! Task.Run(fun () -> LayoutOrder.detect sourceFilePath page)
+                                            // (One suggester for the window: the PDF and the detector loaded once.)
+                                            return! Task.Run(fun () -> LayoutOrder.detectWith orderSuggester.Value page)
                                         }
                                 let now = orderedChildren edits.Current parent
                                 let suggestion = LayoutOrder.propose now page regions
@@ -1023,6 +1025,7 @@ module private StructureView =
                       Parents = parents ()
                       Edits = edits.Current
                       Ordering = ordering.Current
+                      Status = status.Current
                       Download = downloadProgress.Current
                       CanOrderByLayout = (topLevel ()).IsSome
                       OrderByLayout = orderByLayout
@@ -1907,9 +1910,11 @@ type StructureTreeWindow
         | Tagged _ -> None
     // Where Order Page N by Layout gets a page's regions: the layout detector, unless replaced.
     let layoutRegions = ref None
+    // The layout detector Order Page N by Layout asks, made the first time it's asked.
+    let orderSuggester = lazy (new LayoutSuggester(sourceFilePath, review.Language))
     do
         let tagged = match source with Tagged root -> root | Suggested -> SuggestedTree.build []
-        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged findings layoutRegions
+        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged findings layoutRegions orderSuggester
 
     /// The review its edits change.
     member _.Review = review
@@ -1938,4 +1943,6 @@ type StructureTreeWindow
                 (suggester :> IDisposable).Dispose())
             |> ignore
         | None -> ()
+        if orderSuggester.IsValueCreated then
+            Task.Run(fun () -> (orderSuggester.Value :> IDisposable).Dispose()) |> ignore
         renderer.Dispose()
