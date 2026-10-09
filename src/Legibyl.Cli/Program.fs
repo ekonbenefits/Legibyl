@@ -102,6 +102,7 @@ let private validationProgress (activity: string) =
             | ValidationStage.Preparing -> (reporter ()).Status $"{activity}: reading the PDF"
             | ValidationStage.CheckingPages -> (reporter ()).Status(activity, (p.Page, p.PageCount))
             | ValidationStage.Finishing -> (reporter ()).Status $"{activity}: finishing up"
+            | ValidationStage.CheckingWcag -> (reporter ()).Status $"{activity}: checking {WcagSpecification.Name} (contrast, text size and more)"
             | _ -> (reporter ()).Status activity }
 
 /// Says where reading the structure has got.
@@ -122,6 +123,7 @@ let private fixProgress =
             let stage =
                 match p.Stage with
                 | FixStage.CheckingOriginal -> $"{step}: checking the original"
+                | FixStage.CheckingWcag -> $"{step}: checking the original against {WcagSpecification.Name}"
                 | FixStage.Tagging -> $"{step}: finding pages' layouts, to tag them"
                 | FixStage.Fixing when pages.IsSome -> $"{step}: finding pages' layouts, to join split paragraphs"
                 | FixStage.Fixing -> $"{step}: applying the fixes"
