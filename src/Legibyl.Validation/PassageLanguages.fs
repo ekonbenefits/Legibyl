@@ -27,7 +27,7 @@ let private holdsBlock (element: PdfDictionary) context =
     let rec kids (value: PdfObject | null) depth =
         depth < 50
         && match resolve value with
-           | :? PdfArray as array -> seq { 0 .. array.Size() - 1 } |> Seq.exists (fun i -> kids (array.Get i) depth)
+           | :? PdfArray as array -> seq { 0 .. array.Size() - 1 } |> Seq.exists (fun i -> kids (array.Get i) (depth + 1))
            | :? PdfDictionary as kid when not (isNull (kid.GetAsName PdfName.S)) ->
                isBlock kid context || kids (kid.Get PdfName.K) (depth + 1)
            | _ -> false
