@@ -118,14 +118,30 @@ let detect (text: string) : string option =
         | best :: _ when best.Probability >= MinimumProbability -> Some(tagFor best.Language)
         | _ -> None
 
-/// Text to detect the language from: the pages' text, and the structure's replacement text
-/// (ActualText, Alt), which is all there is when text is drawn as outlines.
-let sample (document: PdfDocument) context =
+/// The pages' text, enough of it to detect the language from.
+let private pagesText (document: PdfDocument) =
     let text = StringBuilder()
     let mutable page = 1
     while text.Length < SampleLength && page <= document.GetNumberOfPages() do
         text.Append(PdfTextExtractor.GetTextFromPage(document.GetPage page)).Append(' ') |> ignore
         page <- page + 1
+    text
+
+/// The language the document says it's in (its /Lang), if it says.
+let declared (document: PdfDocument) =
+    match document.GetCatalog().GetPdfObject().GetAsString PdfName.Lang with
+    | NonNull language when not (String.IsNullOrWhiteSpace(language.ToUnicodeString())) -> Some(language.ToUnicodeString().Trim())
+    | _ -> None
+
+/// The language the document's text is in: the one it says, else the one its pages' text reads
+/// as, if that's clear.
+let ofDocument (document: PdfDocument) =
+    declared document |> Option.orElseWith (fun () -> (pagesText document).ToString() |> detect)
+
+/// Text to detect the language from: the pages' text, and the structure's replacement text
+/// (ActualText, Alt), which is all there is when text is drawn as outlines.
+let sample (document: PdfDocument) context =
+    let text = pagesText document
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> ()
     | root ->

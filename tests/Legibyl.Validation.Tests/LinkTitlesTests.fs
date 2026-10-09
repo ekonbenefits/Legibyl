@@ -139,6 +139,17 @@ let ``page titles are never read from this machine`` () =
 [<Fact>]
 let ``a QR code's alt text says where it links, named by the page's title when that's known`` () =
     let titles = readOnlyDict [ "https://example.com/apply", "Apply for benefits" ]
-    LinkTitles.qrAltText titles "https://example.com/apply" |> should equal "QR code linking to Apply for benefits (https://example.com/apply)"
-    LinkTitles.qrAltText titles "www.example.com/other" |> should equal "QR code linking to https://www.example.com/other"
-    LinkTitles.qrAltText titles "WIFI:S:Guest;;" |> should equal "QR code: WIFI:S:Guest;;"
+    LinkTitles.qrAltText titles None "https://example.com/apply" |> should equal ("QR code linking to Apply for benefits (https://example.com/apply)", "en")
+    LinkTitles.qrAltText titles None "www.example.com/other" |> should equal ("QR code linking to https://www.example.com/other", "en")
+    LinkTitles.qrAltText titles None "WIFI:S:Guest;;" |> should equal ("QR code: WIFI:S:Guest;;", "en")
+
+[<Fact>]
+let ``a QR code's alt text and its link's description are in the document's language, where its pack has them`` () =
+    let titles = readOnlyDict [ "https://example.com/solicitar", "Solicitar beneficios" ]
+    LinkTitles.qrAltText titles (Some "es-MX") "https://example.com/solicitar"
+    |> should equal ("Código QR que enlaza a Solicitar beneficios (https://example.com/solicitar)", "es")
+    LinkTitles.qrAltText titles (Some "es") "WIFI:S:Invitados;;" |> should equal ("Código QR: WIFI:S:Invitados;;", "es")
+    LinkTitles.qrLinkContents titles (Some "es") "https://example.com/otra"
+    |> should equal ("Enlace del código QR a https://example.com/otra", "es")
+    // A language with no pack: Legibyl's English, said to be English.
+    LinkTitles.qrAltText titles (Some "ja") "WIFI:S:Guest;;" |> should equal ("QR code: WIFI:S:Guest;;", "en")

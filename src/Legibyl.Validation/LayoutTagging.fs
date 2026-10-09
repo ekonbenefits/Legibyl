@@ -227,6 +227,9 @@ let tag
                 | NonNull titles -> titles
                 | Null -> Dictionary<string, string>()
         let pageTitle address = LinkTitles.titleFor pageTitles address
+        // The language Legibyl writes its own descriptions in: the document's, where its
+        // language pack has the words (else English).
+        let language = LanguagePacks.writtenIn document
         let mutable noteIds = 0
         // Annotations' /StructParent keys come after every page's.
         let objectReferences = List<PdfDictionary * PdfDictionary>()
@@ -357,13 +360,12 @@ let tag
                                 match region.QrText with
                                 | NonNull text ->
                                     let address = LinkTitles.webAddress text
-                                    let alt = LinkTitles.qrAltText pageTitles text
+                                    let alt, altLanguage = LinkTitles.qrAltText pageTitles language text
                                     if not written then
                                         if address |> Option.bind pageTitle |> Option.isSome then
                                             tally.QrTitles <- tally.QrTitles + 1
                                         element.Dictionary.Put(PdfName.Alt, PdfString(alt, PdfEncodings.UNICODE_BIG)) |> ignore
-                                        // Legibyl writes these descriptions in English.
-                                        element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
+                                        element.Dictionary.Put(PdfName.Lang, PdfString altLanguage) |> ignore
                                         tally.QrCodes <- tally.QrCodes + 1
                                     // Unless the page already has a link over it.
                                     let alreadyLinked () =
@@ -377,8 +379,6 @@ let tag
                                     | Some address when linkQrCodes && not (alreadyLinked ()) ->
                                         // A Link holding the figure; its annotation is added with the page's.
                                         let wrapper = newElement document Tags.Link documentElement.Dictionary (Some page)
-                                        // So is its annotation's /Contents.
-                                        wrapper.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
                                         element.Dictionary.Put(PdfName.P, wrapper.Dictionary) |> ignore
                                         wrapper.Kids.Add element.Dictionary
                                         qrLinks.Add((index, address, wrapper))
@@ -597,13 +597,15 @@ let tag
                 annotation.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI address) |> ignore
                 annotation.SetBorder(PdfArray([| 0.0; 0.0; 0.0 |])) |> ignore
                 annotation.SetFlags PdfAnnotation.PRINT |> ignore
-                // What a person wrote for the figure says where it goes better than its address.
-                let contents =
-                    match (fst regions[index]).Alt, pageTitle address with
-                    | NonNull alt, _ when not (String.IsNullOrWhiteSpace alt) -> alt.Trim()
-                    | _, Some title -> $"QR code link to {title} ({address})"
-                    | _, None -> $"QR code link to {address}"
+                // What a person wrote for the figure says where it goes better than its address
+                // (in the document's language, as far as Legibyl knows).
+                let contents, contentsLanguage =
+                    match (fst regions[index]).Alt with
+                    | NonNull alt when not (String.IsNullOrWhiteSpace alt) -> alt.Trim(), language |> Option.defaultValue "en"
+                    | _ -> LinkTitles.qrLinkContents pageTitles language address
                 annotation.SetContents(PdfString(contents, PdfEncodings.UNICODE_BIG)) |> ignore
+                // The Link's language is its annotation's /Contents'.
+                wrapper.Dictionary.Put(PdfName.Lang, PdfString contentsLanguage) |> ignore
                 page.AddAnnotation annotation |> ignore
                 let dictionary = annotation.GetPdfObject()
                 let reference = PdfDictionary()

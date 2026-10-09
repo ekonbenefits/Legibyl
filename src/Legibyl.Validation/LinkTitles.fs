@@ -122,14 +122,21 @@ let linkDescription (titles: IReadOnlyDictionary<string, string>) (address: stri
     titleFor titles address |> Option.map (fun title -> $"{title} ({Uri(address).IdnHost})")
 
 /// A QR code's alt text, as tagging writes it and the Suggest Structure preview shows it: where
-/// it links (named by the page's title, when titles has it), or else what it says.
-let qrAltText (titles: IReadOnlyDictionary<string, string>) (qrText: string) =
+/// it links (named by the page's title, when titles has it), or else what it says. In language
+/// where its pack has the phrase (see LanguagePacks.phrase): the text, and the language it's in.
+let qrAltText (titles: IReadOnlyDictionary<string, string>) (language: string option) (qrText: string) =
     match webAddress qrText with
     | Some address ->
         match titleFor titles address with
-        | Some title -> $"QR code linking to {title} ({address})"
-        | None -> $"QR code linking to {address}"
-    | None -> $"QR code: {qrText}"
+        | Some title -> LanguagePacks.phrase language "qrCodeLinkingTo" [ "title", title; "address", address ]
+        | None -> LanguagePacks.phrase language "qrCodeLinkingToAddress" [ "address", address ]
+    | None -> LanguagePacks.phrase language "qrCode" [ "text", qrText ]
+
+/// A link over a QR code's description (its annotation's /Contents), as qrAltText.
+let qrLinkContents (titles: IReadOnlyDictionary<string, string>) (language: string option) (address: string) =
+    match titleFor titles address with
+    | Some title -> LanguagePacks.phrase language "qrCodeLinkTo" [ "title", title; "address", address ]
+    | None -> LanguagePacks.phrase language "qrCodeLinkToAddress" [ "address", address ]
 
 /// The most of a page read, looking for its title.
 let private maxBytes = 256 * 1024

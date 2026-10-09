@@ -77,7 +77,7 @@ let ``what's wrong with a pack is said, and only that part of it left out`` () =
         equal
         [ "broken", "its language.yaml can't be read"
           "de", "its phrase qrCode has to keep {text}, and only those"
-          "de", "its phrase qrCodeTo isn't one Legibyl writes (qrCode, qrCodeLinkingTo, qrCodeLinkingToAddress)"
+          "de", "its phrase qrCodeTo isn't one Legibyl writes (qrCode, qrCodeLinkTo, qrCodeLinkToAddress, qrCodeLinkingTo, qrCodeLinkingToAddress)"
           "de", "ocr names deu.traineddata, which isn't in its folder"
           "empty", "it has no language.yaml" ]
     let german = LanguagePacks.forTagIn packs "de" |> Option.get
