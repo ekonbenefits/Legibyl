@@ -76,7 +76,8 @@ let private splitParagraph context (visit: StructElemVisit) =
         let onDifferentPages = visit.Page.IsSome && next.Page.IsSome && visit.Page <> next.Page
         let currentText = ParagraphJoins.normalizeText (extractText visit.Element context visit.Page)
         let nextText = ParagraphJoins.normalizeText (extractText next.Element context next.Page)
-        if not onDifferentPages && ParagraphJoins.looksSplit currentText nextText then
+        if not onDifferentPages
+           && ParagraphJoins.looksSplit (languageOf visit.Element context, currentText) (languageOf next.Element context, nextText) then
             Some
                 { Location = $"{visit.Path} + {next.Path}"
                   Geometry =

@@ -55,34 +55,37 @@ let private regionOf (regions: IReadOnlyList<LayoutRegion>) (geometry: Structure
 
 let normalizeText (text: string) = Regex.Replace(text, @"\s+", " ").Trim()
 
-let private isLikelyStandaloneParagraph (text: string) =
+/// The language pack whose words read a paragraph in language: English where its language isn't
+/// known (none where it has no pack, which gives fewer warnings, never wrong ones).
+let private packFor (language: string option) = LanguagePacks.forTag (defaultArg language "en")
+
+let private isLikelyStandaloneParagraph (language: string option) (text: string) =
+    let headings = packFor language |> Option.map _.StandaloneHeadings |> Option.defaultValue []
     text.Length <= 3
-    || Regex.IsMatch(text, @"^(SECTION|ARTICLE)\b", RegexOptions.IgnoreCase)
+    || headings |> List.exists (fun word -> Regex.IsMatch(text, $@"^{Regex.Escape word}\b", RegexOptions.IgnoreCase))
     || Regex.IsMatch(text, @"^\d+(\.\d+)*\s+\S+")
     || Regex.IsMatch(text, @"^[a-z]\.\s+\S+", RegexOptions.IgnoreCase)
 
-/// Whether next reads as the rest of current's sentence: the split-paragraph warning
-/// (Structure-2), and the pairs the layout is asked to confirm.
-let looksSplit (currentText: string) (nextText: string) =
-    let startsWith (prefix: string) = nextText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+/// Whether next reads as the rest of current's sentence, each read in its language (see
+/// StructureTreeObjects.languageOf): the split-paragraph warning (Structure-2), and the pairs the
+/// layout is asked to confirm.
+let looksSplit (currentLanguage: string option, currentText: string) (nextLanguage: string option, nextText: string) =
+    let continuations = packFor nextLanguage |> Option.map _.SentenceContinuations |> Option.defaultValue []
 
     currentText.Length >= 20
     && nextText.Length >= 10
-    && not (isLikelyStandaloneParagraph currentText || isLikelyStandaloneParagraph nextText)
+    && not (isLikelyStandaloneParagraph currentLanguage currentText || isLikelyStandaloneParagraph nextLanguage nextText)
     && not (".:;!?…".Contains currentText[currentText.Length - 1])
     && (Char.IsLower nextText[0]
-        || startsWith "and "
-        || startsWith "or "
-        || startsWith "to "
-        || startsWith "of "
-        || startsWith "the ")
+        || continuations |> List.exists (fun word -> nextText.StartsWith(word + " ", StringComparison.OrdinalIgnoreCase)))
 
 /// A paragraph that can take part in a join, with its page and where its text is drawn.
 type private Piece =
     { Paragraph: PdfDictionary
       Page: int
       Geometry: StructureGeometry
-      Text: string }
+      Text: string
+      Language: string option }
 
 /// Entries that make a paragraph more than its content: joining it would lose or misapply them.
 let private standsAlone (paragraph: PdfDictionary) =
@@ -98,7 +101,8 @@ let private pieceOf context (obj: PdfObject | null) =
                 { Paragraph = paragraph
                   Page = page
                   Geometry = geometry
-                  Text = normalizeText (extractText paragraph context (Some page)) })
+                  Text = normalizeText (extractText paragraph context (Some page))
+                  Language = languageOf paragraph context })
         | _ -> None
     | _ -> None
 
@@ -107,7 +111,7 @@ let private pieceOf context (obj: PdfObject | null) =
 /// language, and next isn't a list item of its own.
 let private couldFollow (previous: Piece) (next: Piece) =
     previous.Page = next.Page
-    && looksSplit previous.Text next.Text
+    && looksSplit (previous.Language, previous.Text) (next.Language, next.Text)
     && Object.Equals(previous.Paragraph.Get(PdfName.Lang), next.Paragraph.Get(PdfName.Lang))
     && not (ParagraphLists.startsWithMarker next.Text)
 
