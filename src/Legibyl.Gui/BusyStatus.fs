@@ -55,3 +55,23 @@ let statusText (progress: BusyProgress) : string =
             | FixStage.Fixing -> $"{step}applying the fixes…"
             | _ -> $"{step}fixing metadata with veraPDF…"
         status
+
+/// What a screen reader is told of it (see MainWindow's progress row): the activity, and how far
+/// it's got a tenth at a time ("Validating: 40%"), not every page, which would be too much to hear.
+let announcement (progress: BusyProgress) : string =
+    let tenth (done': float) = $"{int (max 0.0 (min 1.0 done') * 10.0) * 10}%%"
+    let pages (page: int) (count: int) = if count > 0 then Some(tenth (float (page - 1) / float count)) else None
+    match progress with
+    | Validating(activity, progress) when progress.Stage = ValidationStage.CheckingPages ->
+        match pages progress.Page progress.PageCount with
+        | Some done' -> $"{activity}: {done'}"
+        | None -> statusText (Validating(activity, progress))
+    | ReadingStructure progress when progress.Stage = StructureReadStage.ReadingText ->
+        match pages progress.Page progress.PageCount with
+        | Some done' -> $"Reading the structure: {done'}"
+        | None -> statusText (ReadingStructure progress)
+    | DownloadingLayoutModel fraction -> $"Downloading the layout model: {tenth fraction}"
+    | Fixing progress when progress.Page > 0 && progress.PageCount > 0 ->
+        $"Fixing, step {progress.Step} of {progress.Steps}: {tenth (float (progress.Page - 1) / float progress.PageCount)}"
+    | Fixing progress -> $"Fixing, step {progress.Step} of {progress.Steps}"
+    | progress -> statusText progress

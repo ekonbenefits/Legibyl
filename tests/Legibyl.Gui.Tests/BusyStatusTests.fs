@@ -51,3 +51,25 @@ let ``every progress line says what's happening first`` () =
           "Fixing, step 3 of 4: finding page 2 of 10's layout, to join split paragraphs"
           "Fixing, step 4 of 4: fixing metadata with veraPDF…"
           "Opening garden.pdf…" ]
+
+[<Fact>]
+let ``a screen reader hears the activity and a tenth of the way at a time, not every page`` () =
+    [ Validating("Validating", validation ValidationStage.CheckingPages 57 675)
+      Validating("Validating", validation ValidationStage.CheckingPages 58 675)
+      Validating("Validating", validation ValidationStage.CheckingPages 400 675)
+      Validating("Validating", validation ValidationStage.Finishing 675 675)
+      DownloadingLayoutModel 0.37
+      fixing FixStage.Tagging 2 4 3 10
+      fixing FixStage.FixingMetadata 4 4 0 0
+      Working "Opening garden.pdf…" ]
+    |> List.map announcement
+    |> should
+        equal
+        [ "Validating: 0%"
+          "Validating: 0%"
+          "Validating: 50%"
+          "Validating: finishing up…"
+          "Downloading the layout model: 30%"
+          "Fixing, step 2 of 4: 20%"
+          "Fixing, step 4 of 4"
+          "Opening garden.pdf…" ]

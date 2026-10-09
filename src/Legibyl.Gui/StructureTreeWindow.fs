@@ -527,6 +527,10 @@ module private StructureView =
             /// model (the cells kept from before, if it was rebuilt already), shown for a person to
             /// check, and kept as the table's edit.
             let rebuilding = ref false
+            // What runs behind the wait cursor (the table-structure model), for a screen reader to
+            // hear: the cursor isn't.
+            let working = ctx.useState ""
+
             let rebuildTable (node: StructureNode) =
                 match node.Geometry with
                 | null -> ()
@@ -546,6 +550,7 @@ module private StructureView =
                                         "Rebuild Rows and Cells"
                             // The model runs, off the window's thread, for a few seconds.
                             window.Cursor <- new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Wait)
+                            working.Set "Finding the table's rows and cells…"
                             let! found =
                                 match kept with
                                 | Some cells -> Task.FromResult(Some cells)
@@ -557,6 +562,7 @@ module private StructureView =
                                         suggester.TableCells(box.PageNumber, box)
                                         |> Option.map (List.map (fun (header, g) -> ({ Tag = (if header then Tags.TH else Tags.TD); Box = g }: TableCell))))
                             window.Cursor <- cursor
+                            working.Set ""
                             match found with
                             | Some cells when not cells.IsEmpty ->
                                 // The text drawn in each cell: what the table's elements draw there.
@@ -579,6 +585,7 @@ module private StructureView =
                             | None -> do! Dialogs.showMessage window "The table-structure model isn't available, so the table's rows and cells can't be found." "Rebuild Rows and Cells"
                           with ex ->
                             window.Cursor <- cursor
+                            working.Set ""
                             // A download that failed, the model, or the PDF unreadable here.
                             let ex = match ex with :? AggregateException as a -> (match a.InnerException with null -> ex | inner -> inner) | ex -> ex
                             do! Dialogs.showMessage window $"The table's rows and cells couldn't be found: {ex.Message}" "Rebuild Rows and Cells"
@@ -657,6 +664,7 @@ module private StructureView =
                                                 $"Finding the table's rows and cells needs the table-structure model (Table Transformer), about {TableModel.DownloadSizeMegabytes} MB, downloaded once from Hugging Face. It's downloaded now; this can take a minute."
                                                 "Convert Paragraphs to Table"
                                     window.Cursor <- new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Wait)
+                                    working.Set "Finding the table's rows and cells…"
                                     let! found =
                                         match kept with
                                         // One row a paragraph, as the conversion needs, where a grid kept from before hasn't.
@@ -672,6 +680,7 @@ module private StructureView =
                                                 // The model misses rows (a header row especially): one row a paragraph.
                                                 |> Option.map (TableGrid.fitRows boxes))
                                     window.Cursor <- cursor
+                                    working.Set ""
                                     match found with
                                     | Some cells when not cells.IsEmpty ->
                                         let rec drawn (node: StructureNode) : (string * StructureGeometry) list =
@@ -717,6 +726,7 @@ module private StructureView =
                                         do! Dialogs.showMessage window "The table-structure model isn't available, so these paragraphs can't be converted." "Convert Paragraphs to Table"
                           with ex ->
                             window.Cursor <- cursor
+                            working.Set ""
                             let ex = match ex with :? AggregateException as a -> (match a.InnerException with null -> ex | inner -> inner) | ex -> ex
                             do! Dialogs.showMessage window $"The table's rows and cells couldn't be found: {ex.Message}" "Convert Paragraphs to Table"
                         finally
@@ -1811,6 +1821,12 @@ module private StructureView =
                                     + "A table's cells are shown in its rows: a cell's Tag picker makes it a header (TH) or data (TD) cell, and giving the table the tag P tags it as text instead."
                                 )
                                 secondary (String.Join(" ", progress))
+                                // Heard a tenth of the way at a time, not every page.
+                                Dialogs.announcer (
+                                    if prefetcher.PageCount = 0 || readyCount.Current >= prefetcher.PageCount then "Every page's layout found."
+                                    elif modelReady.Current then $"Finding the pages' layouts: {readyCount.Current * 10 / prefetcher.PageCount * 10}%%"
+                                    else ""
+                                )
                                 if not modelReady.Current then
                                     secondary (
                                         $"Finding the layout needs a layout detection model (PP-DocLayoutV3) and a table-structure model (Table Transformer), about {LayoutModel.downloadMegabytes ()} MB still to download. "
@@ -1819,19 +1835,28 @@ module private StructureView =
                                     )
                                     match downloadProgress.Current with
                                     | Some fraction ->
-                                        ProgressBar.create [ ProgressBar.minimum 0.0; ProgressBar.maximum 1.0; ProgressBar.value fraction ]
+                                        ProgressBar.create [
+                                            ProgressBar.minimum 0.0
+                                            ProgressBar.maximum 1.0
+                                            ProgressBar.value fraction
+                                            AttrBuilder<ProgressBar>.CreateProperty<string | null>(
+                                                Automation.AutomationProperties.NameProperty, $"Downloading the layout models: {fraction:P0}", ValueNone)
+                                        ]
+                                        Dialogs.announcer $"Downloading the layout models: {int (fraction * 10.0) * 10}%%"
                                     | None ->
                                         Button.create [
                                             Button.content "Download model"
                                             Button.horizontalAlignment HorizontalAlignment.Left
                                             Button.onClick download
                                         ]
-                                if status.Current <> "" then
-                                    TextBlock.create [
-                                        TextBlock.text status.Current
-                                        TextBlock.textWrapping TextWrapping.Wrap
-                                        Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Danger ]
-                                    ]
+                                // (Kept in the automation tree while empty, so what it says is heard.)
+                                TextBlock.create [
+                                    TextBlock.text status.Current
+                                    TextBlock.textWrapping TextWrapping.Wrap
+                                    AttrBuilder<TextBlock>.CreateProperty<Automation.AutomationLiveSetting>(
+                                        Automation.AutomationProperties.LiveSettingProperty, Automation.AutomationLiveSetting.Polite, ValueNone)
+                                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.Danger ]
+                                ]
                             ]
                         ]
                     )
@@ -1845,6 +1870,7 @@ module private StructureView =
                         StackPanel.margin (0.0, 0.0, 0.0, 8.0)
                         StackPanel.spacing 10.0
                         StackPanel.children [
+                            Dialogs.announcer working.Current
                             match suggested with
                             | Some(review, prefetcher) ->
                                 banner review prefetcher
