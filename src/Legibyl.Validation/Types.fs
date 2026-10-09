@@ -256,8 +256,9 @@ type LayoutRegion =
       /// For an "LI", its list's /ListNumbering (e.g. "Disc"); consecutive items form one list.
       ListNumbering: string | null
       /// The region's text when it's drawn as outlines or pixels rather than as text (read by
-      /// OCR, in English): written as the element's /ActualText (with /Lang en), with the
-      /// drawing as its content.
+      /// OCR): written as the element's /ActualText, with the drawing as its content, and /Lang
+      /// the language it reads as (or, too short to tell, that of all the text OCR read, else the
+      /// document's).
       ActualText: string | null
       /// For a "Figure" that's a QR code, what it encodes: its alt text says so, and the
       /// QrCodeLinks fix links it when it's a web address.
