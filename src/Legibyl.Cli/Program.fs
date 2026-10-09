@@ -865,8 +865,10 @@ let private runAppend (args: AppendArgs) =
                 let output = args.Output |> Option.defaultWith (fun () -> nextVersion files.Head)
                 let options: Append.Options = { Title = args.Title; Language = args.Lang; PartTag = args.PartTag }
                 (reporter ()).Begin output
+                let said (step: Append.Step) =
+                    if step.PageCount > 0 then (reporter ()).Status(step.Doing, (step.Page, step.PageCount)) else (reporter ()).Status step.Doing
                 match
-                    (try Ok(Append.run (VeraPdfValidator()) files output options (fun stage -> (reporter ()).Status(stage.TrimEnd('…')))) with
+                    (try Ok(Append.run (VeraPdfValidator()) files output options said) with
                      | :? VeraPdfValidationException
                      | :? IOException
                      | :? UnauthorizedAccessException

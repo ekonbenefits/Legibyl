@@ -941,8 +941,8 @@ module private MainView =
                             | None -> ()
                             | Some outputPath ->
                                 isBusy.Set true
-                                busyProgress.Set(Some(Appending "starting…"))
-                                let stage (text: string) = Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> busyProgress.Set(Some(Appending text)))
+                                busyProgress.Set(Some(Appending(Append.Step.Of "starting")))
+                                let stage (step: Append.Step) = Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> busyProgress.Set(Some(Appending step)))
                                 let! outcome =
                                     task {
                                         try

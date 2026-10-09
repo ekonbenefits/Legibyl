@@ -1188,6 +1188,15 @@ let differences (part: Part) (index: int) (input: StructureNode) (joined: Struct
 
 // ---- Validating before and after ----
 
+/// Where appending has got: what it's doing ("Validating garden.pdf (1 of 3)"), and the page
+/// it's on of how many where that's counted (Page 0 where it isn't).
+type Step =
+    { Doing: string
+      Page: int
+      PageCount: int }
+
+    static member Of(doing: string) = { Doing = doing; Page = 0; PageCount = 0 }
+
 /// What appending did: why it didn't (Refusals), else what it wrote (Joined) and how that checks
 /// out (After, and Differences from the inputs' structures).
 type Outcome =
@@ -1205,10 +1214,26 @@ type Outcome =
 
 /// Appends files into output: refuses (writing nothing) if they can't be joined or any fails
 /// PDF/UA; else joins them and checks the result with veraPDF and Legibyl's warnings, and each
-/// part's structure against its input's. stage is told what it's doing, as it goes.
-let run (validator: VeraPdfValidator) (files: string list) (output: string) (options: Options) (stage: string -> unit) : Outcome =
+/// part's structure against its input's. step is told where it's got, as it goes (from any
+/// thread).
+let run (validator: VeraPdfValidator) (files: string list) (output: string) (options: Options) (step: Step -> unit) : Outcome =
     let none = { Refusals = []; Inputs = []; Joined = None; After = None; Differences = [] }
-    stage "Reading the files…"
+    let stage (doing: string) = step (Step.Of doing)
+    // Validating, page by page (and every page, once they're done).
+    let validating (doing: string) =
+        stage doing
+        { new IProgress<ValidationProgress> with
+            member _.Report p =
+                if p.Stage <> ValidationStage.Preparing && p.PageCount > 0 then
+                    step { Doing = doing; Page = p.Page; PageCount = p.PageCount } }
+    // Reading a structure tree, page by page (its text).
+    let reading (doing: string) =
+        stage doing
+        { new IProgress<StructureReadProgress> with
+            member _.Report p =
+                if p.Stage = StructureReadStage.ReadingText && p.PageCount > 0 then
+                    step { Doing = doing; Page = p.Page; PageCount = p.PageCount } }
+    stage "Reading the files"
     // As the app's other path checks: case matters on Linux only.
     let comparison = if OperatingSystem.IsLinux() then StringComparison.Ordinal else StringComparison.OrdinalIgnoreCase
     let same (a: string) (b: string) = String.Equals(Path.GetFullPath a, Path.GetFullPath b, comparison)
@@ -1221,10 +1246,10 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
     | [] ->
         let checks =
             [ for index, file in List.indexed files ->
-                  stage $"Validating {Path.GetFileName file} ({index + 1} of {files.Length})…"
+                  let progress = validating $"Validating {Path.GetFileName file} ({index + 1} of {files.Length})"
                   let profile, _ = PdfUaTarget.detect file
                   file,
-                  (try Ok(validator.Validate(file, profile, checkWcag = false)) with :? VeraPdfValidationException as ex -> Error ex.Message) ]
+                  (try Ok(validator.Validate(file, profile, progress, checkWcag = false)) with :? VeraPdfValidationException as ex -> Error ex.Message) ]
         let failing =
             [ for file, check in checks do
                   match check with
@@ -1237,24 +1262,23 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
         if not failing.IsEmpty then
             { none with Refusals = failing; Inputs = inputs }
         else
-            stage "Joining…"
+            stage "Joining"
             // Joined and checked beside output, which it then replaces: a file already there
             // stays as it was if anything goes wrong on the way.
             let folder = Path.GetDirectoryName(Path.GetFullPath output) |> nonNull
             let scratch = Path.Combine(folder, $".{Path.GetFileNameWithoutExtension output}.{Guid.NewGuid():N}.pdf")
             try
                 let joined = join files scratch options
-                stage $"Validating {Path.GetFileName output}…"
-                let after = validator.Validate(scratch, joined.Profile, checkWcag = false)
-                stage "Comparing the structure with the files'…"
+                let after = validator.Validate(scratch, joined.Profile, validating $"Validating {Path.GetFileName output}", checkWcag = false)
                 let differences =
-                    match validator.ReadStructureTree scratch with
+                    match validator.ReadStructureTree(scratch, reading $"Comparing the structure: reading {Path.GetFileName output}'s") with
                     | Null -> [ "The joined file has no structure tree." ]
                     | NonNull tree ->
                         joined.Parts
                         |> List.indexed
                         |> List.collect (fun (index, part) ->
-                            match validator.ReadStructureTree part.File with
+                            let progress = reading $"Comparing the structure: reading {Path.GetFileName part.File}'s ({index + 1} of {joined.Parts.Length})"
+                            match validator.ReadStructureTree(part.File, progress) with
                             | NonNull input -> differences part index input tree
                             | Null -> [])
                 File.Move(scratch, output, true)

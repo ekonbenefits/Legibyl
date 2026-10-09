@@ -12,8 +12,9 @@ type BusyProgress =
     | DownloadingLayoutModel of float
     /// Fixing: which step, and the page within it where there are pages.
     | Fixing of FixProgress
-    /// Appending PDFs (see Append.run): what it's doing, "Validating garden.pdf…".
-    | Appending of stage: string
+    /// Appending PDFs (see Append.run): what it's doing ("Validating garden.pdf (1 of 3)"), and the
+    /// page where it's counted.
+    | Appending of Append.Step
     /// Something with no steps to count, said as it is: "Opening garden.pdf…".
     | Working of status: string
 
@@ -39,7 +40,8 @@ let statusText (progress: BusyProgress) : string =
             | _ -> "Reading the structure: building the tree…"
         status
     | DownloadingLayoutModel fraction -> $"Downloading the layout model: {fraction:P0}"
-    | Appending stage -> $"Appending: {stage}"
+    | Appending step when step.PageCount > 0 -> $"Appending: {step.Doing}: page {step.Page:N0} of {step.PageCount:N0}"
+    | Appending step -> $"Appending: {step.Doing}…"
     | Working status -> status
     | Fixing progress ->
         let step = $"Fixing, step {progress.Step} of {progress.Steps}: "
@@ -72,6 +74,10 @@ let announcement (progress: BusyProgress) : string =
         | Some done' -> $"Reading the structure: {done'}"
         | None -> statusText (ReadingStructure progress)
     | DownloadingLayoutModel fraction -> $"Downloading the layout model: {tenth fraction}"
+    | Appending step when step.PageCount > 0 ->
+        match pages step.Page step.PageCount with
+        | Some done' -> $"Appending: {step.Doing}: {done'}"
+        | None -> statusText (Appending step)
     | Fixing progress when progress.Page > 0 && progress.PageCount > 0 ->
         $"Fixing, step {progress.Step} of {progress.Steps}: {tenth (float (progress.Page - 1) / float progress.PageCount)}"
     | Fixing progress -> $"Fixing, step {progress.Step} of {progress.Steps}"

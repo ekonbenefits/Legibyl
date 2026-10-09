@@ -142,8 +142,24 @@ let ``files with links, figures drawn by Form XObjects and tags inside them join
     let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
     createInput garden "Garden" "en-US" "P"
     createInput jardin "Jardin" "es-ES" "H2"
-    let outcome = run [ garden; jardin ] joined Append.Options.Default
+    let steps = Collections.Concurrent.ConcurrentQueue<Append.Step>()
+    let outcome = Append.run validator.Value [ garden; jardin ] joined Append.Options.Default steps.Enqueue
     outcome.Refusals |> should be Empty
+    // Where it's got, as it goes: each validation and structure read with its pages.
+    let said = List.ofSeq steps
+    said |> List.map _.Doing |> List.distinct |> should equal [
+        "Reading the files"
+        "Validating garden.pdf (1 of 2)"
+        "Validating jardin.pdf (2 of 2)"
+        "Joining"
+        "Validating packet.pdf"
+        "Comparing the structure: reading packet.pdf's"
+        "Comparing the structure: reading garden.pdf's (1 of 2)"
+        "Comparing the structure: reading jardin.pdf's (2 of 2)" ]
+    let counted (doing: string) = said |> List.filter (fun s -> s.Doing = doing) |> List.map _.PageCount |> List.max
+    counted "Validating garden.pdf (1 of 2)" |> should equal 2
+    counted "Validating packet.pdf" |> should equal 4
+    counted "Comparing the structure: reading packet.pdf's" |> should equal 4
     outcome.Inputs |> List.iter (fun (_, report) -> report.IsCompliant |> should equal true)
     failures outcome |> should be Empty
     // Appending checks PDF/UA only, not WCAG 2.2's checks.
