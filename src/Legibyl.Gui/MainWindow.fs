@@ -174,6 +174,8 @@ module private MainView =
             // For a PDF that fails: whether its Next step row is what's selected.
             let nextSelected = ctx.useState false
             let passFacts = ctx.useState (None: DocumentFacts.Facts option)
+            // Why the checklist couldn't be read, if it couldn't.
+            let passFactsFailed = ctx.useState (None: string option)
             let checklistTicks = ctx.useState 0
             let preview = ctx.useState noPreview
             // Bumped on every selection change so a slow page render for an earlier
@@ -263,6 +265,7 @@ module private MainView =
                 passSelected.Set false
                 nextSelected.Set false
                 passFacts.Set None
+                passFactsFailed.Set None
                 preview.Set noPreview
                 previewVersion.Set(previewVersion.Current + 1)
 
@@ -440,14 +443,22 @@ module private MainView =
                                 selectFirst rows
                                 // What a person checks for a PDF that passes: read in the background.
                                 if report.Passes then
-                                    Task.Run(fun () -> try Some(DocumentFacts.read filePath) with _ -> None)
-                                        .ContinueWith((fun (t: Task<DocumentFacts.Facts option>) ->
-                                            if selectedFile.Current = Some filePath then passFacts.Set t.Result),
+                                    Task.Run(fun () -> try Ok(DocumentFacts.read filePath) with ex -> Error(Dialogs.failureMessage ex))
+                                        .ContinueWith((fun (t: Task<Result<DocumentFacts.Facts, string>>) ->
+                                            if selectedFile.Current = Some filePath then
+                                                match t.Result with
+                                                | Ok facts -> passFacts.Set(Some facts)
+                                                | Error message -> passFactsFailed.Set(Some message)),
                                             TaskScheduler.FromCurrentSynchronizationContext())
                                     |> ignore
                                 return Some report
-                            with :? VeraPdfValidationException as ex ->
+                            with
+                            | :? VeraPdfValidationException as ex ->
                                 outcome.Set(ValidationFailed ex.Message)
+                                return None
+                            // The file locked or gone while it's read, say: said, not an empty window.
+                            | ex ->
+                                outcome.Set(ValidationFailed $"Legibyl couldn't check it: {Dialogs.failureMessage ex}")
                                 return None
                         finally
                             isBusy.Set false
@@ -629,24 +640,28 @@ module private MainView =
                     | Some filePath ->
                         structureOpening.Add filePath |> ignore
                         try
-                            match structureCache.TryFind filePath with
-                            | Some structure -> do! show structure filePath
-                            | None ->
-                                isBusy.Set true
-                                busyProgress.Set None
-                                // Created on the UI thread, so its reports arrive there too.
-                                let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
-                                let stamp = structureCache.Stamp filePath
-                                try
+                            try
+                                match structureCache.TryFind filePath with
+                                | Some structure -> do! show structure filePath
+                                | None ->
+                                    isBusy.Set true
+                                    busyProgress.Set None
+                                    // Created on the UI thread, so its reports arrive there too.
+                                    let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
+                                    let stamp = structureCache.Stamp filePath
                                     try
-                                        let! structure = Task.Run(fun () -> validator.ReadStructureTree(filePath, progress))
-                                        structureCache.Remember(stamp, structure)
+                                        try
+                                            let! structure = Task.Run(fun () -> validator.ReadStructureTree(filePath, progress))
+                                            structureCache.Remember(stamp, structure)
+                                            isBusy.Set false
+                                            do! show structure filePath
+                                        with :? VeraPdfValidationException as ex ->
+                                            do! Dialogs.showMessage window ex.Message "Could not read structure"
+                                    finally
                                         isBusy.Set false
-                                        do! show structure filePath
-                                    with :? VeraPdfValidationException as ex ->
-                                        do! Dialogs.showMessage window ex.Message "Could not read structure"
-                                finally
-                                    isBusy.Set false
+                            // Reading it, or opening its window, failing some other way: said.
+                            with ex ->
+                                do! Dialogs.showMessage window $"Structure… couldn't open it: {Dialogs.failureMessage ex}" "Structure"
                         finally
                             structureOpening.Remove filePath |> ignore
                     | None -> ()
@@ -779,21 +794,20 @@ module private MainView =
                                     let usesLayout =
                                         options.HasFlag PdfFixOptions.TagFromLayout || options.HasFlag PdfFixOptions.JoinSplitParagraphs
                                     // The suggestions with the edits on them (all of them if
-                                    // it wasn't opened), reusing any pages it found.
-                                    let source =
-                                        if usesLayout then
-                                            let suggester = new LayoutSuggester(sourcePath, review.Language)
-                                            Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
-                                        else
-                                            None
+                                    // it wasn't opened), reusing any pages it found. (Made inside
+                                    // the try: reading the PDF for them can fail too.)
+                                    let source = ref None
                                     try
                                         try
+                                            if usesLayout then
+                                                let suggester = new LayoutSuggester(sourcePath, review.Language)
+                                                source.Value <- Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
                                             if usesLayout && not (LayoutModel.isDownloaded ()) then
                                                 do!
                                                     LayoutModel.download
                                                         (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
                                                         CancellationToken.None
-                                            source |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
+                                            source.Value |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
                                             let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
                                             let! fix =
                                                 Task.Run(fun () ->
@@ -811,11 +825,14 @@ module private MainView =
                                         with
                                         | :? VeraPdfValidationException as ex -> return Error ex.Message
                                         | :? Net.Http.HttpRequestException as ex -> return Error $"Couldn't download the layout model: {ex.Message}"
+                                        | :? TaskCanceledException -> return Error "Couldn't download the layout model: the connection timed out."
+                                        // Anything else is said too, rather than leaving nothing happened.
+                                        | ex -> return Error $"Couldn't export it: {Dialogs.failureMessage ex}"
                                     finally
                                         validator.LayoutSource <- null
                                         validator.Review <- null
                                         validator.Edits <- []
-                                        source |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
+                                        source.Value |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
                                         busyProgress.Set None
                                         isBusy.Set false
                                 }
@@ -980,7 +997,13 @@ module private MainView =
                                           FilePickerFileTypes.All ]
                                 ))
                                 report.FilePath
-                        path |> Option.iter (fun path -> File.WriteAllText(path, reportText report))
+                        match path with
+                        | Some path ->
+                            try
+                                File.WriteAllText(path, reportText report)
+                            with ex ->
+                                do! Dialogs.showMessage window $"The report couldn't be written to {Path.GetFileName path}: {Dialogs.failureMessage ex}" "Save Report"
+                        | None -> ()
                     | None -> ()
                 }
                 |> ignore
@@ -1656,7 +1679,10 @@ module private MainView =
                                     let what = if shownWarnings = 1 then "1 warning below is" else $"{shownWarnings} warnings below are"
                                     secondary $"{what} worth a look: what Legibyl noticed that PDF/UA doesn't require, and WCAG 2.2's advisory checks."
                                 match checklist () with
-                                | None -> secondary "Reading the document for its checklist…"
+                                | None ->
+                                    match passFactsFailed.Current with
+                                    | Some message -> secondary $"Couldn't read the document for its checklist: {message}"
+                                    | None -> secondary "Reading the document for its checklist…"
                                 | Some(steps, ticked) ->
                                     for i, step in List.indexed steps do
                                         Border.create [

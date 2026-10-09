@@ -930,15 +930,18 @@ module private StructureView =
                         )
                     match files |> Seq.tryHead |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath())) with
                     | Some path ->
-                        let! imported = Task.Run(fun () -> RegionEdits.fromFileOrPdf path)
-                        let merged, added = RegionEdits.merge edits.Current imported
-                        if added > 0 then do! saveEdits merged
-                        do!
-                            Dialogs.showMessage
-                                window
-                                (if imported.IsEmpty then $"{Path.GetFileName path} has no edits to import."
-                                 else $"Imported {added} of {imported.Length} edits from {Path.GetFileName path}; the rest were already here. They're in the Edits tab.")
-                                "Import Edits"
+                        try
+                            let! imported = Task.Run(fun () -> RegionEdits.fromFileOrPdf path)
+                            let merged, added = RegionEdits.merge edits.Current imported
+                            if added > 0 then do! saveEdits merged
+                            do!
+                                Dialogs.showMessage
+                                    window
+                                    (if imported.IsEmpty then $"{Path.GetFileName path} has no edits to import."
+                                     else $"Imported {added} of {imported.Length} edits from {Path.GetFileName path}; the rest were already here. They're in the Edits tab.")
+                                    "Import Edits"
+                        with ex ->
+                            do! Dialogs.showMessage window $"The edits in {Path.GetFileName path} couldn't be imported: {Dialogs.failureMessage ex}" "Import Edits"
                     | None -> ()
                 }
                 |> ignore
@@ -956,7 +959,13 @@ module private StructureView =
                             ))
                             sourceFilePath
                     match path with
-                    | Some path -> File.WriteAllText(path, JsonSerializer.Serialize(root.Current, jsonOptions))
+                    | Some path ->
+                        let structure = root.Current
+                        try
+                            // (Off the UI thread: a large tree takes a while to write.)
+                            do! Task.Run(fun () -> File.WriteAllText(path, JsonSerializer.Serialize(structure, jsonOptions)))
+                        with ex ->
+                            do! Dialogs.showMessage window $"The structure couldn't be written to {Path.GetFileName path}: {Dialogs.failureMessage ex}" "Export Structure as JSON"
                     | None -> ()
                 }
                 |> ignore
