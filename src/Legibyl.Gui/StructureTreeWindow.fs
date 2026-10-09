@@ -1787,8 +1787,12 @@ module private StructureView =
                         Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                     ]
                     :> IView
+                // Pages done: found, or couldn't be (the prefetcher stops once every page is one or the other).
+                let tried = readyCount.Current + failures.Current.Count
+                let finished = prefetcher.PageCount = 0 || tried >= prefetcher.PageCount
                 let progress =
-                    [ if readyCount.Current >= prefetcher.PageCount then "Every page's layout found."
+                    [ if finished && failures.Current.IsEmpty then "Every page's layout found."
+                      elif finished then $"{readyCount.Current} of {prefetcher.PageCount} pages' layouts found; the rest couldn't be (below)."
                       elif modelReady.Current then $"{readyCount.Current} of {prefetcher.PageCount} pages' layouts found; the rest are being found (several seconds a page)."
                       else $"{readyCount.Current} of {prefetcher.PageCount} pages' layouts found."
                       if readingTitles.Current > 0 then "Reading the titles of pages QR codes link to…"
@@ -1823,8 +1827,9 @@ module private StructureView =
                                 secondary (String.Join(" ", progress))
                                 // Heard a tenth of the way at a time, not every page.
                                 Dialogs.announcer (
-                                    if prefetcher.PageCount = 0 || readyCount.Current >= prefetcher.PageCount then "Every page's layout found."
-                                    elif modelReady.Current then $"Finding the pages' layouts: {readyCount.Current * 10 / prefetcher.PageCount * 10}%%"
+                                    if finished && failures.Current.IsEmpty then "Every page's layout found."
+                                    elif finished then $"Finished finding the pages' layouts: {failures.Current.Count} couldn't be found."
+                                    elif modelReady.Current then $"Finding the pages' layouts: {tried * 10 / prefetcher.PageCount * 10}%%"
                                     else ""
                                 )
                                 if not modelReady.Current then
@@ -1842,13 +1847,18 @@ module private StructureView =
                                             AttrBuilder<ProgressBar>.CreateProperty<string | null>(
                                                 Automation.AutomationProperties.NameProperty, $"Downloading the layout models: {fraction:P0}", ValueNone)
                                         ]
-                                        Dialogs.announcer $"Downloading the layout models: {int (fraction * 10.0) * 10}%%"
                                     | None ->
                                         Button.create [
                                             Button.content "Download model"
                                             Button.horizontalAlignment HorizontalAlignment.Left
                                             Button.onClick download
                                         ]
+                                    // (Kept while no download runs, so its first step is heard.)
+                                    Dialogs.announcer (
+                                        match downloadProgress.Current with
+                                        | Some fraction -> $"Downloading the layout models: {int (fraction * 10.0) * 10}%%"
+                                        | None -> ""
+                                    )
                                 // (Kept in the automation tree while empty, so what it says is heard.)
                                 TextBlock.create [
                                     TextBlock.text status.Current

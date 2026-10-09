@@ -1982,10 +1982,15 @@ module private MainView =
                                 match busyProgress.Current with
                                 | Some progress when busy -> progressLine progress
                                 | _ -> ()
-                                // What a screen reader hears while it runs: the activity, and a tenth of
-                                // the way at a time (the line above changes too often to hear).
-                                Dialogs.announcer (match busyProgress.Current with Some progress when busy -> announcement progress | _ -> "")
                             ]
+                        ]
+                        // What a screen reader hears while it runs: the activity, and a tenth of the way
+                        // at a time (the line above changes too often to hear). Outside the row, which is
+                        // hidden while idle, so it's there, empty, before the first thing it says.
+                        Border.create [
+                            Grid.row 1
+                            Border.isHitTestVisible false
+                            Border.child (Dialogs.announcer (match busyProgress.Current with Some progress when busy -> announcement progress | _ -> ""))
                         ]
                         match statusBanner with
                         | Some banner -> Border.create [ Grid.row 2; Border.child banner ]

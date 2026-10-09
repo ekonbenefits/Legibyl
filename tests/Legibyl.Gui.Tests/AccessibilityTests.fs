@@ -180,7 +180,9 @@ let ``the banner and what was just done are announced as they change`` () =
 
             isLive banner |> should be True
             notices |> should haveLength 1
-            progress |> should haveLength 1))
+            progress |> should haveLength 1
+            // There while nothing runs (not hidden with the progress row), so its first words are heard.
+            progress.Head.IsEffectivelyVisible |> should be True))
 
 [<Fact>]
 let ``a block can be reached, selected and left with the keyboard, and Move Up and Down have shortcuts`` () =
