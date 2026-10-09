@@ -89,7 +89,7 @@ let ``runs of paragraphs starting with list markers become list items, like the 
 
 [<Fact>]
 let ``OCR reads text in an image`` () =
-    match TextRecognition.createEngine () with
+    match TextRecognition.createEngine (Some "en") with
     | None -> Assert.Skip "Tesseract has no native library for this platform."
     | Some engine ->
         use engine = engine
@@ -102,6 +102,26 @@ let ``OCR reads text in an image`` () =
         use image = SkiaSharp.SKImage.FromBitmap bitmap
         use png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
         TextRecognition.recognize engine (png.ToArray()) |> should equal "Scouting for Food"
+
+[<Fact>]
+let ``OCR reads a Spanish document with Spanish's model, its accents and its punctuation kept`` () =
+    TextRecognition.modelsFor (Some "es-MX") |> List.map System.IO.Path.GetFileName |> should equal [ "spa.traineddata"; "eng.traineddata" ]
+    TextRecognition.modelsFor None |> List.map System.IO.Path.GetFileName |> should equal [ "eng.traineddata"; "spa.traineddata" ]
+    // A language with no pack: English's model.
+    TextRecognition.modelsFor (Some "ja") |> List.map System.IO.Path.GetFileName |> should equal [ "eng.traineddata" ]
+    match TextRecognition.createEngine (Some "es") with
+    | None -> Assert.Skip "Tesseract has no native library for this platform."
+    | Some engine ->
+        use engine = engine
+        use bitmap = new SkiaSharp.SKBitmap(1400, 120)
+        use canvas = new SkiaSharp.SKCanvas(bitmap)
+        canvas.Clear SkiaSharp.SKColors.White
+        use font = new SkiaSharp.SKFont(SkiaSharp.SKTypeface.Default, 56f)
+        use paint = new SkiaSharp.SKPaint(Color = SkiaSharp.SKColors.Black, IsAntialias = true)
+        canvas.DrawText("¿Cuándo abre el jardín? ¡Mañana!", 20f, 80f, font, paint)
+        use image = SkiaSharp.SKImage.FromBitmap bitmap
+        use png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
+        TextRecognition.recognize engine (png.ToArray()) |> should equal "¿Cuándo abre el jardín? ¡Mañana!"
 
 /// Draws a QR code for text into the canvas, size pixels square at (x, y).
 let private drawQrCodeIn (canvas: SkiaSharp.SKCanvas) (text: string) (x: float32) (y: float32) (size: int) (dark: SkiaSharp.SKColor) (light: SkiaSharp.SKColor) =

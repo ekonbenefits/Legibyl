@@ -9,6 +9,7 @@ language a text is in for 53 languages without a pack. A pack adds what it can't
 
 | In the pack | What Legibyl does with it |
 |---|---|
+| `ocr` | Its [Tesseract](https://github.com/tesseract-ocr/tessdata_fast) model reads scanned pages and text drawn as outlines in the language. Without it, they're read with English's model. |
 | `phrases` | Text Legibyl writes into PDFs itself (a QR code's alt text, and the description of the link it adds over it) is written in the language, and marked as that language. Without it, the text is in English, marked as English. |
 | `sentenceContinuations` | Words that start the rest of a sentence. A paragraph starting with one is warned about as likely split from the one before. |
 | `standaloneHeadings` | Words that start a paragraph standing on its own ("SECTION 3"), which isn't joined to the one before. |
@@ -30,6 +31,7 @@ Legibyl reads packs from these folders, in this order:
 wrong with any of them.
 
 When more than one folder has a pack for a language, they're read as one:
+- the later one's model replaces the earlier's;
 - the later one's phrases replace the earlier's, one by one;
 - its words are added to the earlier's;
 - its name is used, if it gives one.
@@ -45,6 +47,9 @@ unless there's an `fr-CA` pack.
 # A language pack for French.
 tag: fr          # as a PDF's /Lang gives it; the folder's name if left out
 name: French     # in English
+
+# Tesseract's model, in this folder: tessdata_fast's or tessdata_best's fra.traineddata.
+ocr: fra.traineddata
 
 # What Legibyl writes into PDFs itself. Each keeps the {names} the English has.
 phrases:

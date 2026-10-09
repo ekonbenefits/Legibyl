@@ -2,6 +2,10 @@
 tag: es
 name: Spanish
 
+# Tesseract's model for reading scans and text drawn as outlines (tessdata_fast; the
+# build puts it here).
+ocr: spa.traineddata
+
 # What Legibyl writes into PDFs itself, in Spanish. Each keeps the {names} the English has.
 phrases:
   qrCodeLinkingTo: "Código QR que enlaza a {title} ({address})"

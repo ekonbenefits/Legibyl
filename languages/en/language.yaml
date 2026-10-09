@@ -5,6 +5,10 @@
 tag: en
 name: English
 
+# Tesseract's model for reading scans and text drawn as outlines (tessdata_fast; the
+# build puts it here).
+ocr: eng.traineddata
+
 # A paragraph that starts with one of these likely goes on from the one before.
 sentenceContinuations: [and, or, to, of, the]
 

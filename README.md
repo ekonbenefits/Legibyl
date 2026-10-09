@@ -903,9 +903,14 @@ build without them skips them).
 Some PDFs draw text as outlines (or pixels) rather than as text, so there's
 nothing for a screen reader to read. A text region with no text of its own is
 read with OCR ([Tesseract](https://www.nuget.org/packages/Tesseract.CrossPlatform)
-and its English `tessdata_fast` model, about 4 MB, fetched at build time pinned
-by `TessdataVersion`/`TessdataEngSha256` in `Directory.Build.props` and shipped
-in the app's `tessdata` folder). So is part of one that has some: a band of a
+and its English and Spanish `tessdata_fast` models, about 4 MB and 2 MB, fetched at
+build time pinned by `TessdataVersion`, `TessdataEngSha256` and `TessdataSpaSha256`
+in `Directory.Build.props`, and shipped in the app's built-in language packs,
+`languages/en` and `languages/es`). It reads with the model of the PDF's language and
+English's, or English's and Spanish's where the language isn't known; another
+language's [pack](docs/language-packs.md) can add its own model. Each piece it reads
+is marked with the language it reads as (or, too short to tell, that of all the
+text read). So is part of one that has some: a band of a
 text region, full width and a line tall, that none of its words cover (a badge's
 "5th grade" drawn as outlines under its name written as text) is read too, and
 what OCR finds there joins the region's text in order down the page, when it
