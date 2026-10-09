@@ -314,6 +314,40 @@ module internal VeraPdf =
         | NonNull context -> set [ for m in linkAnnotationPattern.Matches context -> int m.Groups[1].Value ]
         | Null -> Set.empty
 
+    /// A WCAG 2.2 finding's page (0-based), as veraPDF names a page ("root/doc[0]/pages[3]").
+    let private wcagPagePattern = Regex(@"pages\[(\d+)\]", RegexOptions.Compiled)
+
+    /// WCAG 2.2's 1.3.4 (Orientation) as veraPDF checks it only compares pages' shapes, failing
+    /// those not the shape most are: a landscape page for a wide table among portrait ones is
+    /// another shape, not content locked to an orientation, which is what 1.3.4 is about. So
+    /// Legibyl checks the page's text as it's shown (see MarkedContentTextIndex.TextDirection):
+    /// upright, the finding is a warning; turned (sideways or upside down), or with no text to tell
+    /// by, it stays a failure, and says which.
+    let private orientationChecked (context: StructureTreeObjects.Context) (assertion: RuleViolation) =
+        if assertion.Clause <> "1.3.4" || assertion.Passed || not (WcagSpecification.isWcag assertion.Specification) then
+            assertion
+        else
+            let page =
+                match assertion.LocationContext with
+                | NonNull location ->
+                    let found = wcagPagePattern.Match location
+                    if found.Success then Some(int found.Groups[1].Value + 1) else None
+                | Null -> None
+            let shape = match page with Some page -> $"Page {page} is a different shape from most pages." | None -> "A page is a different shape from most pages."
+            match page |> Option.bind (fun page -> match context.MarkedContent.TextDirections.TryGetValue page with | true, d -> Some d | _ -> None) with
+            | Some direction when direction.Upright > direction.Turned ->
+                { assertion with
+                    Passed = true
+                    Severity = FindingSeverity.Warning
+                    ErrorMessage =
+                        $"{shape} Its text reads upright as it's shown, so nothing on it needs turning: a page this shape for a wide table, say, is fine. Check it's meant to be this shape." }
+            | Some direction when direction.Turned > 0 ->
+                { assertion with
+                    ErrorMessage = $"{shape} Most of its text runs sideways or upside down as it's shown, so it has to be turned to be read." }
+            | _ ->
+                { assertion with
+                    ErrorMessage = $"{shape} It has no text Legibyl could read to tell whether its content is sideways (a scan, say): check it reads upright." }
+
     /// Adds page regions to veraPDF's failures and appends Legibyl's own warnings.
     let withLegibylAnalysis (analysis: LegibylAnalysis) (assertions: RuleViolation list) =
         match analysis with
@@ -500,6 +534,7 @@ module internal VeraPdf =
                                         Severity = FindingSeverity.Failure
                                         ErrorMessage = "This link has no description at all (no Contents, alt text or text of its own), so it fails 2.4.4 Link Purpose (In Context), level A, too." }
                                 | _ -> assertion
+                            let assertion = orientationChecked context assertion
                             { assertion with
                                 Geometry =
                                     FindingGeometry.locate context document assertion

@@ -499,7 +499,7 @@ wcagRules:
 
   - clause: "1.3.4"
     meaning: "The pages don't all have the same orientation, so someone who can't turn the screen or the page may not be able to read some of them."
-    whatToDo: "Rotate the odd pages to match where the PDF was made, unless their content needs that orientation (a wide table, say)."
+    whatToDo: "Turn a page whose text runs sideways or upside down so it reads upright. A page of another shape whose text already reads upright (a wide table, say) is fine: Legibyl makes that a warning."
 
   - clause: "1.4.10"
     meaning: "A figure has no bounding box, so a screen magnifier can't find it on the page or enlarge it on its own."
