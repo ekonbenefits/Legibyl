@@ -1972,10 +1972,19 @@ module private MainView =
                                     ProgressBar.height 4.0
                                     ProgressBar.minHeight 4.0
                                     yield! progressBarState busyProgress.Current
+                                    // Named for what it's showing.
+                                    AttrBuilder<ProgressBar>.CreateProperty<string | null>(
+                                        Automation.AutomationProperties.NameProperty,
+                                        (match busyProgress.Current with Some progress -> statusText progress | None -> "Working"),
+                                        ValueNone
+                                    )
                                 ]
                                 match busyProgress.Current with
                                 | Some progress when busy -> progressLine progress
                                 | _ -> ()
+                                // What a screen reader hears while it runs: the activity, and a tenth of
+                                // the way at a time (the line above changes too often to hear).
+                                Dialogs.announcer (match busyProgress.Current with Some progress when busy -> announcement progress | _ -> "")
                             ]
                         ]
                         match statusBanner with

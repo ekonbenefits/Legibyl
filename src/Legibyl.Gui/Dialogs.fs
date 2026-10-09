@@ -14,6 +14,24 @@ open Avalonia.Media
 open Avalonia.Platform.Storage
 open Legibyl.Validation
 
+/// Text a screen reader announces as it changes (a polite live region), not seen: for progress
+/// that the visible text says too often to hear (every page), said a step at a time.
+let announcer (text: string) : Types.IView =
+    Canvas.create [
+        Canvas.width 0.0
+        Canvas.height 0.0
+        Canvas.children [
+            TextBlock.create [
+                TextBlock.text text
+                TextBlock.opacity 0.0
+                TextBlock.tag "announcer"
+                AttrBuilder<TextBlock>.CreateProperty<Automation.AutomationLiveSetting>(
+                    Automation.AutomationProperties.LiveSettingProperty, Automation.AutomationLiveSetting.Polite, ValueNone)
+            ]
+        ]
+    ]
+    :> Types.IView
+
 /// What went wrong, as a person reads it: the innermost exception's message (a task's failure
 /// comes wrapped).
 let failureMessage (ex: exn) =

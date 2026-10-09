@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open Avalonia
 open Avalonia.Controls
 open Avalonia.FuncUI
+open Avalonia.FuncUI.Builder
 open Avalonia.FuncUI.DSL
 open Avalonia.FuncUI.Hosts
 open Avalonia.Layout
@@ -108,6 +109,8 @@ let offer (owner: Window) (pdfPath: string) (review: DocumentReview) (titleSourc
                                 )
                             ]
                             TextBlock.create [
+                                AttrBuilder<TextBlock>.CreateProperty<Automation.AutomationLiveSetting>(
+                                    Automation.AutomationProperties.LiveSettingProperty, Automation.AutomationLiveSetting.Polite, ValueNone)
                                 secondary
                                 TextBlock.text (
                                     if reading.Current then "Reading titles…" else $"Found {found.Length} web addresses."

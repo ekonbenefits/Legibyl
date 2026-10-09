@@ -172,11 +172,15 @@ let ``the banner and what was just done are announced as they change`` () =
         withFailing (fun window ->
             let texts = descendants<TextBlock> window
             let banner = texts |> List.find (fun t -> (string t.Text).StartsWith "FAIL")
+            let announcer (t: TextBlock) = (t.Tag :? string) && string t.Tag = "announcer"
             // A notice line, empty until something's done.
-            let notices = texts |> List.filter (fun t -> isLive t && not (obj.ReferenceEquals(t, banner)))
+            let notices = texts |> List.filter (fun t -> isLive t && not (obj.ReferenceEquals(t, banner)) && not (announcer t))
+            // And what's running, a step at a time, empty while nothing is.
+            let progress = texts |> List.filter (fun t -> isLive t && announcer t)
 
             isLive banner |> should be True
-            notices |> should haveLength 1))
+            notices |> should haveLength 1
+            progress |> should haveLength 1))
 
 [<Fact>]
 let ``a block can be reached, selected and left with the keyboard, and Move Up and Down have shortcuts`` () =
