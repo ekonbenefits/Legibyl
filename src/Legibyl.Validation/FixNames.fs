@@ -11,6 +11,7 @@ let order =
       PdfFixOptions.DocumentRoot
       PdfFixOptions.RoleMap
       PdfFixOptions.Language
+      PdfFixOptions.PassageLanguages
       PdfFixOptions.HeadingsFromToc
       PdfFixOptions.EmptyParagraphs
       PdfFixOptions.EmptyTocEntries

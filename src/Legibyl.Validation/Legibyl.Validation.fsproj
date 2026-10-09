@@ -26,6 +26,7 @@
     <Compile Include="StructureTreeObjects.fs" />
     <Compile Include="DocumentLanguage.fs" />
     <Compile Include="LanguagePacks.fs" />
+    <Compile Include="PassageLanguages.fs" />
     <Compile Include="SplitWordSpans.fs" />
     <Compile Include="ContentOperators.fs" />
     <Compile Include="ContentOperations.fs" />

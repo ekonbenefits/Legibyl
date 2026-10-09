@@ -103,7 +103,12 @@ type PdfFixOptions =
     /// (punctuation drawn after it in its last piece is split off into a piece of its own first);
     /// others are left, and reported.
     | LinkUrls = 134217728
-    | All = 268435455
+    /// Gives each block of text (a paragraph, a heading, a list item, a cell) whose text clearly
+    /// reads as another language than the one it's read in its own /Lang: a Spanish paragraph in
+    /// an English document, say. Told apart among the document's language and those with a
+    /// language pack (see PassageLanguages).
+    | PassageLanguages = 268435456
+    | All = 536870911
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.
