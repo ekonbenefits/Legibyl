@@ -1215,10 +1215,13 @@ type Outcome =
 /// Appends files into output: refuses (writing nothing) if they can't be joined or any fails
 /// PDF/UA; else joins them and checks the result with veraPDF and Legibyl's warnings, and each
 /// part's structure against its input's. step is told where it's got, as it goes (from any
-/// thread).
-let run (validator: VeraPdfValidator) (files: string list) (output: string) (options: Options) (step: Step -> unit) : Outcome =
+/// thread). Cancelled, it stops (OperationCanceledException), writing nothing.
+let run (validator: VeraPdfValidator) (files: string list) (output: string) (options: Options) (step: Step -> unit) (cancel: Threading.CancellationToken) : Outcome =
     let none = { Refusals = []; Inputs = []; Joined = None; After = None; Differences = [] }
-    let stage (doing: string) = step (Step.Of doing)
+    // (Where it stops if it's cancelled, as well.)
+    let stage (doing: string) =
+        cancel.ThrowIfCancellationRequested()
+        step (Step.Of doing)
     // Validating, page by page (and every page, once they're done).
     let validating (doing: string) =
         stage doing
@@ -1249,7 +1252,7 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
                   let progress = validating $"Validating {Path.GetFileName file} ({index + 1} of {files.Length})"
                   let profile, _ = PdfUaTarget.detect file
                   file,
-                  (try Ok(validator.Validate(file, profile, progress, checkWcag = false)) with :? VeraPdfValidationException as ex -> Error ex.Message) ]
+                  (try Ok(validator.Validate(file, profile, progress, checkWcag = false, cancel = cancel)) with :? VeraPdfValidationException as ex -> Error ex.Message) ]
         let failing =
             [ for file, check in checks do
                   match check with
@@ -1269,18 +1272,19 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
             let scratch = Path.Combine(folder, $".{Path.GetFileNameWithoutExtension output}.{Guid.NewGuid():N}.pdf")
             try
                 let joined = join files scratch options
-                let after = validator.Validate(scratch, joined.Profile, validating $"Validating {Path.GetFileName output}", checkWcag = false)
+                let after = validator.Validate(scratch, joined.Profile, validating $"Validating {Path.GetFileName output}", checkWcag = false, cancel = cancel)
                 let differences =
-                    match validator.ReadStructureTree(scratch, reading $"Comparing the structure: reading {Path.GetFileName output}'s") with
+                    match validator.ReadStructureTree(scratch, reading $"Comparing the structure: reading {Path.GetFileName output}'s", cancel) with
                     | Null -> [ "The joined file has no structure tree." ]
                     | NonNull tree ->
                         joined.Parts
                         |> List.indexed
                         |> List.collect (fun (index, part) ->
                             let progress = reading $"Comparing the structure: reading {Path.GetFileName part.File}'s ({index + 1} of {joined.Parts.Length})"
-                            match validator.ReadStructureTree(part.File, progress) with
+                            match validator.ReadStructureTree(part.File, progress, cancel) with
                             | NonNull input -> differences part index input tree
                             | Null -> [])
+                cancel.ThrowIfCancellationRequested()
                 File.Move(scratch, output, true)
                 { none with
                     Inputs = inputs

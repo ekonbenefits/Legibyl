@@ -198,6 +198,49 @@ module private MainView =
             // The Structure window open for each PDF, and those being read or opened.
             let structureWindows = ctx.useStateLazy(fun () -> Collections.Generic.Dictionary<string, Window>()).Current
             let structureOpening = ctx.useStateLazy(fun () -> Collections.Generic.HashSet<string>()).Current
+            // What's running that the progress row's Cancel stops (validating, reading the
+            // structure, Export…, Append PDFs…), and what had the focus before it, given back after.
+            let cancelSource = ctx.useState (None: CancellationTokenSource option)
+            let focusBefore = ctx.useStateLazy(fun () -> ref (None: IInputElement option)).Current
+
+            /// Starts something Cancel can stop, returning what stops it. Cancel takes the focus while
+            /// it runs (the button that started it is turned off), so the keyboard stays where it is.
+            let cancellable () =
+                let source = new CancellationTokenSource()
+                focusBefore.Value <- Option.ofObj (window.FocusManager.GetFocusedElement())
+                cancelSource.Set(Some source)
+                // Once it's shown.
+                Avalonia.Threading.Dispatcher.UIThread.Post(
+                    (fun () ->
+                        Avalonia.VisualTree.VisualExtensions.GetVisualDescendants window
+                        |> Seq.tryPick (fun (visual: Visual) ->
+                            match visual with
+                            | :? Button as button when (button.Tag :? string) && string button.Tag = "cancel-work" -> Some button
+                            | _ -> None)
+                        |> Option.iter (fun button -> button.Focus() |> ignore)),
+                    Avalonia.Threading.DispatcherPriority.Background
+                )
+                source
+
+            /// What source stops is done (or stopped): Cancel goes, and the focus goes back where it
+            /// was, if that can take it again.
+            let finished (source: CancellationTokenSource) =
+                source.Dispose()
+                // (Once: not again, after something else has the focus, if it's said twice.)
+                match cancelSource.Current with
+                | Some current when obj.ReferenceEquals(current, source) ->
+                    cancelSource.Set None
+                    let before = focusBefore.Value
+                    focusBefore.Value <- None
+                    // Once what was turned off while busy is turned on again.
+                    Avalonia.Threading.Dispatcher.UIThread.Post(
+                        (fun () ->
+                            match before with
+                            | Some(:? InputElement as element) when element.IsEffectivelyEnabled && element.IsEffectivelyVisible -> element.Focus() |> ignore
+                            | _ -> ()),
+                        Avalonia.Threading.DispatcherPriority.Background
+                    )
+                | _ -> ()
 
 
             let report =
@@ -423,6 +466,7 @@ module private MainView =
                         let saved = if fresh then None else review.Validation
                         // Created on the UI thread, so its reports arrive there too.
                         let progress = Progress<ValidationProgress>(fun p -> busyProgress.Set(Some(Validating(activity, p))))
+                        let source = cancellable ()
                         try
                             try
                                 // Against the PDF/UA its PDF version calls for (see PdfUaTarget).
@@ -433,7 +477,7 @@ module private MainView =
                                         match saved with
                                         | Some saved when SavedResults.isCurrent saved hash profile ->
                                             SavedResults.toReport saved filePath, hash, Some saved.CheckedAt
-                                        | _ -> { validator.Validate(filePath, profile, progress) with ProfileDetected = true }, hash, None)
+                                        | _ -> { validator.Validate(filePath, profile, progress, cancel = source.Token) with ProfileDetected = true }, hash, None)
                                 checkedAt.Set fromSaved
                                 let rows =
                                     report.Findings
@@ -468,6 +512,10 @@ module private MainView =
                                     |> ignore
                                 return Some report
                             with
+                            | :? OperationCanceledException when source.IsCancellationRequested ->
+                                outcome.Set NotValidated
+                                notice.Set "Cancelled: it hasn't been checked. Check Again checks it."
+                                return None
                             | :? VeraPdfValidationException as ex ->
                                 outcome.Set(ValidationFailed ex.Message)
                                 return None
@@ -477,6 +525,7 @@ module private MainView =
                                 return None
                         finally
                             isBusy.Set false
+                            finished source
                     | _ -> return None
                 }
 
@@ -693,16 +742,22 @@ module private MainView =
                                     // Created on the UI thread, so its reports arrive there too.
                                     let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
                                     let stamp = structureCache.Stamp filePath
+                                    let source = cancellable ()
                                     try
                                         try
-                                            let! structure = Task.Run(fun () -> validator.ReadStructureTree(filePath, progress))
+                                            let! structure = Task.Run(fun () -> validator.ReadStructureTree(filePath, progress, source.Token))
                                             structureCache.Remember(stamp, structure)
                                             isBusy.Set false
+                                            finished source
                                             do! show structure filePath
-                                        with :? VeraPdfValidationException as ex ->
+                                        with
+                                        | :? OperationCanceledException when source.IsCancellationRequested ->
+                                            notice.Set "Cancelled: Structure… wasn't opened."
+                                        | :? VeraPdfValidationException as ex ->
                                             do! Dialogs.showMessage window ex.Message "Could not read structure"
                                     finally
                                         isBusy.Set false
+                                        finished source
                             // Reading it, or opening its window, failing some other way: said.
                             with ex ->
                                 do! Dialogs.showMessage window $"Structure… couldn't open it: {Dialogs.failureMessage ex}" "Structure"
@@ -833,6 +888,8 @@ module private MainView =
                                 | _ -> fst (PdfUaTarget.detect sourcePath)
                             isBusy.Set true
                             busyProgress.Set(Some(Working "Exporting…"))
+                            let cancel = cancellable ()
+                            let cancelled = ref false
                             let! fixOutcome =
                                 task {
                                     // Tagging from the layout and joining split paragraphs run the layout
@@ -853,7 +910,7 @@ module private MainView =
                                                 do!
                                                     LayoutModel.download
                                                         (Progress<float>(fun fraction -> busyProgress.Set(Some(DownloadingLayoutModel fraction))))
-                                                        CancellationToken.None
+                                                        cancel.Token
                                             source.Value |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
                                             let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
                                             // The report shown, validated here (a saved one may not keep all a
@@ -877,9 +934,13 @@ module private MainView =
                                                         |> Option.map fst
                                                     validator.RoleMap <- Collections.Generic.Dictionary<string, string>(review.RoleMap)
                                                     validator.Attachments <- Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>(review.Attachments)
-                                                    validator.Fix(sourcePath, profile, outputPath, options, progress))
+                                                    validator.Fix(sourcePath, profile, outputPath, options, progress, cancel.Token))
                                             return Ok fix
                                         with
+                                        // (Before the download's timing out, which is a cancellation too.)
+                                        | :? OperationCanceledException when cancel.IsCancellationRequested ->
+                                            cancelled.Value <- true
+                                            return Error "Cancelled."
                                         | :? VeraPdfValidationException as ex -> return Error ex.Message
                                         | :? Net.Http.HttpRequestException as ex -> return Error $"Couldn't download the layout model: {ex.Message}"
                                         | :? TaskCanceledException -> return Error "Couldn't download the layout model: the connection timed out."
@@ -890,6 +951,7 @@ module private MainView =
                                         // suggester does after.
                                         busyProgress.Set None
                                         isBusy.Set false
+                                        finished cancel
                                         validator.LayoutSource <- null
                                         validator.Review <- null
                                         validator.Edits <- []
@@ -913,7 +975,8 @@ module private MainView =
                                     | Null -> Task.FromResult(window, None)
                                 | _ -> Task.FromResult(window, None)
 
-                            do! Dialogs.showFixResult shownIn fixOutcome fixedReport
+                            if cancelled.Value then notice.Set "Cancelled: Export… wrote nothing."
+                            else do! Dialogs.showFixResult shownIn fixOutcome fixedReport
                     | _ -> ()
                 }
                 |> ignore
@@ -943,28 +1006,32 @@ module private MainView =
                                 isBusy.Set true
                                 busyProgress.Set(Some(Appending(Append.Step.Of "starting")))
                                 let stage (step: Append.Step) = Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> busyProgress.Set(Some(Appending step)))
+                                let source = cancellable ()
                                 let! outcome =
                                     task {
                                         try
                                             try
                                                 let! outcome =
                                                     Task.Run(fun () ->
-                                                        Append.run validator choice.Files outputPath { Append.Options.Default with Title = choice.Title } stage)
-                                                return Ok outcome
+                                                        Append.run validator choice.Files outputPath { Append.Options.Default with Title = choice.Title } stage source.Token)
+                                                return Some(Ok outcome)
                                             with
+                                            | :? OperationCanceledException when source.IsCancellationRequested -> return None
                                             | :? VeraPdfValidationException
                                             | :? IOException
                                             | :? UnauthorizedAccessException
-                                            | :? InvalidOperationException as ex -> return Error ex.Message
-                                            | :? iText.Commons.Exceptions.ITextException as ex -> return Error ex.Message
+                                            | :? InvalidOperationException as ex -> return Some(Error ex.Message)
+                                            | :? iText.Commons.Exceptions.ITextException as ex -> return Some(Error ex.Message)
                                         finally
                                             busyProgress.Set None
                                             isBusy.Set false
+                                            finished source
                                     }
                                 match outcome with
-                                | Error message -> do! Dialogs.showMessage window $"The PDFs couldn't be joined: {message}" "Append PDFs"
-                                | Ok outcome when outcome.Joined.IsNone -> do! Dialogs.showMessage window (AppendDialog.summary outcome) "Append PDFs"
-                                | Ok outcome ->
+                                | None -> notice.Set "Cancelled: Append PDFs… wrote nothing."
+                                | Some(Error message) -> do! Dialogs.showMessage window $"The PDFs couldn't be joined: {message}" "Append PDFs"
+                                | Some(Ok outcome) when outcome.Joined.IsNone -> do! Dialogs.showMessage window (AppendDialog.summary outcome) "Append PDFs"
+                                | Some(Ok outcome) ->
                                     let! shownIn, _ = openElsewhere outputPath true
                                     do! Dialogs.showMessage shownIn (AppendDialog.summary outcome) "Append PDFs"
                 }
@@ -2008,9 +2075,27 @@ module private MainView =
                                         ValueNone
                                     )
                                 ]
-                                match busyProgress.Current with
-                                | Some progress when busy -> progressLine progress
-                                | _ -> ()
+                                DockPanel.create [
+                                    DockPanel.lastChildFill true
+                                    DockPanel.children [
+                                        match cancelSource.Current with
+                                        | Some source when busy ->
+                                            Button.create [
+                                                DockPanel.dock Dock.Right
+                                                Button.tag "cancel-work"
+                                                Button.content "Cancel"
+                                                Button.margin (8.0, 4.0, 0.0, 0.0)
+                                                // Escape stops it too.
+                                                Button.isCancel true
+                                                ToolTip.tip "Stop it (Escape); nothing is written."
+                                                Button.onClick (fun _ -> try source.Cancel() with :? ObjectDisposedException -> ())
+                                            ]
+                                        | _ -> ()
+                                        match busyProgress.Current with
+                                        | Some progress when busy -> progressLine progress
+                                        | _ -> ()
+                                    ]
+                                ]
                             ]
                         ]
                         // What a screen reader hears while it runs: the activity, and a tenth of the way

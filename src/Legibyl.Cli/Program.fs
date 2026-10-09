@@ -30,6 +30,9 @@ module ExitCodes =
     [<Literal>]
     let UsageError = 64 // matches sysexits.h EX_USAGE convention
 
+    [<Literal>]
+    let Cancelled = 130 // 128 + SIGINT, as a shell reports a run Ctrl+C stopped
+
 let private usageError (message: string) =
     eprintfn $"error: {message}"
     eprintfn "Run with --help for usage."
@@ -68,6 +71,41 @@ let private reporter () =
     | null -> quietReporter
     | _ -> current.Value
 
+/// The run's Ctrl+C (see main): its own for each call of main, as the reporter is.
+let private stopping = Threading.AsyncLocal<Threading.CancellationTokenSource>()
+
+/// What Ctrl+C cancels.
+let private stopToken () =
+    match box stopping.Value with
+    | null -> Threading.CancellationToken.None
+    | _ -> stopping.Value.Token
+
+/// Whether Ctrl+C has stopped the run.
+let private stopped () = (stopToken ()).IsCancellationRequested
+
+/// Runs each over files in turn until Ctrl+C stops it: the results of those done, and whether
+/// it was stopped (the file it was on isn't among them).
+let private untilStopped (files: string seq) (each: string -> 'T) : 'T list * bool =
+    let results = ResizeArray<'T>()
+    let mutable cancelled = false
+    for file in files do
+        if not cancelled then
+            if stopped () then
+                cancelled <- true
+            else
+                try
+                    results.Add(each file)
+                with :? OperationCanceledException when stopped () ->
+                    (reporter ()).Done "stopped"
+                    cancelled <- true
+    List.ofSeq results, cancelled
+
+/// Says the run was stopped, and how far it got; its exit code.
+let private stoppedAfter (done': int) (count: int) (what: string) =
+    (reporter ()).Clear()
+    eprintfn $"Stopped (Ctrl+C): {done'} of {count} files done{what}."
+    ExitCodes.Cancelled
+
 /// How long a download may go without data before it's given up on.
 let private stalled = TimeSpan.FromSeconds 60.0
 
@@ -77,7 +115,8 @@ let private stalled = TimeSpan.FromSeconds 60.0
 let private ensureLayoutModel () =
     if not (Legibyl.Layout.LayoutModel.isDownloaded ()) then
         let total = Legibyl.Layout.LayoutModel.downloadMegabytes ()
-        use cancel = new Threading.CancellationTokenSource()
+        // (Stopped by Ctrl+C too.)
+        use cancel = Threading.CancellationTokenSource.CreateLinkedTokenSource(stopToken ())
         let mutable lastData = Diagnostics.Stopwatch.StartNew()
         let progress =
             { new IProgress<float> with
@@ -263,7 +302,7 @@ type private ValidateArgs =
 let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (given: (string * ReviewFile.SavedFile) option) (file: string) =
     let target = targetFor args.Ua file
     let result = ValidationResult.Empty(file, target)
-    match (try Ok(validator.Validate(file, target.Profile, validationProgress "Validating")) with :? VeraPdfValidationException as ex -> Error ex.Message) with
+    match (try Ok(validator.Validate(file, target.Profile, validationProgress "Validating", cancel = stopToken ())) with :? VeraPdfValidationException as ex -> Error ex.Message) with
     | Error message -> { result with Error = message }
     | Ok report ->
         // The review's dismissals, as the GUI shows them: --review's, else the file's own.
@@ -299,7 +338,7 @@ let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (giv
             result
         else
             try
-                { result with Structure = validator.ReadStructureTree(file, structureProgress) }
+                { result with Structure = validator.ReadStructureTree(file, structureProgress, stopToken ()) }
             with :? VeraPdfValidationException as ex ->
                 { result with StructureError = ex.Message }
 
@@ -418,13 +457,15 @@ let private runValidate (args: ValidateArgs) =
             let given = given |> Option.bind Result.toOption
             let validator = VeraPdfValidator()
             // Each file on its own: one failing some unexpected way doesn't lose the others' results.
-            let results =
-                [ for file in args.Files ->
+            let results, cancelled =
+                untilStopped args.Files (fun file ->
                       (reporter ()).Begin file
                       let result =
                           try
                               validateFile validator args given file
-                          with ex ->
+                          with
+                          | :? OperationCanceledException when stopped () -> reraise ()
+                          | ex ->
                               { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget args.Ua)) with Error = failure ex }
                       // (A file that couldn't be validated is said even with --quiet.)
                       match result.Error with
@@ -432,8 +473,10 @@ let private runValidate (args: ValidateArgs) =
                       | Null when result.IsCompliant = Nullable true && result.MeetsWcag = Nullable true -> (reporter ()).Done "PASS"
                       | Null when result.IsCompliant = Nullable true && not (isNull result.WcagError) -> (reporter ()).Done $"FAIL, {WcagSpecification.Name} not checked"
                       | Null -> (reporter ()).Done $"FAIL, {result.FailedCount} failed"
-                      result ]
+                      result)
+            // What's done is kept: the report has the files done before Ctrl+C.
             write args.Output (if args.Format = "json" then toJson results else validationText results)
+            if cancelled then stoppedAfter results.Length args.Files.Length "; the report has those" else
             results
             |> List.map (fun r ->
                 if not (isNull r.Error) then ExitCodes.ToolError
@@ -518,7 +561,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                  PdfFixOptions.ApplyEdits
              | _ -> PdfFixOptions.None)
     if options = PdfFixOptions.None then
-        let before = try Some(validator.Validate(file, profile, validationProgress "Validating")) with :? VeraPdfValidationException -> None
+        let before = try Some(validator.Validate(file, profile, validationProgress "Validating", cancel = stopToken ())) with :? VeraPdfValidationException -> None
         match before with
         | Some before ->
             { result with
@@ -574,7 +617,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                 | None -> ()
                 if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then
                     (reporter ()).Note "Linked web pages' titles are read as it's fixed: up to two minutes"
-                let fix = validator.Fix(file, profile, targetPath, options, fixProgress)
+                let fix = validator.Fix(file, profile, targetPath, options, fixProgress, stopToken ())
                 let before = compliance fix.OriginalReport
                 let result = { result with ValidatorNotes = fix.OriginalReport.Notes }
                 let applied = Array.ofSeq fix.AppliedFixes
@@ -595,7 +638,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                         Before = before
                         After =
                             match fix.OutputPath with
-                            | NonNull copy -> compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy"))
+                            | NonNull copy -> compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy", cancel = stopToken ()))
                             | Null -> null }
                 | NonNull copy ->
                     { result with
@@ -604,7 +647,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                         Applied = applied
                         NotApplied = notApplied
                         Before = before
-                        After = compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy")) }
+                        After = compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy", cancel = stopToken ())) }
                 | Null -> { result with Status = FixStatus.NothingToDo; Applied = applied; NotApplied = notApplied; Before = before }
             with
             | :? VeraPdfValidationException as ex -> { result with Error = ex.Message }
@@ -702,10 +745,15 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
           Before = null
           After = null
           ValidatorNotes = [||] }
-    let results =
-        [ for file in files ->
+    let results, cancelled =
+        untilStopped files (fun file ->
               (reporter ()).Begin file
-              let result = try fixFile validator request file with ex -> failed file ex
+              let result =
+                  try
+                      fixFile validator request file
+                  with
+                  | :? OperationCanceledException when stopped () -> reraise ()
+                  | ex -> failed file ex
               let standing (c: Compliance | null) = match c with NonNull c when c.IsCompliant -> "PASS" | NonNull c -> $"FAIL {c.FailedCount}" | Null -> "?"
               // (On stderr even with --quiet: after a download's last percentage, say, rather than nothing.)
               match result.Status, result.Error with
@@ -713,9 +761,11 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
               | FixStatus.Fixed, _ -> (reporter ()).Done $"fixed → {Path.GetFileName result.OutputPath} ({standing result.Before} → {standing result.After})"
               | FixStatus.AlreadyTagged, _ -> (reporter ()).Done "already tagged"
               | _ -> (reporter ()).Done $"nothing to do ({standing result.Before})"
-              result ]
+              result)
     write report (if format = "json" then toJson results else fixText results)
-    results |> List.map fixExit |> worst
+    // (The copy of the file it was on isn't written.)
+    if cancelled then stoppedAfter results.Length (Seq.length files) "; the report has those"
+    else results |> List.map fixExit |> worst
 
 type private FixArgs =
     { Files: string array
@@ -774,19 +824,19 @@ let private runStructure (args: StructureArgs) =
     | Error message -> usageError message
     | Ok() ->
         let validator = VeraPdfValidator()
-        let results =
-            [ for file in args.Files ->
+        let results, cancelled =
+            untilStopped args.Files (fun file ->
                   (reporter ()).Begin file
                   let result =
                       try
-                          { File = file; Structure = validator.ReadStructureTree(file, structureProgress); Error = null }
+                          { File = file; Structure = validator.ReadStructureTree(file, structureProgress, stopToken ()); Error = null }
                       with :? VeraPdfValidationException as ex ->
                           { File = file; Structure = null; Error = ex.Message }
                   match result.Error, result.Structure with
                   | NonNull error, _ -> (reporter ()).Error error
                   | Null, Null -> (reporter ()).Done "no structure tree (untagged)"
                   | Null, NonNull _ -> (reporter ()).Done "read"
-                  result ]
+                  result)
         let text () =
             let sb = StringBuilder()
             for r in results do
@@ -798,6 +848,7 @@ let private runStructure (args: StructureArgs) =
                     appendStructure sb structure 2
             sb.ToString().TrimEnd('\n', '\r')
         write args.Output (if args.Format = "json" then toJson results else text ())
+        if cancelled then stoppedAfter results.Length args.Files.Length "; the output has those" else
         results
         |> List.map (fun r ->
             if not (isNull r.Error) then ExitCodes.ToolError
@@ -868,14 +919,19 @@ let private runAppend (args: AppendArgs) =
                 let said (step: Append.Step) =
                     if step.PageCount > 0 then (reporter ()).Status(step.Doing, (step.Page, step.PageCount)) else (reporter ()).Status step.Doing
                 match
-                    (try Ok(Append.run (VeraPdfValidator()) files output options said) with
+                    (try Ok(Append.run (VeraPdfValidator()) files output options said (stopToken ())) with
+                     | :? OperationCanceledException when stopped () -> Error None
                      | :? VeraPdfValidationException
                      | :? IOException
                      | :? UnauthorizedAccessException
                      | :? InvalidOperationException
-                     | :? iText.Commons.Exceptions.ITextException as ex -> Error ex.Message)
+                     | :? iText.Commons.Exceptions.ITextException as ex -> Error(Some ex.Message))
                 with
-                | Error message ->
+                | Error None ->
+                    (reporter ()).Clear()
+                    eprintfn "Stopped (Ctrl+C): nothing was written."
+                    ExitCodes.Cancelled
+                | Error(Some message) ->
                     (reporter ()).Error $"the PDFs couldn't be joined: {message}"
                     ExitCodes.ToolError
                 | Ok outcome ->
@@ -936,6 +992,7 @@ let private runSuggest (args: SuggestArgs) =
                 use suggester = new Legibyl.Layout.LayoutSuggester(args.File)
                 let pages =
                     [ for page in 1 .. suggester.PageCount ->
+                          (stopToken ()).ThrowIfCancellationRequested()
                           (reporter ()).Status("Finding the pages' layouts", (page, suggester.PageCount))
                           suggester.Suggest page ]
                 let layout =
@@ -960,7 +1017,12 @@ let private runSuggest (args: SuggestArgs) =
                     )
                 (reporter ()).Done $"{layout.Pages.Length} pages' layouts found"
                 ExitCodes.Success
-            with ex ->
+            with
+            | :? OperationCanceledException when stopped () ->
+                (reporter ()).Clear()
+                eprintfn "Stopped (Ctrl+C): nothing was written."
+                ExitCodes.Cancelled
+            | ex ->
                 // A download failing or timing out, the file or the models unreadable, anything else.
                 (reporter ()).Error(failure ex)
                 ExitCodes.ToolError
@@ -1381,5 +1443,19 @@ let main argv =
     | :? ParseErrorAction -> reportParseError parseResult
     | _ when argv.Length = 0 -> usageError "Name a command: validate, fix, structure, append, layout or list."
     | _ ->
-        // Let unexpected exceptions crash rather than exit with a code that means something else.
-        parseResult.Invoke(InvocationConfiguration(EnableDefaultExceptionHandler = false))
+        // Ctrl+C stops the run cleanly: the file it's on is left (nothing half-written), and the
+        // report of those done is written (exit 130). Pressed again, it stops at once.
+        use stop = new Threading.CancellationTokenSource()
+        stopping.Value <- stop
+        let onCancel =
+            ConsoleCancelEventHandler(fun _ e ->
+                if not stop.IsCancellationRequested then
+                    e.Cancel <- true
+                    eprintfn "\nStopping (Ctrl+C again stops at once)…"
+                    stop.Cancel())
+        Console.CancelKeyPress.AddHandler onCancel
+        try
+            // Let unexpected exceptions crash rather than exit with a code that means something else.
+            parseResult.Invoke(InvocationConfiguration(EnableDefaultExceptionHandler = false))
+        finally
+            Console.CancelKeyPress.RemoveHandler onCancel

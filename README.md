@@ -398,6 +398,11 @@ take minutes. WCAG 2.2's checks come after the pages ("checking WCAG 2.2
 (contrast, text size and more)…"): veraPDF doesn't say which page it's on
 there, so the bar waits without filling.
 
+Cancel, beside the progress bar, stops validating, reading the structure,
+Export… (its model download too) and Append PDFs… (Escape does the same). It
+has the focus while they run, and the focus goes back where it was after.
+Stopped, nothing is written: no copy, and no result for a validation.
+
 An empty window's details pane lists the steps (open a PDF, read what's found,
 check and edit the structure, choose auto fixes, export a copy).
 
@@ -1162,6 +1167,7 @@ means the same for every command, about what that command did:
 | `1`  | Done, but a document has a problem: it doesn't comply, has no structure tree, or (`layout apply`) was already tagged. |
 | `2`  | The tool couldn't do it for a file: missing, corrupt, encrypted, the layout model couldn't be downloaded, or WCAG 2.2's checks couldn't run (and PDF/UA passes). |
 | `64` | Invalid command-line usage (including a review or layout file that can't be read). |
+| `130` | Stopped by Ctrl+C: the file it was on is left (no copy half-written), and the report has the files done before it. Ctrl+C again stops at once. |
 
 While it works, every command that processes files says how it's going on
 stderr (stdout stays the report): on a terminal, one line rewritten as it goes
