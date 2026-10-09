@@ -506,13 +506,13 @@ wcagRules:
     whatToDo: "Export the PDF again with tags from the tool that made it; or in Structure…, select the figure and choose its region again."
 
   - clause: "2.4.9"
-    meaning: "A link has no description, so a screen reader can't say where it goes."
+    meaning: "A link's only description is its address (or it has none), so a screen reader reads out the address, or nothing, instead of where it goes. Level AAA when it's the address; one with no description at all fails 2.4.4, level A, too."
     whatToDo: "In Structure…, right-click the link › Edit Link Description…, then Export…."
 
   - clause: "4.1.2"
     tests: [16, 17]
     meaning: "A paragraph or span tag holds nothing to read, so a screen reader announces an empty element."
-    whatToDo: "Choose Remove empty paragraphs in Auto Fixes… for empty paragraphs; remove an empty span in a PDF editor's tags panel."
+    whatToDo: "In Structure…, look at the tag first: veraPDF also calls a tag empty when it couldn't read its text. If it really holds nothing, remove it there or in a PDF editor's tags panel; if its text is there, leave it."
 
   - clause: "4.1.2"
     tests: [18, 19]
@@ -522,4 +522,4 @@ wcagRules:
   - clause: "4.1.2"
     tests: [29]
     meaning: "An entry in the table of contents has no text, so a screen reader reads an empty item."
-    whatToDo: "Choose Remove empty contents entries in Auto Fixes…."
+    whatToDo: "In Structure…, look at the entry first: veraPDF also calls one empty when it couldn't read its text. If it really has none, remove it there or in a PDF editor's tags panel; if its text is there, leave it."

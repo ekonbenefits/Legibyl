@@ -1076,9 +1076,10 @@ module private MainView =
                             let failed =
                                 [ if report.FailedCount > wcag then $"{report.FailedCount - wcag} {flavour}"
                                   if wcag > 0 then $"{wcag} {WcagSpecification.Name}" ]
+                            let checks = if report.FailedCount = 1 then "check" else "checks"
                             banner
                                 Theme.Tokens.Danger
-                                $"""FAIL — {String.Join(" and ", failed)} checks failed, of {report.TotalAssertions} ({why}{warnings}){asChecked}"""
+                                $"""FAIL — {String.Join(" and ", failed)} {checks} failed, of {report.TotalAssertions} ({why}{warnings}){asChecked}"""
                     Some(
                         match List.ofSeq report.Notes with
                         | [] -> standing
@@ -1641,7 +1642,7 @@ module private MainView =
                                     ])
                                 if shownWarnings > 0 then
                                     let what = if shownWarnings = 1 then "1 warning below is" else $"{shownWarnings} warnings below are"
-                                    secondary $"{what} worth a look: what Legibyl noticed that PDF/UA doesn't require."
+                                    secondary $"{what} worth a look: what Legibyl noticed that PDF/UA doesn't require, and WCAG 2.2 above level AA."
                                 match checklist () with
                                 | None -> secondary "Reading the document for its checklist…"
                                 | Some(steps, ticked) ->

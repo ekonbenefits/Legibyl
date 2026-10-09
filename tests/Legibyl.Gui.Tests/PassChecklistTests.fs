@@ -89,7 +89,7 @@ let ``a PDF that passes with a warning opens on its Pass row, the warning below 
 
             (match items with PassItem _ :: NextStepItem step :: RuleItem(group, _) :: _ -> step.Title = "Review the warnings" && group.RuleId = "Structure-7" | _ -> false) |> should be True
             (match selected with :? ResultItem as PassItem _ -> true | _ -> false) |> should be True
-            shown |> should contain "1 warning below is worth a look: what Legibyl noticed that PDF/UA doesn't require."
+            shown |> should contain "1 warning below is worth a look: what Legibyl noticed that PDF/UA doesn't require, and WCAG 2.2 above level AA."
             shown |> should contain "Title: The Community Garden"
             shown |> should contain "Language: en-US (English)"
             shown |> should contain "Headings: H1 ×1"

@@ -1224,7 +1224,7 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
                   stage $"Validating {Path.GetFileName file}…"
                   let profile, _ = PdfUaTarget.detect file
                   file,
-                  (try Ok(validator.Validate(file, profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) ]
+                  (try Ok(validator.Validate(file, profile, checkWcag = false)) with :? VeraPdfValidationException as ex -> Error ex.Message) ]
         let failing =
             [ for file, check in checks do
                   match check with
@@ -1245,7 +1245,7 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
             try
                 let joined = join files scratch options
                 stage $"Validating {Path.GetFileName output}…"
-                let after = validator.Validate(scratch, joined.Profile)
+                let after = validator.Validate(scratch, joined.Profile, checkWcag = false)
                 stage "Comparing the structure with the files'…"
                 let differences =
                     match validator.ReadStructureTree scratch with
