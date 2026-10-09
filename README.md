@@ -339,7 +339,11 @@ WCAG's findings are placed on the page like PDF/UA's (a link's by its
 annotation), with veraPDF's detail: the measured contrast ratio, the text's
 size, how many characters repeat. Its redundant-tag rules (4.1.2) aren't offered
 the fixes for empty tags: veraPDF also calls a tag empty when its text couldn't
-be read, so their guide says to look at the tag first.
+be read, so their guide says to look at the tag first. The exception is a
+redundant span that Legibyl can see is empty, with no content and no tags in it
+(often only a space for replacement text, an authoring app's spacer between
+words): `empty-spans` takes it out, putting the space into the replacement text
+beside it where the words would otherwise run together.
 
 A PDF passes when it complies with PDF/UA and WCAG 2.2's checks pass: the
 banner and the CLI's first line say which failed ("FAIL — 1 WCAG 2.2 check
@@ -1288,6 +1292,7 @@ keeps this table in step with it):
 | `empty-paragraphs` | Remove empty paragraph tags |  |
 | `empty-toc-entries` | Remove empty table-of-contents entries |  |
 | `empty-figures` | Remove figure tags that draw nothing |  |
+| `empty-spans` | Remove span tags with nothing in them, keeping the spaces between words |  |
 | `join-split-paragraphs` | Join paragraphs tagged line by line where the page layout shows one block of text | uses the layout models |
 | `join-split-words` | Give text blocks replacement text where adjacent Span tags split words |  |
 | `lists` | Tag paragraphs that start with list markers as a list |  |

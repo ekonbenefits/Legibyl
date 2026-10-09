@@ -34,6 +34,7 @@
     <Compile Include="BookmarksTests.fs" />
     <Compile Include="EmptyTocEntriesTests.fs" />
     <Compile Include="EmptyFiguresTests.fs" />
+    <Compile Include="EmptySpansTests.fs" />
     <Compile Include="SplitWordSpansTests.fs" />
     <Compile Include="LinkContentsTests.fs" />
     <Compile Include="TitleFromFirstPageTests.fs" />

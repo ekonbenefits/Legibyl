@@ -510,9 +510,14 @@ wcagRules:
     whatToDo: "In Structure…, right-click the link › Edit Link Description…, then Export…."
 
   - clause: "4.1.2"
-    tests: [16, 17]
+    tests: [16]
     meaning: "A paragraph or span tag holds nothing to read, so a screen reader announces an empty element."
     whatToDo: "In Structure…, look at the tag first: veraPDF also calls a tag empty when it couldn't read its text. If it really holds nothing, remove it there or in a PDF editor's tags panel; if its text is there, leave it."
+
+  - clause: "4.1.2"
+    tests: [17]
+    meaning: "A paragraph or span tag holds nothing to read, so a screen reader announces an empty element."
+    whatToDo: "Choose Remove empty spans in Auto Fixes…: it takes out span tags with nothing in them, keeping a space one stood for between words in the text beside it. Otherwise, in Structure…, look at the tag first: veraPDF also calls a tag empty when it couldn't read its text. If it really holds nothing, remove it there or in a PDF editor's tags panel; if its text is there, leave it."
 
   - clause: "4.1.2"
     tests: [18, 19]

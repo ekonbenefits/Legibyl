@@ -224,7 +224,8 @@ module internal VeraPdf =
     /// its address), described from its text or its page's title. Its redundant paragraphs and
     /// contents entries aren't offered the fixes for empty ones: veraPDF calls a paragraph whose
     /// text couldn't be read empty, which Legibyl's own checks don't (they offer those fixes
-    /// where they apply). Its others (contrast, text size…) have no fix: they're for where the PDF
+    /// where they apply). Its redundant spans are offered EmptySpans where the span really is
+    /// empty, in withLegibylAnalysis. Its others (contrast, text size…) have no fix: they're for where the PDF
     /// was made.
     let private wcagFixes: Map<string, PdfFixOptions> =
         Map.ofList [ "2.4.9-1", PdfFixOptions.LinkContents ||| PdfFixOptions.LinkTitlesFromWeb ]
@@ -309,6 +310,9 @@ module internal VeraPdf =
     /// A WCAG 2.2 finding's link: its page (0-based) and its place among the page's annotations.
     let private wcagAnnotationPattern = Regex(@"^root/doc\[0\]/pages\[(\d+)\]/annots\[(\d+)\]", RegexOptions.Compiled)
 
+    /// The objects a WCAG 2.2 finding's path through the structure tree names ("(295 0 obj Span Span)").
+    let private wcagObjectPattern = Regex(@"\((\d+) \d+ obj [^)]*\)", RegexOptions.Compiled)
+
     let private linkAnnotationNumbers (locationContext: string | null) =
         match locationContext with
         | NonNull context -> set [ for m in linkAnnotationPattern.Matches context -> int m.Groups[1].Value ]
@@ -345,6 +349,8 @@ module internal VeraPdf =
                                            | reference -> yield reference.GetObjNumber() ]
                          | _ -> Set.empty)
                 let languageUndeclared = not (DocumentLanguage.isDeclared document)
+                // WCAG 2.2's redundant spans (4.1.2-17) that are empty: the EmptySpans fix takes those out.
+                let emptySpans = lazy (EmptySpans.removable document context)
                 // No title in Info or XMP: the fixes that copy one across have none to copy.
                 let untitled =
                     String.IsNullOrWhiteSpace(document.GetDocumentInfo().GetTitle()) && (StructureFixes.xmpTitle document).IsNone
@@ -411,6 +417,16 @@ module internal VeraPdf =
                             options ||| PdfFixOptions.Language
                         else
                             options
+                    // A WCAG finding names its element last, by object ("…/children[1](295 0 obj Span Span)").
+                    let options =
+                        match assertion.LocationContext with
+                        | NonNull locationContext when WcagSpecification.isWcag assertion.Specification && assertion.RuleId = "4.1.2-17" ->
+                            let objects = wcagObjectPattern.Matches locationContext
+                            if objects.Count > 0 && emptySpans.Value.Contains(int objects[objects.Count - 1].Groups[1].Value) then
+                                options ||| PdfFixOptions.EmptySpans
+                            else
+                                options
+                        | _ -> options
                     // Without a title to copy, only titling from the first page (or by hand) gives
                     // the metadata its dc:title.
                     if untitled && isDcTitleRule assertion then

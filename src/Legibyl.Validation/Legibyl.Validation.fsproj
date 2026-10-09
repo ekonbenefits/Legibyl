@@ -56,6 +56,7 @@
     <Compile Include="ParagraphTableRebuild.fs" />
     <Compile Include="ElementEdits.fs" />
     <Compile Include="EmptyFigures.fs" />
+    <Compile Include="EmptySpans.fs" />
     <Compile Include="PredefinedCMaps.fs" />
     <Compile Include="ToUnicodeMaps.fs" />
     <Compile Include="FontEmbedding.fs" />
