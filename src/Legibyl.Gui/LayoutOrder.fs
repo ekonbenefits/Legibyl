@@ -9,9 +9,13 @@ open Legibyl.Validation
 
 /// A page's regions, in its reading order, from the layout detector (whose model must be
 /// downloaded; see LayoutModel). Several seconds.
+let detectWith (suggester: LayoutSuggester) (page: int) : StructureGeometry list =
+    (suggester.Suggest page).Blocks |> List.sortBy _.Order |> List.map _.Geometry
+
+/// The same, with a suggester of its own for the PDF.
 let detect (pdfPath: string) (page: int) : StructureGeometry list =
     use suggester = new LayoutSuggester(pdfPath)
-    (suggester.Suggest page).Blocks |> List.sortBy _.Order |> List.map _.Geometry
+    detectWith suggester page
 
 let private area (box: StructureGeometry) = max 0.0 (box.Right - box.Left) * max 0.0 (box.Top - box.Bottom)
 

@@ -325,6 +325,8 @@ type OrderBarNeeds =
       Edits: RegionEdits.Edit list
       /// Finding a page's layout, and the model's download (a fraction) while it downloads.
       Ordering: bool
+      /// What Order Page N by Layout found, or why it couldn't (shown under its buttons).
+      Status: string
       Download: float option
       /// Whether the document has one element its top-level ones are in.
       CanOrderByLayout: bool
@@ -446,36 +448,49 @@ let pageOrderButtons (needs: OrderBarNeeds) : IView =
         let page = needs.Page
         let moved = page |> Option.map (fun page -> needs.Edits |> List.filter (fun e -> e.Move.IsSome && e.Page = page)) |> Option.defaultValue []
         let pageName = page |> Option.map string |> Option.defaultValue ""
-        WrapPanel.create [
-            WrapPanel.children [
-                suggestButton
-                    (match needs.Ordering, needs.Download with
-                     | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
-                     | true, None -> $"Finding page {pageName}'s layout…"
-                     | false, _ -> $"Order Page {pageName} by Layout")
-                    [ Button.margin (0.0, 0.0, 6.0, 8.0)
-                      Button.isEnabled (page.IsSome && not needs.Ordering && needs.CanOrderByLayout)
-                      ToolTip.tip (
-                          $"Put page {pageName} in the reading order its layout gives, found by a layout detector (several seconds"
-                          + (match LayoutModel.downloadMegabytes () with
-                             | 0 -> ")"
-                             | size -> $"; downloads its models, about {size} MB, the first time)")
-                          + ", as moves you can see in the Edits tab. "
-                          + $"Never within a list or table, or across pages. Restore Page {pageName} Original Order, shown once it's moved, puts it back."
-                      )
-                      Button.onClick ((fun _ -> page |> Option.iter needs.OrderByLayout), SubPatchOptions.Always) ]
-                if not moved.IsEmpty then
-                    editButton $"Restore Page {pageName} Original Order" [
-                        Button.margin (0.0, 0.0, 0.0, 8.0)
-                        ToolTip.tip $"Drop every move on page {pageName}: its elements go back to the order they're tagged in."
-                        Button.onClick (
-                            (fun _ ->
-                                moved
-                                |> List.fold (fun all e -> RegionEdits.setMove all e.Page e.Tag e.Box None) needs.Edits
-                                |> needs.SaveEdits),
-                            SubPatchOptions.Always
-                        )
+        StackPanel.create [
+            StackPanel.children [
+                WrapPanel.create [
+                    WrapPanel.children [
+                        suggestButton
+                            (match needs.Ordering, needs.Download with
+                             | true, Some fraction -> $"Downloading the layout model… {fraction:P0}"
+                             | true, None -> $"Finding page {pageName}'s layout…"
+                             | false, _ -> $"Order Page {pageName} by Layout")
+                            [ Button.margin (0.0, 0.0, 6.0, 8.0)
+                              Button.isEnabled (page.IsSome && not needs.Ordering && needs.CanOrderByLayout)
+                              ToolTip.tip (
+                                  $"Put page {pageName} in the reading order its layout gives, found by a layout detector (several seconds"
+                                  + (match LayoutModel.downloadMegabytes () with
+                                     | 0 -> ")"
+                                     | size -> $"; downloads its models, about {size} MB, the first time)")
+                                  + ", as moves you can see in the Edits tab. "
+                                  + $"Never within a list or table, or across pages. Restore Page {pageName} Original Order, shown once it's moved, puts it back."
+                              )
+                              Button.onClick ((fun _ -> page |> Option.iter needs.OrderByLayout), SubPatchOptions.Always) ]
+                        if not moved.IsEmpty then
+                            editButton $"Restore Page {pageName} Original Order" [
+                                Button.margin (0.0, 0.0, 0.0, 8.0)
+                                ToolTip.tip $"Drop every move on page {pageName}: its elements go back to the order they're tagged in."
+                                Button.onClick (
+                                    (fun _ ->
+                                        moved
+                                        |> List.fold (fun all e -> RegionEdits.setMove all e.Page e.Tag e.Box None) needs.Edits
+                                        |> needs.SaveEdits),
+                                    SubPatchOptions.Always
+                                )
+                            ]
                     ]
+                ]
+                // What it found, or why it couldn't: said as it changes.
+                TextBlock.create [
+                    TextBlock.text needs.Status
+                    TextBlock.isVisible (needs.Status <> "")
+                    TextBlock.textWrapping TextWrapping.Wrap
+                    TextBlock.margin (0.0, 0.0, 0.0, 8.0)
+                    AttrBuilder<TextBlock>.CreateProperty<Automation.AutomationLiveSetting>(Automation.AutomationProperties.LiveSettingProperty, Automation.AutomationLiveSetting.Polite, ValueNone)
+                    Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                ]
             ]
         ]
 

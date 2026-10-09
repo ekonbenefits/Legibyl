@@ -157,3 +157,27 @@ let ``Order Page 1 by Layout reorders the blocks at once, as moves only for what
             left |> should be Empty
         finally
             Directory.Delete(folder, true))
+
+[<Fact>]
+let ``Order Page 1 by Layout says when the page is in its layout's order already, as it changes`` () =
+    onUiThread (fun () ->
+        let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+        Directory.CreateDirectory folder |> ignore
+        try
+            let root = node "StructTreeRoot" null null [ node "Document" null null children ]
+            let window = StructureTreeWindow(root, Path.Combine(folder, "news.pdf"), Width = 1000.0, Height = 760.0)
+            window.LayoutRegions <- Some(fun page -> if page = 1 then regions else [])
+            window.Show()
+            pump ()
+            press window "Order Page 1 by Layout"
+            // Asked again, it's in that order now.
+            press window "Order Page 1 by Layout"
+            let said =
+                descendants<TextBlock> window
+                |> List.tryFind (fun t -> string t.Text = "Page 1's layout reads it in the order it's tagged already." && t.IsVisible)
+            window.Close()
+
+            said |> should not' (equal None)
+            Automation.AutomationProperties.GetLiveSetting said.Value |> should equal Automation.AutomationLiveSetting.Polite
+        finally
+            Directory.Delete(folder, true))
