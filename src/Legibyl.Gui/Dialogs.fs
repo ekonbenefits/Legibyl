@@ -14,6 +14,16 @@ open Avalonia.Media
 open Avalonia.Platform.Storage
 open Legibyl.Validation
 
+/// What went wrong, as a person reads it: the innermost exception's message (a task's failure
+/// comes wrapped).
+let failureMessage (ex: exn) =
+    let rec inner (ex: exn) =
+        match ex with
+        | :? System.AggregateException as aggregate when aggregate.InnerExceptions.Count = 1 -> inner aggregate.InnerExceptions[0]
+        | :? System.Reflection.TargetInvocationException as invocation when not (isNull invocation.InnerException) -> inner (nonNull invocation.InnerException)
+        | ex -> ex
+    (inner ex).Message
+
 /// Shows a save dialog starting in nearPath's folder and returns the chosen local
 /// path, or None if the user cancelled.
 let pickSavePath (topLevel: TopLevel) (options: FilePickerSaveOptions) (nearPath: string) : Task<string option> =
