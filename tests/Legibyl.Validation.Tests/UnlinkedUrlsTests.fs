@@ -353,6 +353,61 @@ let ``an address's full stop is split off inside the text object its pieces shar
 
     paragraphKids output.Path |> should equal [ "See "; "Link"; "."; " Open daily." ]
 
+/// A tagged page with a P holding two pieces of marked content (MCIDs 0 and 1), its content as
+/// content writes it given the font's name in the page's resources and the page.
+let private rawParagraph (path: string) (content: PdfName -> PdfPage -> string) =
+    tagged path (fun document _ font ->
+        let page = document.AddNewPage()
+        let documentElement = document.GetStructTreeRoot().AddKid(Tagging.PdfStructElem(document, PdfName.Document))
+        let paragraph = documentElement.AddKid(Tagging.PdfStructElem(document, PdfName.P, page))
+        for _ in 0..1 do
+            paragraph.AddKid(Tagging.PdfMcrNumber(page, paragraph)) |> ignore
+        let name = page.GetResources().AddFont(document, font)
+        let stream = match page.GetFirstContentStream() with null -> page.NewContentStreamAfter() | stream -> stream
+        stream.SetData(System.Text.Encoding.ASCII.GetBytes(content name page)) |> ignore)
+
+[<Fact>]
+let ``an address's full stop isn't split off where its piece can't be cut safely, and each says why`` () =
+    let lines (font: PdfName) (first: string) (draw: string) (after: string) =
+        $"BT /{font.GetValue()} 12 Tf 72 700 Td\n{first} BDC {draw} EMC\n/P <</MCID 1>> BDC ( Open daily.) Tj EMC\nET\n{after}"
+    let cases: (string * (PdfName -> PdfPage -> string)) list =
+        [ // As the fix can split: the case the others change one thing of.
+          "none", (fun font _ -> lines font "/P <</MCID 0>>" "(https://example.org/beds.) Tj" "")
+          "its marked content holds other marked content",
+          (fun font _ -> lines font "/P <</MCID 0>>" "/Span BMC EMC (https://example.org/beds.) Tj" "")
+          "its marked content says what it reads as, for all of it",
+          (fun font _ -> lines font "/P <</MCID 0 /ActualText (https://example.org/beds.)>>" "(https://example.org/beds.) Tj" "")
+          "the text drawing it moves to a new line first, which the fix doesn't cut",
+          (fun font _ -> lines font "/P <</MCID 0>>" "(https://example.org/beds.) '" "")
+          "its marked content is drawn in more than one place",
+          (fun font _ -> lines font "/P <</MCID 0>>" "(https://example.org/beds.) Tj" "/P <</MCID 0>> BDC EMC\n")
+          // Properties named in the page's resources, holding an indirect reference a level down:
+          // written inline, the page's content would be broken.
+          "its marked content's properties can't be copied",
+          (fun font page ->
+              let properties = PdfDictionary()
+              properties.Put(PdfName.MCID, PdfNumber 0) |> ignore
+              let inner = PdfDictionary()
+              inner.Put(PdfName "Note", (PdfString "kept elsewhere").MakeIndirect(page.GetDocument())) |> ignore
+              properties.Put(PdfName "Extra", inner) |> ignore
+              let name = page.GetResources().AddProperties properties
+              lines font $"/P /{name.GetValue()}" "(https://example.org/beds.) Tj" "") ]
+    [ for why, content in cases ->
+          use input = new TempPdf()
+          use output = new TempPdf ".fixed"
+          rawParagraph input.Path content
+          let fixedOnes = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed
+          why, unlinked input.Path, fixedOnes ]
+    |> should
+        equal
+        [ for why, _ in cases ->
+              if why = "none" then
+                  why, [ "Page 1: \"https://example.org/beds\".", true ], true
+              else
+                  why,
+                  [ $"Page 1: \"https://example.org/beds\". Not fixable here: the \".\" after it is drawn in the same piece, and can't be split off: {why}.", false ],
+                  false ]
+
 [<Fact>]
 let ``an address's full stop with something drawn after it in the same piece isn't split off, and says why`` () =
     use pdf = new TempPdf()
