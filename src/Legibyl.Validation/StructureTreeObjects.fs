@@ -15,8 +15,9 @@ type Context =
       MarkedContent: MarkedContentTextIndex.Index
       /// The StructTreeRoot's /RoleMap: custom tag -> the tag it stands for.
       RoleMap: IReadOnlyDictionary<PdfName, PdfName>
-      /// The document's language (the catalog's /Lang), if it says.
-      Language: string option
+      /// The document's language (the catalog's /Lang), if it says: as a fix that declares it
+      /// leaves it.
+      mutable Language: string option
       /// What fixes found and couldn't change (a font left as it is), said to the user as not
       /// applied: a note doesn't make a change.
       Notes: List<string> }

@@ -112,7 +112,8 @@ let private pieceOf context (obj: PdfObject | null) =
 let private couldFollow (previous: Piece) (next: Piece) =
     previous.Page = next.Page
     && looksSplit (previous.Language, previous.Text) (next.Language, next.Text)
-    && Object.Equals(previous.Paragraph.Get(PdfName.Lang), next.Paragraph.Get(PdfName.Lang))
+    // In the same language: their own, or the one around them.
+    && (previous.Language |> Option.map _.ToLowerInvariant()) = (next.Language |> Option.map _.ToLowerInvariant())
     && not (ParagraphLists.startsWithMarker next.Text)
 
 /// Every run of two or more sibling paragraphs the split-paragraph warning flags whose text the
