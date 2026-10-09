@@ -135,3 +135,81 @@ let ``a font that's right already is left alone, and the fix is safe and named``
     result.AppliedFixes |> Seq.exists (fun line -> line.Contains "CIDSystemInfo" || line.Contains "CIDSet" || line.Contains "/WMode") |> should be False
     FixNames.nameOf PdfFixOptions.FontDictionaries |> should equal "font-dictionaries"
     FixNames.safe.HasFlag PdfFixOptions.FontDictionaries |> should be True
+
+/// A page of text in Lato, embedded as a simple TrueType font flagged symbolic, with an encoding
+/// whose /Differences name each letter, and no ToUnicode map: as some PDF libraries write a subset.
+let private createSymbolic (path: string) (withEncoding: bool) =
+    use plain = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(plain.Path))
+        let page = document.AddNewPage PageSize.LETTER
+        let font = PdfFontFactory.CreateFont(corpusFile "fonts/Lato-Regular.ttf", iText.IO.Font.PdfEncodings.WINANSI, PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED)
+        PdfCanvas(page).BeginText().SetFontAndSize(font, 14f).MoveText(72.0, 700.0).ShowText("The garden opens at eight.").EndText() |> ignore
+    use document = new PdfDocument(new PdfReader(plain.Path), new PdfWriter(path))
+    let font =
+        seq { for n in 1 .. document.GetNumberOfPdfObjects() - 1 -> document.GetPdfObject n }
+        |> Seq.pick (function
+            | :? PdfDictionary as d when PdfName.TrueType.Equals(d.GetAsName PdfName.Subtype) -> Some d
+            | _ -> None)
+    font.GetAsDictionary(PdfName.FontDescriptor).Put(PdfName.Flags, PdfNumber 4) |> ignore
+    font.Remove PdfName.ToUnicode |> ignore
+    if withEncoding then
+        let differences = PdfArray()
+        differences.Add(PdfNumber 84)
+        differences.Add(PdfName "T")
+        let encoding = PdfDictionary()
+        encoding.Put(PdfName.Type, PdfName.Encoding) |> ignore
+        encoding.Put(PdfName.BaseEncoding, PdfName.WinAnsiEncoding) |> ignore
+        encoding.Put(PdfName.Differences, differences) |> ignore
+        font.Put(PdfName.Encoding, encoding) |> ignore
+    else
+        font.Remove PdfName.Encoding |> ignore
+
+let private text (path: string) =
+    use document = new PdfDocument(new PdfReader(path))
+    iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(document.GetPage 1)
+
+[<Fact>]
+let ``a symbolic TrueType font's encoding is taken out, the characters it named kept in a ToUnicode map, and the page looks the same`` () =
+    use broken = new TempPdf()
+    use fixedPdf = new TempPdf()
+    createSymbolic broken.Path true
+
+    let result = fix broken.Path fixedPdf.Path
+
+    failed broken.Path |> should contain "7.21.6-3"
+    failed fixedPdf.Path |> should not' (contain "7.21.6-3")
+    result.AppliedFixes
+    |> should contain "Removed the encoding PDF/UA doesn't allow from 1 symbolic TrueType font(s), which draw by their own character map; a ToUnicode map now says the characters it named."
+    text fixedPdf.Path |> should equal "The garden opens at eight."
+    text broken.Path |> should equal (text fixedPdf.Path)
+    render fixedPdf.Path |> should equal (render broken.Path)
+
+[<Fact>]
+let ``a symbolic TrueType font without an encoding is left alone`` () =
+    use plain = new TempPdf()
+    use fixedPdf = new TempPdf()
+    createSymbolic plain.Path false
+
+    let result = fix plain.Path fixedPdf.Path
+
+    result.AppliedFixes |> Seq.exists (fun line -> line.Contains "symbolic") |> should be False
+
+[<Fact>]
+let ``a symbolic TrueType font that isn't embedded keeps its encoding, and it's said why`` () =
+    use broken = new TempPdf()
+    use unembedded = new TempPdf()
+    use fixedPdf = new TempPdf()
+    createSymbolic broken.Path true
+    do
+        use document = new PdfDocument(new PdfReader(broken.Path), new PdfWriter(unembedded.Path))
+        for n in 1 .. document.GetNumberOfPdfObjects() - 1 do
+            match document.GetPdfObject n with
+            | :? PdfDictionary as d when PdfName.FontDescriptor.Equals(d.GetAsName PdfName.Type) -> d.Remove PdfName.FontFile2 |> ignore
+            | _ -> ()
+
+    let result = fix unembedded.Path fixedPdf.Path
+
+    result.AppliedFixes |> Seq.exists (fun line -> line.Contains "symbolic") |> should be False
+    result.NotApplied
+    |> should contain "Left the encoding of 1 symbolic TrueType font(s), which PDF/UA doesn't allow: the font isn't embedded with a character map of its own to draw by, or the encoding picks other glyphs than its map, so taking it out could change what's drawn."

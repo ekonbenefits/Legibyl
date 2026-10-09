@@ -71,7 +71,8 @@ type PdfFixOptions =
     /// Makes embedded fonts' dictionaries agree with their font programs and CMaps, without
     /// changing what's drawn: removes a subset font's glyph list (CharSet, CIDSet) where it's
     /// incomplete, sets a composite font's CIDSystemInfo to its CMap's, and an embedded CMap's
-    /// /WMode to its program's.
+    /// /WMode to its program's, and takes the /Encoding out of a symbolic TrueType font that draws
+    /// by its own cmap (writing the characters it named into its ToUnicode map first).
     | FontDictionaries = 1048576
     /// Writes which characters fonts draw (a ToUnicode map), where codes the pages use say none
     /// a reader can map, from the fonts' own glyph names and Unicode tables (see ToUnicodeMaps),

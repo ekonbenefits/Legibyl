@@ -192,6 +192,11 @@ rules:
     meaning: "An embedded CMap says one writing direction (/WMode) in its dictionary and another in its program."
     whatToDo: "Choose Font dictionaries in Auto Fixes…: it sets the dictionary to the program's, which readers use. Nothing changes on the page."
 
+  - clause: "7.21.6"
+    tests: [3]
+    meaning: &symbolicEncodingMeaning "A font that draws by its own character map (a symbolic TrueType font) also has an encoding, which PDF/UA doesn't allow: readers may disagree about which to use."
+    whatToDo: &symbolicEncoding "Choose Font dictionaries in Auto Fixes…: for an embedded font with its own character map, it takes the encoding out, first writing the characters it named into a ToUnicode map so the text still reads. Nothing changes on the page."
+
   - clause: "7.21.4.1"
     tests: [1]
     meaning: "A font isn't embedded, so the text may look different, or not read the same, on another computer."
@@ -357,6 +362,11 @@ pdfUa2Rules:
     tests: [1]
     meaning: "A font isn't embedded, so the text may look different, or not read the same, on another computer."
     whatToDo: *embed
+
+  - clause: "8.4.5.7"
+    tests: [3]
+    meaning: *symbolicEncodingMeaning
+    whatToDo: *symbolicEncoding
 
   - clause: "8.4.5.8"
     meaning: "Some text uses a font that doesn't say which characters it draws, so a screen reader (or copying the text) gets nothing, or the wrong letters."
