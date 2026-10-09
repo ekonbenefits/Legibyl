@@ -482,12 +482,12 @@ let pageOrderButtons (needs: OrderBarNeeds) : IView =
                             ]
                     ]
                 ]
-                // What it found, or why it couldn't: said as it changes.
+                // What it found, or why it couldn't: said as it changes. (Kept in the automation tree
+                // while empty, so its first message is announced too.)
                 TextBlock.create [
                     TextBlock.text needs.Status
-                    TextBlock.isVisible (needs.Status <> "")
                     TextBlock.textWrapping TextWrapping.Wrap
-                    TextBlock.margin (0.0, 0.0, 0.0, 8.0)
+                    TextBlock.margin (if needs.Status = "" then Thickness 0.0 else Thickness(0.0, 0.0, 0.0, 8.0))
                     AttrBuilder<TextBlock>.CreateProperty<Automation.AutomationLiveSetting>(Automation.AutomationProperties.LiveSettingProperty, Automation.AutomationLiveSetting.Polite, ValueNone)
                     Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
                 ]
