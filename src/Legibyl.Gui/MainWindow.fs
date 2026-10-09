@@ -466,17 +466,28 @@ module private MainView =
                 }
 
             /// Opens a file and validates it with the current profile, naming that activity.
-            let openFileAs (activity: string) (path: string) =
-                selectedFile.Set(Some path)
-                opened path
-                clearResults ()
-                pending.Set noChanges
-                let review = layoutReviews.For path
-                autoFixes.Set review.AutoFixes
-                dismissed.Set review.Dismissed
-                edited.Set review.IsEdited
-                showDismissed.Set false
-                runValidation activity false
+            let openFileAs (activity: string) (path: string) : Task<ValidationReport option> =
+                task {
+                    selectedFile.Set(Some path)
+                    opened path
+                    clearResults ()
+                    pending.Set noChanges
+                    // Its review read in the background: the review file, the copy's own, and the
+                    // layout kept with it (each page's text read to see which haven't changed).
+                    isBusy.Set true
+                    busyProgress.Set(Some(Working $"Opening {Path.GetFileName path}…"))
+                    let! review = Task.Run(fun () -> try Some(layoutReviews.For path) with _ -> None)
+                    busyProgress.Set None
+                    isBusy.Set false
+                    match review with
+                    | Some review ->
+                        autoFixes.Set review.AutoFixes
+                        dismissed.Set review.Dismissed
+                        edited.Set review.IsEdited
+                    | None -> ()
+                    showDismissed.Set false
+                    return! runValidation activity false
+                }
 
             /// Keeps the selected file's review in the file next to it; false if it couldn't be
             /// written (and says why).
@@ -485,7 +496,16 @@ module private MainView =
                     match selectedFile.Current with
                     | Some path ->
                         try
-                            (layoutReviews.For path).Save path
+                            // (Recording the layout reads each page's text: off the UI thread.)
+                            let review = layoutReviews.For path
+                            let wasBusy = isBusy.Current
+                            isBusy.Set true
+                            busyProgress.Set(Some(Working "Saving the review…"))
+                            try
+                                do! Task.Run(fun () -> review.Save path)
+                            finally
+                                busyProgress.Set None
+                                isBusy.Set wasBusy
                             edited.Set false
                             notice.Set $"Saved the review in {Path.GetFileName(ReviewFile.filePath path)}."
                             return true
@@ -628,7 +648,15 @@ module private MainView =
                             | null ->
                                 // Untagged: the button says Suggest Structure…, and that's what it does.
                                 let review = layoutReviews.For filePath
-                                open' filePath (StructureTreeWindow(Suggested, filePath, review, refreshPending))
+                                // What finds its pages' layouts reads the PDF: off the UI thread.
+                                isBusy.Set true
+                                busyProgress.Set(Some(Working "Opening the suggested structure…"))
+                                try
+                                    let! suggester = Task.Run(fun () -> new LayoutSuggester(filePath, review.Language))
+                                    open' filePath (StructureTreeWindow(Suggested, filePath, review, refreshPending, FindingMarkers.none, Some suggester))
+                                finally
+                                    busyProgress.Set None
+                                    isBusy.Set false
                             | structure ->
                                 open' filePath (StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending, findingsToMark ()))
                         }
@@ -798,7 +826,8 @@ module private MainView =
                                     try
                                         try
                                             if usesLayout then
-                                                let suggester = new LayoutSuggester(sourcePath, review.Language)
+                                                // (It reads the PDF: off the UI thread.)
+                                                let! suggester = Task.Run(fun () -> new LayoutSuggester(sourcePath, review.Language))
                                                 source.Value <- Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
                                             if usesLayout && not (LayoutModel.isDownloaded ()) then
                                                 do!

@@ -82,7 +82,11 @@ module TableModel =
                 Directory.CreateDirectory(Path.GetDirectoryName target |> string) |> ignore
                 let partial = target + ".partial"
                 do! fetch partial progress cancellation
-                let hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes partial)).ToLowerInvariant()
+                // Off the caller's thread (the UI's, in the app): 30 MB to read and hash.
+                let! hash =
+                    Task.Run(fun () ->
+                        use stream = File.OpenRead partial
+                        Convert.ToHexString(SHA256.HashData stream).ToLowerInvariant())
                 if hash <> sha256 then
                     File.Delete partial
                     failwith $"The table model downloaded from {address} isn't the one expected."
