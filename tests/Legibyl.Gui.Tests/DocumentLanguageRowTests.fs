@@ -96,3 +96,42 @@ let ``a PDF that says no language isn't given the one its text reads as by openi
                 review.Language |> should equal (Some "es")
             finally
                 window.Close()))
+
+let private click (block: Border) =
+    let properties = Avalonia.Input.PointerPointProperties(Avalonia.Input.RawInputModifiers.LeftMouseButton, Avalonia.Input.PointerUpdateKind.LeftButtonPressed)
+    block.RaiseEvent(
+        Avalonia.Input.PointerPressedEventArgs(
+            block,
+            new Avalonia.Input.Pointer(0, Avalonia.Input.PointerType.Mouse, true),
+            block,
+            Avalonia.Point(4.0, 4.0),
+            0UL,
+            properties,
+            Avalonia.Input.KeyModifiers.None
+        )
+    )
+    pump ()
+
+[<Fact>]
+let ``a paragraph's language can be chosen, as an edit Export… writes`` () =
+    withSpanish "en-US" (fun pdf ->
+        onUiThread (fun () ->
+            let review = DocumentReviews().For pdf
+            let source = StructureSource.Tagged(VeraPdfValidator().ReadStructureTree pdf |> nonNull)
+            let window = StructureTreeWindow(source, pdf, review, ignore, FindingMarkers.none)
+            window.Show()
+            pump ()
+            try
+                let paragraph =
+                    descendants<Border> window
+                    |> List.find (fun border -> match border.Tag with :? StructureNode as node -> node.Tag = "P" | _ -> false)
+                click paragraph
+                let picker = descendants<ComboBox> window |> List.find (fun c -> string (AutomationProperties.GetName c) = "Language of this <P>")
+                string picker.SelectedItem |> should equal "As around it"
+
+                picker.SelectedItem <- "Spanish (es)"
+                pump ()
+
+                review.Edits |> List.map _.Lang |> should equal [ Some "es" ]
+            finally
+                window.Close()))

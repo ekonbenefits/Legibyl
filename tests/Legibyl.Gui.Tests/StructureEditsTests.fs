@@ -524,7 +524,7 @@ let ``a tagged PDF's figure can be tagged Artifact, not read, and Figure again``
         withPdf (fun pdf ->
             let window = show (structure null) pdf
             click (blockFor window "Figure") false
-            let picker () = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) <> "Document language") |> List.exactlyOne
+            let picker () = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) |> _.StartsWith("Tag for")) |> List.exactlyOne
             let choices = picker().Items |> Seq.map string |> List.ofSeq
             picker().SelectedItem <- "Artifact"
             pump ()
@@ -608,7 +608,7 @@ let ``several figures are tagged Artifact at once`` () =
             let figures = descendants<Border> window |> List.filter (fun b -> match b.Tag with :? StructureNode as n -> n.Tag = "Figure" | _ -> false)
             click figures[0] false
             click figures[1] true
-            let picker = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) <> "Document language") |> List.exactlyOne
+            let picker = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) |> _.StartsWith("Tag for")) |> List.exactlyOne
             let named = string (Automation.AutomationProperties.GetName picker)
             picker.SelectedItem <- "Artifact"
             pump ()

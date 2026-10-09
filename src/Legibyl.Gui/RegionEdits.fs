@@ -29,7 +29,9 @@ type Edit =
       /// For an element of a tagged PDF: where it goes among its siblings (Move Up and Move Down).
       Move: ElementMove option
       /// For a tagged PDF's table: its rows and cells rebuilt as these (see TableRebuild).
-      Cells: TableCell list }
+      Cells: TableCell list
+      /// The language its text is in, as a person gave it (e.g. "es").
+      Lang: string option }
 
 /// How much two boxes must overlap to be the same region: their intersection over their
 /// union. A regenerated PDF can move things a little; different regions rarely overlap this much.
@@ -58,9 +60,9 @@ let private update (edits: Edit list) page tag box (change: Edit -> Edit) : Edit
     let edited =
         change (
             existing
-            |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = []; Retag = None; Exclude = false; Move = None; Cells = [] }
+            |> Option.defaultValue { Page = page; Tag = tag; Box = box; Alt = None; Text = None; MergeWith = []; Retag = None; Exclude = false; Move = None; Cells = []; Lang = None }
         )
-    if edited.Alt.IsNone && edited.Text.IsNone && edited.Retag.IsNone && not edited.Exclude && edited.Move.IsNone && edited.Cells.IsEmpty then others
+    if edited.Alt.IsNone && edited.Text.IsNone && edited.Lang.IsNone && edited.Retag.IsNone && not edited.Exclude && edited.Move.IsNone && edited.Cells.IsEmpty then others
     else others @ [ { edited with Box = box } ]
 
 /// A table's rows and cells rebuilt as cells (see TableRebuild); none to leave it.
@@ -108,6 +110,10 @@ let tagOf edits page (block: SuggestedBlock) =
 let altFor edits page (block: SuggestedBlock) =
     find edits page block.Tag block.Geometry |> Option.bind _.Alt
 
+/// edits with the language a person gave an element's text (None: as around it).
+let setLang (edits: Edit list) page tag box (language: string option) : Edit list =
+    update edits page tag box (fun e -> { e with Lang = language })
+
 /// The region's text: corrected if it was, else what OCR read (only for regions OCR read).
 let textFor edits page (block: SuggestedBlock) =
     if not block.Recognized then None
@@ -125,7 +131,8 @@ let toElementEdits (edits: Edit list) : ElementEdit list =
              Retag = Option.toObj e.Retag
              Exclude = e.Exclude
              Move = e.Move
-             Cells = e.Cells }
+             Cells = e.Cells
+             Lang = Option.toObj e.Lang }
           : ElementEdit) ]
 
 /// A page's suggestions as tagging takes them: with the edits layered on (see
@@ -140,7 +147,7 @@ let mergeElements (edits: Edit list) (page: int) (tag: string) (boxes: Structure
     let involves (e: Edit) =
         e.Page = page && not e.MergeWith.IsEmpty && (e.Box :: e.MergeWith) |> List.exists (fun box -> boxes |> List.exists (same box))
     (edits |> List.filter (not << involves))
-    @ [ { Page = page; Tag = tag; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false; Move = None; Cells = [] } ]
+    @ [ { Page = page; Tag = tag; Box = boxes.Head; Alt = None; Text = None; MergeWith = boxes.Tail; Retag = None; Exclude = false; Move = None; Cells = []; Lang = None } ]
 
 /// Converts selected sibling paragraphs to one table, with cells checked by a person. The first
 /// paragraph's box stays the edit anchor; the remaining boxes identify its consecutive siblings.
@@ -161,7 +168,8 @@ let setParagraphsAsTable (edits: Edit list) (boxes: StructureGeometry list) (cel
               Retag = Some Tags.Table
               Exclude = false
               Move = None
-              Cells = cells } ]
+              Cells = cells
+              Lang = None } ]
     | _ -> edits
 
 /// Paragraphs to merge into the first, by box, replacing any merge that involves them.
@@ -190,7 +198,8 @@ let ofElementEdit (e: ElementEdit) : Edit =
       Retag = Option.ofObj e.Retag
       Exclude = e.Exclude
       Move = e.Move
-      Cells = e.Cells }
+      Cells = e.Cells
+      Lang = Option.ofObj e.Lang }
 
 /// The edits in a review.
 let editsIn (saved: SavedFile) : Edit list = ReviewFile.edits saved |> List.map ofElementEdit

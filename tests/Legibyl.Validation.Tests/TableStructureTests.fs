@@ -206,7 +206,7 @@ let ``a tagged table tagged wrongly is rebuilt from the cells the model finds, a
         let rec nodes (node: Legibyl.Validation.StructureNode) : Legibyl.Validation.StructureNode list = node :: (node.Children |> Seq.collect nodes |> List.ofSeq)
         let table = Legibyl.Validation.VeraPdfValidator().ReadStructureTree input.Path |> nonNull |> nodes |> List.find (fun n -> n.Tag = "Table")
         let edit: Legibyl.Validation.ElementEdit =
-            { Page = 1; Tag = "Table"; Box = table.Geometry |> nonNull; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = cells }
+            { Page = 1; Tag = "Table"; Box = table.Geometry |> nonNull; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = cells; Lang = null }
         let failed (path: string) =
             Legibyl.Validation.VeraPdfValidator().Validate(path, Legibyl.Validation.PdfProfile.PdfUa1).Findings
             |> Seq.filter (fun f -> not f.Passed && f.Severity = Legibyl.Validation.FindingSeverity.Failure)

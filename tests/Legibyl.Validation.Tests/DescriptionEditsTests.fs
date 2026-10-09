@@ -46,7 +46,7 @@ let private failed (path: string) =
     |> Set.ofSeq
 
 let private edit (tag: string) (box: StructureGeometry) (text: string) =
-    { Page = 1; Tag = tag; Box = box; Alt = text; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [] }
+    { Page = 1; Tag = tag; Box = box; Alt = text; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = []; Lang = null }
 
 let private applyEdits (input: string) (output: string) (edits: ElementEdit list) =
     VeraPdfValidator(Edits = edits).Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.ApplyEdits)

@@ -98,7 +98,7 @@ let ``reused Art blocks select their current node after repeated moves`` keyboar
                 (block window articles[0]).BorderThickness |> should equal (Thickness 1.5)
                 let picker =
                     descendants<ComboBox> window
-                    |> List.filter (fun c -> string (Automation.AutomationProperties.GetName c) <> "Document language")
+                    |> List.filter (fun c -> (string (Automation.AutomationProperties.GetName c)).StartsWith "Tag for")
                     |> List.exactlyOne
                 Automation.AutomationProperties.GetName picker |> should equal "Tag for this <P>"
                 picker.SelectedItem <- "H1"

@@ -87,7 +87,7 @@ let private select (block: Border) = clickBlock Input.KeyModifiers.None block
 
 /// Picks a tag in the Tag picker.
 let private pickTag (window: Window) (tag: string) =
-    (descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) <> "Document language") |> List.exactlyOne).SelectedItem <- tag
+    (descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) |> _.StartsWith("Tag for")) |> List.exactlyOne).SelectedItem <- tag
     pump ()
 
 [<Fact>]
@@ -207,13 +207,13 @@ let ``several regions take a tag at once, Artifact for all of them not read`` ()
             let window = show pdf review
             select (blockFor window "H")
             clickBlock Input.KeyModifiers.Shift (blockFor window "P")
-            let picker = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) <> "Document language") |> List.exactlyOne
+            let picker = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) |> _.StartsWith("Tag for")) |> List.exactlyOne
             // They differ: nothing's chosen.
             let shownAtFirst = picker.SelectedItem
             let named = string (Automation.AutomationProperties.GetName picker)
             pickTag window "Artifact"
             let edits = review.Edits |> List.map (fun e -> e.Tag, e.Retag) |> List.sort
-            let shownAfter = string (descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) <> "Document language") |> List.exactlyOne).SelectedItem
+            let shownAfter = string (descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) |> _.StartsWith("Tag for")) |> List.exactlyOne).SelectedItem
             window.Close()
 
             shownAtFirst |> should equal null
@@ -228,7 +228,7 @@ let ``a region can be given any suggested tag, which is kept and tagged`` () =
             let review = reviewOf pdf
             let window = show pdf review
             select (blockFor window "P")
-            let picker = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) <> "Document language") |> List.exactlyOne
+            let picker = descendants<ComboBox> window |> List.filter (fun c -> string (Avalonia.Automation.AutomationProperties.GetName c) |> _.StartsWith("Tag for")) |> List.exactlyOne
             let choices = picker.Items |> Seq.map string |> List.ofSeq
             picker.SelectedItem <- "Note"
             pump ()

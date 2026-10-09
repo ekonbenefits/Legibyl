@@ -37,6 +37,10 @@ type SavedEdit =
       [<JsonPropertyName "text">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
       Text: string | null
+      /// The language its text is in, as a person gave it (Structure…'s Language), e.g. "es".
+      [<JsonPropertyName "lang">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      Lang: string | null
       /// For paragraphs merged into this one (in Structure…): their boxes, like Box.
       [<JsonPropertyName "mergeWith">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
@@ -233,7 +237,7 @@ let readFrom (path: string) : SavedFile option =
     else readFile path
 
 /// The fields an edit can have.
-let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mergeWith"; "moveAfter"; "moveAfterPage"; "moveFirst"; "cells" ]
+let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "lang"; "retag"; "exclude"; "mergeWith"; "moveAfter"; "moveAfterPage"; "moveFirst"; "cells" ]
 
 /// What's wrong with a review's edits as written (json), which reading it would otherwise pass
 /// over: fields an edit doesn't have (e.g. "description": a link's description is its "alt"),
@@ -266,7 +270,7 @@ let problems (json: string) : string list =
                       for field in edit.EnumerateObject() do
                           if not (List.contains field.Name editFields) then
                               let hint = if field.Name = "description" || field.Name = "contents" then " (a link's description is its \"alt\")" else ""
-                              $"edits[{index}] has \"{field.Name}\", which isn't a field of an edit{hint}. An edit has page, tag and box, and any of alt, text, retag, exclude, mergeWith, moveAfter (with moveAfterPage) or moveFirst, and cells (a table's, rebuilt)."
+                              $"edits[{index}] has \"{field.Name}\", which isn't a field of an edit{hint}. An edit has page, tag and box, and any of alt, text, lang, retag, exclude, mergeWith, moveAfter (with moveAfterPage) or moveFirst, and cells (a table's, rebuilt)."
                       match edit.TryGetProperty "cells" with
                       | true, cells when cells.ValueKind = JsonValueKind.Array ->
                           for c, cell in Seq.indexed (cells.EnumerateArray()) do
@@ -276,6 +280,13 @@ let problems (json: string) : string list =
                                   | _ -> ""
                               if tag <> Tags.TH && tag <> Tags.TD then
                                   $"edits[{index}].cells[{c}] is a \"{tag}\", not a header cell (TH) or a data cell (TD)."
+                      | _ -> ()
+                      match edit.TryGetProperty "lang" with
+                      | true, language when
+                          language.ValueKind = JsonValueKind.String
+                          && not (Text.RegularExpressions.Regex.IsMatch(language.GetString() |> string, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"))
+                          ->
+                          $"edits[{index}] has lang \"{language.GetString()}\", which isn't a language tag (e.g. es, en-US)."
                       | _ -> ()
                       match edit.TryGetProperty "retag" with
                       | true, retag when retag.ValueKind = JsonValueKind.String && not (Tags.retagTargets.Contains(retag.GetString() |> string)) ->
@@ -339,7 +350,7 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
                       | Some box when cell.Tag = Tags.TH || cell.Tag = Tags.TD -> ({ Tag = cell.Tag; Box = box }: TableCell)
                       | _ -> () ]
             | Null -> []
-        if isNull saved.Alt && isNull saved.Text && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude && move.IsNone && cells.IsEmpty then
+        if isNull saved.Alt && isNull saved.Text && isNull saved.Lang && mergeWith.IsEmpty && isNull saved.Retag && not saved.Exclude && move.IsNone && cells.IsEmpty then
             None
         else
             Some
@@ -352,7 +363,8 @@ let toElementEdit (saved: SavedEdit) : ElementEdit option =
                   Retag = saved.Retag
                   Exclude = saved.Exclude
                   Move = move
-                  Cells = cells }
+                  Cells = cells
+                  Lang = saved.Lang }
     | None -> None
 
 /// The edit as it's saved.
@@ -363,6 +375,7 @@ let ofElementEdit (e: ElementEdit) : SavedEdit =
       Box = saved e.Box
       Alt = e.Alt
       Text = e.Text
+      Lang = e.Lang
       MergeWith = if e.MergeWith.IsEmpty then null else e.MergeWith |> List.map saved |> Array.ofList
       Retag = e.Retag
       Exclude = e.Exclude
@@ -399,7 +412,7 @@ let rekey (edits: ElementEdit list) (tagged: TaggedRegion seq) : ElementEdit lis
                   |> List.tryHead
                   |> Option.map (fun (tag, box, _) -> { e with Tag = tag; Box = box; Retag = null })
               match moved with
-              | Some moved when isNull moved.Alt && isNull moved.Text && moved.MergeWith.IsEmpty && moved.Move.IsNone -> ()
+              | Some moved when isNull moved.Alt && isNull moved.Text && isNull moved.Lang && moved.MergeWith.IsEmpty && moved.Move.IsNone -> ()
               | Some moved -> yield moved
               | None -> yield e ]
 

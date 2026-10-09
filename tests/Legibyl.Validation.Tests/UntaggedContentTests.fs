@@ -54,7 +54,7 @@ let private render (path: string) =
     page.Pixels |> Array.map (fun c -> c.Red, c.Green, c.Blue, c.Alpha)
 
 let private edit (piece: StructureNode) (retag: string) (alt: string | null) =
-    { Page = 1; Tag = ElementEdits.UntaggedTag; Box = nonNull piece.Geometry; Alt = alt; Text = null; MergeWith = []; Retag = retag; Exclude = false; Move = None; Cells = [] }
+    { Page = 1; Tag = ElementEdits.UntaggedTag; Box = nonNull piece.Geometry; Alt = alt; Text = null; MergeWith = []; Retag = retag; Exclude = false; Move = None; Cells = []; Lang = null }
 
 let private applyEdits (input: string) (output: string) (edits: ElementEdit list) =
     VeraPdfValidator(Edits = edits).Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.ApplyEdits)
@@ -107,7 +107,7 @@ let ``chosen piece by piece: decoration isn't read, a figure and a paragraph are
 
     let result = applyEdits input.Path output.Path edits
 
-    result.AppliedFixes |> should contain "Applied 5 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 5 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
     untagged output.Path |> should be Empty
     outside output.Path |> should be Empty
     render output.Path |> should equal (render input.Path)

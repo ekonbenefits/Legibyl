@@ -74,7 +74,7 @@ let private paragraphs (path: string) =
     all root |> List.filter (fun n -> n.Tag = "P")
 
 let private moveEdit (paragraph: StructureNode) (move: ElementMove) : ElementEdit =
-    { Page = 1; Tag = "P"; Box = nonNull paragraph.Geometry; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = Some move ; Cells = []}
+    { Page = 1; Tag = "P"; Box = nonNull paragraph.Geometry; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = Some move ; Cells = []; Lang = null }
 
 let private failedRules (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
@@ -116,8 +116,8 @@ let ``a move to where it is already changes nothing, and says so`` () =
 let ``a review keeps a move, first or after a sibling (on its own page or another)`` () =
     let after = { box (72.0, 600.0, 300.0, 620.0) with PageNumber = 2 }
     let edits =
-        [ { Page = 1; Tag = "P"; Box = box (72.0, 700.0, 300.0, 720.0); Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = Some First ; Cells = []}
-          { Page = 3; Tag = "H1"; Box = { box (72.0, 700.0, 300.0, 720.0) with PageNumber = 3 }; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = Some(After after) ; Cells = []} ]
+        [ { Page = 1; Tag = "P"; Box = box (72.0, 700.0, 300.0, 720.0); Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = Some First ; Cells = []; Lang = null }
+          { Page = 3; Tag = "H1"; Box = { box (72.0, 700.0, 300.0, 720.0) with PageNumber = 3 }; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = Some(After after) ; Cells = []; Lang = null } ]
 
     let back = edits |> List.map ReviewFile.ofElementEdit |> List.choose ReviewFile.toElementEdit
 

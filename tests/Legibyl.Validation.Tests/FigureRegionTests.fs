@@ -25,7 +25,7 @@ let private region: StructureGeometry =
 
 let private edit: ElementEdit =
     { Page = 1; Tag = "FigureRegion"; Box = region; Alt = "Sales rise from January to February."
-      Text = null; Retag = "Figure"; MergeWith = []; Exclude = false; Move = None; Cells = [] }
+      Text = null; Retag = "Figure"; MergeWith = []; Exclude = false; Move = None; Cells = []; Lang = null }
 
 /// Chart labels live in distant Art/Sect/P branches, interleaved with article paragraphs.
 /// Some chart artwork is tagged, some artifact, and some outside every tag.

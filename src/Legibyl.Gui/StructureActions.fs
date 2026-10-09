@@ -603,6 +603,56 @@ let tagChoice (needs: SelectionNeeds) : TagChoice option =
                         |> needs.SaveEdits
                         |> ignore }
 
+/// What the Language picker offers for the selection: a tagged PDF's one element with text of its
+/// own, the language its text is in (its own /Lang, or yours), to give it another.
+type LanguageChoice =
+    { Target: StructureNode
+      /// Each language's label ("Spanish (es)") and tag; first, for one that says none of its
+      /// own, "As around it" (None).
+      Languages: (string * string option) list
+      Current: string option
+      Pick: string option -> unit }
+
+/// The label "As around it" has: the language the element is read in when it says none.
+[<Literal>]
+let AsAroundIt = "As around it"
+
+let languageChoice (needs: SelectionNeeds) : LanguageChoice option =
+    // (Its text may be in what it holds: a paragraph's in a span.)
+    let rec holdsText (node: StructureNode) =
+        node.ContentLeafCount > 0 || not (String.IsNullOrWhiteSpace node.Content) || node.Children |> Seq.exists holdsText
+    match needs.Selected.Current with
+    | [ single ] when
+        not needs.Suggested
+        && single.Kind = StructureNodeKind.Element
+        && not (isNull single.Geometry)
+        && holdsText single
+        ->
+        let edit = editFor needs.Edits.Current single
+        let current = edit |> Option.bind _.Lang |> Option.orElse (Option.ofObj single.Language)
+        let choices = LanguagePacks.choices ()
+        let label (tag: string) =
+            let primary = tag.Split('-').[0].ToLowerInvariant()
+            let name = choices |> List.tryFind (fun (t, _) -> t = primary) |> Option.map snd |> Option.defaultValue tag
+            $"{name} ({tag})"
+        // Its own and yours too, as written (es-MX, say), so what it has is always one to show.
+        let tags =
+            Option.toList (Option.ofObj single.Language) @ Option.toList current @ (choices |> List.map fst)
+            |> List.distinctBy (fun tag -> tag.ToLowerInvariant())
+        Some
+            { Target = single
+              // (One that says its own can't be made to say none.)
+              Languages = (if isNull single.Language then [ AsAroundIt, None ] else []) @ [ for tag in tags -> label tag, Some tag ]
+              Current = current
+              Pick =
+                fun picked ->
+                    // Its own language, as the PDF has it, isn't an edit.
+                    let language = if picked = Option.ofObj single.Language then None else picked
+                    if language <> (edit |> Option.bind _.Lang) then
+                        let box = nonNull single.Geometry
+                        RegionEdits.setLang needs.Edits.Current box.PageNumber single.Tag box language |> needs.SaveEdits |> ignore }
+    | _ -> None
+
 /// The rest: a suggested region merged into its neighbour (its text still read) or kept again;
 /// what's drawn outside every tag made decoration, or tagged as a figure or a paragraph; a tagged
 /// PDF's paragraphs, or a figure drawn in pieces, merged into one, or kept apart again.
@@ -772,7 +822,7 @@ let selectionActions (needs: SelectionNeeds) (moves: Action list) : IView =
         | None -> ()
         | Some choice ->
             let chosen = needs.Selected.Current
-            DockPanel.create [
+            (DockPanel.create [
                 DockPanel.margin (0.0, 0.0, 0.0, 8.0)
                 DockPanel.children [
                     TextBlock.create [
@@ -801,7 +851,44 @@ let selectionActions (needs: SelectionNeeds) (moves: Action list) : IView =
                         )
                     ]
                 ]
-            ]
+            ])
+            |> View.withKey "tag-picker"
+        match languageChoice needs with
+        | None -> ()
+        | Some choice ->
+            let chosen = needs.Selected.Current
+            (DockPanel.create [
+                DockPanel.margin (0.0, 0.0, 0.0, 8.0)
+                DockPanel.children [
+                    TextBlock.create [
+                        DockPanel.dock Dock.Left
+                        TextBlock.text "Language"
+                        TextBlock.verticalAlignment VerticalAlignment.Center
+                        TextBlock.margin (0.0, 0.0, 8.0, 0.0)
+                    ]
+                    ComboBox.create [
+                        ComboBox.minWidth 160.0
+                        ComboBox.horizontalAlignment HorizontalAlignment.Left
+                        ComboBox.dataItems (choice.Languages |> List.map fst)
+                        ComboBox.selectedIndex (
+                            choice.Languages
+                            |> List.tryFindIndex (fun (_, tag) -> tag |> Option.map _.ToLowerInvariant() = (choice.Current |> Option.map _.ToLowerInvariant()))
+                            |> Option.defaultValue 0
+                        )
+                        AttrBuilder<ComboBox>.CreateProperty<string | null>(Automation.AutomationProperties.NameProperty, $"Language of this <{choice.Target.Tag}>", ValueNone)
+                        ToolTip.tip "The language its text is in, when it isn't the one around it (a Spanish paragraph in an English document): a screen reader reads it with that voice. Export… gives it (/Lang)."
+                        ComboBox.onSelectedItemChanged (
+                            (fun item ->
+                                match item with
+                                | :? string as picked when obj.ReferenceEquals(needs.Selected.Current, chosen) ->
+                                    choice.Languages |> List.tryFind (fun (label, _) -> label = picked) |> Option.iter (snd >> choice.Pick)
+                                | _ -> ()),
+                            SubPatchOptions.Always
+                        )
+                    ]
+                ]
+            ])
+            |> View.withKey "language-picker"
         yield! row (otherActions needs)
         match needs.Selected.Current with
         | [ single ] when single.Tag = Tags.P && not needs.Suggested && (otherActions needs).IsEmpty ->

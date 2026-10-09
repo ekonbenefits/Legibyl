@@ -675,7 +675,9 @@ in the PDF yet. Paragraphs can be merged too: shift-click extends the selection
 over a block's siblings (the page preview outlines and numbers each one), and
 when a single block of text (a paragraph, heading, caption, note or block
 quote) is selected, a **Tag** picker under **Selected element** gives it another tag —
-a heading tagged as a paragraph, say — as a `retag` edit; and when two or more
+a heading tagged as a paragraph, say — as a `retag` edit. A **Language** picker,
+for any one element with text, gives its text another language than the one around
+it (a Spanish paragraph in an English document), as a `lang` edit; and when two or more
 neighbouring paragraphs on one page are selected (none with alt
 text or replacement text), **Merge N Paragraphs** records the merge as an edit,
 keyed by each paragraph's box; **Don't Merge These** drops it again. Export joins
@@ -1433,6 +1435,7 @@ an edit gives it), and changing it with any of:
 | `alt` | a figure | Its alt text: what it's for, not only what it shows. |
 | `alt` | a `Link` (tagged PDF) | Its description, what a screen reader announces (the annotation's `/Contents`). |
 | `text` | text read with OCR | The text, corrected (`""` for nothing to read), written as replacement text (`/ActualText`). |
+| `lang` | an element with text (tagged PDF) | The language its text is in, when it isn't the one around it (`"es"` for a Spanish paragraph in an English document), written as its `/Lang`. |
 | `mergeWith` | a paragraph (tagged PDF) | The boxes of the paragraphs after it to merge into it. |
 | `moveAfter` (and `moveAfterPage`), or `moveFirst: true` | an element (tagged PDF) | Moves it among its siblings in the reading order: after the sibling with that box (on `moveAfterPage`, when it's another page), or first. Those not moved keep their order. |
 | `retag` | something outside every tag (`"tag": "Untagged"`, its `box` from `structure`) | `"Artifact"`: decoration, not read (its drawing is wrapped in `/Artifact BMC … EMC`; never text, which stays readable). `"Figure"` (with `alt`) or `"P"`: tagged, in reading order after what's tagged before it on its page. |

@@ -110,7 +110,7 @@ let private edits (title: string | null) (edits: ReviewFile.SavedEdit list) : Re
     { Version = 1; DismissedWarnings = null; Edits = Array.ofList edits; Title = title; Language = null; RoleMap = null; Attachments = null; Layout = null; Fixes = null; Validation = null; Checklist = null }
 
 let private editOn tag box : ReviewFile.SavedEdit =
-    { Page = 1; Tag = tag; Box = box; Alt = null; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null}
+    { Page = 1; Tag = tag; Box = box; Alt = null; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null; Lang = null }
 
 let private heading = [| 70.0; 695.0; 300.0; 715.0 |]
 let private figure = [| 70.0; 548.0; 175.0; 652.0 |]
@@ -169,7 +169,7 @@ let ``edits with a field an edit doesn't have, or a tag that isn't one, are usag
         File.WriteAllText(pdf + ".legibyl.json", """{ "version": 1, "edits": [ { "page": 1, "tag": "P", "box": [ 1, 2, 3, 4 ], "contents": "x" } ] }""")
         fst (run [ "fix"; pdf; "--edits" ]) |> should equal 64
         ReviewFile.problems (File.ReadAllText(pdf + ".legibyl.json"))
-        |> should equal [ "edits[0] has \"contents\", which isn't a field of an edit (a link's description is its \"alt\"). An edit has page, tag and box, and any of alt, text, retag, exclude, mergeWith, moveAfter (with moveAfterPage) or moveFirst, and cells (a table's, rebuilt)." ])
+        |> should equal [ "edits[0] has \"contents\", which isn't a field of an edit (a link's description is its \"alt\"). An edit has page, tag and box, and any of alt, text, lang, retag, exclude, mergeWith, moveAfter (with moveAfterPage) or moveFirst, and cells (a table's, rebuilt)." ])
 
 [<Fact>]
 let ``layout apply on a tagged file says it's already tagged`` () =

@@ -204,7 +204,9 @@ type ElementEdit =
       Move: ElementMove option
       /// For a table: its rows and cells rebuilt as these cells (from the page, see TableRebuild);
       /// empty to leave it.
-      Cells: TableCell list }
+      Cells: TableCell list
+      /// The language its text is in (/Lang, e.g. "es"), as a person gave it; null to leave it.
+      Lang: string | null }
 
 /// The order of an element's children once some are moved (see ElementMove): those moved are
 /// taken out and put where their moves say, the rest keeping the order they were read in. The
