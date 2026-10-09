@@ -55,20 +55,82 @@ let private write (path: string option) (rendered: string) =
 /// The worst of several exit codes (a tool error over a document problem over success).
 let private worst (codes: int seq) = if Seq.isEmpty codes then ExitCodes.Success else Seq.max codes
 
+/// What the run says on stderr as it goes (see Progress): set by each command for its files.
+let mutable private reporter = Progress.Reporter(Progress.Quiet, 1)
+
+/// How long a download may go without data before it's given up on.
+let private stalled = TimeSpan.FromSeconds 60.0
+
 /// Downloads the layout models (the layout detector's, and the table-structure model) if they
-/// aren't yet, saying how it's going on stderr.
+/// aren't yet, saying how it's going (MB of the total). A download that gets no data for a
+/// minute is given up on, as timed out.
 let private ensureLayoutModel () =
     if not (Legibyl.Layout.LayoutModel.isDownloaded ()) then
-        eprintfn $"Downloading the layout models (about {Legibyl.Layout.LayoutModel.downloadMegabytes ()} MB), once…"
-        let mutable shown = -1
+        let total = Legibyl.Layout.LayoutModel.downloadMegabytes ()
+        use cancel = new Threading.CancellationTokenSource()
+        let mutable lastData = Diagnostics.Stopwatch.StartNew()
         let progress =
             { new IProgress<float> with
                 member _.Report fraction =
-                    let percent = int (fraction * 10.0) * 10
-                    if percent > shown then
-                        shown <- percent
-                        eprintfn $"  {percent}%%" }
-        Legibyl.Layout.LayoutModel.download progress Threading.CancellationToken.None |> _.GetAwaiter().GetResult()
+                    lastData.Restart()
+                    reporter.Status("Downloading the layout models, once", (int (fraction * float total), total), "MB") }
+        use _watchdog =
+            new Threading.Timer(
+                (fun _ -> if lastData.Elapsed > stalled then cancel.Cancel()),
+                null,
+                TimeSpan.FromSeconds 5.0,
+                TimeSpan.FromSeconds 5.0
+            )
+        reporter.Status("Downloading the layout models, once", (0, total), "MB")
+        Legibyl.Layout.LayoutModel.download progress cancel.Token |> _.GetAwaiter().GetResult()
+
+/// Says where validation has got, as activity ("Validating").
+let private validationProgress (activity: string) =
+    { new IProgress<ValidationProgress> with
+        member _.Report p =
+            match p.Stage with
+            | ValidationStage.Preparing -> reporter.Status $"{activity}: reading the PDF"
+            | ValidationStage.CheckingPages -> reporter.Status(activity, (p.Page, p.PageCount))
+            | ValidationStage.Finishing -> reporter.Status $"{activity}: finishing up"
+            | _ -> reporter.Status activity }
+
+/// Says where reading the structure has got.
+let private structureProgress =
+    { new IProgress<StructureReadProgress> with
+        member _.Report p =
+            match p.Stage with
+            | StructureReadStage.ReadingText -> reporter.Status("Reading the structure: page text", (p.Page, p.PageCount))
+            | StructureReadStage.ReadingLinks -> reporter.Status "Reading the structure: links"
+            | _ -> reporter.Status "Reading the structure: building the tree" }
+
+/// Says where fixing has got: its step, and the page where there are pages.
+let private fixProgress =
+    { new IProgress<FixProgress> with
+        member _.Report p =
+            let step = $"Fixing, step {p.Step} of {p.Steps}"
+            let pages = if p.Page > 0 && p.PageCount > 0 then Some(p.Page, p.PageCount) else None
+            let stage =
+                match p.Stage with
+                | FixStage.CheckingOriginal -> $"{step}: checking the original"
+                | FixStage.Tagging -> $"{step}: finding pages' layouts, to tag them"
+                | FixStage.Fixing when pages.IsSome -> $"{step}: finding pages' layouts, to join split paragraphs"
+                | FixStage.Fixing -> $"{step}: applying the fixes"
+                | _ -> $"{step}: fixing metadata with veraPDF"
+            match pages with
+            | Some position -> reporter.Status(stage, position)
+            | None -> reporter.Status stage }
+
+/// The --progress and --quiet options every command that processes files has.
+let private progressOption () =
+    optionMaybe<string> "--progress"
+    |> desc "How progress is said on stderr: auto (one line rewritten on a terminal, a line per stage otherwise), line, plain, json (one object a line), or none. stdout stays the report."
+    |> helpName "auto|line|plain|json|none"
+
+let private quietOption () = option<bool> "--quiet" |> desc "Say nothing on stderr as it goes (as --progress none); errors are still said."
+
+/// The reporter for a run over count files, or why the options can't make one.
+let private startReporting (progress: string option) (quiet: bool) (count: int) =
+    Progress.choose progress quiet |> Result.map (fun mode -> reporter <- Progress.Reporter(mode, count))
 
 /// What went wrong, as a file's error says it: the innermost exception's message (a task's comes
 /// wrapped), a download's failure said as one.
@@ -139,7 +201,7 @@ let private fixesOption (defaultNames: string) =
         $"The fixes to run, comma-separated: \"safe\" (the ones that need no guesswork), \"all\" (every one \
           but link-titles-from-web, which visits web pages), \"none\", or names from 'legibyl list fixes', e.g. \
           \"safe,lists,headings-from-toc\". Default: {defaultNames}. tag-from-layout and join-split-paragraphs \
-          download the layout model (about 130 MB) the first time."
+          download the layout models (about {Legibyl.Layout.LayoutModel.totalMegabytes} MB) the first time."
     |> helpName "names"
     |> arity Arity.ExactlyOne
     |> validate (fun names ->
@@ -180,13 +242,15 @@ type private ValidateArgs =
       AllWarnings: bool
       /// --review: the review to use for every file (a .legibyl.json file, or a PDF whose review
       /// to use), instead of each one's own.
-      Review: string option }
+      Review: string option
+      Progress: string option
+      Quiet: bool }
 
 /// Validates file; its warnings the review (given, else its own) dismisses are left out.
 let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (given: (string * ReviewFile.SavedFile) option) (file: string) =
     let target = targetFor args.Ua file
     let result = ValidationResult.Empty(file, target)
-    match (try Ok(validator.Validate(file, target.Profile)) with :? VeraPdfValidationException as ex -> Error ex.Message) with
+    match (try Ok(validator.Validate(file, target.Profile, validationProgress "Validating")) with :? VeraPdfValidationException as ex -> Error ex.Message) with
     | Error message -> { result with Error = message }
     | Ok report ->
         // The review's dismissals, as the GUI shows them: --review's, else the file's own.
@@ -222,7 +286,7 @@ let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (giv
             result
         else
             try
-                { result with Structure = validator.ReadStructureTree file }
+                { result with Structure = validator.ReadStructureTree(file, structureProgress) }
             with :? VeraPdfValidationException as ex ->
                 { result with StructureError = ex.Message }
 
@@ -323,38 +387,51 @@ let private printingLog (verbose: bool) : IDisposable =
 
 let private runValidate (args: ValidateArgs) =
     use _ = printingLog args.Verbose
-    let given =
-        args.Review
-        |> Option.map (fun path ->
-            if not (File.Exists path) then Error $"--review: {path} doesn't exist."
-            else
-                match ReviewFile.readFrom path with
-                | Some review -> Ok(path, review)
-                | None -> Error $"--review: {path} has no review in it.")
-    match given with
-    | Some(Error message) -> usageError message
-    | _ ->
-        let given = given |> Option.bind Result.toOption
-        let validator = VeraPdfValidator()
-        // Each file on its own: one failing some unexpected way doesn't lose the others' results.
-        let results =
-            [ for file in args.Files ->
-                  try
-                      validateFile validator args given file
-                  with ex ->
-                      let message = failure ex
-                      eprintfn $"error: {file}: {message}"
-                      { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget args.Ua)) with Error = message } ]
-        write args.Output (if args.Format = "json" then toJson results else validationText results)
-        results
-        |> List.map (fun r ->
-            if not (isNull r.Error) then ExitCodes.ToolError
-            elif r.IsCompliant = Nullable false then ExitCodes.DocumentProblem
-            // WCAG's checks couldn't run: the tool's fault, not the document's.
-            elif not (isNull r.WcagError) then ExitCodes.ToolError
-            elif r.MeetsWcag = Nullable false then ExitCodes.DocumentProblem
-            else ExitCodes.Success)
-        |> worst
+    match startReporting args.Progress args.Quiet args.Files.Length with
+    | Error message -> usageError message
+    | Ok() ->
+        let given =
+            args.Review
+            |> Option.map (fun path ->
+                if not (File.Exists path) then Error $"--review: {path} doesn't exist."
+                else
+                    match ReviewFile.readFrom path with
+                    | Some review -> Ok(path, review)
+                    | None -> Error $"--review: {path} has no review in it.")
+        match given with
+        | Some(Error message) -> usageError message
+        | _ ->
+            let given = given |> Option.bind Result.toOption
+            let validator = VeraPdfValidator()
+            // Each file on its own: one failing some unexpected way doesn't lose the others' results.
+            let results =
+                [ for file in args.Files ->
+                      reporter.Begin file
+                      let result =
+                          try
+                              validateFile validator args given file
+                          with ex ->
+                              let message = failure ex
+                              reporter.Clear()
+                              eprintfn $"error: {file}: {message}"
+                              { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget args.Ua)) with Error = message }
+                      reporter.Done(
+                          if not (isNull result.Error) then $"ERROR, {result.Error}"
+                          elif result.IsCompliant = Nullable true && result.MeetsWcag = Nullable true then "PASS"
+                          elif result.IsCompliant = Nullable true && not (isNull result.WcagError) then $"FAIL, {WcagSpecification.Name} not checked"
+                          else $"FAIL, {result.FailedCount} failed"
+                      )
+                      result ]
+            write args.Output (if args.Format = "json" then toJson results else validationText results)
+            results
+            |> List.map (fun r ->
+                if not (isNull r.Error) then ExitCodes.ToolError
+                elif r.IsCompliant = Nullable false then ExitCodes.DocumentProblem
+                // WCAG's checks couldn't run: the tool's fault, not the document's.
+                elif not (isNull r.WcagError) then ExitCodes.ToolError
+                elif r.MeetsWcag = Nullable false then ExitCodes.DocumentProblem
+                else ExitCodes.Success)
+            |> worst
 
 // ---- fix and layout apply ----
 
@@ -484,7 +561,9 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                     | Null -> ()
                     validator.Review <- ReviewFile.forCopy (Some review)
                 | None -> ()
-                let fix = validator.Fix(file, profile, targetPath, options)
+                if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then
+                    reporter.Note "Linked web pages' titles are read as it's fixed: up to two minutes"
+                let fix = validator.Fix(file, profile, targetPath, options, fixProgress)
                 let before = compliance fix.OriginalReport
                 let result = { result with ValidatorNotes = fix.OriginalReport.Notes }
                 let applied = Array.ofSeq fix.AppliedFixes
@@ -505,7 +584,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                         Before = before
                         After =
                             match fix.OutputPath with
-                            | NonNull copy -> compliance (validator.Validate(copy, profile))
+                            | NonNull copy -> compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy"))
                             | Null -> null }
                 | NonNull copy ->
                     { result with
@@ -514,7 +593,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                         Applied = applied
                         NotApplied = notApplied
                         Before = before
-                        After = compliance (validator.Validate(copy, profile)) }
+                        After = compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy")) }
                 | Null -> { result with Status = FixStatus.NothingToDo; Applied = applied; NotApplied = notApplied; Before = before }
             with
             | :? VeraPdfValidationException as ex -> { result with Error = ex.Message }
@@ -600,6 +679,7 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
     // error (exit 2), and the others' results are kept.
     let failed (file: string) (ex: exn) : FixOutcome =
         // On stderr as well: after a download's last percentage, say, rather than nothing.
+        reporter.Clear()
         eprintfn $"error: {file}: {failure ex}"
         let target = try targetFor request.Ua file with _ -> unknownTarget request.Ua
         { File = file
@@ -614,7 +694,19 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
           Before = null
           After = null
           ValidatorNotes = [||] }
-    let results = [ for file in files -> try fixFile validator request file with ex -> failed file ex ]
+    let results =
+        [ for file in files ->
+              reporter.Begin file
+              let result = try fixFile validator request file with ex -> failed file ex
+              let standing (c: Compliance | null) = match c with NonNull c when c.IsCompliant -> "PASS" | NonNull c -> $"FAIL {c.FailedCount}" | Null -> "?"
+              reporter.Done(
+                  match result.Status with
+                  | FixStatus.Error -> $"ERROR, {result.Error}"
+                  | FixStatus.Fixed -> $"fixed → {Path.GetFileName result.OutputPath} ({standing result.Before} → {standing result.After})"
+                  | FixStatus.AlreadyTagged -> "already tagged"
+                  | _ -> $"nothing to do ({standing result.Before})"
+              )
+              result ]
     write report (if format = "json" then toJson results else fixText results)
     results |> List.map fixExit |> worst
 
@@ -628,68 +720,85 @@ type private FixArgs =
       EditsFrom: string option
       Lang: string option
       Output: string option
-      Verbose: bool }
+      Verbose: bool
+      Progress: string option
+      Quiet: bool }
 
 /// Whether tag is a language tag (BCP 47): a language, then subtags, e.g. en, en-US, zh-Hant-TW.
 let private isLanguageTag (tag: string) = RegularExpressions.Regex.IsMatch(tag, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$")
 
 let private runFix (args: FixArgs) =
     use _ = printingLog args.Verbose
-    if args.Edits && args.EditsFrom.IsSome then
-        usageError "Use --edits or --edits-from, not both."
-    elif (sidecarProblems args.Edits args.Files).IsSome then
-        usageError (sidecarProblems args.Edits args.Files).Value
-    elif args.Output.IsSome && args.Files.Length > 1 then
-        usageError "--output names one fixed copy: use it with a single file (several get their next versions)."
-    elif args.Lang |> Option.exists (isLanguageTag >> not) then
-        usageError $"--lang takes a language tag, e.g. es-MX, not '{args.Lang.Value}'."
-    else
-        match args.EditsFrom |> Option.map reviewFrom with
-        | Some(Error message) -> usageError message
-        | review ->
-            let fixes = FixNames.parse (defaultArg args.Fixes "safe") |> Result.defaultValue FixNames.safe
-            runFixes
-                (VeraPdfValidator())
-                (List.ofArray args.Files)
-                { Ua = args.Ua
-                  Fixes = fixes
-                  Review = review |> Option.bind Result.toOption
-                  ReviewAsked = args.Edits
-                  Layout = None
-                  Language = args.Lang
-                  Output = args.Output }
-                args.Format
-                args.Report
+    match startReporting args.Progress args.Quiet args.Files.Length with
+    | Error message -> usageError message
+    | Ok() ->
+        if args.Edits && args.EditsFrom.IsSome then
+            usageError "Use --edits or --edits-from, not both."
+        elif (sidecarProblems args.Edits args.Files).IsSome then
+            usageError (sidecarProblems args.Edits args.Files).Value
+        elif args.Output.IsSome && args.Files.Length > 1 then
+            usageError "--output names one fixed copy: use it with a single file (several get their next versions)."
+        elif args.Lang |> Option.exists (isLanguageTag >> not) then
+            usageError $"--lang takes a language tag, e.g. es-MX, not '{args.Lang.Value}'."
+        else
+            match args.EditsFrom |> Option.map reviewFrom with
+            | Some(Error message) -> usageError message
+            | review ->
+                let fixes = FixNames.parse (defaultArg args.Fixes "safe") |> Result.defaultValue FixNames.safe
+                runFixes
+                    (VeraPdfValidator())
+                    (List.ofArray args.Files)
+                    { Ua = args.Ua
+                      Fixes = fixes
+                      Review = review |> Option.bind Result.toOption
+                      ReviewAsked = args.Edits
+                      Layout = None
+                      Language = args.Lang
+                      Output = args.Output }
+                    args.Format
+                    args.Report
 
 // ---- structure ----
 
-type private StructureArgs = { Files: string array; Format: string; Output: string option }
+type private StructureArgs = { Files: string array; Format: string; Output: string option; Progress: string option; Quiet: bool }
 
 let private runStructure (args: StructureArgs) =
-    let validator = VeraPdfValidator()
-    let results =
-        [ for file in args.Files ->
-              try
-                  { File = file; Structure = validator.ReadStructureTree file; Error = null }
-              with :? VeraPdfValidationException as ex ->
-                  { File = file; Structure = null; Error = ex.Message } ]
-    let text () =
-        let sb = StringBuilder()
-        for r in results do
-            match r.Error, r.Structure with
-            | NonNull error, _ -> sb.AppendLine $"{r.File}: ERROR — {error}" |> ignore
-            | Null, Null -> sb.AppendLine $"{r.File}: no structure tree (untagged)" |> ignore
-            | Null, NonNull structure ->
-                sb.AppendLine $"{r.File}:" |> ignore
-                appendStructure sb structure 2
-        sb.ToString().TrimEnd('\n', '\r')
-    write args.Output (if args.Format = "json" then toJson results else text ())
-    results
-    |> List.map (fun r ->
-        if not (isNull r.Error) then ExitCodes.ToolError
-        elif isNull r.Structure then ExitCodes.DocumentProblem
-        else ExitCodes.Success)
-    |> worst
+    match startReporting args.Progress args.Quiet args.Files.Length with
+    | Error message -> usageError message
+    | Ok() ->
+        let validator = VeraPdfValidator()
+        let results =
+            [ for file in args.Files ->
+                  reporter.Begin file
+                  let result =
+                      try
+                          { File = file; Structure = validator.ReadStructureTree(file, structureProgress); Error = null }
+                      with :? VeraPdfValidationException as ex ->
+                          { File = file; Structure = null; Error = ex.Message }
+                  reporter.Done(
+                      match result.Error, result.Structure with
+                      | NonNull error, _ -> $"ERROR, {error}"
+                      | Null, Null -> "no structure tree (untagged)"
+                      | Null, NonNull _ -> "read"
+                  )
+                  result ]
+        let text () =
+            let sb = StringBuilder()
+            for r in results do
+                match r.Error, r.Structure with
+                | NonNull error, _ -> sb.AppendLine $"{r.File}: ERROR — {error}" |> ignore
+                | Null, Null -> sb.AppendLine $"{r.File}: no structure tree (untagged)" |> ignore
+                | Null, NonNull structure ->
+                    sb.AppendLine $"{r.File}:" |> ignore
+                    appendStructure sb structure 2
+            sb.ToString().TrimEnd('\n', '\r')
+        write args.Output (if args.Format = "json" then toJson results else text ())
+        results
+        |> List.map (fun r ->
+            if not (isNull r.Error) then ExitCodes.ToolError
+            elif isNull r.Structure then ExitCodes.DocumentProblem
+            else ExitCodes.Success)
+        |> worst
 
 // ---- append ----
 
@@ -701,7 +810,9 @@ type private AppendArgs =
       PartTag: string option
       Format: string
       Report: string option
-      Verbose: bool }
+      Verbose: bool
+      Progress: string option
+      Quiet: bool }
 
 let private appendText (r: AppendOutcome) =
     let sb = StringBuilder()
@@ -731,106 +842,123 @@ let private appendText (r: AppendOutcome) =
 
 let private runAppend (args: AppendArgs) =
     use _ = printingLog args.Verbose
-    let files = List.ofArray args.Files
-    if files.Length < 2 then
-        usageError "Name two or more PDFs to join."
-    else
-        let profile, _ = PdfUaTarget.detect files.Head
-        match args.PartTag, args.Lang with
-        | Some tag, _ when not (List.contains tag (Append.partTags profile)) ->
-            usageError $"""--part-tag for {PdfUaTarget.displayName profile} is one of {String.Join(", ", Append.partTags profile)}, not '{tag}'."""
-        // A language tag (BCP 47): a language, then subtags, e.g. en, en-US, zh-Hant-TW.
-        | _, Some lang when not (isLanguageTag lang) ->
-            usageError $"--lang takes a language tag, e.g. en-US, not '{lang}'."
-        | _ ->
-            let output = args.Output |> Option.defaultWith (fun () -> nextVersion files.Head)
-            let options: Append.Options = { Title = args.Title; Language = args.Lang; PartTag = args.PartTag }
-            match
-                (try Ok(Append.run (VeraPdfValidator()) files output options (fun stage -> if args.Verbose then eprintfn $"{stage}")) with
-                 | :? VeraPdfValidationException
-                 | :? IOException
-                 | :? UnauthorizedAccessException
-                 | :? InvalidOperationException
-                 | :? iText.Commons.Exceptions.ITextException as ex -> Error ex.Message)
-            with
-            | Error message ->
-                eprintfn $"error: the PDFs couldn't be joined: {message}"
-                ExitCodes.ToolError
-            | Ok outcome ->
-                let warnings, failures =
-                    match outcome.After with
-                    | Some after -> after.Assertions |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning) |> List.ofSeq, List.ofSeq after.FailedAssertions
-                    | None -> [], []
-                let result =
-                    { Status =
-                        if outcome.Joined.IsNone then AppendStatus.Refused
-                        elif outcome.Passes then AppendStatus.Joined
-                        else AppendStatus.Fails
-                      OutputPath = outcome.Joined |> Option.map _.Output |> Option.toObj
-                      Standard = outcome.Joined |> Option.map (fun joined -> PdfUaTarget.displayName joined.Profile) |> Option.toObj
-                      Title = outcome.Joined |> Option.map _.Title |> Option.toObj
-                      Language = outcome.Joined |> Option.bind _.Language |> Option.toObj
-                      Inputs =
-                        [| for file, report in outcome.Inputs ->
-                               { File = file
-                                 Standard = PdfUaTarget.displayName report.Profile
-                                 IsCompliant = report.IsCompliant
-                                 FailedCount = report.FailedCount } |]
-                      Refusals = [| for refusal in outcome.Refusals -> { File = refusal.File; Reason = refusal.Reason } |]
-                      Notes = outcome.Joined |> Option.map (_.AllNotes >> Array.ofList) |> Option.defaultValue [||]
-                      After = outcome.After |> Option.map compliance |> Option.toObj
-                      Failures = failures |> List.map FailureDetail.Of |> Array.ofList
-                      Warnings = warnings |> List.map FailureDetail.Of |> Array.ofList
-                      StructureDifferences = Array.ofList outcome.Differences }
-                write args.Report (if args.Format = "json" then toJson result else appendText result)
-                match result.Status with
-                | AppendStatus.Joined -> ExitCodes.Success
-                | AppendStatus.Fails -> ExitCodes.DocumentProblem
-                | _ -> ExitCodes.ToolError
+    match startReporting args.Progress args.Quiet 1 with
+    | Error message -> usageError message
+    | Ok() ->
+        let files = List.ofArray args.Files
+        if files.Length < 2 then
+            usageError "Name two or more PDFs to join."
+        else
+            let profile, _ = PdfUaTarget.detect files.Head
+            match args.PartTag, args.Lang with
+            | Some tag, _ when not (List.contains tag (Append.partTags profile)) ->
+                usageError $"""--part-tag for {PdfUaTarget.displayName profile} is one of {String.Join(", ", Append.partTags profile)}, not '{tag}'."""
+            // A language tag (BCP 47): a language, then subtags, e.g. en, en-US, zh-Hant-TW.
+            | _, Some lang when not (isLanguageTag lang) ->
+                usageError $"--lang takes a language tag, e.g. en-US, not '{lang}'."
+            | _ ->
+                let output = args.Output |> Option.defaultWith (fun () -> nextVersion files.Head)
+                let options: Append.Options = { Title = args.Title; Language = args.Lang; PartTag = args.PartTag }
+                reporter.Begin output
+                match
+                    (try Ok(Append.run (VeraPdfValidator()) files output options (fun stage -> reporter.Status(stage.TrimEnd('…')))) with
+                     | :? VeraPdfValidationException
+                     | :? IOException
+                     | :? UnauthorizedAccessException
+                     | :? InvalidOperationException
+                     | :? iText.Commons.Exceptions.ITextException as ex -> Error ex.Message)
+                with
+                | Error message ->
+                    reporter.Clear()
+                    eprintfn $"error: the PDFs couldn't be joined: {message}"
+                    ExitCodes.ToolError
+                | Ok outcome ->
+                    reporter.Done(
+                        match outcome.Joined, outcome.Passes with
+                        | None, _ -> "nothing written"
+                        | Some joined, true -> $"joined → {Path.GetFileName joined.Output} (passes)"
+                        | Some joined, false -> $"joined → {Path.GetFileName joined.Output} (doesn't pass)"
+                    )
+                    let warnings, failures =
+                        match outcome.After with
+                        | Some after -> after.Assertions |> Seq.filter (fun a -> a.Severity = FindingSeverity.Warning) |> List.ofSeq, List.ofSeq after.FailedAssertions
+                        | None -> [], []
+                    let result =
+                        { Status =
+                            if outcome.Joined.IsNone then AppendStatus.Refused
+                            elif outcome.Passes then AppendStatus.Joined
+                            else AppendStatus.Fails
+                          OutputPath = outcome.Joined |> Option.map _.Output |> Option.toObj
+                          Standard = outcome.Joined |> Option.map (fun joined -> PdfUaTarget.displayName joined.Profile) |> Option.toObj
+                          Title = outcome.Joined |> Option.map _.Title |> Option.toObj
+                          Language = outcome.Joined |> Option.bind _.Language |> Option.toObj
+                          Inputs =
+                            [| for file, report in outcome.Inputs ->
+                                   { File = file
+                                     Standard = PdfUaTarget.displayName report.Profile
+                                     IsCompliant = report.IsCompliant
+                                     FailedCount = report.FailedCount } |]
+                          Refusals = [| for refusal in outcome.Refusals -> { File = refusal.File; Reason = refusal.Reason } |]
+                          Notes = outcome.Joined |> Option.map (_.AllNotes >> Array.ofList) |> Option.defaultValue [||]
+                          After = outcome.After |> Option.map compliance |> Option.toObj
+                          Failures = failures |> List.map FailureDetail.Of |> Array.ofList
+                          Warnings = warnings |> List.map FailureDetail.Of |> Array.ofList
+                          StructureDifferences = Array.ofList outcome.Differences }
+                    write args.Report (if args.Format = "json" then toJson result else appendText result)
+                    match result.Status with
+                    | AppendStatus.Joined -> ExitCodes.Success
+                    | AppendStatus.Fails -> ExitCodes.DocumentProblem
+                    | _ -> ExitCodes.ToolError
 
 // ---- layout suggest and layout apply ----
 
-type private SuggestArgs = { File: string; Output: string option; FigureImages: bool }
+type private SuggestArgs = { File: string; Output: string option; FigureImages: bool; Progress: string option; Quiet: bool }
 
 let private runSuggest (args: SuggestArgs) =
-    if args.FigureImages && args.Output.IsNone then
-        usageError "--figure-images needs --output: the images go in a folder beside the layout file."
-    elif not (File.Exists args.File) then
-        eprintfn $"error: {args.File} doesn't exist."
-        ExitCodes.ToolError
-    else
-        try
-            ensureLayoutModel ()
-            use suggester = new Legibyl.Layout.LayoutSuggester(args.File)
-            let pages =
-                [ for page in 1 .. suggester.PageCount ->
-                      eprintfn $"Finding page {page} of {suggester.PageCount}'s layout…"
-                      suggester.Suggest page ]
-            let layout =
-                Legibyl.Layout.LayoutSuggestions.toLayoutFile args.File pages (Legibyl.Layout.LayoutSuggestions.suggestedTitle args.File pages)
-            match args.Output with
-            | None -> Console.WriteLine(LayoutFile.toJson layout)
-            | Some path ->
-                let layout =
-                    if args.FigureImages then
-                        use renderer = new Legibyl.Rendering.PdfRegionRenderer()
-                        LayoutFile.withFigureImages path (fun geometry -> renderer.RenderRegion(args.File, geometry)) layout
-                    else
-                        layout
-                File.WriteAllText(path, LayoutFile.toJson layout)
-                Console.WriteLine(
-                    toJson
-                        { File = args.File
-                          Layout = path
-                          Images = if args.FigureImages then LayoutFile.imagesFolder path else null
-                          Pages = layout.Pages.Length
-                          Regions = layout.Pages |> Array.sumBy _.Regions.Length }
-                )
-            ExitCodes.Success
-        with ex ->
-            // A download failing or timing out, the file or the models unreadable, anything else.
-            eprintfn $"error: {failure ex}"
+    match startReporting args.Progress args.Quiet 1 with
+    | Error message -> usageError message
+    | Ok() ->
+        if args.FigureImages && args.Output.IsNone then
+            usageError "--figure-images needs --output: the images go in a folder beside the layout file."
+        elif not (File.Exists args.File) then
+            eprintfn $"error: {args.File} doesn't exist."
             ExitCodes.ToolError
+        else
+            try
+                reporter.Begin args.File
+                ensureLayoutModel ()
+                use suggester = new Legibyl.Layout.LayoutSuggester(args.File)
+                let pages =
+                    [ for page in 1 .. suggester.PageCount ->
+                          reporter.Status("Finding the pages' layouts", (page, suggester.PageCount))
+                          suggester.Suggest page ]
+                let layout =
+                    Legibyl.Layout.LayoutSuggestions.toLayoutFile args.File pages (Legibyl.Layout.LayoutSuggestions.suggestedTitle args.File pages)
+                match args.Output with
+                | None -> Console.WriteLine(LayoutFile.toJson layout)
+                | Some path ->
+                    let layout =
+                        if args.FigureImages then
+                            use renderer = new Legibyl.Rendering.PdfRegionRenderer()
+                            LayoutFile.withFigureImages path (fun geometry -> renderer.RenderRegion(args.File, geometry)) layout
+                        else
+                            layout
+                    File.WriteAllText(path, LayoutFile.toJson layout)
+                    Console.WriteLine(
+                        toJson
+                            { File = args.File
+                              Layout = path
+                              Images = if args.FigureImages then LayoutFile.imagesFolder path else null
+                              Pages = layout.Pages.Length
+                              Regions = layout.Pages |> Array.sumBy _.Regions.Length }
+                    )
+                reporter.Done $"{layout.Pages.Length} pages' layouts found"
+                ExitCodes.Success
+            with ex ->
+                // A download failing or timing out, the file or the models unreadable, anything else.
+                reporter.Clear()
+                eprintfn $"error: {failure ex}"
+                ExitCodes.ToolError
 
 type private ApplyArgs =
     { File: string
@@ -841,31 +969,36 @@ type private ApplyArgs =
       Fixes: string option
       Edits: bool
       EditsFrom: string option
-      Output: string option }
+      Output: string option
+      Progress: string option
+      Quiet: bool }
 
 let private runApply (args: ApplyArgs) =
-    if args.Edits && args.EditsFrom.IsSome then
-        usageError "Use --edits or --edits-from, not both."
-    elif (sidecarProblems args.Edits [ args.File ]).IsSome then
-        usageError (sidecarProblems args.Edits [ args.File ]).Value
-    else
-        match LayoutFile.read args.Layout, args.EditsFrom |> Option.map reviewFrom with
-        | Error message, _ -> usageError message
-        | _, Some(Error message) -> usageError message
-        | Ok layout, review ->
-            let fixes = FixNames.parse (defaultArg args.Fixes "none") |> Result.defaultValue PdfFixOptions.None
-            runFixes
-                (VeraPdfValidator())
-                [ args.File ]
-                { Ua = args.Ua
-                  Fixes = fixes
-                  Review = review |> Option.bind Result.toOption
-                  ReviewAsked = args.Edits
-                  Layout = Some layout
-                  Language = None
-                  Output = args.Output }
-                args.Format
-                args.Report
+    match startReporting args.Progress args.Quiet 1 with
+    | Error message -> usageError message
+    | Ok() ->
+        if args.Edits && args.EditsFrom.IsSome then
+            usageError "Use --edits or --edits-from, not both."
+        elif (sidecarProblems args.Edits [ args.File ]).IsSome then
+            usageError (sidecarProblems args.Edits [ args.File ]).Value
+        else
+            match LayoutFile.read args.Layout, args.EditsFrom |> Option.map reviewFrom with
+            | Error message, _ -> usageError message
+            | _, Some(Error message) -> usageError message
+            | Ok layout, review ->
+                let fixes = FixNames.parse (defaultArg args.Fixes "none") |> Result.defaultValue PdfFixOptions.None
+                runFixes
+                    (VeraPdfValidator())
+                    [ args.File ]
+                    { Ua = args.Ua
+                      Fixes = fixes
+                      Review = review |> Option.bind Result.toOption
+                      ReviewAsked = args.Edits
+                      Layout = Some layout
+                      Language = None
+                      Output = args.Output }
+                    args.Format
+                    args.Report
 
 // ---- list ----
 
@@ -979,6 +1112,8 @@ let private validateCommand =
                     option<bool> "--structure"
                     |> desc "Also include each file's structure tree (as 'legibyl structure' gives it)."
                 and! verbose = verboseOption ()
+                and! progress = progressOption ()
+                and! quiet = quietOption ()
                 and! allWarnings =
                     option<bool> "--all-warnings"
                     |> desc "Report every warning, those the review dismisses too (they're counted in dismissedWarnings either way)."
@@ -995,7 +1130,9 @@ let private validateCommand =
                       Structure = structure
                       Verbose = verbose
                       AllWarnings = allWarnings
-                      Review = review }
+                      Review = review
+                      Progress = progress
+                      Quiet = quiet }
             }
         )
         setAction runValidate
@@ -1020,6 +1157,8 @@ let private fixCommand =
                 and! format = formatOption ()
                 and! report = reportOption ()
                 and! verbose = verboseOption ()
+                and! progress = progressOption ()
+                and! quiet = quietOption ()
                 return
                     { Files = files
                       Ua = ua
@@ -1030,7 +1169,9 @@ let private fixCommand =
                       EditsFrom = editsFrom
                       Lang = lang
                       Output = output
-                      Verbose = verbose }
+                      Verbose = verbose
+                      Progress = progress
+                      Quiet = quiet }
             }
         )
         setAction runFix
@@ -1045,7 +1186,9 @@ let private structureCommand =
                 let! files = filesArgument ()
                 and! format = formatOption ()
                 and! output = optionMaybe "--output" |> desc "Write it to path instead of stdout." |> helpName "path"
-                return { Files = files; Format = format; Output = output }
+                and! progress = progressOption ()
+                and! quiet = quietOption ()
+                return { Files = files; Format = format; Output = output; Progress = progress; Quiet = quiet }
             }
         )
         setAction runStructure
@@ -1077,6 +1220,8 @@ let private appendCommand =
                 and! format = formatOption ()
                 and! report = reportOption ()
                 and! verbose = verboseOption ()
+                and! progress = progressOption ()
+                and! quiet = quietOption ()
                 return
                     { Files = files
                       Output = output
@@ -1085,7 +1230,9 @@ let private appendCommand =
                       PartTag = partTag
                       Format = format
                       Report = report
-                      Verbose = verbose }
+                      Verbose = verbose
+                      Progress = progress
+                      Quiet = quiet }
             }
         )
         setAction runAppend
@@ -1094,9 +1241,9 @@ let private appendCommand =
 let private suggestCommand =
     command "suggest" {
         description
-            "Suggest a layout for an untagged PDF: each page's regions in reading order, with the tag each suggests, its page, \
+            $"Suggest a layout for an untagged PDF: each page's regions in reading order, with the tag each suggests, its page, \
              box and text, as JSON. Leave it as found and write changes as edits (exclude, retag, alt, text) in a review \
-             file; then 'legibyl layout apply'. Downloads the layout model (about 130 MB) the first time; several seconds a page."
+             file; then 'legibyl layout apply'. Downloads the layout models (about {Legibyl.Layout.LayoutModel.totalMegabytes} MB) the first time; several seconds a page."
         inputs (
             input {
                 let! file = fileArgument ()
@@ -1110,7 +1257,9 @@ let private suggestCommand =
                         "With --output: also write a PNG of each figure into a folder beside the layout \
                          (\"scan.layout.json\" -> \"scan.layout.images/p1-r3.png\"), named in the figure's \"image\", to \
                          look at when writing its alt text. Each run clears the last run's images."
-                return { File = file; Output = output; FigureImages = figureImages }
+                and! progress = progressOption ()
+                and! quiet = quietOption ()
+                return { File = file; Output = output; FigureImages = figureImages; Progress = progress; Quiet = quiet }
             }
         )
         setAction runSuggest
@@ -1133,6 +1282,8 @@ let private applyCommand =
                 and! ua = uaOption ()
                 and! format = formatOption ()
                 and! report = reportOption ()
+                and! progress = progressOption ()
+                and! quiet = quietOption ()
                 return
                     { File = file
                       Layout = layout
@@ -1142,7 +1293,9 @@ let private applyCommand =
                       Fixes = fixes
                       Edits = edits
                       EditsFrom = editsFrom
-                      Output = output }
+                      Output = output
+                      Progress = progress
+                      Quiet = quiet }
             }
         )
         setAction runApply

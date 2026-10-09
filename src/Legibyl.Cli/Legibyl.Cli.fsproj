@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <Compile Include="Results.fs" />
+    <Compile Include="Progress.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

@@ -486,6 +486,9 @@ module LayoutModel =
 
     let isDownloaded () = layoutDownloaded () && TableModel.isDownloaded ()
 
+    /// Roughly how big both are, downloaded the first time.
+    let totalMegabytes = LayoutMegabytes + TableModel.DownloadSizeMegabytes
+
     /// Roughly how much there's left to download, for telling the user before they do.
     let downloadMegabytes () =
         (if layoutDownloaded () then 0 else LayoutMegabytes) + (if TableModel.isDownloaded () then 0 else TableModel.DownloadSizeMegabytes)
