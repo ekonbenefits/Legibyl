@@ -29,27 +29,36 @@
     <ProjectReference Include="..\Legibyl.Rendering\Legibyl.Rendering.fsproj" />
   </ItemGroup>
 
-  <!-- The English OCR model, pinned by TessdataVersion/TessdataEngSha256 in
-       Directory.Build.props, cached under obj/ and copied to the output's tessdata/. -->
+  <!-- The English and Spanish OCR models, pinned by TessdataVersion and their SHA-256s in
+       Directory.Build.props, cached under obj/ and copied into the output's built-in language
+       packs (languages/en, languages/es), whose language.yaml names them. -->
   <PropertyGroup>
-    <TessdataEngUrl>https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/$(TessdataVersion)/eng.traineddata</TessdataEngUrl>
     <TessdataDir>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)tessdata/$(TessdataVersion)/</TessdataDir>
-    <TessdataEng>$(TessdataDir)eng.traineddata</TessdataEng>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="$(TessdataEng)" Link="tessdata/eng.traineddata" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <TessdataModel Include="eng" Language="en" Sha256="$(TessdataEngSha256)" Property="TessdataEngSha256" />
+    <TessdataModel Include="spa" Language="es" Sha256="$(TessdataSpaSha256)" Property="TessdataSpaSha256" />
+    <None Include="@(TessdataModel->'$(TessdataDir)%(Identity).traineddata')" Link="languages/%(Language)/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
-  <Target Name="FetchTessdata" BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems" Condition="!Exists('$(TessdataEng)')">
-    <DownloadFile SourceUrl="$(TessdataEngUrl)" DestinationFolder="$(TessdataDir)" DestinationFileName="eng.traineddata.download" Retries="3" />
-    <GetFileHash Files="$(TessdataEng).download" Algorithm="SHA256">
+  <!-- Each model in turn (batched by its name), fetched if it isn't cached yet. -->
+  <Target Name="FetchTessdata" BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems" Outputs="%(TessdataModel.Identity)">
+    <PropertyGroup>
+      <_TessdataName>%(TessdataModel.Identity)</_TessdataName>
+      <_TessdataExpected>%(TessdataModel.Sha256)</_TessdataExpected>
+      <_TessdataProperty>%(TessdataModel.Property)</_TessdataProperty>
+      <_TessdataFile>$(TessdataDir)$(_TessdataName).traineddata</_TessdataFile>
+      <_TessdataUrl>https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/$(TessdataVersion)/$(_TessdataName).traineddata</_TessdataUrl>
+    </PropertyGroup>
+    <DownloadFile Condition="!Exists('$(_TessdataFile)')" SourceUrl="$(_TessdataUrl)" DestinationFolder="$(TessdataDir)" DestinationFileName="$(_TessdataName).traineddata.download" Retries="3" />
+    <GetFileHash Condition="!Exists('$(_TessdataFile)')" Files="$(_TessdataFile).download" Algorithm="SHA256">
       <Output TaskParameter="Hash" PropertyName="_TessdataActualSha256" />
     </GetFileHash>
-    <Delete Files="$(TessdataEng).download" Condition="'$(_TessdataActualSha256)' != '$(TessdataEngSha256)'" />
-    <Error Condition="'$(_TessdataActualSha256)' != '$(TessdataEngSha256)'"
-           Text="SHA-256 mismatch for $(TessdataEngUrl): expected $(TessdataEngSha256), got $(_TessdataActualSha256). If you are upgrading tessdata, update TessdataEngSha256 in Directory.Build.props." />
-    <Move SourceFiles="$(TessdataEng).download" DestinationFiles="$(TessdataEng)" />
+    <Delete Condition="!Exists('$(_TessdataFile)') And '$(_TessdataActualSha256)' != '$(_TessdataExpected)'" Files="$(_TessdataFile).download" />
+    <Error Condition="!Exists('$(_TessdataFile)') And '$(_TessdataActualSha256)' != '$(_TessdataExpected)'"
+           Text="SHA-256 mismatch for $(_TessdataUrl): expected $(_TessdataExpected), got $(_TessdataActualSha256). If you are upgrading tessdata, update $(_TessdataProperty) in Directory.Build.props." />
+    <Move Condition="!Exists('$(_TessdataFile)')" SourceFiles="$(_TessdataFile).download" DestinationFiles="$(_TessdataFile)" />
   </Target>
 
   <!-- Suggest Structure's models, pinned in Directory.Build.props, cached under obj/ and copied

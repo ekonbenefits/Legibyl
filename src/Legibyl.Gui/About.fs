@@ -50,7 +50,7 @@ let components () =
         (if TableModel.isDownloaded () then $"finding tables' rows and cells; its model is in {IO.Path.GetDirectoryName(TableModel.path ())}"
          else "finding tables' rows and cells; its model isn't downloaded yet")
         "ONNX Runtime", BuildInfo.libraryVersion typeof<Microsoft.ML.OnnxRuntime.InferenceSession>.Assembly, "running the table model"
-        "Tesseract tessdata", stamped "TessdataVersion", "reading text drawn as outlines or pixels (English)"
+        "Tesseract tessdata", stamped "TessdataVersion", "reading text drawn as outlines or pixels (English and Spanish)"
         "Avalonia", BuildInfo.libraryVersion typeof<Application>.Assembly, "the windows" ]
 
 /// What Copy puts on the clipboard: the version line `legibyl --version` prints, then what it's

@@ -12,10 +12,12 @@
   <PropertyGroup>
     <VeraPdfVersion>1.28.1</VeraPdfVersion>
     <VeraPdfSha256>916049DB6C6335A4A4C624E098499CFF152EF523F65693A0D835AEC635B6DCBC</VeraPdfSha256>
-    <!-- Tesseract's English OCR model (tessdata_fast, Apache-2.0), fetched by Legibyl.Layout's
-         build like the veraPDF jar and copied to the output under tessdata/. -->
+    <!-- Tesseract's English and Spanish OCR models (tessdata_fast, Apache-2.0), fetched by
+         Legibyl.Layout's build like the veraPDF jar and copied into the output's built-in
+         language packs, languages/en and languages/es. -->
     <TessdataVersion>4.1.0</TessdataVersion>
     <TessdataEngSha256>7D4322BD2A7749724879683FC3912CB542F19906C83BCC1A52132556427170B2</TessdataEngSha256>
+    <TessdataSpaSha256>6F2E04D02774A18F01BED44B1111F2CD7F3BA7AC9DC4373CD3F898A40EA6B464</TessdataSpaSha256>
     <!-- The models Suggest Structure runs, bundled with the app and the CLI (fetched by
          Legibyl.Layout's build like tessdata, and copied to the output under models/): the layout
          detector (PP-DocLayoutV3, Apache-2.0, PaddlePaddle's own files on Hugging Face) and the

@@ -230,6 +230,17 @@ let tag
         // The language Legibyl writes its own descriptions in: the document's, where its
         // language pack has the words (else English).
         let language = LanguagePacks.writtenIn document
+        // The language of text OCR read, where a piece is too short to tell on its own: the
+        // document's, else what all of it reads as together, else the pages' text's, else English.
+        let recognizedLanguage =
+            lazy
+                (DocumentLanguage.declared document
+                 |> Option.orElseWith (fun () ->
+                     DocumentLanguage.detect (
+                         String.Join(" ", [ for regions in regionsByPage do for region in regions do match region.ActualText with NonNull text -> text | Null -> () ])
+                     ))
+                 |> Option.orElse language
+                 |> Option.defaultValue "en")
         let mutable noteIds = 0
         // Annotations' /StructParent keys come after every page's.
         let objectReferences = List<PdfDictionary * PdfDictionary>()
@@ -287,8 +298,9 @@ let tag
                 match region.ActualText with
                 | NonNull text ->
                     element.Dictionary.Put(PdfName.ActualText, PdfString(text, PdfEncodings.UNICODE_BIG)) |> ignore
-                    // OCR reads with its English model, so the text it gives is English.
-                    element.Dictionary.Put(PdfName.Lang, PdfString "en") |> ignore
+                    // The language its text reads as, else that of all the text OCR read.
+                    let lang = DocumentLanguage.detect text |> Option.defaultWith (fun () -> recognizedLanguage.Value)
+                    element.Dictionary.Put(PdfName.Lang, PdfString lang) |> ignore
                     tally.Recognized <- tally.Recognized + 1
                 | Null -> ()
             // A table with cells, all at once, when its first content turns up: a TR for each row,

@@ -240,7 +240,7 @@ let ``a turned page's table cells aren't looked for, and it's said why`` () =
 
 [<Fact>]
 let ``a cell's text is the page's words in it, and only an empty cell is read by OCR`` () =
-    match TextRecognition.createEngine () with
+    match TextRecognition.createEngine (Some "en") with
     | None -> Assert.Skip "Tesseract has no native library for this platform."
     | Some engine ->
         (engine :> IDisposable).Dispose()

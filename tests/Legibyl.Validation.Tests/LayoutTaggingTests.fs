@@ -202,6 +202,26 @@ let ``text drawn as outlines is tagged with its OCR text as ActualText`` () =
     (paragraph.Tag, paragraph.ActualText, paragraph.ContentLeafCount) |> should equal ("P", "Outlined words", 1)
 
 [<Fact>]
+let ``text OCR read is marked with the language it reads as, a short piece with that of all of it`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        // Two lines' outlines.
+        use document = new PdfDocument(new PdfWriter(input.Path))
+        let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
+        canvas.Rectangle(72.0, 700.0, 200.0, 12.0).Fill().Rectangle(72.0, 645.0, 60.0, 12.0).Fill() |> ignore
+    let long =
+        "El jardín comunitario abre los sábados por la mañana y los domingos por la tarde, con entrada libre para todas las familias del barrio."
+    let regions =
+        [ { region "P" (70.0, 695.0, 280.0, 715.0) null with ActualText = long }
+          { region "P" (70.0, 640.0, 280.0, 660.0) null with ActualText = "Horario" } ]
+
+    tagFromLayout input.Path output.Path (Some(FixedLayout regions)) |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    [ for paragraph in (root.Children |> Seq.exactlyOne).Children -> paragraph.Language ] |> should equal [ "es"; "es" ]
+
+[<Fact>]
 let ``a heading drawn in pieces is one marked sequence, and a wrapped line reads with a space`` () =
     use input = new TempPdf()
     use output = new TempPdf()

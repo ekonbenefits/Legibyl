@@ -461,6 +461,7 @@ for name, version, licence, source in
       "Table Transformer model (8-bit ONNX)", tableRevision, "MIT", $"https://huggingface.co/Xenova/table-transformer-structure-recognition/tree/{tableRevision}"
       "Table Transformer (training and model code)", "1.0", "MIT", "https://github.com/microsoft/table-transformer"
       "tessdata_fast eng.traineddata", tessdata, "Apache-2.0", $"https://github.com/tesseract-ocr/tessdata_fast/tree/{tessdata}"
+      "tessdata_fast spa.traineddata", tessdata, "Apache-2.0", $"https://github.com/tesseract-ocr/tessdata_fast/tree/{tessdata}"
       "URW base 35 fonts (TrueType)", urwFonts, "AGPL-3.0 with a font exception", $"https://github.com/ArtifexSoftware/urw-base35-fonts/tree/{urwFonts}"
       "Liberation fonts (TrueType)", liberationFonts, "OFL-1.1", $"https://github.com/liberationfonts/liberation-fonts/releases/tag/{liberationFonts}" ] do
     entries.Add

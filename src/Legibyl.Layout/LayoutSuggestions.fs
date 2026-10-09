@@ -300,22 +300,55 @@ module LayoutSuggestions =
             |> List.tryFind (fun block -> block.Tag = Tags.H1 && not (String.IsNullOrWhiteSpace block.Text))
             |> Option.map _.Text.Trim()
 
-/// Reads text drawn as outlines or pixels, with Tesseract and its English model (shipped in
-/// the app's tessdata folder). Unavailable where Tesseract has no native library: none of the
-/// platforms Legibyl supports (Intel Macs, which it doesn't, have none).
+/// Reads text drawn as outlines or pixels, with Tesseract and the models of the language packs
+/// (see LanguagePacks: English's and Spanish's are built in). Unavailable where Tesseract has no
+/// native library: none of the platforms Legibyl supports (Intel Macs, which it doesn't, have
+/// none).
 module TextRecognition =
     open Tesseract
 
-    let private tessdata () = Path.Combine(AppContext.BaseDirectory, "tessdata")
+    /// The models to read a document in language with: its pack's, and English's for what's in
+    /// English beside it; English's and Spanish's where the language isn't known. A language whose
+    /// pack has no model is read with English's.
+    let modelsFor (language: string option) : string list =
+        let model tag = LanguagePacks.forTag tag |> Option.bind _.Ocr
+        match language with
+        | Some language -> [ model language; model "en" ]
+        | None -> [ model "en"; model "es" ]
+        |> List.choose id
+        |> List.distinct
 
-    /// A Tesseract engine, or None if it can't be loaded here.
-    let createEngine () : TesseractEngine option =
-        try
-            Some(new TesseractEngine(tessdata (), "eng", EngineMode.Default))
-        with _ ->
-            // No native library for this platform, or it failed to load: no OCR, rather
-            // than no layout.
-            None
+    /// A folder holding every one of models (Tesseract reads its models from one folder): theirs,
+    /// when they share one, else a copy of each in the user's own.
+    let private folderFor (models: string list) =
+        match models |> List.map (Path.GetDirectoryName >> string) |> List.distinct with
+        | [ folder ] -> folder
+        | _ ->
+            let folder = Path.Combine(Environment.GetFolderPath Environment.SpecialFolder.LocalApplicationData, "Legibyl", "tessdata")
+            Directory.CreateDirectory folder |> ignore
+            for model in models do
+                let copy = Path.Combine(folder, string (Path.GetFileName model))
+                let source = FileInfo model
+                if not (File.Exists copy) || FileInfo(copy).Length <> source.Length || File.GetLastWriteTimeUtc copy < source.LastWriteTimeUtc then
+                    // Written beside it, then moved into place: another Legibyl may be reading it.
+                    let partial = $"{copy}.{Guid.NewGuid():N}"
+                    File.Copy(model, partial)
+                    File.Move(partial, copy, true)
+            folder
+
+    /// A Tesseract engine reading a document in language (see modelsFor), or None if it can't be
+    /// loaded here or there's no model.
+    let createEngine (language: string option) : TesseractEngine option =
+        match modelsFor language with
+        | [] -> None
+        | models ->
+            try
+                let names = String.Join("+", models |> List.map Path.GetFileNameWithoutExtension)
+                Some(new TesseractEngine(folderFor models, names, EngineMode.Default))
+            with _ ->
+                // No native library for this platform, or it failed to load: no OCR, rather
+                // than no layout.
+                None
 
     /// The text in a PNG of one region, on one line.
     let recognize (engine: TesseractEngine) (png: byte array) =
@@ -487,7 +520,8 @@ type LayoutSuggester(pdfPath: string) =
     let document = PdfDocument.Open bytes
     let pages = new Legibyl.Rendering.PdfiumDocument(bytes)
     let detector = lazy (LayoutDetector.Load(LayoutModel.directory ()))
-    let ocr = lazy (TextRecognition.createEngine ())
+    // OCR in the document's language, as far as its text tells (see TextRecognition.modelsFor).
+    let ocr = lazy (TextRecognition.createEngine (LanguagePacks.writtenInFile pdfPath))
     // The table-structure model, if it's downloaded: without it, tables have no cells (and are
     // tagged as text).
     let tables =
