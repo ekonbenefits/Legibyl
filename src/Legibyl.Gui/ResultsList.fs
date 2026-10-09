@@ -204,7 +204,7 @@ module NextStep =
             Some
                 { Title = "Review the warnings"
                   Details =
-                    [ $"It passes the automated checks, with {warningsText}: what Legibyl noticed that PDF/UA doesn't require, and WCAG 2.2 above level AA."
+                    [ $"It passes the automated checks, with {warningsText}: what Legibyl noticed that PDF/UA doesn't require, and WCAG 2.2's advisory checks."
                       "Select each to see what it means. Where one is inaccurate, right-click it › Dismiss, so it isn't counted again (Save keeps it with the review)."
                       if not fixable.IsEmpty then
                           let text = plural fixable.Length "warning"

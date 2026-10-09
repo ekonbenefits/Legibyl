@@ -326,7 +326,11 @@ PDF/UA's, with a plain-language guide each (`RuleGuide.yaml`'s `wcagRules`).
 
 Legibyl aims at level AA, as laws and policies ask: an A or AA finding is a
 failure, and one above AA (2.4.9 today) is a warning, which a review can dismiss
-and which doesn't stop a PDF passing (`WcagSpecification` in `Results.fs`). A
+and which doesn't stop a PDF passing (`WcagSpecification` in `Results.fs`). So
+are the rules veraPDF tags `cosmetic`: characters repeated to lay text out
+(1.3.1), a guess at a problem that turns up in PDFs that are fine (a contents
+page's dot leaders, a form's underscores), and that veraPDF doesn't place on
+the page. A
 criterion veraPDF adds that the table doesn't list is a failure, with no level.
 veraPDF's 2.4.9 check fails a link described only by its address, and one with
 no description at all; the second fails 2.4.4 (Link Purpose (In Context), level

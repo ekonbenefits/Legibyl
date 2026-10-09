@@ -86,6 +86,18 @@ module internal VeraPdf =
              | None -> ()
              profile)
 
+    /// WCAG 2.2's rules veraPDF tags "cosmetic" (characters repeated to lay text out, 1.3.1): a
+    /// guess at a problem, found often in PDFs that are fine (a contents page's dot leaders, a
+    /// form's underscores), and without a place on the page. Their failures are warnings.
+    let wcagCosmetic: Lazy<Set<string * int>> =
+        lazy
+            (set [ for item in javaSeq (wcagProfile.Value.getRules ()) do
+                       let rule = item :?> Rule
+                       // Its tags, as the profile has them: "cosmetic,machine,text".
+                       let tags = match rule.getTags () with NonNull tags -> tags.Split ',' | Null -> [||]
+                       if tags |> Array.exists (fun tag -> tag.Trim() = "cosmetic") then
+                           rule.getRuleId().getClause (), rule.getRuleId().getTestNumber () ])
+
     /// Legibyl's name for a specification veraPDF names, for a rule of clause: WCAG 2.2's
     /// "WCAG2.2" is "WCAG 2.2" and the criterion's level ("WCAG 2.2 AA"; see WcagSpecification);
     /// PDF/UA's are as veraPDF gives them.
@@ -621,10 +633,12 @@ module internal VeraPdf =
                   // "extra context" field (almost always null). The real per-failure tree-walk
                   // path (e.g. "root/Catalog[0]/StructTreeRoot[0]/.../TH[3]") — the same value
                   // veraPDF's own report writer uses — lives on assertion.getLocation().getContext().
-                  // A failure of WCAG 2.2 above level AA, which Legibyl aims at, is a warning.
+                  // A failure of WCAG 2.2 above level AA, which Legibyl aims at, is a warning, as is
+                  // one of its cosmetic rules (wcagCosmetic).
                   let aboveTarget =
                       ruleId.getSpecification().ToString().StartsWith("WCAG", StringComparison.Ordinal)
-                      && WcagSpecification.isAboveTarget (ruleId.getClause ())
+                      && (WcagSpecification.isAboveTarget (ruleId.getClause ())
+                          || wcagCosmetic.Value.Contains(ruleId.getClause (), ruleId.getTestNumber ()))
                       && assertion.getStatus () <> TestAssertion.Status.PASSED
                   let violation =
                       { Specification = specificationName (ruleId.getSpecification().ToString()) (ruleId.getClause ())

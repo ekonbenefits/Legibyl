@@ -1646,7 +1646,7 @@ module private MainView =
                                     ])
                                 if shownWarnings > 0 then
                                     let what = if shownWarnings = 1 then "1 warning below is" else $"{shownWarnings} warnings below are"
-                                    secondary $"{what} worth a look: what Legibyl noticed that PDF/UA doesn't require, and WCAG 2.2 above level AA."
+                                    secondary $"{what} worth a look: what Legibyl noticed that PDF/UA doesn't require, and WCAG 2.2's advisory checks."
                                 match checklist () with
                                 | None -> secondary "Reading the document for its checklist…"
                                 | Some(steps, ticked) ->
