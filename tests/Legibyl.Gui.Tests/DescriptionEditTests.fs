@@ -149,7 +149,10 @@ let ``the Attachments tab lists an attached file, and takes its file name and de
             window.Show()
             pump ()
             let tabs = descendants<TabControl> window |> List.head
-            tabs.SelectedItem <- tabs.Items |> Seq.cast<TabItem> |> Seq.find (fun t -> string t.Header = "Attachments")
+            // (The PDF's attachments are read in the background.)
+            let attachmentsTab () = tabs.Items |> Seq.cast<TabItem> |> Seq.tryFind (fun t -> string t.Header = "Attachments")
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> (attachmentsTab ()).IsSome) |> ignore
+            tabs.SelectedItem <- (attachmentsTab ()).Value
             pump ()
             let shown = descendants<TextBlock> window |> List.map (fun t -> string t.Text)
             let answer (button: string) (text: string) =

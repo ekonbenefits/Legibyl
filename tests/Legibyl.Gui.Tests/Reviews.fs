@@ -26,5 +26,11 @@ let chooseFromFileMenu (window: Window) (header: string) =
         |> Seq.pick (function
             | :? NativeMenuItem as item when string item.Header = header -> Some item
             | _ -> None)
-    if item.IsEnabled then (nonNull item.Command).Execute null
-    item.IsEnabled
+    // Whether it could be chosen: as it was, not once it's done.
+    let enabled = item.IsEnabled
+    if enabled then
+        (nonNull item.Command).Execute null
+        // Saving is done in the background: until the window no longer says it's edited.
+        if header = "Save" then
+            Legibyl.Screenshots.HeadlessWindow.pumpUntil (System.TimeSpan.FromSeconds 10.0) (fun () -> not (window.Title.Contains "Edited")) |> ignore
+    enabled
