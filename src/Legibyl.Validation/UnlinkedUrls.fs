@@ -4,7 +4,8 @@
 ///
 /// The text index finds the addresses each page's text shows (see WebAddressText); here, those
 /// that are web addresses (LinkTitles.webAddress) and that nothing links: text more than half
-/// under a link annotation is linked already.
+/// under a link annotation is linked already, and so is an address a link annotation on its page
+/// goes to, wherever it is (the text read can be invisible, drawn away from what's seen).
 module internal Legibyl.Validation.UnlinkedUrls
 
 open System
@@ -45,6 +46,29 @@ let private linkBoxes (page: PdfPage) =
               | rectangle ->
                   let box = rectangle.ToRectangle()
                   yield float (box.GetLeft()), float (box.GetBottom()), float (box.GetRight()), float (box.GetTop()) ]
+
+/// Where a web address goes, to compare: its host (any "www." off) and the rest, with neither
+/// http or https nor a final "/" making a difference.
+let private destination (address: string) =
+    match Uri.TryCreate(address.Trim(), UriKind.Absolute) with
+    | true, NonNull uri when uri.Host <> "" ->
+        let host = uri.Host.ToLowerInvariant()
+        let host = if host.StartsWith "www." then host.Substring 4 else host
+        Some(host + uri.PathAndQuery.TrimEnd('/') + uri.Fragment)
+    | _ -> None
+
+/// Where the page's link annotations go, those going to web addresses (see destination).
+let private linkDestinations (page: PdfPage) =
+    set [ for annotation in page.GetAnnotations() do
+              match annotation with
+              | :? PdfLinkAnnotation as link ->
+                  match link.GetAction() with
+                  | NonNull action when PdfName.URI.Equals(action.GetAsName PdfName.S) ->
+                      match action.GetAsString PdfName.URI with
+                      | NonNull uri -> yield! Option.toList (destination (uri.ToUnicodeString()))
+                      | Null -> ()
+                  | _ -> ()
+              | _ -> () ]
 
 /// Whether more than half of the smaller of the two boxes is in both.
 let private mostlyUnder (geometry: StructureGeometry) (left, bottom, right, top) =
@@ -107,6 +131,7 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
     [ for KeyValue(pageNumber, found) in context.MarkedContent.Addresses |> Seq.sortBy _.Key do
           if pageNumber <= document.GetNumberOfPages() then
               let links = lazy (linkBoxes (document.GetPage pageNumber))
+              let destinations = lazy (linkDestinations (document.GetPage pageNumber))
               for address in found do
                   match LinkTitles.webAddress address.Text with
                   | Some target ->
@@ -116,7 +141,10 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
                             Bottom = address.Bottom
                             Right = address.Right
                             Top = address.Top }
-                      if not (links.Value |> List.exists (mostlyUnder geometry)) then
+                      // Linked: under a link, or with a link on its page going where it does (its
+                      // text can be drawn elsewhere than what's seen: invisible text over a picture).
+                      let linkedElsewhere = destination target |> Option.exists destinations.Value.Contains
+                      if not linkedElsewhere && not (links.Value |> List.exists (mostlyUnder geometry)) then
                           let owners =
                               [ for mcid in address.Mcids ->
                                     match tagged.Value.MarkedContent.TryGetValue((pageNumber, mcid)) with

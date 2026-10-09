@@ -451,6 +451,23 @@ let ``an address one of whose pieces is read on both sides of another isn't link
     validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed |> should be False
 
 [<Fact>]
+let ``an address a link on its page goes to isn't warned about, wherever the link is`` () =
+    use pdf = new TempPdf()
+    tagged pdf.Path (fun document pointer font ->
+        let page = document.AddNewPage()
+        // The text read drawn away from what's seen (as invisible text over a picture can be).
+        inTags pointer page font [ "P"; "Span" ] 72.0 700.0 "Visit https://example.org/plan."
+        inTags pointer page font [ "P"; "Span" ] 72.0 680.0 "Visit https://example.org/beds."
+        let link (y: float32) (address: string) =
+            let annotation = PdfLinkAnnotation(iText.Kernel.Geom.Rectangle(72f, y, 150f, 12f))
+            annotation.SetAction(PdfAction.CreateURI address) |> ignore
+            page.AddAnnotation annotation |> ignore
+        // The same place written another way; and a link going somewhere else.
+        link 400f "http://www.EXAMPLE.org/plan/"
+        link 380f "https://example.org/paths")
+    named pdf.Path |> should equal [ "https://example.org/beds", false ]
+
+[<Fact>]
 let ``an address drawn right to left is read left to right, whole`` () =
     use pdf = new TempPdf()
     tagged pdf.Path (fun document pointer font ->
