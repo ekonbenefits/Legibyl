@@ -33,7 +33,8 @@ let private report (findings: RuleViolation list) =
       IsCompliant = false
       TotalAssertions = 100
       Assertions = List.toArray findings
-      Notes = [||] }
+      Notes = [||]
+      WcagError = null }
 
 let private lines (checkBox: CheckBox) =
     checkBox.GetVisualDescendants()

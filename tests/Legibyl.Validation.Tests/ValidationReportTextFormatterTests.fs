@@ -62,7 +62,8 @@ let ``BuildReport includes locations for each failed finding`` () =
                    TestNumber = 3
                    ErrorMessage = null
                    LocationContext = null } |]
-          Notes = [||] }
+          Notes = [||]
+          WcagError = null }
 
     let text = ValidationReportTextFormatter.BuildReport report
 

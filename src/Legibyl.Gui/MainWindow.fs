@@ -1077,9 +1077,13 @@ module private MainView =
                                 [ if report.FailedCount > wcag then $"{report.FailedCount - wcag} {flavour}"
                                   if wcag > 0 then $"{wcag} {WcagSpecification.Name}" ]
                             let checks = if report.FailedCount = 1 then "check" else "checks"
-                            banner
-                                Theme.Tokens.Danger
-                                $"""FAIL — {String.Join(" and ", failed)} {checks} failed, of {report.TotalAssertions} ({why}{warnings}){asChecked}"""
+                            // WCAG 2.2's checks that couldn't run: said, with what did fail.
+                            let notChecked = if isNull report.WcagError then "" else $"{WcagSpecification.Name} couldn't be checked; "
+                            let counted =
+                                match failed with
+                                | [] -> $"{report.TotalAssertions} checks"
+                                | failed -> $"""{String.Join(" and ", failed)} {checks} failed, of {report.TotalAssertions}"""
+                            banner Theme.Tokens.Danger $"FAIL — {notChecked}{counted} ({why}{warnings}){asChecked}"
                     Some(
                         match List.ofSeq report.Notes with
                         | [] -> standing

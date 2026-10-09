@@ -37,7 +37,10 @@ let BuildReport (report: ValidationReport) : string =
     sb.AppendLine($"File: {report.FilePath}")
       .AppendLine($"Checked against: {PdfUaTarget.describe report.Profile report.PdfVersion report.ProfileDetected}")
       .AppendLine($"Compliant: {report.IsCompliant}")
-      .AppendLine($"Meets {WcagSpecification.Name}'s machine checks: {report.MeetsWcag}")
+      .AppendLine(
+          match report.WcagError with
+          | NonNull error -> $"Meets {WcagSpecification.Name}'s machine checks: not checked ({error})"
+          | Null -> $"Meets {WcagSpecification.Name}'s machine checks: {report.MeetsWcag}")
       .AppendLine($"Total checks: {report.TotalAssertions}")
       .AppendLine($"Failed checks: {report.FailedCount}")
       .AppendLine($"Warnings: {report.WarningCount}")

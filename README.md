@@ -342,7 +342,10 @@ banner and the CLI's first line say which failed ("FAIL — 1 WCAG 2.2 check
 failed, of 868"; "FAIL (PDF/UA-1 passes; WCAG 2.2: 1 failed; 868 checks)"), the
 CLI's JSON has `meetsWcag` and `wcagFailedCount` beside `isCompliant` (still
 PDF/UA's), and its exit code is 1 unless both pass. Appending checks PDF/UA
-only, as joining is about PDF/UA's tags.
+only, as joining is about PDF/UA's tags. If WCAG's checks can't run on a file, PDF/UA's
+result stands, WCAG 2.2 is reported not checked (a note says why; the JSON has
+`wcagError`), and the file doesn't pass; a saved result like that isn't kept as
+current, so opening the PDF checks it again.
 
 The contrast check draws every page, with PDFium (as Legibyl draws pages
 everywhere else) rather than the Apache PDFBox veraPDF uses: Legibyl's copy of

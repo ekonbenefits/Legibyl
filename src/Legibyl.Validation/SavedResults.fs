@@ -52,11 +52,14 @@ let ofReport (report: ValidationReport) (hash: string) (checkedAt: DateTime) : R
                  ErrorMessage = finding.ErrorMessage } |]
       Notes =
         if report.Notes.Count = 0 then null
-        else [| for note in report.Notes -> { Level = note.Level; Logger = note.Logger; Message = note.Message; Count = note.Count } |] }
+        else [| for note in report.Notes -> { Level = note.Level; Logger = note.Logger; Message = note.Message; Count = note.Count } |]
+      WcagError = report.WcagError }
 
 /// Whether saved is the result for the file with hash, as this build would give it against profile.
+/// One whose WCAG checks couldn't run isn't: they're tried again.
 let isCurrent (saved: ReviewFile.SavedValidation) (hash: string) (profile: PdfProfile) =
     saved.Hash = hash
+    && isNull saved.WcagError
     && saved.VeraPdfVersion = checkedBy
     && saved.LegibylVersion = legibylVersion
     && saved.Standard = standardOf profile
@@ -98,4 +101,5 @@ let toReport (saved: ReviewFile.SavedValidation) (pdfPath: string) : ValidationR
       Notes =
         match saved.Notes with
         | NonNull notes -> [| for note in notes -> { Level = note.Level; Logger = note.Logger; Message = note.Message; Count = note.Count } |]
-        | Null -> [||] }
+        | Null -> [||]
+      WcagError = saved.WcagError }

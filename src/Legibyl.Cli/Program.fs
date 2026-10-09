@@ -183,6 +183,7 @@ let private validateFile (validator: VeraPdfValidator) (args: ValidateArgs) (giv
                 IsCompliant = Nullable report.IsCompliant
                 MeetsWcag = Nullable report.MeetsWcag
                 WcagFailedCount = Nullable(Seq.length report.WcagFailures)
+                WcagError = report.WcagError
                 TotalAssertions = Nullable report.TotalAssertions
                 FailedCount = Nullable report.FailedCount
                 ValidatorNotes = report.Notes
@@ -246,7 +247,10 @@ let private standingLine (r: ValidationResult) =
         $"{r.File}: PASS ({r.Standard} and {WcagSpecification.Name}, {r.TotalAssertions} checks)"
     else
         let standing (name: string) (passes: bool) (failed: int) = if passes then $"{name} passes" else $"{name}: {failed} failed"
-        $"{r.File}: FAIL ({standing r.Standard (r.IsCompliant = Nullable true) uaFailed}; {standing WcagSpecification.Name (r.MeetsWcag = Nullable true) wcagFailed}; {r.TotalAssertions} checks)"
+        let wcag =
+            if isNull r.WcagError then standing WcagSpecification.Name (r.MeetsWcag = Nullable true) wcagFailed
+            else $"{WcagSpecification.Name} not checked"
+        $"{r.File}: FAIL ({standing r.Standard (r.IsCompliant = Nullable true) uaFailed}; {wcag}; {r.TotalAssertions} checks)"
 
 let private validationText (results: ValidationResult list) =
     let sb = StringBuilder()
@@ -339,7 +343,7 @@ type private FixRequest =
       Output: string option }
 
 let private compliance (report: ValidationReport) =
-    { IsCompliant = report.IsCompliant; MeetsWcag = report.MeetsWcag; FailedCount = report.FailedCount }
+    { IsCompliant = report.IsCompliant; MeetsWcag = report.MeetsWcag; FailedCount = report.FailedCount; WcagError = report.WcagError }
 
 let private nextVersion (file: string) =
     let name = CopyNames.nextVersion file
@@ -500,6 +504,7 @@ let private fixText (results: FixOutcome list) =
     let line (text: string) = sb.AppendLine text |> ignore
     let standing (c: Compliance) =
         if c.IsCompliant && c.MeetsWcag then "PASS"
+        elif c.IsCompliant && not (isNull c.WcagError) then $"FAIL, {WcagSpecification.Name} not checked"
         elif c.IsCompliant then $"FAIL, {c.FailedCount} failed ({WcagSpecification.Name}'s)"
         else $"FAIL, {c.FailedCount} failed"
     for r in results do
