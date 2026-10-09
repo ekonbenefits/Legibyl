@@ -1,0 +1,16 @@
+# Legibyl's language pack for Spanish. docs/language-packs.md says what each field does.
+tag: es
+name: Spanish
+
+# What Legibyl writes into PDFs itself, in Spanish. Each keeps the {names} the English has.
+phrases:
+  qrCodeLinkingTo: "Código QR que enlaza a {title} ({address})"
+  qrCodeLinkingToAddress: "Código QR que enlaza a {address}"
+  qrCode: "Código QR: {text}"
+
+# A paragraph that starts with one of these likely goes on from the one before.
+sentenceContinuations: [y, o, e, u, de, del, la, el, los, las, en, que, con, para]
+
+# A paragraph that starts with one of these stands on its own. Without their accents too:
+# capitals in PDFs often lose them.
+standaloneHeadings: [SECCIÓN, SECCION, ARTÍCULO, ARTICULO]

@@ -1061,6 +1061,7 @@ legibyl structure <files>… [--format json|text] [--output path]
 legibyl layout suggest <file> [--output layout.json] [--figure-images]
 legibyl layout apply <file> --layout layout.json [--ua 1|2] [--edits | --edits-from review] [--fixes names] [--output out.pdf] [--format json|text] [--report path]
 legibyl list fixes [--format text|json]
+legibyl list languages [--format text|json]
 ```
 
 ```powershell
@@ -1449,7 +1450,10 @@ legibyl layout apply scan.pdf --layout scan.layout.json --edits-from scan.edits.
 ### list
 
 `legibyl list fixes` prints the fixes `--fixes` can name, with what each does
-and which are in `safe`. `--format json` gives them as JSON. `legibyl --version` prints the tool
+and which are in `safe`. `legibyl list languages` prints the language packs found (English and
+Spanish are built in), the folders packs are read from, and what's wrong with any pack: it exits
+1 if something is. [docs/language-packs.md](docs/language-packs.md) says how to add a language.
+`--format json` gives either as JSON. `legibyl --version` prints the tool
 build and the vendored veraPDF engine version.
 
 ## Versioning

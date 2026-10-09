@@ -275,6 +275,23 @@ let ``the lists come as JSON too`` () =
     |> should be True
 
 [<Fact>]
+let ``list languages gives the built-in packs and where packs are read from`` () =
+    let original = Console.Out
+    use writer = new StringWriter()
+    Console.SetOut writer
+    try
+        Legibyl.Cli.Program.main [| "list"; "languages"; "--format"; "json" |] |> ignore
+    finally
+        Console.SetOut original
+    let listed = JsonDocument.Parse(writer.ToString()).RootElement
+
+    let tags = [ for language in listed.GetProperty("languages").EnumerateArray() -> language.GetProperty("tag").GetString() ]
+    tags |> should contain "en"
+    tags |> should contain "es"
+    [ for folder in listed.GetProperty("folders").EnumerateArray() -> folder.GetString() ]
+    |> should contain (Path.Combine(AppContext.BaseDirectory, "languages"))
+
+[<Fact>]
 let ``validate explains common failures, and names their fixes as --fixes does`` () =
     withTaggedPdf (fun pdf ->
         let _, result = run [ "validate"; pdf ]

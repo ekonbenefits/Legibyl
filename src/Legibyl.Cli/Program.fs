@@ -797,6 +797,47 @@ let private listFixes (format: string) =
         FixNames.listing () |> List.iter (printfn "%s")
     ExitCodes.Success
 
+/// The language packs installed (see LanguagePacks), where they're read from, and what's wrong
+/// with any: exit 1 if something is.
+let private listLanguages (format: string) =
+    let roots = LanguagePacks.roots ()
+    let packs, problems = LanguagePacks.load roots
+    if format = "json" then
+        Console.WriteLine(
+            toJson
+                {| Folders = roots
+                   Languages =
+                    [ for pack in packs ->
+                          {| Tag = pack.Tag
+                             Name = pack.Name
+                             Folders = pack.Folders
+                             Ocr = pack.Ocr |> Option.toObj
+                             Phrases = pack.Phrases.Keys |> Array.ofSeq
+                             SentenceContinuations = pack.SentenceContinuations
+                             StandaloneHeadings = pack.StandaloneHeadings |} ]
+                   Problems = [ for problem in problems -> {| Folder = problem.Folder; Message = problem.Message |} ] |}
+        )
+    else
+        for pack in packs do
+            let has =
+                [ if pack.Ocr.IsSome then "OCR"
+                  if not pack.Phrases.IsEmpty then $"{pack.Phrases.Count} of {LanguagePacks.phrases.Count} phrases"
+                  if not pack.SentenceContinuations.IsEmpty then "sentence continuations"
+                  if not pack.StandaloneHeadings.IsEmpty then "standalone headings" ]
+            printfn "%-8s %-12s %s" pack.Tag pack.Name (String.Join(", ", has))
+            for folder in pack.Folders do
+                printfn "         %s" folder
+        printfn ""
+        printfn "Packs are read from (a folder per language, named for its tag, holding language.yaml):"
+        for root in roots do
+            printfn "  %s" root
+        if not problems.IsEmpty then
+            printfn ""
+            printfn "Left out:"
+            for problem in problems do
+                printfn "  %s: %s" problem.Folder problem.Message
+    if problems.IsEmpty then ExitCodes.Success else ExitCodes.DocumentProblem
+
 // ---- The command line ----
 
 /// Runs a function in place of a command's action, e.g. for --version.
@@ -1040,6 +1081,13 @@ let private listCommand =
                 description "The fixes 'fix --fixes' can name, with what each does."
                 inputs (listFormatOption ())
                 setAction listFixes
+            }
+        )
+        addCommand (
+            command "languages" {
+                description "The language packs installed (English and Spanish are built in), where packs are read from, and what's wrong with any. Exits 1 if a pack has a problem."
+                inputs (listFormatOption ())
+                setAction listLanguages
             }
         )
     }

@@ -1,0 +1,12 @@
+# Legibyl's language pack for English. docs/language-packs.md says what each field does.
+#
+# The phrases Legibyl writes into PDFs are in English to begin with (LanguagePacks.phrases),
+# so this pack doesn't repeat them.
+tag: en
+name: English
+
+# A paragraph that starts with one of these likely goes on from the one before.
+sentenceContinuations: [and, or, to, of, the]
+
+# A paragraph that starts with one of these stands on its own.
+standaloneHeadings: [SECTION, ARTICLE]
