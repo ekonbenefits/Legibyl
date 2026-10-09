@@ -890,8 +890,9 @@ type VeraPdfValidator() =
                         try
                             Some(ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued)), null
                         with
-                        | :? OperationCanceledException -> reraise ()
-                        | e -> None, (match e.Message with NonNull m when not (String.IsNullOrWhiteSpace m) -> m | _ -> e.GetType().Name)
+                        | :? OperationCanceledException
+                        | :? OutOfMemoryException -> reraise ()
+                        | e -> None, (if e.Message.Trim() = "" then e.GetType().Name else e.Message)
                 { toReport pdfPath profile result wcag (analysis.GetAwaiter().GetResult()) with WcagError = wcagError }))
             let wcagNote =
                 match report.WcagError with

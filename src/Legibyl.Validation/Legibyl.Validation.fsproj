@@ -143,7 +143,8 @@
   </Target>
 
   <!-- wcag-algorithms less veraPDF's ContrastRatioConsumer (and its DataPoint), so the one in
-       java/wcag-contrast.jar is the only one. -->
+       java/wcag-contrast.jar is the only one, and less veraPDF's signature. Made once: a change
+       to how it's made needs a new name for WcagAlgorithmsRepacked (or obj/ cleaned). -->
   <Target Name="RepackWcagAlgorithms" AfterTargets="FetchVeraPdfWcagJars" BeforeTargets="GetIkvmReferenceItemsFromIkvmReferences" Condition="!Exists('$(WcagAlgorithmsRepacked)')">
     <PropertyGroup>
       <_WcagRepackDir>$(VeraPdfJarDir)wcag-algorithms-repack/</_WcagRepackDir>
@@ -154,7 +155,11 @@
       <_WcagConsumerClass Include="$(_WcagRepackDir)org/verapdf/wcag/algorithms/semanticalgorithms/consumers/ContrastRatioConsumer*.class" />
     </ItemGroup>
     <Error Condition="'@(_WcagConsumerClass)' == ''" Text="wcag-algorithms has no ContrastRatioConsumer to replace: compare veraPDF's new release with java/README.md." />
-    <Delete Files="@(_WcagConsumerClass)" />
+    <!-- And veraPDF's signature, which no longer fits the jar's classes. -->
+    <ItemGroup>
+      <_WcagSignature Include="$(_WcagRepackDir)META-INF/*.SF;$(_WcagRepackDir)META-INF/*.RSA;$(_WcagRepackDir)META-INF/*.DSA;$(_WcagRepackDir)META-INF/*.EC" />
+    </ItemGroup>
+    <Delete Files="@(_WcagConsumerClass);@(_WcagSignature)" />
     <ZipDirectory SourceDirectory="$(_WcagRepackDir)" DestinationFile="$(WcagAlgorithmsRepacked).tmp" Overwrite="true" />
     <Move SourceFiles="$(WcagAlgorithmsRepacked).tmp" DestinationFiles="$(WcagAlgorithmsRepacked)" />
     <RemoveDir Directories="$(_WcagRepackDir)" />

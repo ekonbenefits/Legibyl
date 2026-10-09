@@ -345,7 +345,8 @@ A PDF passes when it complies with PDF/UA and WCAG 2.2's checks pass: the
 banner and the CLI's first line say which failed ("FAIL — 1 WCAG 2.2 check
 failed, of 868"; "FAIL (PDF/UA-1 passes; WCAG 2.2: 1 failed; 868 checks)"), the
 CLI's JSON has `meetsWcag` and `wcagFailedCount` beside `isCompliant` (still
-PDF/UA's), and its exit code is 1 unless both pass. Appending checks PDF/UA
+PDF/UA's), and its exit code is 1 unless both pass (2 if WCAG's checks
+couldn't run, see below, and PDF/UA passes). Appending checks PDF/UA
 only, as joining is about PDF/UA's tags. If WCAG's checks can't run on a file, PDF/UA's
 result stands, WCAG 2.2 is reported not checked (a note says why; the JSON has
 `wcagError`), and the file doesn't pass; a saved result like that isn't kept as
@@ -1158,7 +1159,7 @@ means the same for every command, about what that command did:
 |-----------|---------|
 | `0`  | Done, and the document is fine: it complies (`validate`, the copy `fix` or `layout apply` wrote), or has a structure (`structure`). |
 | `1`  | Done, but a document has a problem: it doesn't comply, has no structure tree, or (`layout apply`) was already tagged. |
-| `2`  | The tool couldn't do it for a file: missing, corrupt, encrypted, or the layout model couldn't be downloaded. |
+| `2`  | The tool couldn't do it for a file: missing, corrupt, encrypted, the layout model couldn't be downloaded, or WCAG 2.2's checks couldn't run (and PDF/UA passes). |
 | `64` | Invalid command-line usage (including a review or layout file that can't be read). |
 
 ### validate

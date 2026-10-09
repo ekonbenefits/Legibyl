@@ -187,11 +187,14 @@ let ``white text on a JPEG 2000 picture is measured against the picture, not the
         let words = Paragraph("White words on the navy banner.").SetFontColor(DeviceRgb(0xFF, 0xFF, 0xFF)).SetFontSize 20f
         words.SetFixedPosition(1, 96f, 560f, 400f) |> ignore
         layout.Add words |> ignore
+        // And light grey on the white page, which fails: the page was drawn and measured.
+        layout.Add(Paragraph("Light grey on white is hard to read.").SetFontColor(DeviceRgb(0xCC, 0xCC, 0xCC))) |> ignore
 
     let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
 
-    report.WcagFailures |> Seq.map _.RuleId |> should not' (contain "1.4.3-1")
-    report.MeetsWcag |> should be True
+    let contrast = report.WcagFailures |> Seq.filter (fun f -> f.RuleId = "1.4.3-1") |> List.ofSeq
+    contrast |> List.length |> should equal 1
+    (contrast.Head.LocationContext |> notNull) |> should haveSubstring "Light grey on white"
 
 [<Fact>]
 let ``WCAG's contrast check draws pages with PDFium: PDFBox isn't in veraPDF's assembly`` () =

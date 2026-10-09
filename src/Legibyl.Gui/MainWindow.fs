@@ -1127,6 +1127,14 @@ module private MainView =
             // fails, and for one that passes with warnings not dismissed.
             let nextStep =
                 match report with
+                // WCAG 2.2 not checked, and nothing failed: not "it passes".
+                | Some report when not (isNull report.WcagError) && allRows |> List.forall (fun r -> r.Violation.Severity <> FindingSeverity.Failure) ->
+                    Some
+                        { Title = $"Check {WcagSpecification.Name} again"
+                          Details =
+                            [ $"{WcagSpecification.Name}'s checks couldn't run ({report.WcagError}), so it isn't counted as passing them, though PDF/UA's checks ran."
+                              "Choose Check Again. If it happens again, report it, with the PDF if you can share it." ]
+                          TopRules = [] }
                 | Some _ ->
                     NextStep.decide
                         allRows
