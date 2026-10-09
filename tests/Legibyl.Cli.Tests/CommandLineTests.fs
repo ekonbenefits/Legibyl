@@ -611,3 +611,41 @@ let ``a file that isn't a PDF among others is its own error, and the others' res
         fixedCode |> should equal 2
         [ for r in fixes -> Path.GetFileName(r.GetProperty("file").GetString() |> string), r.GetProperty("status").GetString() ]
         |> should equal [ "garden.pdf", "nothing-to-do"; "broken.pdf", "error"; "other.pdf", "nothing-to-do" ])
+
+/// Runs the CLI with stderr captured: its exit code, and what it said there, line by line.
+let private stderrOf (args: string list) =
+    let original = Console.Error
+    use writer = new StringWriter()
+    Console.SetError writer
+    let code =
+        try
+            Legibyl.Cli.Program.main (Array.ofList args)
+        finally
+            Console.SetError original
+    code, writer.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries ||| StringSplitOptions.TrimEntries) |> List.ofArray
+
+[<Fact>]
+let ``progress is said on stderr: a line per stage and how each file went, as JSON if asked, or nothing with --quiet`` () =
+    withTaggedPdf (fun pdf ->
+        let folder = Path.GetDirectoryName pdf |> nonNull
+        let other = Path.Combine(folder, "other.pdf")
+        File.Copy(pdf, other)
+        let report = Path.Combine(folder, "report.json")
+
+        let _, plain = stderrOf [ "validate"; pdf; other; "--output"; report; "--progress"; "plain" ]
+        let _, json = stderrOf [ "validate"; pdf; other; "--output"; report; "--progress"; "json" ]
+        let _, quiet = stderrOf [ "validate"; pdf; "--output"; report; "--quiet" ]
+        let wrong, said = stderrOf [ "validate"; pdf; "--progress"; "loud" ]
+
+        plain |> should contain "[1/2] garden.pdf: Validating: reading the PDF"
+        plain |> List.filter (fun line -> line.StartsWith "[2/2] other.pdf: FAIL") |> should haveLength 1
+        let events = json |> List.map (fun line -> JsonDocument.Parse(line).RootElement)
+        [ for e in events do
+              match e.TryGetProperty "done" with
+              | true, done' -> e.GetProperty("file").GetString(), done'.GetString()
+              | _ -> () ]
+        |> List.map (fun (file, outcome) -> Path.GetFileName(string file), (string outcome).StartsWith "FAIL")
+        |> should equal [ "garden.pdf", true; "other.pdf", true ]
+        quiet |> should be Empty
+        wrong |> should equal 64
+        said.Head |> should equal "error: Unknown --progress 'loud'. Expected auto, line, plain, json or none.")
