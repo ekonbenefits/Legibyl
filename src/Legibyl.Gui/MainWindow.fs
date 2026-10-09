@@ -628,8 +628,10 @@ module private MainView =
                             | null ->
                                 // Untagged: the button says Suggest Structure…, and that's what it does.
                                 let review = layoutReviews.For filePath
-                                // Offer to read the titles of pages links go to, before the window opens.
-                                do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles())
+                                // Offer to read the titles of pages links go to, before the window opens:
+                                // its links, and the QR codes of pages found before. (QR codes found as
+                                // the window finds pages are offered there, if this wasn't asked.)
+                                do! LinkTitleOffer.offer window filePath review (LinkTitles.WebPageTitles()) (LinkTitleOffer.qrCodesIn review)
                                 open' filePath (StructureTreeWindow(Suggested, filePath, review, refreshPending))
                             | structure ->
                                 open' filePath (StructureTreeWindow(Tagged structure, filePath, layoutReviews.For filePath, refreshPending, findingsToMark ()))

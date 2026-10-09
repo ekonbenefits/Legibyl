@@ -49,10 +49,13 @@ let private withPdf (links: bool) (test: string -> unit) =
             canvas.Fill() |> ignore
     try test pdf finally Directory.Delete(folder, true)
 
-/// Opens the offer, waits for its scan, runs act on it, and returns once it's closed.
-let private runOffer pdf (review: DocumentReview) titles (act: Window -> unit) =
+/// The QR code found on the PDF's page (by the layout's prefetcher, as the Structure window has it).
+let private scanned: LinkTitleOffer.Found list = [ { Address = "https://example.com/scan"; Where = [ "QR code on page 1" ] } ]
+
+/// Opens the offer (with the QR codes found already), runs act on it, and returns once it's closed.
+let private runOfferWith pdf (review: DocumentReview) titles (qrCodes: LinkTitleOffer.Found list) (act: Window -> unit) =
     let owner = HeadlessWindow.show 800.0 600.0
-    let pending = LinkTitleOffer.offer owner pdf review titles
+    let pending = LinkTitleOffer.offer owner pdf review titles qrCodes
     let dialog () = owner.OwnedWindows |> Seq.tryHead
     let found (window: Window) = descendants<TextBlock> window |> List.exists (fun t -> (string t.Text).StartsWith "Found ")
     HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 30.0) (fun () -> pending.IsCompleted || (dialog () |> Option.exists found)) |> ignore
@@ -60,6 +63,8 @@ let private runOffer pdf (review: DocumentReview) titles (act: Window -> unit) =
     HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> pending.IsCompleted) |> ignore
     owner.Close()
     pending.IsCompleted |> should be True
+
+let private runOffer pdf review titles act = runOfferWith pdf review titles scanned act
 
 let private click (window: Window) (text: string) =
     let button = descendants<Button> window |> List.find (fun b -> string b.Content = text)
@@ -102,13 +107,13 @@ let ``a PDF that doesn't link to the web isn't asked about, and an answer isn't 
     withPdf false (fun pdf ->
         onUiThread (fun () ->
             let review = DocumentReview(DateTime.UtcNow)
-            runOffer pdf review (FakeTitles Map.empty) ignore
+            runOfferWith pdf review (FakeTitles Map.empty) [] ignore
             review.LinkTitles |> should equal NotAsked))
     withPdf true (fun pdf ->
         onUiThread (fun () ->
             let review = DocumentReview(DateTime.UtcNow, LinkTitles = Skipped)
             let owner = HeadlessWindow.show 800.0 600.0
-            let pending = LinkTitleOffer.offer owner pdf review (FakeTitles Map.empty)
+            let pending = LinkTitleOffer.offer owner pdf review (FakeTitles Map.empty) scanned
             let asked = owner.OwnedWindows.Count
             owner.Close()
             pending.IsCompleted |> should be True

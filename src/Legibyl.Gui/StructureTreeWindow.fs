@@ -875,6 +875,22 @@ module private StructureView =
                     }
                     |> ignore
 
+            // Whether this window has offered to read web pages' titles, for QR codes found here.
+            let offered = ctx.useState false
+            /// For a found page with a QR code going to a web page, when nobody's said whether to
+            /// read such pages' titles: asks, once (the PDF's links with it), then reads them.
+            let offerTitlesFor (review: DocumentReview) (page: PageSuggestion) =
+                let hasWebQrCode = page.Blocks |> List.exists (fun block -> block.QrText |> Option.bind LinkTitles.webAddress |> Option.isSome)
+                if review.LinkTitles = NotAsked && hasWebQrCode && not offered.Current then
+                    offered.Set true
+                    task {
+                        do! LinkTitleOffer.offer window sourceFilePath review (LinkTitles.WebPageTitles()) (LinkTitleOffer.qrCodesIn review)
+                        pageNodes.Current.Clear()
+                        root.Set(buildRoot ())
+                        showPage selected.Current
+                    }
+                    |> ignore
+
             // Pages are found in the background; each is added to the structure as it is.
             ctx.useEffect (
                 (fun () ->
@@ -886,11 +902,13 @@ module private StructureView =
                                     readyCount.Set review.Pages.Count
                                     root.Set(buildRoot ())
                                     if shownPage.Current.IsNone then showPage selected.Current
+                                    offerTitlesFor review page
                                     readTitlesFor review page))
                         let failed =
                             prefetcher.PageFailed.Subscribe(fun (number, reason) ->
                                 Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> failures.Set(failures.Current.Add(number, reason))))
                         for page in review.Pages.Values do
+                            offerTitlesFor review page
                             readTitlesFor review page
                         if modelReady.Current then prefetcher.Start()
                         { new IDisposable with
