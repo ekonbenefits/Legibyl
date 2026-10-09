@@ -7,6 +7,8 @@ phrases:
   qrCodeLinkingTo: "Código QR que enlaza a {title} ({address})"
   qrCodeLinkingToAddress: "Código QR que enlaza a {address}"
   qrCode: "Código QR: {text}"
+  qrCodeLinkTo: "Enlace del código QR a {title} ({address})"
+  qrCodeLinkToAddress: "Enlace del código QR a {address}"
 
 # A paragraph that starts with one of these likely goes on from the one before.
 sentenceContinuations: [y, o, e, u, de, del, la, el, los, las, en, que, con, para]

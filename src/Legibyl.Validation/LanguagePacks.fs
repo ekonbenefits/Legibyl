@@ -12,6 +12,7 @@ open System
 open System.Collections.Generic
 open System.IO
 open System.Text.RegularExpressions
+open iText.Kernel.Pdf
 open YamlDotNet.Serialization
 open YamlDotNet.Serialization.NamingConventions
 
@@ -56,7 +57,9 @@ let phrases =
     Map.ofList
         [ "qrCodeLinkingTo", "QR code linking to {title} ({address})"
           "qrCodeLinkingToAddress", "QR code linking to {address}"
-          "qrCode", "QR code: {text}" ]
+          "qrCode", "QR code: {text}"
+          "qrCodeLinkTo", "QR code link to {title} ({address})"
+          "qrCodeLinkToAddress", "QR code link to {address}" ]
 
 let private placeholders (text: string) =
     Regex.Matches(text, @"\{(\w+)\}") |> Seq.map (fun m -> m.Groups[1].Value) |> Set.ofSeq
@@ -190,3 +193,14 @@ let phraseIn (packs: Pack list) (language: string option) (key: string) (values:
 
 /// A phrase, from the installed packs (see phraseIn).
 let phrase (language: string option) (key: string) (values: (string * string) list) = phraseIn (fst installed.Value) language key values
+
+/// The language Legibyl writes a document's own text in (see phrase): the one it says it's in,
+/// else the one its text reads as, if that's clear.
+let writtenIn (document: PdfDocument) = DocumentLanguage.ofDocument document
+
+/// The language Legibyl writes a PDF's own text in (see writtenIn); None if it can't be read.
+let writtenInFile (pdfPath: string) =
+    try
+        use document = new PdfDocument(new PdfReader(pdfPath))
+        writtenIn document
+    with _ -> None

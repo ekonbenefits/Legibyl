@@ -269,6 +269,28 @@ let ``with link titles, a QR code's description names the page it goes to`` () =
     |> should be True
 
 [<Fact>]
+let ``in a Spanish document, a QR code's alt text and its link's description are in Spanish, and say so`` () =
+    use made = new TempPdf()
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createUntagged made.Path
+    do
+        use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(made.Path), new iText.Kernel.Pdf.PdfWriter(input.Path))
+        document.GetCatalog().SetLang(iText.Kernel.Pdf.PdfString "es-MX") |> ignore
+
+    tagWithQrLinks input.Path output.Path (FixedLayout(withQrCode regions)) |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let figure = flatten root |> List.find (fun node -> node.Tag = "Figure")
+    (figure.AlternateDescription, figure.Language) |> should equal ("Código QR que enlaza a https://example.com/apply", "es")
+    let link = flatten root |> List.find (fun node -> node.Tag = "Link" && node.Children |> Seq.exists (fun child -> child.Tag = "Figure"))
+    link.Language |> should equal "es"
+    use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(output.Path))
+    [ for a in document.GetPage(1).GetAnnotations() do
+          if not (isNull (a.GetContents())) then a.GetContents().ToUnicodeString() ]
+    |> should contain "Enlace del código QR a https://example.com/apply"
+
+[<Fact>]
 let ``a QR code's link is described with the alt text a person wrote for it`` () =
     use input = new TempPdf()
     use output = new TempPdf()

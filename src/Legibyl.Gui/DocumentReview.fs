@@ -233,8 +233,12 @@ type DocumentReview(modified: DateTime) =
         | Read except -> not (except.Contains address)
         | _ -> false
 
-    /// A QR code's alt text as prefilled: where it links, named by its page's title if read.
-    member this.QrAlt(qrText: string) = LinkTitles.qrAltText this.TitleLookup qrText
+    /// The language Legibyl writes this PDF's own text in (see LanguagePacks.writtenIn).
+    member val Language = lazy None with get, set
+
+    /// A QR code's alt text as prefilled: where it links, named by its page's title if read, in
+    /// the PDF's language as tagging writes it.
+    member this.QrAlt(qrText: string) = fst (LinkTitles.qrAltText this.TitleLookup this.Language.Value qrText)
 
     /// A web link's description as prefilled: its page's title, if read; "" if not.
     member this.LinkPrefill(address: string) =
@@ -263,6 +267,7 @@ type DocumentReviews() =
             // The review saved next to the PDF, and the layout recorded with it: its pages that
             // haven't changed since count as found.
             let review = DocumentReview modified
+            review.Language <- lazy (LanguagePacks.writtenInFile fullPath)
             let file = ReviewFile.readFile (ReviewFile.filePath fullPath)
             match file with
             | Some saved ->

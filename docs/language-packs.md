@@ -9,7 +9,7 @@ language a text is in for 53 languages without a pack. A pack adds what it can't
 
 | In the pack | What Legibyl does with it |
 |---|---|
-| `phrases` | Text Legibyl writes into PDFs itself (a QR code's alt text, say) is written in the language, and marked as that language. Without it, the text is in English, marked as English. |
+| `phrases` | Text Legibyl writes into PDFs itself (a QR code's alt text, and the description of the link it adds over it) is written in the language, and marked as that language. Without it, the text is in English, marked as English. |
 | `sentenceContinuations` | Words that start the rest of a sentence. A paragraph starting with one is warned about as likely split from the one before. |
 | `standaloneHeadings` | Words that start a paragraph standing on its own ("SECTION 3"), which isn't joined to the one before. |
 
@@ -51,6 +51,8 @@ phrases:
   qrCodeLinkingTo: "Code QR menant à {title} ({address})"
   qrCodeLinkingToAddress: "Code QR menant à {address}"
   qrCode: "Code QR : {text}"
+  qrCodeLinkTo: "Lien du code QR vers {title} ({address})"
+  qrCodeLinkToAddress: "Lien du code QR vers {address}"
 
 # A paragraph that starts with one of these likely goes on from the one before.
 sentenceContinuations: [et, ou, de, du, des, la, le, les, en, que, pour]
@@ -66,6 +68,12 @@ Every field can be left out. The phrases, in English, are:
 | `qrCodeLinkingTo` | QR code linking to {title} ({address}) |
 | `qrCodeLinkingToAddress` | QR code linking to {address} |
 | `qrCode` | QR code: {text} |
+| `qrCodeLinkTo` | QR code link to {title} ({address}) |
+| `qrCodeLinkToAddress` | QR code link to {address} |
+
+The first three are a QR code's alt text: where it links (with the title of the page it goes
+to, when Legibyl has read it), or what it says when it isn't a web address. The last two
+describe the link Legibyl adds over a QR code.
 
 The built-in packs, in the app's `languages` folder (and the repository's), are examples.
 

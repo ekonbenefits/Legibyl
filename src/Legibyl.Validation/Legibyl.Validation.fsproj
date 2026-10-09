@@ -14,7 +14,6 @@
   <ItemGroup>
     <Compile Include="Tags.fs" />
     <Compile Include="Destinations.fs" />
-    <Compile Include="LanguagePacks.fs" />
     <Compile Include="Types.fs" />
     <Compile Include="PdfUaTarget.fs" />
     <Compile Include="PdfLocationParser.fs" />
@@ -25,6 +24,8 @@
     <Compile Include="WebAddressText.fs" />
     <Compile Include="MarkedContentTextIndex.fs" />
     <Compile Include="StructureTreeObjects.fs" />
+    <Compile Include="DocumentLanguage.fs" />
+    <Compile Include="LanguagePacks.fs" />
     <Compile Include="SplitWordSpans.fs" />
     <Compile Include="ContentOperators.fs" />
     <Compile Include="ContentOperations.fs" />
@@ -48,7 +49,6 @@
     <Compile Include="UntaggedContent.fs" />
     <Compile Include="DisconnectedContent.fs" />
     <Compile Include="FigureRegion.fs" />
-    <Compile Include="DocumentLanguage.fs" />
     <Compile Include="TableRebuild.fs" />
     <Compile Include="ParagraphTableRebuild.fs" />
     <Compile Include="ElementEdits.fs" />
