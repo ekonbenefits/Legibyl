@@ -126,8 +126,8 @@ let ``a PDF that passes opens on its Pass row: the steps a person checks, for th
         window.Close()
 
         (match selected with :? ResultItem as PassItem _ -> true | _ -> false) |> should be True
-        (match first with PassItem progress -> progress | _ -> "") |> should equal "Passes PDF/UA-1's automated checks"
-        shown |> should contain "Passes PDF/UA-1's automated checks. PDF/UA also needs a person to check:"
+        (match first with PassItem progress -> progress | _ -> "") |> should equal "Passes PDF/UA-1 and WCAG 2.2's automated checks"
+        shown |> should contain "Passes PDF/UA-1 and WCAG 2.2's automated checks. PDF/UA also needs a person to check:"
         // The file's own title and language, as written.
         shown |> List.exists (fun t -> t.StartsWith "Title: " || t = "No title of its own") |> should be True
         shown |> List.exists (fun t -> t.StartsWith "Language: " || t = "No language declared") |> should be True
@@ -220,13 +220,21 @@ let ``the summary above the list counts what the banner does`` () =
     onUiThread (fun () ->
         let window = openSample "pages-clipped-paragraphs.pdf"
         let shown = texts window
-        let failures = HeadlessWindow.findings window |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Failure) |> List.length
+        let failed = HeadlessWindow.findings window |> List.filter (fun r -> r.Violation.Severity = FindingSeverity.Failure)
+        let failures = failed.Length
+        // The banner counts each standard's: PDF/UA's, and WCAG 2.2's machine checks'.
+        let wcag = failed |> List.filter (fun r -> r.Violation.Specification = WcagSpecification.Name) |> List.length
+        let counted =
+            let parts =
+                [ if failures > wcag then $"{failures - wcag} PDF/UA-1"
+                  if wcag > 0 then $"{wcag} {WcagSpecification.Name}" ]
+            String.Join(" and ", parts)
         window.Close()
 
         shown |> should contain $"{failures} failures"
         shown |> should contain "1 warning"
         // (Ending ", as checked …" when this session has checked it already.)
-        shown |> List.exists (fun t -> t.StartsWith $"FAIL — {failures} of " && t.Contains "; 1 warning)") |> should be True)
+        shown |> List.exists (fun t -> t.StartsWith $"FAIL — {counted} checks failed, of " && t.Contains "; 1 warning)") |> should be True)
 
 [<Fact>]
 let ``a PDF 2.0 file is checked against PDF/UA-2 without choosing, and the banner says why`` () =
@@ -247,7 +255,7 @@ let ``a PDF 2.0 file is checked against PDF/UA-2 without choosing, and the banne
             let pickers = descendants<ComboBox> window
             window.Close()
 
-            shown |> List.exists (fun t -> t.StartsWith "FAIL" && t.Contains "against PDF/UA-2 (a PDF 2.0 file; ") |> should be True
+            shown |> List.exists (fun t -> t.StartsWith "FAIL" && t.Contains " PDF/UA-2 " && t.Contains "(a PDF 2.0 file; ") |> should be True
             // No profile picker to choose from.
             pickers |> should be Empty)
     finally
@@ -305,5 +313,38 @@ let ``what veraPDF noted reading the file is under the banner, not among the fin
 
             headers |> should equal [ "veraPDF noted 1 thing while reading the file" ]
             findings |> List.exists (fun m -> m.Contains "Nested MCID") |> should be False)
+    finally
+        Directory.Delete(folder, true)
+
+[<Fact>]
+let ``a PDF that passes PDF/UA but not WCAG 2.2's contrast fails, saying so, with no Pass row`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"legibyl-{Guid.NewGuid():N}")
+    Directory.CreateDirectory folder |> ignore
+    let pdf = Path.Combine(folder, "garden-colours.pdf")
+    do
+        use document =
+            new iText.Pdfua.PdfUADocument(
+                new iText.Kernel.Pdf.PdfWriter(pdf),
+                iText.Pdfua.PdfUAConfig(iText.Kernel.Pdf.PdfUAConformance.PDF_UA_1, "Garden Colours", "en-US")
+            )
+        let font =
+            iText.Kernel.Font.PdfFontFactory.CreateFont(
+                Path.Combine(AppContext.BaseDirectory, "SampleCorpus", "fonts", "Lato-Regular.ttf"),
+                iText.IO.Font.PdfEncodings.WINANSI,
+                iText.Kernel.Font.PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED
+            )
+        use layout = new iText.Layout.Document(document)
+        layout.SetFont font |> ignore
+        layout.Add(iText.Layout.Element.Paragraph("Light grey on white is hard to read.").SetFontColor(iText.Kernel.Colors.DeviceRgb(0xCC, 0xCC, 0xCC))) |> ignore
+    try
+        onUiThread (fun () ->
+            let window = HeadlessWindow.show 1200.0 720.0
+            HeadlessWindow.openPdf window pdf
+            let shown = texts window
+            let items = HeadlessWindow.resultItems window
+            window.Close()
+
+            shown |> List.exists (fun t -> t.StartsWith "FAIL — " && t.Contains $" {WcagSpecification.Name} checks failed" && not (t.Contains "PDF/UA-1 checks")) |> should be True
+            items |> List.exists (function PassItem _ -> true | _ -> false) |> should be False)
     finally
         Directory.Delete(folder, true)

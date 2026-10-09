@@ -41,6 +41,32 @@ veraPDF's bundled fat jar in turn includes third-party dependencies
 under their own respective open-source licenses. Consult the individual
 project pages for full license texts of those transitive dependencies.
 
+## veraPDF's WCAG 2.2 checks, Apache PDFBox and image readers
+
+Compiled into the same assembly as veraPDF (each downloaded unmodified from
+Maven Central, pinned by SHA-256 in `src/Legibyl.Validation/Legibyl.Validation.fsproj`;
+see `lib/vendor/verapdf-jars/README.md`):
+
+- **veraPDF `wcag-validation` and `wcag-algorithms` 1.28.1**
+  (<https://github.com/veraPDF/veraPDF-validation>,
+  <https://github.com/veraPDF/veraPDF-wcag-algs>), and veraPDF's
+  `WCAG-2-2-Machine.xml` validation profile at its v1.28.1 tag
+  (<https://github.com/veraPDF/veraPDF-validation-profiles>), committed unmodified
+  as `src/Legibyl.Validation/Profiles/WCAG-2-2-Machine.xml`. Copyright (c)
+  2015-2026, veraPDF Consortium; dual-licensed GPLv3+ / MPLv2+, as veraPDF above.
+- **Apache PDFBox and FontBox 2.0.24** (<https://pdfbox.apache.org/>) and
+  **Apache Commons Logging 1.2**: Apache License 2.0 (`LICENSE.Apache`).
+- **jbig2-imageio 3.0.3** (Apache PDFBox's JBIG2 reader): Apache License 2.0.
+- **jai-imageio-core 1.4.0** (<https://github.com/jai-imageio/jai-imageio-core>):
+  BSD 3-clause license, Copyright (c) 2005 Sun Microsystems, Inc., with its
+  disclaimer that the software is not designed or intended for use in the
+  design, construction, operation or maintenance of any nuclear facility.
+
+Legibyl does **not** bundle jai-imageio-jpeg2000, whose JJ2000 licence grants no
+rights for products that don't conform to the JPEG 2000 standard. In its place
+is Legibyl's own stand-in class (`src/Legibyl.Validation/java/`, AGPL-3.0 or
+later, like the rest of Legibyl), which reads no JPEG 2000 images.
+
 ## IKVM.NET
 
 This application also uses [IKVM.NET](https://github.com/ikvmnet/ikvm),

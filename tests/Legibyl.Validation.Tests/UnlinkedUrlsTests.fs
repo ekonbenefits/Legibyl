@@ -250,7 +250,7 @@ let ``an address drawn in pieces side by side in one tag is linked whole, the pa
 
     result.AppliedFixes |> should contain "Linked 1 web address shown as text, to where it goes."
     named output.Path |> should be Empty
-    let failed (path: string) = validator.Value.Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    let failed (path: string) = validator.Value.Validate(path, PdfProfile.PdfUa1).PdfUaFailures |> Seq.map _.RuleId |> Set.ofSeq
     Set.difference (failed output.Path) (failed input.Path) |> should be Empty
     render output.Path |> should equal (render input.Path)
     // The P reads "Visit ", then a Link holding the address's three pieces and the annotation.
@@ -301,7 +301,7 @@ let private linksAlike (input: string) (output: string) =
     let result = validator.Value.Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.LinkUrls)
     result.AppliedFixes |> should contain "Linked 1 web address shown as text, to where it goes."
     named output |> should be Empty
-    let failed (path: string) = validator.Value.Validate(path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> Set.ofSeq
+    let failed (path: string) = validator.Value.Validate(path, PdfProfile.PdfUa1).PdfUaFailures |> Seq.map _.RuleId |> Set.ofSeq
     Set.difference (failed output) (failed input) |> should be Empty
     render output |> should equal (render input)
 
@@ -510,7 +510,7 @@ let ``the fix moves the address's own page's content, not another page's with th
             show canvas font 72.0 700.0 text
             canvas.CloseTag() |> ignore)
     validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed |> should be True
-    let failed = validator.Value.Validate(output.Path, PdfProfile.PdfUa1).FailedAssertions |> Seq.map _.RuleId |> List.ofSeq
+    let failed = validator.Value.Validate(output.Path, PdfProfile.PdfUa1).PdfUaFailures |> Seq.map _.RuleId |> List.ofSeq
     failed |> should not' (contain "7.1-3")
     let paragraph = (validator.Value.ReadStructureTree output.Path |> notNull).Children[0].Children[0]
     (string paragraph.Content, [ for child in paragraph.Children -> child.Tag, string child.Content, child.PageNumber.GetValueOrDefault() ])

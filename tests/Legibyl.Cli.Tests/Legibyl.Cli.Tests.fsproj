@@ -18,6 +18,7 @@
     <Compile Include="FigureRegionTests.fs" />
     <Compile Include="LayoutFileTests.fs" />
     <Compile Include="AppendCommandTests.fs" />
+    <Compile Include="WcagCommandTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

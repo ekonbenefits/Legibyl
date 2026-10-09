@@ -67,8 +67,14 @@ type ValidationResult =
       StandardFrom: string
       /// The flavour id actually validated against (e.g. "ua1"), null if validation errored.
       FlavourId: string | null
-      /// True/false if validation completed, null if it errored before a result was produced.
+      /// Whether it complies with the PDF/UA standard checked: true/false if validation completed,
+      /// null if it errored before a result was produced.
       IsCompliant: Nullable<bool>
+      /// Whether WCAG 2.2's machine checks (contrast, text size and more), which run with every
+      /// validation, pass; null if validation errored. A file passes when both are true.
+      MeetsWcag: Nullable<bool>
+      /// How many of FailedCount's failures are WCAG 2.2's; null if validation errored.
+      WcagFailedCount: Nullable<int>
       TotalAssertions: Nullable<int>
       FailedCount: Nullable<int>
       /// Only the failed rule checks; empty (never null) when compliant or errored.
@@ -102,6 +108,8 @@ type ValidationResult =
           StandardFrom = target.From
           FlavourId = null
           IsCompliant = Nullable()
+          MeetsWcag = Nullable()
+          WcagFailedCount = Nullable()
           TotalAssertions = Nullable()
           FailedCount = Nullable()
           Failures = [||]
@@ -114,8 +122,9 @@ type ValidationResult =
           DismissedWarnings = 0
           Review = null }
 
-/// A document's standing against its profile: whether it complies, and how many checks failed.
-type Compliance = { IsCompliant: bool; FailedCount: int }
+/// A document's standing: whether it complies with PDF/UA, whether WCAG 2.2's machine checks pass
+/// (it passes when both do), and how many checks failed, of both.
+type Compliance = { IsCompliant: bool; MeetsWcag: bool; FailedCount: int }
 
 /// What `fix` or `layout apply` did to one file.
 module FixStatus =

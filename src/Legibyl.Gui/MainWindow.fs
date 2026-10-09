@@ -210,7 +210,7 @@ module private MainView =
             // for this very file (see DocumentReview.CheckedFor).
             let checklist () : (ChecklistStep list * Set<string>) option =
                 match report, passFacts.Current, selectedFile.Current with
-                | Some report, Some facts, Some path when report.IsCompliant ->
+                | Some report, Some facts, Some path when report.Passes ->
                     let review = layoutReviews.For path
                     let ticked = review.Validation |> Option.map (fun v -> review.CheckedFor v.Hash) |> Option.defaultValue Set.empty
                     // With those checked in the copy it is, if it's one.
@@ -220,16 +220,18 @@ module private MainView =
             /// Export writes into a copy, when that's all it writes.
             let ticksToCarry () =
                 match report, selectedFile.Current with
-                | Some report, Some path when report.IsCompliant ->
+                | Some report, Some path when report.Passes ->
                     let review = layoutReviews.For path
                     match review.Validation with
                     | Some validation -> Set.difference (review.CheckedFor validation.Hash) review.CarriedChecked
                     | None -> Set.empty
                 | _ -> Set.empty
-            let profileName = report |> Option.map (fun r -> PdfUaTarget.displayName r.Profile) |> Option.defaultValue "PDF/UA"
+            // What it passes: PDF/UA, and WCAG 2.2's machine checks, which run with every validation.
+            let profileName =
+                report |> Option.map (fun r -> $"{PdfUaTarget.displayName r.Profile} and {WcagSpecification.Name}") |> Option.defaultValue "PDF/UA"
             let passProgress =
                 match report, checklist () with
-                | Some report, _ when not report.IsCompliant -> None
+                | Some report, _ when not report.Passes -> None
                 | Some _, Some(steps, ticked) -> Some(Checklist.progress profileName steps ticked)
                 | Some _, None -> Some $"Passes {profileName}'s automated checks"
                 | None, _ -> None
@@ -250,7 +252,7 @@ module private MainView =
                 | None -> ()
             /// Whether it's worth offering fixes right now. The current fixers target known
             /// validation failures, so hide them once the file is already compliant.
-            let canAttemptFix = report |> Option.exists (fun r -> not r.IsCompliant || r.WarningCount > 0)
+            let canAttemptFix = report |> Option.exists (fun r -> not r.Passes || r.WarningCount > 0)
 
             let clearResults () =
                 outcome.Set NotValidated
@@ -326,7 +328,7 @@ module private MainView =
             /// fails, the Next step row; else the first rule's first finding, or the rule's row if it
             /// starts collapsed.
             let selectFirst (rows: RuleViolationRow list) =
-                let passes = match outcome.Current with Validated(report, _) -> report.IsCompliant | _ -> false
+                let passes = match outcome.Current with Validated(report, _) -> report.Passes | _ -> false
                 if passes then
                     selectPass ()
                 elif rows |> List.exists (fun row -> row.Violation.Severity = FindingSeverity.Failure) then
@@ -431,13 +433,13 @@ module private MainView =
                                     review.Validation <- Some(SavedResults.ofReport report hash DateTime.Now)
                                     // A PDF that passes with every warning dismissed (or none) has
                                     // nothing left to do: its result alone isn't a change to keep.
-                                    if report.IsCompliant && rows |> List.forall _.Dismissed then review.TakeValidationAsSaved()
+                                    if report.Passes && rows |> List.forall _.Dismissed then review.TakeValidationAsSaved()
                                     edited.Set review.IsEdited
                                 outcome.Set(Validated(report, rows))
                                 refreshPending ()
                                 selectFirst rows
                                 // What a person checks for a PDF that passes: read in the background.
-                                if report.IsCompliant then
+                                if report.Passes then
                                     Task.Run(fun () -> try Some(DocumentFacts.read filePath) with _ -> None)
                                         .ContinueWith((fun (t: Task<DocumentFacts.Facts option>) ->
                                             if selectedFile.Current = Some filePath then passFacts.Set t.Result),
@@ -958,7 +960,7 @@ module private MainView =
             let reportText (report: ValidationReport) =
                 let checks =
                     match checklist () with
-                    | Some(steps, ticked) when report.IsCompliant -> Checklist.text profileName steps ticked
+                    | Some(steps, ticked) when report.Passes -> Checklist.text profileName steps ticked
                     | _ -> ""
                 checks + ValidationReportTextFormatter.BuildReport(withoutDismissed report)
 
@@ -1064,12 +1066,19 @@ module private MainView =
                     // And for a PDF that passes, once a person has worked through its checklist.
                     let asChecked = if passProgress = Some "Checked by a person" then asChecked + ", checked by a person" else asChecked
                     let standing =
-                        if report.IsCompliant then
-                            banner Theme.Tokens.Success $"PASS — compliant with {flavour} ({why}{report.TotalAssertions} checks, {warnings}){asChecked}"
+                        if report.Passes then
+                            banner
+                                Theme.Tokens.Success
+                                $"PASS — compliant with {flavour} and {WcagSpecification.Name} ({why}{report.TotalAssertions} checks, {warnings}){asChecked}"
                         else
+                            // Which standard's checks failed: PDF/UA's, WCAG 2.2's, or both.
+                            let wcag = Seq.length report.WcagFailures
+                            let failed =
+                                [ if report.FailedCount > wcag then $"{report.FailedCount - wcag} {flavour}"
+                                  if wcag > 0 then $"{wcag} {WcagSpecification.Name}" ]
                             banner
                                 Theme.Tokens.Danger
-                                $"FAIL — {report.FailedCount} of {report.TotalAssertions} checks failed against {flavour} ({why}{warnings}){asChecked}"
+                                $"""FAIL — {String.Join(" and ", failed)} checks failed, of {report.TotalAssertions} ({why}{warnings}){asChecked}"""
                     Some(
                         match List.ofSeq report.Notes with
                         | [] -> standing

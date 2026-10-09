@@ -3,8 +3,9 @@
 # shall be marked as Artifact or tagged as real content"), which says little to someone who
 # doesn't know PDF's insides.
 #
-# rules is PDF/UA-1's (ISO 14289-1), pdfUa2Rules PDF/UA-2's (ISO 14289-2), and tagNestingRules
-# ISO 32005's, which PDF/UA-2 includes. Each entry is for a clause (or several clauses), and the
+# rules is PDF/UA-1's (ISO 14289-1), pdfUa2Rules PDF/UA-2's (ISO 14289-2), tagNestingRules
+# ISO 32005's, which PDF/UA-2 includes, and wcagRules WCAG 2.2's machine checks (veraPDF's
+# WCAG-2-2-Machine.xml), which run with every validation. Each entry is for a clause (or several clauses), and the
 # tests of it listed, or every test of it when none are. The first entry that matches a failure
 # is its guide; a rule no entry matches has only veraPDF's own text. Check a rule's clause, test
 # and description with veraPDF's PDF/UA-1 profile (PDFUA-1.xml).
@@ -473,3 +474,52 @@ tagNestingRules:
 
   - meaning: "A tag is inside one it can't be in under PDF 2.0's rules (a paragraph straight under the structure's root, say, or a link inside a link), so a screen reader may misreport or skip it."
     whatToDo: "Fix it where the PDF was made, and export it again with tags, or move the tag in a PDF editor's tags panel. For a tag straight under the structure's root (anything but a single Document there), choose One Document tag at the top in Auto Fixes…: it puts them under one."
+
+# WCAG 2.2's machine checks: veraPDF's, run beside PDF/UA with every validation (Profiles/
+# WCAG-2-2-Machine.xml has each rule's description).
+wcagRules:
+
+  - clause: "1.4.3"
+    meaning: "Text doesn't stand out enough from what's behind it (at least 4.5 to 1, or 3 to 1 for large text: 18 pt, or 14 pt bold), so people with low vision or colour blindness may not be able to read it."
+    whatToDo: "Darken the text or lighten what's behind it where the PDF was made, then export it again. The finding shows where on the page."
+
+  - clause: "1.4.4"
+    meaning: "Text is too small (under 4.5 pt) to read when the page is enlarged without assistive technology."
+    whatToDo: "Make it larger where the PDF was made, or mark it as decoration if it's not meant to be read."
+
+  - clause: "1.3.1"
+    tests: [1]
+    meaning: "A character is repeated five or more times in a row (dot leaders in a contents page, say, or underscores for a line), and a screen reader reads every one."
+    whatToDo: "Mark the repeated characters as decoration (an artifact) where the PDF was made, or in Structure… choose Not read for them."
+
+  - clause: "1.3.1"
+    tests: [2]
+    meaning: "Spaces are repeated to lay text out, so a screen reader may pause or announce them, and the text's structure isn't in its tags."
+    whatToDo: "Lay the text out with tabs, columns or a table where the PDF was made, rather than runs of spaces."
+
+  - clause: "1.3.4"
+    meaning: "The pages don't all have the same orientation, so someone who can't turn the screen or the page may not be able to read some of them."
+    whatToDo: "Rotate the odd pages to match where the PDF was made, unless their content needs that orientation (a wide table, say)."
+
+  - clause: "1.4.10"
+    meaning: "A figure has no bounding box, so a screen magnifier can't find it on the page or enlarge it on its own."
+    whatToDo: "Export the PDF again with tags from the tool that made it; or in Structure…, select the figure and choose its region again."
+
+  - clause: "2.4.9"
+    meaning: "A link has no description, so a screen reader can't say where it goes."
+    whatToDo: "In Structure…, right-click the link › Edit Link Description…, then Export…."
+
+  - clause: "4.1.2"
+    tests: [16, 17]
+    meaning: "A paragraph or span tag holds nothing to read, so a screen reader announces an empty element."
+    whatToDo: "Choose Remove empty paragraphs in Auto Fixes… for empty paragraphs; remove an empty span in a PDF editor's tags panel."
+
+  - clause: "4.1.2"
+    tests: [18, 19]
+    meaning: "A heading tag holds nothing to read, so a screen reader announces an empty heading."
+    whatToDo: "In Structure…, select it and remove it, or give it its heading text where the PDF was made."
+
+  - clause: "4.1.2"
+    tests: [29]
+    meaning: "An entry in the table of contents has no text, so a screen reader reads an empty item."
+    whatToDo: "Choose Remove empty contents entries in Auto Fixes…."

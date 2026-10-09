@@ -38,7 +38,7 @@ let ``a saved result reads back as the validation gave it, messages and all`` (n
     ReviewFile.toJson file |> should not' (haveSubstring "\"message\"")
 
 [<Fact>]
-let ``a saved result is stale for other bytes, another veraPDF or Legibyl, or another standard`` () =
+let ``a saved result is stale for other bytes, another veraPDF or Legibyl, another standard, or no WCAG checks`` () =
     let pdf = corpusFile "pdfua1-pass.pdf"
     let report = VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1)
     let hash = SavedResults.hashOf pdf
@@ -47,9 +47,11 @@ let ``a saved result is stale for other bytes, another veraPDF or Legibyl, or an
     SavedResults.isCurrent saved hash PdfProfile.PdfUa1 |> should be True
     SavedResults.isCurrent saved (hash.Replace('a', 'b')) PdfProfile.PdfUa1 |> should be False
     SavedResults.isCurrent { saved with VeraPdfVersion = "1.26.0" } hash PdfProfile.PdfUa1 |> should be False
+    // One saved before WCAG 2.2's checks ran with every validation is checked again.
+    SavedResults.isCurrent { saved with VeraPdfVersion = "1.28.1" } hash PdfProfile.PdfUa1 |> should be False
     SavedResults.isCurrent { saved with LegibylVersion = "0.1" } hash PdfProfile.PdfUa1 |> should be False
     SavedResults.isCurrent saved hash PdfProfile.PdfUa2 |> should be False
-    saved.VeraPdfVersion |> should equal "1.28.1"
+    saved.VeraPdfVersion |> should equal "1.28.1+wcag-2.2"
 
 [<Fact>]
 let ``a copy's review doesn't carry the saved result, or the checklist`` () =

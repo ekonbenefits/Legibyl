@@ -12,6 +12,11 @@
   <PropertyGroup>
     <VeraPdfVersion>1.28.1</VeraPdfVersion>
     <VeraPdfSha256>916049DB6C6335A4A4C624E098499CFF152EF523F65693A0D835AEC635B6DCBC</VeraPdfSha256>
+    <!-- veraPDF's WCAG 2.2 checks: its wcag-validation and wcag-algorithms jars (the veraPDF
+         version above), and the Apache PDFBox they render pages with for the contrast check, each
+         jar pinned by its SHA-256 in Legibyl.Validation.fsproj and compiled into veraPDF's
+         assembly. See lib/vendor/verapdf-jars/README.md. -->
+    <PdfBoxVersion>2.0.24</PdfBoxVersion>
     <!-- Tesseract's English and Spanish OCR models (tessdata_fast, Apache-2.0), fetched by
          Legibyl.Layout's build like the veraPDF jar and copied into the output's built-in
          language packs, languages/en and languages/es. -->
