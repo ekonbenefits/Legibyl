@@ -65,6 +65,7 @@
     <Compile Include="AppendTests.fs" />
     <Compile Include="UnlinkedUrlsTests.fs" />
     <Compile Include="DocumentRootTests.fs" />
+    <Compile Include="LanguagePacksTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
