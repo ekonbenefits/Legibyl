@@ -570,6 +570,8 @@ module private StructureView =
                                     Task.Run(fun () ->
                                         if not (TableModel.isDownloaded ()) then
                                             (TableModel.download downloading CancellationToken.None).Wait()
+                                            // Then what it's doing now, not the download's last percentage (after it, on the window's thread).
+                                            Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> working.Set "Finding the table's rows and cells…")
                                         use suggester = new LayoutSuggester(sourceFilePath, review.Language)
                                         suggester.TableCells(box.PageNumber, box)
                                         |> Option.map (List.map (fun (header, g) -> ({ Tag = (if header then Tags.TH else Tags.TD); Box = g }: TableCell))))
@@ -686,6 +688,8 @@ module private StructureView =
                                             Task.Run(fun () ->
                                                 if not (TableModel.isDownloaded ()) then
                                                     (TableModel.download downloading CancellationToken.None).Wait()
+                                                    // Then what it's doing now, not the download's last percentage (after it, on the window's thread).
+                                                    Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> working.Set "Finding the table's rows and cells…")
                                                 use suggester = new LayoutSuggester(sourceFilePath, review.Language)
                                                 suggester.TableCells(region.PageNumber, region)
                                                 |> Option.map (List.map (fun (header, geometry) ->

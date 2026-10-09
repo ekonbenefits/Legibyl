@@ -36,7 +36,9 @@ let ``every progress line says what's happening first`` () =
       fixing FixStage.Fixing 3 4 0 0
       fixing FixStage.Fixing 3 4 2 10
       fixing FixStage.FixingMetadata 4 4 0 0
-      Working "Opening garden.pdf…" ]
+      Working "Opening garden.pdf…"
+      Appending(Append.Step.Of "Joining")
+      Appending { Doing = "Validating garden.pdf (1 of 3)"; Page = 4; PageCount = 12 } ]
     |> List.map statusText
     |> should
         equal
@@ -50,7 +52,9 @@ let ``every progress line says what's happening first`` () =
           "Fixing, step 3 of 4: applying the fixes…"
           "Fixing, step 3 of 4: finding page 2 of 10's layout, to join split paragraphs"
           "Fixing, step 4 of 4: fixing metadata with veraPDF…"
-          "Opening garden.pdf…" ]
+          "Opening garden.pdf…"
+          "Appending: Joining…"
+          "Appending: Validating garden.pdf (1 of 3): page 4 of 12" ]
 
 [<Fact>]
 let ``a screen reader hears the activity and a tenth of the way at a time, not every page`` () =
@@ -61,7 +65,8 @@ let ``a screen reader hears the activity and a tenth of the way at a time, not e
       DownloadingLayoutModel 0.37
       fixing FixStage.Tagging 2 4 3 10
       fixing FixStage.FixingMetadata 4 4 0 0
-      Working "Opening garden.pdf…" ]
+      Working "Opening garden.pdf…"
+      Appending { Doing = "Validating garden.pdf (1 of 3)"; Page = 7; PageCount = 12 } ]
     |> List.map announcement
     |> should
         equal
@@ -72,4 +77,5 @@ let ``a screen reader hears the activity and a tenth of the way at a time, not e
           "Downloading the layout model: 30%"
           "Fixing, step 2 of 4: 20%"
           "Fixing, step 4 of 4"
-          "Opening garden.pdf…" ]
+          "Opening garden.pdf…"
+          "Appending: Validating garden.pdf (1 of 3): 50%" ]
