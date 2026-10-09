@@ -84,10 +84,11 @@ module internal VeraPdf =
              | None -> ()
              profile)
 
-    /// Legibyl's name for a specification veraPDF names: WCAG 2.2's "WCAG2.2" is "WCAG 2.2" (see
-    /// WcagSpecification); PDF/UA's are as veraPDF gives them.
-    let specificationName (specification: string) =
-        if specification.StartsWith("WCAG", StringComparison.Ordinal) then WcagSpecification.Name else specification
+    /// Legibyl's name for a specification veraPDF names, for a rule of clause: WCAG 2.2's
+    /// "WCAG2.2" is "WCAG 2.2" and the criterion's level ("WCAG 2.2 AA"; see WcagSpecification);
+    /// PDF/UA's are as veraPDF gives them.
+    let specificationName (specification: string) (clause: string) =
+        if specification.StartsWith("WCAG", StringComparison.Ordinal) then WcagSpecification.ofCriterion clause else specification
 
     let toJavaFlavour profile =
         match profile with
@@ -99,7 +100,7 @@ module internal VeraPdf =
     /// doesn't have.
     let ruleDescription (profile: PdfProfile) (specification: string) (clause: string) (testNumber: int) =
         ensureInitialised ()
-        if specification = WcagSpecification.Name then
+        if WcagSpecification.isWcag specification then
             javaSeq (wcagProfile.Value.getRules ())
             |> Seq.map (fun item -> item :?> Rule)
             |> Seq.tryFind (fun rule -> rule.getRuleId().getClause () = clause && rule.getRuleId().getTestNumber () = testNumber)
@@ -216,7 +217,7 @@ module internal VeraPdf =
 
     let private determineFixOptions (assertion: RuleViolation) =
         match PdfUaTarget.ofSpecification assertion.Specification with
-        | None when assertion.Specification = WcagSpecification.Name ->
+        | None when WcagSpecification.isWcag assertion.Specification ->
             wcagFixes |> Map.tryFind assertion.RuleId |> Option.defaultValue PdfFixOptions.None
         | Some standard -> fixesByRule |> Map.tryFind (standard, assertion.RuleId) |> Option.defaultValue PdfFixOptions.None
         // ISO 32005's rows for what the structure tree root may hold ("Table 5. StructTreeRoot-Part"):
@@ -544,15 +545,20 @@ module internal VeraPdf =
                   // "extra context" field (almost always null). The real per-failure tree-walk
                   // path (e.g. "root/Catalog[0]/StructTreeRoot[0]/.../TH[3]") — the same value
                   // veraPDF's own report writer uses — lives on assertion.getLocation().getContext().
+                  // A failure of WCAG 2.2 above level AA, which Legibyl aims at, is a warning.
+                  let aboveTarget =
+                      ruleId.getSpecification().ToString().StartsWith("WCAG", StringComparison.Ordinal)
+                      && WcagSpecification.isAboveTarget (ruleId.getClause ())
+                      && assertion.getStatus () <> TestAssertion.Status.PASSED
                   let violation =
-                      { Specification = specificationName (ruleId.getSpecification().ToString())
+                      { Specification = specificationName (ruleId.getSpecification().ToString()) (ruleId.getClause ())
                         Clause = ruleId.getClause ()
                         TestNumber = ruleId.getTestNumber ()
-                        Passed = (assertion.getStatus () = TestAssertion.Status.PASSED)
+                        Passed = aboveTarget || (assertion.getStatus () = TestAssertion.Status.PASSED)
                         Message = assertion.getMessage ()
                         ErrorMessage = assertion.getErrorMessage ()
                         LocationContext = assertion.getLocation () |?> _.getContext()
-                        Severity = FindingSeverity.Failure
+                        Severity = (if aboveTarget then FindingSeverity.Warning else FindingSeverity.Failure)
                         FixOptions = PdfFixOptions.None
                         Geometry = null
                         Element = null }

@@ -74,7 +74,7 @@ let private tagFromLayout (input: string) (output: string) (source: IPageLayoutS
 
 let private failedRules (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Findings
-    |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure && f.Specification <> WcagSpecification.Name)
+    |> Seq.filter (fun f -> not f.Passed && f.Severity = FindingSeverity.Failure && not (WcagSpecification.isWcag f.Specification))
     |> Seq.map _.RuleId
     |> Set.ofSeq
 

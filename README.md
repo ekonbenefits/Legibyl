@@ -313,10 +313,21 @@ contrast (1.4.3: at least 4.5 to 1, or 3 to 1 for large text, measured on the
 page as veraPDF renders it with Apache PDFBox), text too small to read (1.4.4),
 characters repeated to lay text out (1.3.1), pages in mixed orientations
 (1.3.4), figures with no bounding box (1.4.10), links with no description, or
-one that's only their address (2.4.9, a level AAA criterion), and empty
+one that's only their address (2.4.9), and empty
 paragraph, span, heading and contents-entry tags (4.1.2). Their findings are
-named "WCAG 2.2", beside PDF/UA's, with a plain-language guide each
-(`RuleGuide.yaml`'s `wcagRules`).
+named by the standard and the success criterion's level ("WCAG 2.2 AA"), beside
+PDF/UA's, with a plain-language guide each (`RuleGuide.yaml`'s `wcagRules`).
+
+| Success criterion | Level |
+|---|---|
+| 1.3.1 Info and Relationships, 4.1.2 Name, Role, Value | A |
+| 1.3.4 Orientation, 1.4.3 Contrast (Minimum), 1.4.4 Resize Text, 1.4.10 Reflow | AA |
+| 2.4.9 Link Purpose (Link Only) | AAA |
+
+Legibyl aims at level AA, as laws and policies ask: an A or AA finding is a
+failure, and one above AA (2.4.9 today) is a warning, which a review can dismiss
+and which doesn't stop a PDF passing (`WcagSpecification` in `Results.fs`). A
+criterion veraPDF adds that the table doesn't list is a failure, with no level.
 
 A PDF passes when it complies with PDF/UA and WCAG 2.2's checks pass: the
 banner and the CLI's first line say which failed ("FAIL — 1 WCAG 2.2 checks
