@@ -312,3 +312,17 @@ let ``a review records an untagged PDF's layout as found, and --edits tags from 
         let carried = ReviewFile.readFor copy |> Option.get
         carried.Layout |> should be Null
         carried.Edits |> should be Null)
+
+[<Fact>]
+let ``layout apply on a file that isn't a PDF says so as its error, rather than crashing`` () =
+    withUntaggedPdf (fun pdf ->
+        let path = pdf + ".layout.json"
+        File.WriteAllText(path, LayoutFile.toJson (LayoutSuggestions.toLayoutFile pdf [ suggestion ] None))
+        let broken = Path.Combine(Path.GetDirectoryName pdf |> nonNull, "broken.pdf")
+        File.WriteAllText(broken, "This isn't a PDF.")
+
+        let code, result = run [ "layout"; "apply"; broken; "--layout"; path ]
+
+        code |> should equal 2
+        result.Value.GetProperty("status").GetString() |> should equal "error"
+        result.Value.GetProperty("error").GetString() |> should not' (be NullOrEmptyString))

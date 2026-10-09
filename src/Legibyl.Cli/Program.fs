@@ -70,6 +70,21 @@ let private ensureLayoutModel () =
                         eprintfn $"  {percent}%%" }
         Legibyl.Layout.LayoutModel.download progress Threading.CancellationToken.None |> _.GetAwaiter().GetResult()
 
+/// What went wrong, as a file's error says it: the innermost exception's message (a task's comes
+/// wrapped), a download's failure said as one.
+let private failure (ex: exn) =
+    let rec inner (ex: exn) =
+        match ex with
+        | :? AggregateException as aggregate when aggregate.InnerExceptions.Count = 1 -> inner aggregate.InnerExceptions[0]
+        | ex -> ex
+    match inner ex with
+    | :? Net.Http.HttpRequestException as ex -> $"Couldn't download the layout model: {ex.Message}"
+    | :? Threading.Tasks.TaskCanceledException -> "Couldn't download the layout model: the connection timed out."
+    | ex -> ex.Message
+
+/// The standard a file is checked against when even that couldn't be read from it.
+let private unknownTarget: Target = { Profile = PdfProfile.PdfUa1; PdfVersion = null; FromFile = true }
+
 // ---- Shared inputs ----
 
 let private filesArgument () =
@@ -317,7 +332,13 @@ let private runValidate (args: ValidateArgs) =
     | _ ->
         let given = given |> Option.bind Result.toOption
         let validator = VeraPdfValidator()
-        let results = [ for file in args.Files -> validateFile validator args given file ]
+        // Each file on its own: one failing some unexpected way doesn't lose the others' results.
+        let results =
+            [ for file in args.Files ->
+                  try
+                      validateFile validator args given file
+                  with ex ->
+                      { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget)) with Error = failure ex } ]
         write args.Output (if args.Format = "json" then toJson results else validationText results)
         results
         |> List.map (fun r ->
@@ -491,7 +512,6 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                 | Null -> { result with Status = FixStatus.NothingToDo; Applied = applied; NotApplied = notApplied; Before = before }
             with
             | :? VeraPdfValidationException as ex -> { result with Error = ex.Message }
-            | :? Net.Http.HttpRequestException as ex -> { result with Error = $"Couldn't download the layout model: {ex.Message}" }
         finally
             validator.LayoutSource <- null
             validator.Edits <- []
@@ -570,7 +590,25 @@ let private sidecarProblems (edits: bool) (files: string seq) =
     else files |> Seq.tryPick (fun file -> editProblems "--edits" (ReviewFile.filePath file))
 
 let private runFixes (validator: VeraPdfValidator) (files: string list) (request: FixRequest) (format: string) (report: string option) =
-    let results = [ for file in files -> fixFile validator request file ]
+    // Each file on its own: a model that won't download, or a PDF that won't open, is that file's
+    // error (exit 2), and the others' results are kept.
+    let failed (file: string) (ex: exn) : FixOutcome =
+        // On stderr as well: after a download's last percentage, say, rather than nothing.
+        eprintfn $"error: {file}: {failure ex}"
+        let target = try targetFor request.Ua file with _ -> unknownTarget
+        { File = file
+          Standard = PdfUaTarget.displayName target.Profile
+          PdfVersion = target.PdfVersion
+          StandardFrom = target.From
+          Status = FixStatus.Error
+          OutputPath = null
+          Applied = [||]
+          NotApplied = [||]
+          Error = failure ex
+          Before = null
+          After = null
+          ValidatorNotes = [||] }
+    let results = [ for file in files -> try fixFile validator request file with ex -> failed file ex ]
     write report (if format = "json" then toJson results else fixText results)
     results |> List.map fixExit |> worst
 
@@ -783,14 +821,9 @@ let private runSuggest (args: SuggestArgs) =
                           Regions = layout.Pages |> Array.sumBy _.Regions.Length }
                 )
             ExitCodes.Success
-        with
-        | :? Net.Http.HttpRequestException as ex ->
-            eprintfn $"error: couldn't download the layout model: {ex.Message}"
-            ExitCodes.ToolError
-        | :? IOException
-        | :? UnauthorizedAccessException
-        | :? InvalidOperationException as ex ->
-            eprintfn $"error: {ex.Message}"
+        with ex ->
+            // A download failing or timing out, the file or the models unreadable, anything else.
+            eprintfn $"error: {failure ex}"
             ExitCodes.ToolError
 
 type private ApplyArgs =
