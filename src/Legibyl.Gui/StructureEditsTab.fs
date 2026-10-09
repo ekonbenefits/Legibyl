@@ -152,6 +152,9 @@ let view (needs: Needs) : IView =
                                     | Some alt when edit.Tag = Tags.Form -> detailLine $"tooltip: \"{alt}\"" false
                                     | Some alt -> detailLine $"alt: \"{alt}\"" false
                                     | None -> ()
+                                    match edit.Lang with
+                                    | Some language -> detailLine $"language: {language}" false
+                                    | None -> ()
                                     if not edit.Cells.IsEmpty then
                                         let headers = edit.Cells |> List.filter (fun c -> c.Tag = Tags.TH) |> List.length
                                         if edit.Tag = Tags.P && edit.Retag = Some Tags.Table then

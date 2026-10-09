@@ -40,7 +40,7 @@ let private createTagged (path: string) =
 
 /// The figure's alt text, as given in Structure…: its box is about where the image is.
 let private altEdit =
-    { Page = 1; Tag = "Figure"; Box = box (73.0, 551.0, 171.0, 649.0); Alt = "Tomato seedlings in a tray"; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [] }
+    { Page = 1; Tag = "Figure"; Box = box (73.0, 551.0, 171.0, 649.0); Alt = "Tomato seedlings in a tray"; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = []; Lang = null }
 
 let private applyEdits (input: string) (output: string) (edits: ElementEdit list) =
     VeraPdfValidator(Edits = edits).Fix(input, PdfProfile.PdfUa1, output, PdfFixOptions.ApplyEdits)
@@ -59,7 +59,7 @@ let ``an edit is written to the element with its tag in about the same place`` (
 
     let result = applyEdits input.Path output.Path [ altEdit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
     figureAlt output.Path |> should equal "Tomato seedlings in a tray"
 
 [<Fact>]
@@ -96,7 +96,7 @@ let ``an edit with no element in about the same place isn't applied, and says so
 
     let result = applyEdits input.Path output.Path [ altEdit; elsewhere ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
     // Each edit that isn't applied is named, with why.
     result.NotApplied
     |> should
@@ -130,7 +130,7 @@ let private createLines (path: string) =
 let private line y = box (72.0, y - 2.0, 236.0, y + 12.0)
 
 let private merge (boxes: StructureGeometry list) =
-    { Page = 1; Tag = "P"; Box = boxes.Head; Alt = null; Text = null; MergeWith = boxes.Tail; Retag = null; Exclude = false; Move = None; Cells = [] }
+    { Page = 1; Tag = "P"; Box = boxes.Head; Alt = null; Text = null; MergeWith = boxes.Tail; Retag = null; Exclude = false; Move = None; Cells = []; Lang = null }
 
 let private paragraphTexts (path: string) =
     VeraPdfValidator().ReadStructureTree path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "P") |> List.map (fun n -> (string n.Content).Trim())
@@ -145,7 +145,7 @@ let ``paragraphs chosen to merge are joined into the first`` () =
 
     let result = applyEdits input.Path output.Path [ edit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
     paragraphTexts output.Path |> List.map (fun t -> t.Replace("  ", " "))
     |> should equal [ "Plots are assigned each spring, and members share the tools kept in the shed by the gate." ]
     ElementEdits.pending output.Path [ edit ] |> should equal 0
@@ -276,7 +276,7 @@ let ``a figure made not read leaves the tags, and its content is an artifact, st
 
     let result = applyEdits input.Path output.Path [ notReadEdit ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
     let tags = VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.map _.Tag
     tags |> should not' (contain "Figure")
     tags |> should contain "P"
@@ -373,5 +373,24 @@ let ``a rule tagged as a figure (a hairline) can be made not read`` () =
 
     let result = applyEdits input.Path output.Path [ { altEdit with Box = ruleBox; Alt = null; Retag = "Artifact" } ]
 
-    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+    result.AppliedFixes |> should contain "Applied 1 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
     VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.exists (fun n -> n.Tag = "Figure") |> should be False
+
+[<Fact>]
+let ``a language given an element's text is written to it, and kept in the review as lang`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createTagged input.Path
+    let paragraph = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "P")
+    let languageEdit =
+        { Page = 1; Tag = "P"; Box = nonNull paragraph.Geometry; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = []; Lang = "es" }
+
+    let result = applyEdits input.Path output.Path [ languageEdit ]
+
+    result.WasFixed |> should be True
+    (VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "P")).Language |> should equal "es"
+    let saved = ReviewFile.ofElementEdit languageEdit
+    System.Text.Json.JsonSerializer.Serialize saved |> should haveSubstring "\"lang\":\"es\""
+    (ReviewFile.toElementEdit saved |> Option.map _.Lang) |> should equal (Some "es")
+    ReviewFile.problems """{ "version": 1, "edits": [ { "page": 1, "tag": "P", "box": [70, 695, 300, 715], "lang": "es_MX" } ] }"""
+    |> should equal [ "edits[0] has lang \"es_MX\", which isn't a language tag (e.g. es, en-US)." ]

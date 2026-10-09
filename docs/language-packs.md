@@ -11,6 +11,7 @@ language a text is in for 53 languages without a pack. A pack adds what it can't
 |---|---|
 | `ocr` | Its [Tesseract](https://github.com/tesseract-ocr/tessdata_fast) model reads scanned pages and text drawn as outlines in the language. Without it, they're read with English's model. |
 | `phrases` | Text Legibyl writes into PDFs itself (a QR code's alt text, and the description of the link it adds over it) is written in the language, and marked as that language. Without it, the text is in English, marked as English. |
+| (the pack itself) | Short passages (a paragraph, a heading) are told apart among the document's language and those with a pack, which they reliably can be: a Spanish paragraph in an English document is found, and marked Spanish, because Spanish has a pack. |
 | `sentenceContinuations` | Words that start the rest of a sentence. A paragraph starting with one is warned about as likely split from the one before. |
 | `standaloneHeadings` | Words that start a paragraph standing on its own ("SECTION 3"), which isn't joined to the one before. |
 

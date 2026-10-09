@@ -226,6 +226,9 @@ let private changes (edit: ElementEdit, element: PdfDictionary) =
       | _ -> ()
       match edit.Text with
       | NonNull text when textOf element PdfName.ActualText <> Some text -> yield element, PdfName.ActualText, text
+      | _ -> ()
+      match edit.Lang with
+      | NonNull language when textOf element PdfName.Lang <> Some language -> yield element, PdfName.Lang, language
       | _ -> () ]
 
 // ---- Not read: an element made an artifact ----
@@ -406,8 +409,8 @@ let private moveElements (document: PdfDocument) context (moved: (ElementEdit * 
 /// that change anything else.
 let private otherChanges (tables: ElementEdit list) =
     [ for edit in tables do
-          if not (isNull edit.Alt && isNull edit.Text && isNull edit.Retag && edit.Move.IsNone && not edit.Exclude) then
-              { edit with Cells = [] } ]
+          if not (isNull edit.Alt && isNull edit.Text && isNull edit.Lang && isNull edit.Retag && edit.Move.IsNone && not edit.Exclude) then
+              { edit with Cells = []; Lang = null } ]
 
 /// A person-confirmed conversion of consecutive paragraph siblings into a table.
 let private isParagraphTable (edit: ElementEdit) =
@@ -482,7 +485,7 @@ let internal apply (document: PdfDocument) context (edits: ElementEdit list) : s
     [ if rebuilt.Length > 0 then $"Rebuilt {rebuilt.Length} table(s)' rows and cells from the page, as you checked them."
       if figuresWritten > 0 then $"Replaced structure in {figuresWritten} selected region(s) with a Figure and your alt text, preserving the artwork."
       yield! converted
-      if count > 0 then $"Applied {count} of your edits (alt text, replacement text, tags, merges and decoration not read)."
+      if count > 0 then $"Applied {count} of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
       if moved > 0 then $"Put {moved} element(s) in the reading order you gave them." ]
 
 // ---- The document's title ----
@@ -656,7 +659,7 @@ let figureRegionPreview (pdfPath: string) (box: StructureGeometry) : Result<stri
         let context = createContext document pdfPath
         let edit: ElementEdit =
             { Page = box.PageNumber; Tag = FigureRegion.Tag; Box = box; Alt = "preview"; Text = null
-              MergeWith = []; Retag = Tags.Figure; Exclude = false; Move = None; Cells = [] }
+              MergeWith = []; Retag = Tags.Figure; Exclude = false; Move = None; Cells = []; Lang = null }
         FigureRegion.plan document context edit |> Result.map _.Summary
     with ex -> Error $"the PDF couldn't be read: {ex.Message}"
 
@@ -671,7 +674,7 @@ let paragraphTableRefusal (pdfPath: string) (boxes: StructureGeometry list) : st
             let context = createContext document pdfPath
             let edit: ElementEdit =
                 { Page = first.PageNumber; Tag = Tags.P; Box = first; Alt = null; Text = null
-                  MergeWith = rest; Retag = Tags.Table; Exclude = false; Move = None; Cells = [] }
+                  MergeWith = rest; Retag = Tags.Table; Exclude = false; Move = None; Cells = []; Lang = null }
             mergeRun document context edit |> Option.bind (ParagraphTableRebuild.paragraphsRefusal context)
         with _ -> None
     | _ -> None

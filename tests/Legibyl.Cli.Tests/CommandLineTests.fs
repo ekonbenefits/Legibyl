@@ -80,7 +80,7 @@ let private writeReview (path: string) (alt: string) =
     let review: ReviewFile.SavedFile =
         { Version = 1
           DismissedWarnings = null
-          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null} |]
+          Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = alt; Text = null; MergeWith = null; Retag = null; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null; Lang = null } |]
           Title = null
           Language = null
           RoleMap = null; Attachments = null
@@ -98,7 +98,7 @@ let ``--edits writes the review next to the PDF into the fixed copy, and carries
 
         let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
 
-        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
         figureAlt copy |> should equal (Some "Tomato seedlings")
         // Only the edits: no other fix was asked for.
         strings result.Value "applied" |> should haveLength 1
@@ -110,7 +110,7 @@ let ``--edits with a figure retagged Artifact makes it decoration`` () =
         let review: ReviewFile.SavedFile =
             { Version = 1
               DismissedWarnings = null
-              Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = null; Text = null; MergeWith = null; Retag = "Artifact"; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null} |]
+              Edits = [| { Page = 1; Tag = "Figure"; Box = [| 72.0; 550.0; 172.0; 650.0 |]; Alt = null; Text = null; MergeWith = null; Retag = "Artifact"; Exclude = false; MoveAfter = null; MoveAfterPage = 0; MoveFirst = false ; Cells = null; Lang = null } |]
               Title = null
               Language = null
               RoleMap = null; Attachments = null
@@ -123,7 +123,7 @@ let ``--edits with a figure retagged Artifact makes it decoration`` () =
 
         let _, result = run [ "fix"; pdf; "--edits"; "--fixes"; "none" ]
 
-        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, tags, merges and decoration not read)."
+        strings result.Value "applied" |> should contain "Applied 1 of your edits (alt text, replacement text, languages, tags, merges and decoration not read)."
         let rec tags (node: StructureNode) : string list = node.Tag :: [ for child in node.Children do yield! tags child ]
         VeraPdfValidator().ReadStructureTree copy |> nonNull |> tags |> should not' (contain "Figure"))
 

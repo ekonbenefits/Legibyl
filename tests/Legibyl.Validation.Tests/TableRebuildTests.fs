@@ -89,7 +89,7 @@ let private failed (path: string) =
 let private cell tag row column = { Tag = tag; Box = box (72.0 + 150.0 * float column) (672.0 - 24.0 * float row) (222.0 + 150.0 * float column) (696.0 - 24.0 * float row) }
 
 let private rebuildEdit (table: StructureNode) (cells: TableCell list) =
-    { Page = 1; Tag = "Table"; Box = table.Geometry |> notNull; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = cells }
+    { Page = 1; Tag = "Table"; Box = table.Geometry |> notNull; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = cells; Lang = null }
 
 /// The rows of the table at path: each row's cells, as tag and text.
 let private rows (path: string) =
@@ -116,7 +116,7 @@ let ``consecutive row paragraphs convert to a checked table and keep each cell's
           Retag = "Table"
           Exclude = false
           Move = None
-          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ]; Lang = null }
     ElementEdits.pending input.Path [ edit ] |> should equal 1
 
     let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
@@ -152,7 +152,7 @@ let ``paragraph table conversion refuses paragraphs that are not consecutive sib
           Retag = "Table"
           Exclude = false
           Move = None
-          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ]; Lang = null }
 
     ElementEdits.pending input.Path [ edit ] |> should equal 0
     let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
@@ -176,7 +176,7 @@ let ``paragraph table conversion refuses one span covering more than one cell`` 
           Retag = "Table"
           Exclude = false
           Move = None
-          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+          Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ]; Lang = null }
 
     ElementEdits.pending input.Path [ edit ] |> should equal 0
     let result = VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits)
@@ -236,7 +236,7 @@ let private conversionOf (path: string) =
       Retag = "Table"
       Exclude = false
       Move = None
-      Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] }
+      Cells = [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ]; Lang = null }
 
 [<Fact>]
 let ``empty spans in row paragraphs go with the content beside them, and don't stop the conversion`` () =
@@ -437,7 +437,7 @@ let ``a header over two columns spans them`` () =
 
 [<Fact>]
 let ``a rebuild is kept in a review, its cells and all`` () =
-    let edit = { Page = 1; Tag = "Table"; Box = box 70.0 620.0 380.0 700.0; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [ cell "TH" 0 0; cell "TD" 1 0 ] }
+    let edit = { Page = 1; Tag = "Table"; Box = box 70.0 620.0 380.0 700.0; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [ cell "TH" 0 0; cell "TD" 1 0 ]; Lang = null }
     let saved = ReviewFile.ofElementEdit edit
     let json = System.Text.Json.JsonSerializer.Serialize saved
     json |> should haveSubstring "\"cells\""
@@ -588,7 +588,7 @@ let ``an edit for an element with a page is its, not a wrapper's without one aro
             inner.Put(PdfName.Pg, document.GetPage(1).GetPdfObject()) |> ignore
         | found -> failwith $"{found.Length} Sects"
     let inner = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.filter (fun n -> n.Tag = "Sect") |> List.last
-    let edit = { Page = 1; Tag = "Sect"; Box = inner.Geometry |> notNull; Alt = null; Text = null; MergeWith = []; Retag = "Div"; Exclude = false; Move = None; Cells = [] }
+    let edit = { Page = 1; Tag = "Sect"; Box = inner.Geometry |> notNull; Alt = null; Text = null; MergeWith = []; Retag = "Div"; Exclude = false; Move = None; Cells = []; Lang = null }
 
     VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
 
@@ -677,7 +677,7 @@ let ``a table holding an annotation on another page is left`` () =
 
 [<Fact>]
 let ``a review's rebuild is no problem, and a cell that isn't a TH or a TD is`` () =
-    let edit = { Page = 1; Tag = "Table"; Box = box 70.0 620.0 380.0 700.0; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [ cell "TH" 0 0; cell "TD" 1 0 ] }
+    let edit = { Page = 1; Tag = "Table"; Box = box 70.0 620.0 380.0 700.0; Alt = null; Text = null; MergeWith = []; Retag = null; Exclude = false; Move = None; Cells = [ cell "TH" 0 0; cell "TD" 1 0 ]; Lang = null }
     let review = $"""{{ "version": 1, "edits": [ {System.Text.Json.JsonSerializer.Serialize(ReviewFile.ofElementEdit edit)} ] }}"""
     ReviewFile.problems review |> should be Empty
     ReviewFile.problems (review.Replace("\"TD\"", "\"P\"")) |> should equal [ "edits[0].cells[1] is a \"P\", not a header cell (TH) or a data cell (TD)." ]
