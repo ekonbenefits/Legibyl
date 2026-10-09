@@ -630,7 +630,14 @@ let private setLanguage (chosen: string option) (document: PdfDocument) context 
             | Some language ->
                 declare language
                 [ $"Declared the document's language as {DocumentLanguage.describe language}, detected from its text." ]
-            | None -> []
+            | None ->
+                // Text in more than one language (English and Spanish side by side): the language
+                // most of its passages are in, else its first passage's.
+                match PassageLanguages.mostly document context with
+                | Some language ->
+                    declare language
+                    [ $"Declared the document's language as {DocumentLanguage.describe language}, the language most of its passages are in (or its first's): its text is in more than one, so check it in Structure…." ]
+                | None -> []
 
 /// Legibyl's own fixes, in the order they run. Each takes the open document and returns a
 /// line per change it made. The order matters where one fix changes what another sees:
@@ -638,7 +645,8 @@ let private setLanguage (chosen: string option) (document: PdfDocument) context 
 ///   0. The parent tree first, where it's missing: until it's rebuilt, every tag reads as
 ///      untagged. Then a single Document tag at the top, so the fixes after it see the tree as
 ///      it'll be (it moves nothing else). Then the document's language: it only sets /Lang, and
-///      bookmarks need it.
+///      bookmarks need it. Then passages in another language than the document's: once it's
+///      declared, so they're told apart from it.
 ///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list fix could take it for a list item.
@@ -1237,6 +1245,7 @@ let orderedFixes
       PdfFixOptions.ApplyEdits, chooseRoles roleMap
       PdfFixOptions.RoleMap, mapRoles
       PdfFixOptions.Language, setLanguage language
+      PdfFixOptions.PassageLanguages, PassageLanguages.apply
       PdfFixOptions.HeadingsFromToc, tagHeadingsFromToc
       PdfFixOptions.EmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.EmptyTocEntries, removeEmptyTocEntries
@@ -1274,6 +1283,7 @@ let private readsText =
     set
         [ PdfFixOptions.ParentTree
           PdfFixOptions.Language
+          PdfFixOptions.PassageLanguages
           PdfFixOptions.HeadingsFromToc
           PdfFixOptions.EmptyParagraphs
           PdfFixOptions.EmptyTocEntries

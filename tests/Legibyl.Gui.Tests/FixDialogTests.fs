@@ -130,6 +130,7 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
               "One Document tag at the top"
               "Map the PDF's own tag names"
               "Declare the language"
+              "Mark passages in another language"
               "Headings from the table of contents"
               "Remove empty paragraphs"
               "Remove empty contents entries"

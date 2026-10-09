@@ -22,8 +22,9 @@
 /// text couldn't be read, Structure-13; words split across Span boundaries, Structure-14; tables
 /// tagged as aligned paragraphs, Structure-15; no single Document tag at the top, Structure-16;
 /// content tied to a tag that's gone, Structure-17; web addresses shown as text that nothing
-/// links, Structure-18, which untagged documents get too; and a declared language the text isn't
-/// in, Structure-19, as well) are added in `run` directly, and their messages to messageFor.
+/// links, Structure-18, which untagged documents get too; a declared language the text isn't
+/// in, Structure-19, as well; and passages in another language, not marked, Structure-20) are
+/// added in `run` directly, and their messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -446,6 +447,24 @@ let private languageMismatchFindings (document: PdfDocument) context =
               null ]
     | None -> []
 
+// ---- Structure-20: a passage in another language, not marked ----
+
+[<Literal>]
+let private PassageLanguageMessage =
+    "A passage is in another language than the one around it, and doesn't say so, so a screen reader reads it with the wrong voice; an auto fix can mark it with its language."
+
+let private passageLanguageFindings (document: PdfDocument) context =
+    [ for passage in PassageLanguages.find document context ->
+          let page = passage.Page |> Option.map string |> Option.defaultValue "unknown"
+          let text = if passage.Text.Length > 60 then passage.Text.Substring(0, 60).TrimEnd() + "…" else passage.Text
+          warning
+              PassageLanguageMessage
+              $"Page {page}: reads as {DocumentLanguage.describe passage.Language}, in a part read as {DocumentLanguage.describe passage.ReadIn}: \"{text}\"."
+              passage.Path
+              20
+              PdfFixOptions.PassageLanguages
+              (Option.toObj passage.Geometry) ]
+
 // ---- Structure-13: pages whose text couldn't be read ----
 
 [<Literal>]
@@ -521,7 +540,8 @@ let run (document: PdfDocument) context : RuleViolation list =
                   PdfFixOptions.None
                   (Option.toObj candidate.Geometry)
           yield! documentRootFindings document context
-          yield! languageMismatchFindings document context ]
+          yield! languageMismatchFindings document context
+          yield! passageLanguageFindings document context ]
 
 /// Each check's message, by its TestNumber (as a saved validation reads it back).
 let messageFor (testNumber: int) : string option =
@@ -546,6 +566,7 @@ let messageFor (testNumber: int) : string option =
         | 17 -> Some DisconnectedMessage
         | 18 -> Some UnlinkedUrlMessage
         | 19 -> Some LanguageMismatchMessage
+        | 20 -> Some PassageLanguageMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

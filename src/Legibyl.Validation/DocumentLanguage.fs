@@ -137,6 +137,39 @@ let declared (document: PdfDocument) =
     | NonNull language when not (String.IsNullOrWhiteSpace(language.ToUnicodeString())) -> Some(language.ToUnicodeString().Trim())
     | _ -> None
 
+/// A tag's language, without its region or script ("es-MX" -> "es").
+let primary (tag: string) = tag.Split('-').[0].Trim().ToLowerInvariant()
+
+/// Detectors that tell only some languages apart, by their codes.
+let private among = Collections.Concurrent.ConcurrentDictionary<string, LanguageDetector>()
+
+/// The language a short text (a paragraph, a heading) is in, among these languages (tags) only:
+/// told apart far more surely than among all 53. None unless it has three words or more and the
+/// detector is all but certain.
+let detectAmong (tags: string list) (text: string) : string option =
+    let codes =
+        tags
+        |> List.choose (fun tag -> languages |> Seq.tryFind (fun kv -> fst kv.Value = primary tag) |> Option.map _.Key)
+        |> List.distinct
+        |> List.sort
+    let words = text.Split((null: char array | null), StringSplitOptions.RemoveEmptyEntries) |> Array.filter (Seq.exists Char.IsLetter)
+    if codes.Length < 2 || words.Length < 3 || (text |> Seq.filter Char.IsLetter |> Seq.length) < 15 then
+        None
+    else
+        let detector =
+            among.GetOrAdd(
+                String.Join("+", codes),
+                fun _ ->
+                    let detector = LanguageDetector()
+                    detector.AddLanguages(Array.ofList codes)
+                    detector.RandomSeed <- Nullable 1
+                    detector
+            )
+        let candidates = lock detector (fun () -> detector.DetectAll text |> List.ofSeq)
+        match candidates |> List.sortByDescending _.Probability with
+        | best :: _ when best.Probability >= 0.99 -> Some(tagFor best.Language)
+        | _ -> None
+
 /// The languages detection knows: each one's tag and its name in English.
 let known () = languages.Values |> List.ofSeq
 
@@ -162,9 +195,6 @@ let sample (document: PdfDocument) context =
                     | null -> ()
                     | value -> text.Append(value.ToUnicodeString()).Append(' ') |> ignore
     text.ToString()
-
-/// A tag's language, without its region or script ("es-MX" -> "es").
-let primary (tag: string) = tag.Split('-').[0].Trim().ToLowerInvariant()
 
 /// The language the document says it's in and the one its text reads as, when they're different
 /// languages (not just regions of one), the text clearly reads as the other, and that's one of

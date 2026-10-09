@@ -450,6 +450,7 @@ new one. All of them:
 | Structure-17 | Content still tied to a tag that isn't in the tags any more | `parent-tree`, where it draws nothing (otherwise its tag needs putting back) |
 | Structure-18 | A web address shown as text that nothing links | `link-urls`, when the address's tagged text is its own (in one piece, or in pieces side by side in one tag; punctuation drawn with it is split off) |
 | Structure-19 | A declared language the text clearly isn't in (Spanish text in a document that says it's English) | `language`, or choose the language in Structure… |
+| Structure-20 | A passage (a paragraph, heading, list item or cell) in another language than the one around it that doesn't say so | `passage-languages` |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -1195,6 +1196,7 @@ keeps this table in step with it):
 | `document-root` | Put the tags under a single Document tag at the top of the structure | safe |
 | `role-map` | Map the PDF's own tag names to standard tags, and fix a broken role map |  |
 | `language` | Declare the document's language: the one you chose, or the one its text reads as, where it says none or one its text isn't in |  |
+| `passage-languages` | Mark passages in another language than the one around them (a Spanish paragraph in an English document) with their own |  |
 | `headings-from-toc` | Tag headings the table of contents lists (H1–H6) and point its links at them |  |
 | `empty-paragraphs` | Remove empty paragraph tags |  |
 | `empty-toc-entries` | Remove empty table-of-contents entries |  |
