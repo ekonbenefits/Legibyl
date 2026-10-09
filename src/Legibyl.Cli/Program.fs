@@ -394,7 +394,8 @@ let private validationText (results: ValidationResult list) =
 
 /// With --verbose, prints each record veraPDF logs on stderr as it comes, until disposed.
 let private printingLog (verbose: bool) : IDisposable =
-    if verbose then VeraPdfValidator.Recorded.Subscribe(fun note -> eprintfn $"veraPDF {note.Level} {note.Logger}: {note.Message}")
+    // (Through the run's reporter, so it isn't written over a progress line.)
+    if verbose then VeraPdfValidator.Recorded.Subscribe(fun note -> (reporter ()).Say $"veraPDF {note.Level} {note.Logger}: {note.Message}")
     else { new IDisposable with member _.Dispose() = () }
 
 let private runValidate (args: ValidateArgs) =
@@ -423,16 +424,13 @@ let private runValidate (args: ValidateArgs) =
                           try
                               validateFile validator args given file
                           with ex ->
-                              let message = failure ex
-                              (reporter ()).Clear()
-                              eprintfn $"error: {file}: {message}"
-                              { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget args.Ua)) with Error = message }
-                      (reporter ()).Done(
-                          if not (isNull result.Error) then $"ERROR, {result.Error}"
-                          elif result.IsCompliant = Nullable true && result.MeetsWcag = Nullable true then "PASS"
-                          elif result.IsCompliant = Nullable true && not (isNull result.WcagError) then $"FAIL, {WcagSpecification.Name} not checked"
-                          else $"FAIL, {result.FailedCount} failed"
-                      )
+                              { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget args.Ua)) with Error = failure ex }
+                      // (A file that couldn't be validated is said even with --quiet.)
+                      match result.Error with
+                      | NonNull error -> (reporter ()).Error error
+                      | Null when result.IsCompliant = Nullable true && result.MeetsWcag = Nullable true -> (reporter ()).Done "PASS"
+                      | Null when result.IsCompliant = Nullable true && not (isNull result.WcagError) -> (reporter ()).Done $"FAIL, {WcagSpecification.Name} not checked"
+                      | Null -> (reporter ()).Done $"FAIL, {result.FailedCount} failed"
                       result ]
             write args.Output (if args.Format = "json" then toJson results else validationText results)
             results
@@ -519,7 +517,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                  PdfFixOptions.ApplyEdits
              | _ -> PdfFixOptions.None)
     if options = PdfFixOptions.None then
-        let before = try Some(validator.Validate(file, profile)) with :? VeraPdfValidationException -> None
+        let before = try Some(validator.Validate(file, profile, validationProgress "Validating")) with :? VeraPdfValidationException -> None
         match before with
         | Some before ->
             { result with
@@ -690,9 +688,6 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
     // Each file on its own: a model that won't download, or a PDF that won't open, is that file's
     // error (exit 2), and the others' results are kept.
     let failed (file: string) (ex: exn) : FixOutcome =
-        // On stderr as well: after a download's last percentage, say, rather than nothing.
-        (reporter ()).Clear()
-        eprintfn $"error: {file}: {failure ex}"
         let target = try targetFor request.Ua file with _ -> unknownTarget request.Ua
         { File = file
           Standard = PdfUaTarget.displayName target.Profile
@@ -711,13 +706,12 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
               (reporter ()).Begin file
               let result = try fixFile validator request file with ex -> failed file ex
               let standing (c: Compliance | null) = match c with NonNull c when c.IsCompliant -> "PASS" | NonNull c -> $"FAIL {c.FailedCount}" | Null -> "?"
-              (reporter ()).Done(
-                  match result.Status with
-                  | FixStatus.Error -> $"ERROR, {result.Error}"
-                  | FixStatus.Fixed -> $"fixed → {Path.GetFileName result.OutputPath} ({standing result.Before} → {standing result.After})"
-                  | FixStatus.AlreadyTagged -> "already tagged"
-                  | _ -> $"nothing to do ({standing result.Before})"
-              )
+              // (On stderr even with --quiet: after a download's last percentage, say, rather than nothing.)
+              match result.Status, result.Error with
+              | FixStatus.Error, error -> (reporter ()).Error(match error with NonNull error -> error | Null -> "it couldn't be fixed")
+              | FixStatus.Fixed, _ -> (reporter ()).Done $"fixed → {Path.GetFileName result.OutputPath} ({standing result.Before} → {standing result.After})"
+              | FixStatus.AlreadyTagged, _ -> (reporter ()).Done "already tagged"
+              | _ -> (reporter ()).Done $"nothing to do ({standing result.Before})"
               result ]
     write report (if format = "json" then toJson results else fixText results)
     results |> List.map fixExit |> worst
@@ -787,12 +781,10 @@ let private runStructure (args: StructureArgs) =
                           { File = file; Structure = validator.ReadStructureTree(file, structureProgress); Error = null }
                       with :? VeraPdfValidationException as ex ->
                           { File = file; Structure = null; Error = ex.Message }
-                  (reporter ()).Done(
-                      match result.Error, result.Structure with
-                      | NonNull error, _ -> $"ERROR, {error}"
-                      | Null, Null -> "no structure tree (untagged)"
-                      | Null, NonNull _ -> "read"
-                  )
+                  match result.Error, result.Structure with
+                  | NonNull error, _ -> (reporter ()).Error error
+                  | Null, Null -> (reporter ()).Done "no structure tree (untagged)"
+                  | Null, NonNull _ -> (reporter ()).Done "read"
                   result ]
         let text () =
             let sb = StringBuilder()
@@ -881,8 +873,7 @@ let private runAppend (args: AppendArgs) =
                      | :? iText.Commons.Exceptions.ITextException as ex -> Error ex.Message)
                 with
                 | Error message ->
-                    (reporter ()).Clear()
-                    eprintfn $"error: the PDFs couldn't be joined: {message}"
+                    (reporter ()).Error $"the PDFs couldn't be joined: {message}"
                     ExitCodes.ToolError
                 | Ok outcome ->
                     (reporter ()).Done(
@@ -968,8 +959,7 @@ let private runSuggest (args: SuggestArgs) =
                 ExitCodes.Success
             with ex ->
                 // A download failing or timing out, the file or the models unreadable, anything else.
-                (reporter ()).Clear()
-                eprintfn $"error: {failure ex}"
+                (reporter ()).Error(failure ex)
                 ExitCodes.ToolError
 
 type private ApplyArgs =
