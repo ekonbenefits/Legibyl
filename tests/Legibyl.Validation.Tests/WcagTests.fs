@@ -215,3 +215,16 @@ let ``WCAG 2.2's checks that couldn't run don't pass, and aren't kept as current
     (SavedResults.toReport saved pdf.Path).MeetsWcag |> should be False
     SavedResults.isCurrent saved hash PdfProfile.PdfUa1 |> should be False
     SavedResults.isCurrent { saved with WcagError = null } hash PdfProfile.PdfUa1 |> should be True
+
+[<Fact>]
+let ``characters repeated to lay text out, a rule veraPDF calls cosmetic, are a warning, not a failure`` () =
+    use pdf = new TempPdf()
+    // A contents line with dot leaders, which a screen reader may read dot by dot.
+    createPdf pdf.Path false [ "Opening hours..........3", DeviceRgb(0x20, 0x20, 0x20), 12f ]
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    let repeated = report.Findings |> Seq.filter (fun f -> f.Clause = "1.3.1") |> List.ofSeq
+    repeated |> List.map (fun f -> f.Specification, f.TestNumber, f.Severity) |> should equal [ "WCAG 2.2 A", 1, FindingSeverity.Warning ]
+    report.WcagFailures |> should be Empty
+    report.Passes |> should be True
