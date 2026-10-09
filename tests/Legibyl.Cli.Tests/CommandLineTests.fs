@@ -733,7 +733,7 @@ let ``Ctrl+C stops a run cleanly: the file it's on is left, and the report has t
             | Null -> ())
         cli.BeginErrorReadLine()
         onLong.Wait(TimeSpan.FromSeconds 60.0) |> should be True
-        use interrupt = Diagnostics.Process.Start("kill", [ "-INT"; string cli.Id ]) |> nonNull
+        use interrupt = Diagnostics.Process.Start("kill", [ "-INT"; string cli.Id ])
         interrupt.WaitForExit()
         cli.WaitForExit(TimeSpan.FromSeconds 60.0) |> should be True
         cli.WaitForExit()

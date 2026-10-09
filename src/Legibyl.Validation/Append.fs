@@ -1292,4 +1292,10 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
                     After = Some { after with FilePath = output }
                     Differences = differences }
             finally
-                if File.Exists scratch then File.Delete scratch
+                // (Best-effort: a cancelled validation's checks may still have it open, which
+                // mustn't replace what went wrong, or the cancellation.)
+                try
+                    if File.Exists scratch then File.Delete scratch
+                with
+                | :? IOException
+                | :? UnauthorizedAccessException -> ()

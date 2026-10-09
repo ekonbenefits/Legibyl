@@ -859,6 +859,8 @@ type VeraPdfValidator() =
         ) : ValidationReport =
         ensureExists pdfPath
         ensureInitialised ()
+        // (Not started, Legibyl's own checks included, if it's cancelled already.)
+        cancel.ThrowIfCancellationRequested()
         let flavour = toJavaFlavour profile
         let foundry = Foundries.defaultInstance ()
         let analysis = startLegibylAnalysis pdfPath
@@ -963,6 +965,17 @@ type VeraPdfValidator() =
         let structuralOptions =
             StructureFixes.orderedFixes this.PageTitleSource None [] None None Map.empty Map.empty |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
+        // Reading web pages' titles (up to two minutes) stops at once if it's cancelled: what it's
+        // read by then isn't used.
+        let titleSource =
+            let titles = this.PageTitleSource
+            if not cancel.CanBeCanceled then titles
+            else
+                { new IPageTitleSource with
+                    member _.PageTitles addresses =
+                        let reading = Task.Run(fun () -> titles.PageTitles addresses)
+                        reading.Wait cancel
+                        reading.GetAwaiter().GetResult() }
         // A report of the file as it is, given: it isn't validated again.
         let known = this.Validated |> Option.filter (fun report -> report.FilePath = pdfPath && report.Profile = profile)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
@@ -1029,7 +1042,7 @@ type VeraPdfValidator() =
                             tempOutput
                             source
                             (options.HasFlag PdfFixOptions.QrLinks)
-                            (if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then Some this.PageTitleSource else None)
+                            (if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then Some titleSource else None)
                             (Option.ofObj this.Language |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.map _.Trim())
                             (report FixStage.Tagging)
                     with
@@ -1061,7 +1074,7 @@ type VeraPdfValidator() =
                             currentInput
                             tempOutput
                             options
-                            this.PageTitleSource
+                            titleSource
                             layout
                             (List.ofSeq this.Edits)
                             (Option.ofObj this.Title)
@@ -1141,6 +1154,9 @@ type VeraPdfValidator() =
                     moveToOutput currentInput outputPath
                     { result with OutputPath = outputPath }
             with
+            // Cancelled: however it ended (closing a half-written copy can fail too), it was stopped.
+            | ex when cancel.IsCancellationRequested && not (ex :? OperationCanceledException) ->
+                raise (OperationCanceledException("The fix was cancelled.", ex, cancel))
             | :? iText.Kernel.Exceptions.PdfException as ex ->
                 raise (VeraPdfValidationException($"iText failed to fix '{pdfPath}': {ex.Message}", ex))
             | :? IOException as ex ->

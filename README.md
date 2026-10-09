@@ -401,7 +401,9 @@ there, so the bar waits without filling.
 Cancel, beside the progress bar, stops validating, reading the structure,
 Export… (its model download too) and Append PDFs… (Escape does the same). It
 has the focus while they run, and the focus goes back where it was after.
-Stopped, nothing is written: no copy, and no result for a validation.
+Stopped, nothing is written: no copy, and no result for a validation. In
+Structure…, the layout models' download has a Cancel of its own, and closing
+the window stops any download it started.
 
 An empty window's details pane lists the steps (open a PDF, read what's found,
 check and edit the structure, choose auto fixes, export a copy).

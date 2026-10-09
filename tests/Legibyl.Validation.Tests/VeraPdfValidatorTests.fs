@@ -311,8 +311,9 @@ let ``Validate cancelled stops veraPDF partway, and WCAG 2.2's pass isn't starte
         { new IProgress<ValidationProgress> with
             member _.Report value =
                 reports.Enqueue value
-                // Once it's on a page.
-                if value.Stage = ValidationStage.CheckingPages then cancel.Cancel() }
+                // At its first report (sampled four times a second: a stage it passes quickly may
+                // not be).
+                cancel.Cancel() }
 
     (fun () -> VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1, progress, cancel = cancel.Token) |> ignore)
     |> should throw typeof<OperationCanceledException>
@@ -335,15 +336,18 @@ let ``Validate, Fix and ReadStructureTree already cancelled don't start, and Fix
     (fun () -> validator.ReadStructureTree(input.Path, cancel = cancelled) |> ignore) |> should throw typeof<OperationCanceledException>
     IO.File.Exists output.Path |> should be False
 
-[<Fact>]
-let ``Fix cancelled partway writes nothing, and leaves no temporary file`` () =
+[<Theory>]
+[<InlineData(FixStage.Fixing)>]
+// After Legibyl's own fixes have written their copy.
+[<InlineData(FixStage.FixingMetadata)>]
+let ``Fix cancelled partway writes nothing, and leaves no temporary file`` (stage: FixStage) =
     use input = new TempPdf()
     use output = new TempPdf()
     createPdfWithUntitledFigures input.Path 2
     let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1)
     use cancel = new Threading.CancellationTokenSource()
-    // Cancelled as Legibyl's own fixes start, past the original's check.
-    let progress = { new IProgress<FixProgress> with member _.Report value = if value.Stage = FixStage.Fixing then cancel.Cancel() }
+    // Cancelled as the stage starts, past the original's check.
+    let progress = { new IProgress<FixProgress> with member _.Report value = if value.Stage = stage then cancel.Cancel() }
     let folder = IO.Path.GetDirectoryName output.Path |> nonNull
     let before = IO.Directory.GetFiles folder |> set
 
@@ -355,5 +359,5 @@ let ``Fix cancelled partway writes nothing, and leaves no temporary file`` () =
     IO.File.Exists output.Path |> should be False
     // (Tests run side by side: only files named for this output count.)
     IO.Directory.GetFiles folder
-    |> Array.filter (fun file -> not (before.Contains file) && (IO.Path.GetFileName file).Contains(IO.Path.GetFileNameWithoutExtension output.Path))
+    |> Array.filter (fun file -> not (before.Contains file) && (string (IO.Path.GetFileName file)).Contains(string (IO.Path.GetFileNameWithoutExtension output.Path)))
     |> should be Empty
