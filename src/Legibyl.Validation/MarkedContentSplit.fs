@@ -98,6 +98,16 @@ let private paints (operation: Operation) =
     || operation.Name = ContentOperators.sh
     || (pathPainting.Contains operation.Name && operation.Name <> ContentOperators.n)
 
+/// Whether value is, or holds at any depth, an indirect reference: one a page's content can't
+/// write inline (properties named in the page's resources can hold them).
+let rec private holdsReference (value: PdfObject | null) =
+    match value with
+    | null -> false
+    | value when value.IsIndirectReference() -> true
+    | :? PdfDictionary as dictionary -> dictionary.KeySet() |> Seq.exists (fun key -> holdsReference (dictionary.Get(key, false)))
+    | :? PdfArray as array -> seq { 0 .. array.Size() - 1 } |> Seq.exists (fun i -> holdsReference (array.Get(i, false)))
+    | _ -> false
+
 /// How the end (tail, whitespace aside) of the piece of marked content mcid on the page would
 /// be split off, numbered past usedMcids (those the tags give the page); or why it can't be.
 let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Result<Plan, string> =
@@ -140,7 +150,7 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
             elif properties.IsNone then Error "its marked content's properties can't be read"
             elif [ PdfName.ActualText; PdfName.Alt; PdfName.E ] |> List.exists properties.Value.ContainsKey then
                 Error "its marked content says what it reads as, for all of it"
-            elif properties.Value.KeySet() |> Seq.exists (fun key -> properties.Value.Get(key, false).IsIndirectReference()) then
+            elif properties.Value.KeySet() |> Seq.exists (fun key -> holdsReference (properties.Value.Get(key, false))) then
                 Error "its marked content's properties can't be copied"
             elif showing.IsEmpty then Error "its marked content draws no text"
             else
