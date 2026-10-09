@@ -725,11 +725,13 @@ let private trueTypeGlyphs (program: byte array) : Set<int> option =
 /// it has to match (7.21.3.1; it only matters for choosing a substitute, and the font is
 /// embedded); and an embedded CMap's /WMode is set to the one in its program, which readers use
 /// (7.21.3.3-2).
-let private repairFontDictionaries (document: PdfDocument) _ =
+let private repairFontDictionaries (document: PdfDocument) (context: Context) =
     let mutable glyphLists = 0
     let mutable uncheckedLists = 0
     let mutable collections = 0
     let mutable writingModes = 0
+    let mutable symbolicEncodings = 0
+    let mutable symbolicLeft = 0
     let subset (name: PdfName | null) =
         match name with
         | NonNull name -> Regex.IsMatch(name.GetValue(), "^[A-Z]{6}\\+")
@@ -826,8 +828,91 @@ let private repairFontDictionaries (document: PdfDocument) _ =
                     collections <- collections + 1
             | _ -> ()
         | _ -> ()
+    // A symbolic TrueType font with an /Encoding (7.21.6-3; 8.4.5.7-3), which PDF/UA doesn't allow:
+    // a reader draws a symbolic font's codes through its program's own (3,0) or (1,0) cmap, so the
+    // encoding only says which characters they are, and goes once a ToUnicode map says so instead.
+    // Left where it might choose the glyphs: the program isn't embedded, has neither cmap, or names
+    // a glyph the encoding names for a code that isn't the one its cmap gives.
+    let symbolicEncoding (font: PdfDictionary) =
+        match descriptorOf font, font.Get(PdfName.Encoding, true) with
+        | Some descriptor, (NonNull _ as encoding) when
+            PdfName.TrueType.Equals(font.GetAsName PdfName.Subtype)
+            && (match descriptor.GetAsNumber PdfName.Flags with null -> false | flags -> (flags.IntValue() &&& 4) <> 0)
+            ->
+            let baseEncoding, differences =
+                match encoding with
+                | :? PdfName as name -> Some(name.GetValue()), Map.empty
+                | :? PdfDictionary as encoding ->
+                    let names = Collections.Generic.Dictionary<int, string>()
+                    match encoding.GetAsArray PdfName.Differences with
+                    | null -> ()
+                    | array ->
+                        let mutable code = 0
+                        for i in 0 .. array.Size() - 1 do
+                            match array.Get i with
+                            | :? PdfNumber as n -> code <- n.IntValue()
+                            | :? PdfName as name ->
+                                names[code] <- name.GetValue()
+                                code <- code + 1
+                            | _ -> ()
+                    (encoding.GetAsName PdfName.BaseEncoding |> Option.ofObj |> Option.map _.GetValue()),
+                    (names |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
+                | _ -> None, Map.empty
+            let program = match descriptor.GetAsStream PdfName.FontFile2 with null -> None | stream -> Some(stream.GetBytes())
+            let parsed =
+                program
+                |> Option.bind (fun bytes ->
+                    try Some(UglyToad.PdfPig.Fonts.TrueType.Parser.TrueTypeFontParser.Parse(UglyToad.PdfPig.Fonts.TrueType.TrueTypeDataBytes bytes))
+                    with _ -> None)
+            let table (cmap: obj) =
+                Option.ofObj cmap |> Option.map (fun t -> t :?> UglyToad.PdfPig.Fonts.TrueType.Tables.CMapSubTables.ICMapSubTable)
+            let symbol = parsed |> Option.bind (fun p -> table (box p.WindowsSymbolCMap))
+            let mac = parsed |> Option.bind (fun p -> table (box p.MacRomanCMap))
+            // The glyph a code draws, as a reader without the encoding takes it.
+            let glyphOf (code: int) =
+                let viaSymbol = symbol |> Option.map (fun t -> max (t.CharacterCodeToGlyphIndex(0xF000 + code)) (t.CharacterCodeToGlyphIndex code)) |> Option.defaultValue 0
+                if viaSymbol > 0 then viaSymbol else mac |> Option.map (fun t -> t.CharacterCodeToGlyphIndex code) |> Option.defaultValue 0
+            let named = program |> Option.bind ToUnicodeMaps.trueTypeGlyphNamed
+            let drawnTheSame =
+                match named with
+                | None -> true
+                | Some named -> differences |> Map.forall (fun code name -> match named name with Some glyph -> glyph = glyphOf code | None -> true)
+            if (symbol.IsSome || mac.IsSome) && drawnTheSame then
+                let existing =
+                    match font.GetAsStream PdfName.ToUnicode with
+                    | null -> Map.empty
+                    | stream -> try ToUnicodeMaps.parse (Text.Encoding.Latin1.GetString(stream.GetBytes())) with _ -> Map.empty
+                let standard = baseEncoding |> Option.bind ToUnicodeMaps.baseEncoding
+                let first = match font.GetAsNumber PdfName.FirstChar with null -> 0 | n -> max 0 (n.IntValue())
+                let last = match font.GetAsNumber PdfName.LastChar with null -> 255 | n -> min 255 (n.IntValue())
+                // What the encoding says each code is, where the map doesn't already.
+                let said =
+                    [ for code in first .. last do
+                          let readable = existing |> Map.tryFind code |> Option.exists ToUnicodeMaps.isReadable
+                          if not readable then
+                              let text =
+                                  match Map.tryFind code differences with
+                                  | Some name -> ToUnicodeMaps.glyphNameText name
+                                  | None ->
+                                      match standard with
+                                      | Some unicode when unicode code > 0 -> Some(Char.ConvertFromUtf32(unicode code))
+                                      | _ -> None
+                              match text with
+                              | Some text -> yield code, text
+                              | None -> () ]
+                if not said.IsEmpty then
+                    let entries = said |> List.fold (fun map (code, text) -> Map.add code text map) existing
+                    let stream = PdfStream(Text.Encoding.ASCII.GetBytes(ToUnicodeMaps.write 1 entries))
+                    stream.MakeIndirect document |> ignore
+                    font.Put(PdfName.ToUnicode, stream) |> ignore
+                font.Remove PdfName.Encoding |> ignore
+                symbolicEncodings <- symbolicEncodings + 1
+            else
+                symbolicLeft <- symbolicLeft + 1
+        | _ -> ()
     let rec fix (font: PdfDictionary) =
         glyphList font
+        symbolicEncoding font
         if PdfName.Type0.Equals(font.GetAsName PdfName.Subtype) then
             composite font
             // A descendant can be a direct object, which the loop over objects won't reach.
@@ -850,7 +935,14 @@ let private repairFontDictionaries (document: PdfDocument) _ =
       if collections > 0 then
           $"Set the character collection (CIDSystemInfo) of {collections} embedded composite font(s) to their CMap's."
       if writingModes > 0 then
-          $"Set the writing direction (/WMode) of {writingModes} embedded CMap(s) to the one in their program, which readers use." ]
+          $"Set the writing direction (/WMode) of {writingModes} embedded CMap(s) to the one in their program, which readers use."
+      if symbolicEncodings > 0 then
+          $"Removed the encoding PDF/UA doesn't allow from {symbolicEncodings} symbolic TrueType font(s), which draw by their own character map; a ToUnicode map now says the characters it named." ]
+    |> fun lines ->
+        if symbolicLeft > 0 then
+            context.Notes.Add
+                $"Left the encoding of {symbolicLeft} symbolic TrueType font(s), which PDF/UA doesn't allow: the font isn't embedded with a character map of its own to draw by, or the encoding picks other glyphs than its map, so taking it out could change what's drawn."
+        lines
 
 /// The character codes each font draws, by its dictionary: what the pages' text uses (and the
 /// forms they draw, the tiling patterns they paint, the glyphs of their Type 3 fonts, and their

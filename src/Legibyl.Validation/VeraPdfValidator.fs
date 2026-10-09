@@ -191,6 +191,9 @@ module internal VeraPdf =
               ua2 "8.4.5.3.1-1" PdfFixOptions.FontDictionaries
               ua1 "7.21.3.3-2" PdfFixOptions.FontDictionaries
               ua2 "8.4.5.4-2" PdfFixOptions.FontDictionaries
+              // A symbolic TrueType font's encoding.
+              ua1 "7.21.6-3" PdfFixOptions.FontDictionaries
+              ua2 "8.4.5.7-3" PdfFixOptions.FontDictionaries
               ua1 "7.21.7-1" PdfFixOptions.FontUnicode
               ua1 "7.21.7-2" PdfFixOptions.FontUnicode
               ua2 "8.4.5.8-1" PdfFixOptions.FontUnicode
