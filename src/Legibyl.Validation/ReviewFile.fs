@@ -242,6 +242,15 @@ let editFields = [ "page"; "tag"; "box"; "alt"; "text"; "retag"; "exclude"; "mer
 let problems (json: string) : string list =
     try
         use document = JsonDocument.Parse json
+        (match document.RootElement.TryGetProperty "language" with
+         | true, language when
+             language.ValueKind <> JsonValueKind.Null
+             && (language.ValueKind <> JsonValueKind.String
+                 || not (Text.RegularExpressions.Regex.IsMatch(language.GetString() |> string, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$")))
+             ->
+             [ $"language is {language.GetRawText()}, which isn't a language tag (e.g. \"es\", \"en-US\")." ]
+         | _ -> [])
+        @
         (match document.RootElement.TryGetProperty "roleMap" with
          | true, map when map.ValueKind = JsonValueKind.Object ->
              [ for entry in map.EnumerateObject() do

@@ -1,5 +1,6 @@
 module Legibyl.Validation.Tests.DocumentLanguageTests
 
+open System
 open Xunit
 open FsUnit.Xunit
 open iText.IO.Font.Constants
@@ -142,3 +143,22 @@ let ``a chosen language is declared with no fixes asked for`` () =
     createPdf input.Path spanish None
     VeraPdfValidator(Language = "es").Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.None) |> ignore
     declaredLanguage output.Path |> should equal (Some "es")
+
+[<Fact>]
+let ``garbled text in a document that says it's English isn't taken for another language`` () =
+    // English with each letter shifted on (1 to 25 places), as a font mapping its glyphs wrong
+    // reads: some shifts read as Slovak, Polish or Somali.
+    let shift (by: int) (line: string) =
+        let on (c: char) (a: char) = char (int a + (int c - int a + by) % 26)
+        String(line |> Seq.map (fun c -> if c >= 'a' && c <= 'z' then on c 'a' elif c >= 'A' && c <= 'Z' then on c 'A' else c) |> Array.ofSeq)
+    [ for by in 1..25 do
+          use input = new TempPdf()
+          createPdf input.Path (english |> List.map (shift by)) (Some "en-US")
+          yield! mismatches input.Path ]
+    |> should be Empty
+
+[<Fact>]
+let ``a review's language that isn't a language tag is a problem with it`` () =
+    ReviewFile.problems """{ "version": 1, "language": "Spanish please" }"""
+    |> should equal [ "language is \"Spanish please\", which isn't a language tag (e.g. \"es\", \"en-US\")." ]
+    ReviewFile.problems """{ "version": 1, "language": "es-MX" }""" |> should be Empty

@@ -435,7 +435,7 @@ let private LanguageMismatchMessage =
     "The document says it's in one language, but its text reads as another, so a screen reader reads it all with the wrong voice; an auto fix can declare the language its text reads as, or choose the language in Structure…."
 
 let private languageMismatchFindings (document: PdfDocument) context =
-    match DocumentLanguage.mismatch document context with
+    match LanguagePacks.mismatch document context with
     | Some(said, reads) ->
         [ warning
               LanguageMismatchMessage

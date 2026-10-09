@@ -218,3 +218,8 @@ let ofFile (pdfPath: string) =
         use document = new PdfDocument(new PdfReader(pdfPath))
         DocumentLanguage.declared document, DocumentLanguage.readsAs document
     with _ -> None, None
+
+/// The language a document says it's in and the one its text reads as, when its text clearly
+/// reads as another language with a pack (see DocumentLanguage.mismatch).
+let internal mismatch (document: PdfDocument) context =
+    DocumentLanguage.mismatch (fst installed.Value |> List.map _.Tag) document context

@@ -620,7 +620,7 @@ let private setLanguage (chosen: string option) (document: PdfDocument) context 
             document.GetCatalog().GetPdfObject().Put(PdfName.Lang, PdfString language) |> ignore
             context.Language <- Some language
         if DocumentLanguage.isDeclared document then
-            match DocumentLanguage.mismatch document context with
+            match LanguagePacks.mismatch document context with
             | Some(said, reads) ->
                 declare reads
                 [ $"Declared the document's language as {DocumentLanguage.describe reads}, which its text reads as, in place of {DocumentLanguage.describe said}." ]

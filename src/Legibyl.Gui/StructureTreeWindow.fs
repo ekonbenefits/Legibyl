@@ -504,7 +504,7 @@ module private StructureView =
                 else
                     Task.Run(fun () ->
                         try
-                            use suggester = new LayoutSuggester(sourceFilePath)
+                            use suggester = new LayoutSuggester(sourceFilePath, review.Language)
                             let read = suggester.CellTexts(page, [ for cell in cells -> cell.Box ])
                             List.map2 (fun text read -> if text = "" then read else text) texts read
                         with _ -> texts)
@@ -539,7 +539,7 @@ module private StructureView =
                                     Task.Run(fun () ->
                                         if not (TableModel.isDownloaded ()) then
                                             (TableModel.download (Progress<float>(ignore)) CancellationToken.None).Wait()
-                                        use suggester = new LayoutSuggester(sourceFilePath)
+                                        use suggester = new LayoutSuggester(sourceFilePath, review.Language)
                                         suggester.TableCells(box.PageNumber, box)
                                         |> Option.map (List.map (fun (header, g) -> ({ Tag = (if header then Tags.TH else Tags.TD); Box = g }: TableCell))))
                             window.Cursor <- cursor
@@ -651,7 +651,7 @@ module private StructureView =
                                             Task.Run(fun () ->
                                                 if not (TableModel.isDownloaded ()) then
                                                     (TableModel.download (Progress<float>(ignore)) CancellationToken.None).Wait()
-                                                use suggester = new LayoutSuggester(sourceFilePath)
+                                                use suggester = new LayoutSuggester(sourceFilePath, review.Language)
                                                 suggester.TableCells(region.PageNumber, region)
                                                 |> Option.map (List.map (fun (header, geometry) ->
                                                     ({ Tag = (if header then Tags.TH else Tags.TD); Box = geometry }: TableCell)))
@@ -1493,7 +1493,17 @@ module private StructureView =
             let titleEdit = ctx.useState review.Title
             let documentCandidates = ctx.useStateLazy(fun () -> try DocumentTitles.candidates sourceFilePath with _ -> []).Current
             // The language the PDF says it's in and the one its text reads as; a person's choice.
-            let languageFacts = ctx.useStateLazy(fun () -> LanguagePacks.ofFile sourceFilePath).Current
+            // (Read in the background: a PDF that says none has its pages' text read to tell.)
+            let unknown: string option * string option = None, None
+            let languageFacts = ctx.useState unknown
+            ctx.useEffect (
+                (fun () ->
+                    Task.Run(fun () -> LanguagePacks.ofFile sourceFilePath)
+                        .ContinueWith((fun (read: Task<string option * string option>) -> if read.IsCompletedSuccessfully then languageFacts.Set read.Result),
+                                      TaskScheduler.FromCurrentSynchronizationContext())
+                    |> ignore),
+                [ EffectTrigger.AfterInit ]
+            )
             let languageEdit = ctx.useState review.Language
             // As it was when the window opened, as written (es-MX, say): one of the choices.
             let openedLanguage = ctx.useStateLazy(fun () -> review.Language).Current
@@ -1606,7 +1616,7 @@ module private StructureView =
             /// says none, what Export… does about it. (One only detected isn't shown as chosen: the
             /// picker then would record it as a choice by itself.)
             let languageRow (review: DocumentReview) =
-                let declared, reads = languageFacts
+                let declared, reads = languageFacts.Current
                 let primary (tag: string) = tag.Split('-').[0].ToLowerInvariant()
                 let nameOf (tag: string) =
                     languageChoices |> List.tryFind (fun (t, _) -> t = primary tag) |> Option.map snd |> Option.defaultValue tag
@@ -1883,7 +1893,7 @@ type StructureTreeWindow
     let finding =
         match source with
         | Suggested ->
-            let suggester = new LayoutSuggester(sourceFilePath)
+            let suggester = new LayoutSuggester(sourceFilePath, review.Language)
             Some(suggester, LayoutPrefetcher(suggester, review.Pages))
         | Tagged _ -> None
     // Where Order Page N by Layout gets a page's regions: the layout detector, unless replaced.
