@@ -143,18 +143,24 @@ let load (roots: string list) : Pack list * Problem list =
     let packs = List<Pack>()
     let problems = List<Problem>()
     for root in roots do
-        if Directory.Exists root then
-            for folder in Directory.GetDirectories root |> Array.sort do
-                let file, found = read folder
+        // A folder of packs that can't be listed is said, and the others read.
+        let folders =
+            try
+                if Directory.Exists root then Directory.GetDirectories root |> Array.sort else [||]
+            with ex ->
+                problems.Add { Folder = root; Message = $"its packs can't be listed: {ex.Message}" }
+                [||]
+        for folder in folders do
+            let file, found = read folder
+            problems.AddRange found
+            match file with
+            | Some file ->
+                let pack, found = checkedPack folder file
                 problems.AddRange found
-                match file with
-                | Some file ->
-                    let pack, found = checkedPack folder file
-                    problems.AddRange found
-                    match packs |> Seq.tryFindIndex (fun p -> String.Equals(p.Tag, pack.Tag, StringComparison.OrdinalIgnoreCase)) with
-                    | Some i -> packs[i] <- merge packs[i] pack
-                    | None -> packs.Add pack
-                | None -> ()
+                match packs |> Seq.tryFindIndex (fun p -> String.Equals(p.Tag, pack.Tag, StringComparison.OrdinalIgnoreCase)) with
+                | Some i -> packs[i] <- merge packs[i] pack
+                | None -> packs.Add pack
+            | None -> ()
     List.ofSeq packs, List.ofSeq problems
 
 /// The packs installed (in roots ()), read once.
@@ -178,7 +184,9 @@ let phraseIn (packs: Pack list) (language: string option) (key: string) (values:
         match language |> Option.bind (forTagIn packs) |> Option.bind (fun pack -> pack.Phrases |> Map.tryFind key |> Option.map (fun text -> text, pack.Tag)) with
         | Some found -> found
         | None -> phrases[key], "en"
-    values |> List.fold (fun (text: string) (name, value) -> text.Replace("{" + name + "}", value)) text, tag
+    // In one pass, so a value that reads like a {name} ("{address}" in a title) stays as it is.
+    let given = dict values
+    Regex.Replace(text, @"\{(\w+)\}", fun m -> match given.TryGetValue m.Groups[1].Value with | true, value -> value | _ -> m.Value), tag
 
 /// A phrase, from the installed packs (see phraseIn).
 let phrase (language: string option) (key: string) (values: (string * string) list) = phraseIn (fst installed.Value) language key values

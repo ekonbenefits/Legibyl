@@ -83,3 +83,8 @@ let ``what's wrong with a pack is said, and only that part of it left out`` () =
     let german = LanguagePacks.forTagIn packs "de" |> Option.get
     (german.Name, german.Ocr, german.Phrases |> Map.toList)
     |> should equal ("German", (None: string option), [ "qrCodeLinkingToAddress", "QR-Code, der zu {address} führt" ])
+
+[<Fact>]
+let ``a value that reads like one of a phrase's names is written as it is`` () =
+    LanguagePacks.phraseIn [] None "qrCodeLinkingTo" [ "title", "{address}"; "address", "https://example.org" ]
+    |> should equal ("QR code linking to {address} (https://example.org)", "en")
