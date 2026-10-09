@@ -167,12 +167,14 @@ let sample (document: PdfDocument) context =
 let primary (tag: string) = tag.Split('-').[0].Trim().ToLowerInvariant()
 
 /// The language the document says it's in and the one its text reads as, when they're different
-/// languages (not just regions of one) and the text clearly reads as the other.
-let mismatch (document: PdfDocument) context =
+/// languages (not just regions of one), the text clearly reads as the other, and that's one of
+/// those given (the languages with a pack): text whose letters are garbled (a font mapping them
+/// wrong) can read as Slovak or Somali, but isn't taken for a language Legibyl knows well.
+let mismatch (among: string list) (document: PdfDocument) context =
     match declared document with
     | Some said ->
         match detect (sample document context) with
-        | Some reads when primary reads <> primary said -> Some(said, reads)
+        | Some reads when primary reads <> primary said && among |> List.exists (fun tag -> primary tag = primary reads) -> Some(said, reads)
         | _ -> None
     | None -> None
 

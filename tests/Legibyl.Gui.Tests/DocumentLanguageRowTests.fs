@@ -57,6 +57,8 @@ let ``a PDF that says it's in English with Spanish text says so, and a person ca
             pump ()
             try
                 let picker () = descendants<ComboBox> window |> List.find (fun c -> string (AutomationProperties.GetName c) = "Document language")
+                // (What the PDF says, and its text reads as, are read in the background.)
+                HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> not (isNull (picker ()).SelectedItem)) |> ignore
                 string (picker ()).SelectedItem |> should equal "English (en-US)"
                 texts window |> List.exists (fun text -> text.Contains "It says English, but its text reads as Spanish") |> should be True
 
@@ -81,9 +83,12 @@ let ``a PDF that says no language isn't given the one its text reads as by openi
             window.Show()
             pump ()
             try
+                let hint () = texts window |> List.exists (fun text -> text.Contains "It says none: its text reads as Spanish")
+                // (What its text reads as is read in the background.)
+                HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) hint |> ignore
                 review.Language |> should equal (None: string option)
                 review.IsEdited |> should be False
-                texts window |> List.exists (fun text -> text.Contains "It says none: its text reads as Spanish") |> should be True
+                hint () |> should be True
 
                 (descendants<Button> window |> List.find (fun b -> string b.Content = "Use Spanish")).RaiseEvent(RoutedEventArgs Button.ClickEvent)
                 pump ()

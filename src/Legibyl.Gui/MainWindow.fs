@@ -780,7 +780,7 @@ module private MainView =
                                     // it wasn't opened), reusing any pages it found.
                                     let source =
                                         if usesLayout then
-                                            let suggester = new LayoutSuggester(sourcePath)
+                                            let suggester = new LayoutSuggester(sourcePath, review.Language)
                                             Some(suggester, ReviewedLayout(LayoutPrefetcher(suggester, review.Pages), review))
                                         else
                                             None

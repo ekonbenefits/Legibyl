@@ -521,8 +521,9 @@ module LayoutModel =
 
 /// Suggests structure for a PDF's pages, one page at a time (each takes seconds). Keeps the
 /// PDF and the detector open until disposed; calls are serialised, since neither is thread-safe.
+/// language is the one a person chose for the document, if they did: OCR reads in it.
 [<Sealed>]
-type LayoutSuggester(pdfPath: string) =
+type LayoutSuggester(pdfPath: string, language: string option) =
     let gate = obj ()
     // Pixels per point to render at; the detector scales pages to its own input size anyway.
     let scale = 2.0
@@ -532,7 +533,7 @@ type LayoutSuggester(pdfPath: string) =
     let pages = new Legibyl.Rendering.PdfiumDocument(bytes)
     let detector = lazy (LayoutDetector.Load(LayoutModel.directory ()))
     // OCR in the document's language, as far as its text tells (see TextRecognition.modelsFor).
-    let ocr = lazy (TextRecognition.createEngine (LanguagePacks.writtenInFile pdfPath))
+    let ocr = lazy (TextRecognition.createEngine (language |> Option.orElseWith (fun () -> LanguagePacks.writtenInFile pdfPath)))
     // The table-structure model, if it's downloaded: without it, tables have no cells (and are
     // tagged as text).
     let tables =
@@ -605,6 +606,9 @@ type LayoutSuggester(pdfPath: string) =
                     |> List.sortBy (fun (_, g) -> -(Math.Round(g.Top, 1)), g.Left)
                 )
             | _ -> Some []
+
+    /// A suggester for a document whose language a person hasn't chosen.
+    new(pdfPath: string) = new LayoutSuggester(pdfPath, None)
 
     member _.PageCount = document.NumberOfPages
 
