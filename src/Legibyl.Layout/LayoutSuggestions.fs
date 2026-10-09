@@ -332,16 +332,22 @@ module TextRecognition =
                 if not (File.Exists copy) || FileInfo(copy).Length <> source.Length || File.GetLastWriteTimeUtc copy < source.LastWriteTimeUtc then
                     // Written beside it, then moved into place: another Legibyl may be reading it.
                     let partial = $"{copy}.{Guid.NewGuid():N}"
-                    File.Copy(model, partial)
-                    File.Move(partial, copy, true)
+                    try
+                        File.Copy(model, partial)
+                        try
+                            File.Move(partial, copy, true)
+                        // Another Legibyl that's just put it there.
+                        with _ when File.Exists copy && FileInfo(copy).Length = source.Length ->
+                            ()
+                    finally
+                        if File.Exists partial then
+                            try File.Delete partial with _ -> ()
             folder
 
     /// A Tesseract engine reading a document in language (see modelsFor), or None if it can't be
     /// loaded here or there's no model.
     let createEngine (language: string option) : TesseractEngine option =
-        match modelsFor language with
-        | [] -> None
-        | models ->
+        let engine (models: string list) =
             try
                 let names = String.Join("+", models |> List.map Path.GetFileNameWithoutExtension)
                 Some(new TesseractEngine(folderFor models, names, EngineMode.Default))
@@ -349,6 +355,11 @@ module TextRecognition =
                 // No native library for this platform, or it failed to load: no OCR, rather
                 // than no layout.
                 None
+        match modelsFor language with
+        | [] -> None
+        // Where the models can't be put in one folder (the user's can't be written, say): the
+        // first alone, from its own.
+        | first :: _ as models -> engine models |> Option.orElseWith (fun () -> if models.Length > 1 then engine [ first ] else None)
 
     /// The text in a PNG of one region, on one line.
     let recognize (engine: TesseractEngine) (png: byte array) =
