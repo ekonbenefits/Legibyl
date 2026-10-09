@@ -55,8 +55,18 @@ let private write (path: string option) (rendered: string) =
 /// The worst of several exit codes (a tool error over a document problem over success).
 let private worst (codes: int seq) = if Seq.isEmpty codes then ExitCodes.Success else Seq.max codes
 
-/// What the run says on stderr as it goes (see Progress): set by each command for its files.
-let mutable private reporter = Progress.Reporter(Progress.Quiet, 1)
+/// What the run says on stderr as it goes (see Progress): set by each command for its files. Its
+/// own for each call of main (two runs in one process, as tests make, don't share one), and
+/// followed onto the threads a run's work goes to.
+let private current = Threading.AsyncLocal<Progress.Reporter>()
+let private quietReporter = Progress.Reporter(Progress.Quiet, 1)
+
+/// The run's reporter.
+let private reporter () =
+    // (Unset before a command sets it.)
+    match box current.Value with
+    | null -> quietReporter
+    | _ -> current.Value
 
 /// How long a download may go without data before it's given up on.
 let private stalled = TimeSpan.FromSeconds 60.0
@@ -73,7 +83,7 @@ let private ensureLayoutModel () =
             { new IProgress<float> with
                 member _.Report fraction =
                     lastData.Restart()
-                    reporter.Status("Downloading the layout models, once", (int (fraction * float total), total), "MB") }
+                    (reporter ()).Status("Downloading the layout models, once", (int (fraction * float total), total), "MB") }
         use _watchdog =
             new Threading.Timer(
                 (fun _ -> if lastData.Elapsed > stalled then cancel.Cancel()),
@@ -81,7 +91,7 @@ let private ensureLayoutModel () =
                 TimeSpan.FromSeconds 5.0,
                 TimeSpan.FromSeconds 5.0
             )
-        reporter.Status("Downloading the layout models, once", (0, total), "MB")
+        (reporter ()).Status("Downloading the layout models, once", (0, total), "MB")
         Legibyl.Layout.LayoutModel.download progress cancel.Token |> _.GetAwaiter().GetResult()
 
 /// Says where validation has got, as activity ("Validating").
@@ -89,19 +99,19 @@ let private validationProgress (activity: string) =
     { new IProgress<ValidationProgress> with
         member _.Report p =
             match p.Stage with
-            | ValidationStage.Preparing -> reporter.Status $"{activity}: reading the PDF"
-            | ValidationStage.CheckingPages -> reporter.Status(activity, (p.Page, p.PageCount))
-            | ValidationStage.Finishing -> reporter.Status $"{activity}: finishing up"
-            | _ -> reporter.Status activity }
+            | ValidationStage.Preparing -> (reporter ()).Status $"{activity}: reading the PDF"
+            | ValidationStage.CheckingPages -> (reporter ()).Status(activity, (p.Page, p.PageCount))
+            | ValidationStage.Finishing -> (reporter ()).Status $"{activity}: finishing up"
+            | _ -> (reporter ()).Status activity }
 
 /// Says where reading the structure has got.
 let private structureProgress =
     { new IProgress<StructureReadProgress> with
         member _.Report p =
             match p.Stage with
-            | StructureReadStage.ReadingText -> reporter.Status("Reading the structure: page text", (p.Page, p.PageCount))
-            | StructureReadStage.ReadingLinks -> reporter.Status "Reading the structure: links"
-            | _ -> reporter.Status "Reading the structure: building the tree" }
+            | StructureReadStage.ReadingText -> (reporter ()).Status("Reading the structure: page text", (p.Page, p.PageCount))
+            | StructureReadStage.ReadingLinks -> (reporter ()).Status "Reading the structure: links"
+            | _ -> (reporter ()).Status "Reading the structure: building the tree" }
 
 /// Says where fixing has got: its step, and the page where there are pages.
 let private fixProgress =
@@ -117,8 +127,8 @@ let private fixProgress =
                 | FixStage.Fixing -> $"{step}: applying the fixes"
                 | _ -> $"{step}: fixing metadata with veraPDF"
             match pages with
-            | Some position -> reporter.Status(stage, position)
-            | None -> reporter.Status stage }
+            | Some position -> (reporter ()).Status(stage, position)
+            | None -> (reporter ()).Status stage }
 
 /// The --progress and --quiet options every command that processes files has.
 let private progressOption () =
@@ -130,7 +140,7 @@ let private quietOption () = option<bool> "--quiet" |> desc "Say nothing on stde
 
 /// The reporter for a run over count files, or why the options can't make one.
 let private startReporting (progress: string option) (quiet: bool) (count: int) =
-    Progress.choose progress quiet |> Result.map (fun mode -> reporter <- Progress.Reporter(mode, count))
+    Progress.choose progress quiet |> Result.map (fun mode -> current.Value <- Progress.Reporter(mode, count))
 
 /// What went wrong, as a file's error says it: the innermost exception's message (a task's comes
 /// wrapped), a download's failure said as one.
@@ -406,16 +416,16 @@ let private runValidate (args: ValidateArgs) =
             // Each file on its own: one failing some unexpected way doesn't lose the others' results.
             let results =
                 [ for file in args.Files ->
-                      reporter.Begin file
+                      (reporter ()).Begin file
                       let result =
                           try
                               validateFile validator args given file
                           with ex ->
                               let message = failure ex
-                              reporter.Clear()
+                              (reporter ()).Clear()
                               eprintfn $"error: {file}: {message}"
                               { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget args.Ua)) with Error = message }
-                      reporter.Done(
+                      (reporter ()).Done(
                           if not (isNull result.Error) then $"ERROR, {result.Error}"
                           elif result.IsCompliant = Nullable true && result.MeetsWcag = Nullable true then "PASS"
                           elif result.IsCompliant = Nullable true && not (isNull result.WcagError) then $"FAIL, {WcagSpecification.Name} not checked"
@@ -562,7 +572,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                     validator.Review <- ReviewFile.forCopy (Some review)
                 | None -> ()
                 if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then
-                    reporter.Note "Linked web pages' titles are read as it's fixed: up to two minutes"
+                    (reporter ()).Note "Linked web pages' titles are read as it's fixed: up to two minutes"
                 let fix = validator.Fix(file, profile, targetPath, options, fixProgress)
                 let before = compliance fix.OriginalReport
                 let result = { result with ValidatorNotes = fix.OriginalReport.Notes }
@@ -679,7 +689,7 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
     // error (exit 2), and the others' results are kept.
     let failed (file: string) (ex: exn) : FixOutcome =
         // On stderr as well: after a download's last percentage, say, rather than nothing.
-        reporter.Clear()
+        (reporter ()).Clear()
         eprintfn $"error: {file}: {failure ex}"
         let target = try targetFor request.Ua file with _ -> unknownTarget request.Ua
         { File = file
@@ -696,10 +706,10 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
           ValidatorNotes = [||] }
     let results =
         [ for file in files ->
-              reporter.Begin file
+              (reporter ()).Begin file
               let result = try fixFile validator request file with ex -> failed file ex
               let standing (c: Compliance | null) = match c with NonNull c when c.IsCompliant -> "PASS" | NonNull c -> $"FAIL {c.FailedCount}" | Null -> "?"
-              reporter.Done(
+              (reporter ()).Done(
                   match result.Status with
                   | FixStatus.Error -> $"ERROR, {result.Error}"
                   | FixStatus.Fixed -> $"fixed → {Path.GetFileName result.OutputPath} ({standing result.Before} → {standing result.After})"
@@ -769,13 +779,13 @@ let private runStructure (args: StructureArgs) =
         let validator = VeraPdfValidator()
         let results =
             [ for file in args.Files ->
-                  reporter.Begin file
+                  (reporter ()).Begin file
                   let result =
                       try
                           { File = file; Structure = validator.ReadStructureTree(file, structureProgress); Error = null }
                       with :? VeraPdfValidationException as ex ->
                           { File = file; Structure = null; Error = ex.Message }
-                  reporter.Done(
+                  (reporter ()).Done(
                       match result.Error, result.Structure with
                       | NonNull error, _ -> $"ERROR, {error}"
                       | Null, Null -> "no structure tree (untagged)"
@@ -859,9 +869,9 @@ let private runAppend (args: AppendArgs) =
             | _ ->
                 let output = args.Output |> Option.defaultWith (fun () -> nextVersion files.Head)
                 let options: Append.Options = { Title = args.Title; Language = args.Lang; PartTag = args.PartTag }
-                reporter.Begin output
+                (reporter ()).Begin output
                 match
-                    (try Ok(Append.run (VeraPdfValidator()) files output options (fun stage -> reporter.Status(stage.TrimEnd('…')))) with
+                    (try Ok(Append.run (VeraPdfValidator()) files output options (fun stage -> (reporter ()).Status(stage.TrimEnd('…')))) with
                      | :? VeraPdfValidationException
                      | :? IOException
                      | :? UnauthorizedAccessException
@@ -869,11 +879,11 @@ let private runAppend (args: AppendArgs) =
                      | :? iText.Commons.Exceptions.ITextException as ex -> Error ex.Message)
                 with
                 | Error message ->
-                    reporter.Clear()
+                    (reporter ()).Clear()
                     eprintfn $"error: the PDFs couldn't be joined: {message}"
                     ExitCodes.ToolError
                 | Ok outcome ->
-                    reporter.Done(
+                    (reporter ()).Done(
                         match outcome.Joined, outcome.Passes with
                         | None, _ -> "nothing written"
                         | Some joined, true -> $"joined → {Path.GetFileName joined.Output} (passes)"
@@ -925,12 +935,12 @@ let private runSuggest (args: SuggestArgs) =
             ExitCodes.ToolError
         else
             try
-                reporter.Begin args.File
+                (reporter ()).Begin args.File
                 ensureLayoutModel ()
                 use suggester = new Legibyl.Layout.LayoutSuggester(args.File)
                 let pages =
                     [ for page in 1 .. suggester.PageCount ->
-                          reporter.Status("Finding the pages' layouts", (page, suggester.PageCount))
+                          (reporter ()).Status("Finding the pages' layouts", (page, suggester.PageCount))
                           suggester.Suggest page ]
                 let layout =
                     Legibyl.Layout.LayoutSuggestions.toLayoutFile args.File pages (Legibyl.Layout.LayoutSuggestions.suggestedTitle args.File pages)
@@ -952,11 +962,11 @@ let private runSuggest (args: SuggestArgs) =
                               Pages = layout.Pages.Length
                               Regions = layout.Pages |> Array.sumBy _.Regions.Length }
                     )
-                reporter.Done $"{layout.Pages.Length} pages' layouts found"
+                (reporter ()).Done $"{layout.Pages.Length} pages' layouts found"
                 ExitCodes.Success
             with ex ->
                 // A download failing or timing out, the file or the models unreadable, anything else.
-                reporter.Clear()
+                (reporter ()).Clear()
                 eprintfn $"error: {failure ex}"
                 ExitCodes.ToolError
 
