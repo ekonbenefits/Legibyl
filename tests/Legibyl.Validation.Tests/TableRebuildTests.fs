@@ -681,3 +681,16 @@ let ``a review's rebuild is no problem, and a cell that isn't a TH or a TD is`` 
     let review = $"""{{ "version": 1, "edits": [ {System.Text.Json.JsonSerializer.Serialize(ReviewFile.ofElementEdit edit)} ] }}"""
     ReviewFile.problems review |> should be Empty
     ReviewFile.problems (review.Replace("\"TD\"", "\"P\"")) |> should equal [ "edits[0].cells[1] is a \"P\", not a header cell (TH) or a data cell (TD)." ]
+
+[<Fact>]
+let ``a table rebuilt with a language given it gets the language too`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createBroken input.Path [ [ "Planta"; "Siembra" ]; [ "Tomate"; "Marzo" ] ]
+    let table = VeraPdfValidator().ReadStructureTree input.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")
+    let edit = { rebuildEdit table [ cell "TH" 0 0; cell "TH" 0 1; cell "TD" 1 0; cell "TD" 1 1 ] with Lang = "es" }
+
+    VeraPdfValidator(Edits = [ edit ]).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.ApplyEdits) |> ignore
+
+    (VeraPdfValidator().ReadStructureTree output.Path |> notNull |> nodes |> List.find (fun n -> n.Tag = "Table")).Language |> should equal "es"
+    ElementEdits.pending output.Path [ edit ] |> should equal 0

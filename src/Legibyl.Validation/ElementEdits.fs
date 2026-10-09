@@ -410,7 +410,7 @@ let private moveElements (document: PdfDocument) context (moved: (ElementEdit * 
 let private otherChanges (tables: ElementEdit list) =
     [ for edit in tables do
           if not (isNull edit.Alt && isNull edit.Text && isNull edit.Lang && isNull edit.Retag && edit.Move.IsNone && not edit.Exclude) then
-              { edit with Cells = []; Lang = null } ]
+              { edit with Cells = [] } ]
 
 /// A person-confirmed conversion of consecutive paragraph siblings into a table.
 let private isParagraphTable (edit: ElementEdit) =
