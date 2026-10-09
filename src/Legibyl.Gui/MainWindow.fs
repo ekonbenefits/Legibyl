@@ -829,12 +829,17 @@ module private MainView =
                                         // Anything else is said too, rather than leaving nothing happened.
                                         | ex -> return Error $"Couldn't export it: {Dialogs.failureMessage ex}"
                                     finally
+                                        // The busy state ends first, whatever letting go of the
+                                        // suggester does after.
+                                        busyProgress.Set None
+                                        isBusy.Set false
                                         validator.LayoutSource <- null
                                         validator.Review <- null
                                         validator.Edits <- []
-                                        source.Value |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
-                                        busyProgress.Set None
-                                        isBusy.Set false
+                                        try
+                                            source.Value |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
+                                        with _ ->
+                                            ()
                                 }
 
                             // Open the exported copy in its own window, where it's validated, to show
