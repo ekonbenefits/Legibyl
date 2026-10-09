@@ -37,12 +37,13 @@ let qrCodesIn (review: DocumentReview) : Found list =
 
 /// Offers to read the titles of the web pages links go to (those without a description, found
 /// first) and QR codes found already (qrCodes; those found later follow the answer), each of
-/// which can be unticked, with Read Titles and Skip. Remembers the answer in review, and doesn't
-/// ask again once it's answered. With nothing that links to the web, it isn't shown. Returns once
-/// it's closed (or found it had nothing to ask).
-let offer (owner: Window) (pdfPath: string) (review: DocumentReview) (titleSource: IPageTitleSource) (qrCodes: Found list) : Task =
+/// which can be unticked, with Read Titles and Skip, in a window of its own beside owner (not
+/// stopping it being used). Remembers the answer in review, and doesn't ask again once it's
+/// answered. With nothing that links to the web, it isn't shown. Returns once it's closed, true;
+/// or, finding it had nothing to ask, false.
+let offer (owner: Window) (pdfPath: string) (review: DocumentReview) (titleSource: IPageTitleSource) (qrCodes: Found list) : Task<bool> =
     if review.LinkTitles <> NotAsked then
-        Task.CompletedTask
+        Task.FromResult false
     else
       task {
         // The PDF's links (quick: no page is drawn), in the background.
@@ -54,7 +55,8 @@ let offer (owner: Window) (pdfPath: string) (review: DocumentReview) (titleSourc
                 with _ ->
                     // Can't read them: offer the QR codes, if any.
                     [])
-        review.WebLinks <- links
+        // (As found before, if they were.)
+        if review.WebLinks.IsEmpty then review.WebLinks <- links
         // Its links first, then the QR codes.
         let found =
             let linked = links |> List.fold (fun all link -> add all link.Address $"link on page {link.Page}") []
@@ -171,6 +173,10 @@ let offer (owner: Window) (pdfPath: string) (review: DocumentReview) (titleSourc
                             ]
                         ]
                     ])
-            do! window.ShowDialog owner
+            let closed = TaskCompletionSource<bool>()
+            window.Closed.Add(fun _ -> closed.TrySetResult true |> ignore)
+            window.Show owner
+            return! closed.Task
+        else
+            return false
       }
-      :> Task

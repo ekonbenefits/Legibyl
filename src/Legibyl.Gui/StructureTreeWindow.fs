@@ -875,21 +875,36 @@ module private StructureView =
                     }
                     |> ignore
 
-            // Whether this window has offered to read web pages' titles, for QR codes found here.
-            let offered = ctx.useState false
-            /// For a found page with a QR code going to a web page, when nobody's said whether to
-            /// read such pages' titles: asks, once (the PDF's links with it), then reads them.
-            let offerTitlesFor (review: DocumentReview) (page: PageSuggestion) =
-                let hasWebQrCode = page.Blocks |> List.exists (fun block -> block.QrText |> Option.bind LinkTitles.webAddress |> Option.isSome)
-                if review.LinkTitles = NotAsked && hasWebQrCode && not offered.Current then
-                    offered.Set true
+            // Whether this window has offered to read web pages' titles, and is asking now.
+            let offered = ref false
+            let asking = ref false
+            /// When nobody's said whether to read the titles of the web pages the PDF links to (its
+            /// links, and its pages' QR codes found so far): asks, beside this window, once; then
+            /// builds the pages again, their descriptions named by those titles.
+            let rec askTitles (review: DocumentReview) =
+                if review.LinkTitles = NotAsked && not offered.Value && not asking.Value then
+                    asking.Value <- true
                     task {
-                        do! LinkTitleOffer.offer window sourceFilePath review (LinkTitles.WebPageTitles()) (LinkTitleOffer.qrCodesIn review)
-                        pageNodes.Current.Clear()
-                        root.Set(buildRoot ())
-                        showPage selected.Current
+                        let mutable shown = false
+                        try
+                            let! asked = LinkTitleOffer.offer window sourceFilePath review (LinkTitles.WebPageTitles()) (LinkTitleOffer.qrCodesIn review)
+                            shown <- asked
+                            // With nothing to ask yet, a QR code found later asks.
+                            offered.Value <- asked
+                            if asked then
+                                pageNodes.Current.Clear()
+                                root.Set(buildRoot ())
+                                showPage selected.Current
+                        finally
+                            asking.Value <- false
+                        // QR codes found while it looked, with nothing else to ask about: asked about now.
+                        if not shown && not (LinkTitleOffer.qrCodesIn review).IsEmpty then askTitles review
                     }
                     |> ignore
+            /// For a found page with a QR code going to a web page: asks, if it hasn't.
+            let offerTitlesFor (review: DocumentReview) (page: PageSuggestion) =
+                if page.Blocks |> List.exists (fun block -> block.QrText |> Option.bind LinkTitles.webAddress |> Option.isSome) then
+                    askTitles review
 
             // Pages are found in the background; each is added to the structure as it is.
             ctx.useEffect (
@@ -907,8 +922,9 @@ module private StructureView =
                         let failed =
                             prefetcher.PageFailed.Subscribe(fun (number, reason) ->
                                 Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> failures.Set(failures.Current.Add(number, reason))))
+                        // Its links (and QR codes of pages found before), asked about as it opens.
+                        askTitles review
                         for page in review.Pages.Values do
-                            offerTitlesFor review page
                             readTitlesFor review page
                         if modelReady.Current then prefetcher.Start()
                         { new IDisposable with
