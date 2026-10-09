@@ -134,3 +134,11 @@ let ``the language a person chose is declared, in place of the one it says or it
     // Chosen again, it has it already: nothing to say.
     let again' = VeraPdfValidator(Language = "es-MX").Fix(output.Path, PdfProfile.PdfUa1, again.Path, PdfFixOptions.Language)
     again'.AppliedFixes |> Seq.filter (fun (line: string) -> line.Contains "language") |> should be Empty
+
+[<Fact>]
+let ``a chosen language is declared with no fixes asked for`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPdf input.Path spanish None
+    VeraPdfValidator(Language = "es").Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.None) |> ignore
+    declaredLanguage output.Path |> should equal (Some "es")

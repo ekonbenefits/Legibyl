@@ -702,10 +702,10 @@ type VeraPdfValidator() =
         ) : FixResult =
         ensureExists pdfPath
         ensureInitialised ()
-        if options = PdfFixOptions.None then
-            raise (VeraPdfValidationException "At least one fix option must be selected.")
         // A language a person chose is declared, whatever else is asked for.
         let options = if String.IsNullOrWhiteSpace this.Language then options else options ||| PdfFixOptions.Language
+        if options = PdfFixOptions.None then
+            raise (VeraPdfValidationException "At least one fix option must be selected.")
 
         let structuralOptions =
             StructureFixes.orderedFixes this.PageTitleSource None [] None None Map.empty Map.empty |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
@@ -766,6 +766,7 @@ type VeraPdfValidator() =
                             source
                             (options.HasFlag PdfFixOptions.QrLinks)
                             (if options.HasFlag PdfFixOptions.LinkTitlesFromWeb then Some this.PageTitleSource else None)
+                            (Option.ofObj this.Language |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.map _.Trim())
                             (report FixStage.Tagging)
                     with
                     | [], _ ->

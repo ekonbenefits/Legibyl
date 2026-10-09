@@ -1602,15 +1602,16 @@ module private StructureView =
                 ]
 
             /// The document's language: the one it'll be declared as (a person's choice, else the
-            /// one it says, else the one its text reads as), to choose; and, where what it says
-            /// isn't what its text reads as, or it says none, what Export… does about it.
+            /// one it says), to choose; and, where what it says isn't what its text reads as, or it
+            /// says none, what Export… does about it. (One only detected isn't shown as chosen: the
+            /// picker then would record it as a choice by itself.)
             let languageRow (review: DocumentReview) =
                 let declared, reads = languageFacts
                 let primary (tag: string) = tag.Split('-').[0].ToLowerInvariant()
                 let nameOf (tag: string) =
                     languageChoices |> List.tryFind (fun (t, _) -> t = primary tag) |> Option.map snd |> Option.defaultValue tag
                 let label (tag: string) = $"{nameOf tag} ({tag})"
-                let current = languageEdit.Current |> Option.orElse declared |> Option.orElse reads
+                let current = languageEdit.Current |> Option.orElse declared
                 // Every language to choose, after the ones it says and was chosen as they're written
                 // (en-US, say): the same list whatever's chosen, so the choice stays shown.
                 let tags =
@@ -1628,7 +1629,7 @@ module private StructureView =
                     | Some _, _, _ -> None
                     | None, Some said, Some textReads when primary said <> primary textReads ->
                         Some($"It says {nameOf said}, but its text reads as {nameOf textReads}: a screen reader reads it all with the wrong voice.", Some textReads)
-                    | None, None, Some textReads -> Some($"It says none: Declare the language, in Auto Fixes…, declares {nameOf textReads}, which its text reads as.", None)
+                    | None, None, Some textReads -> Some($"It says none: its text reads as {nameOf textReads}, which Declare the language, in Auto Fixes…, declares.", Some textReads)
                     | None, None, None -> Some("It says none, and there isn't enough text to tell: choose it.", None)
                     | _ -> None
                 Grid.create [
@@ -1644,6 +1645,7 @@ module private StructureView =
                         ComboBox.create [
                             Grid.column 1
                             ComboBox.minWidth 220.0
+                            ComboBox.placeholderText "None said: choose it"
                             ComboBox.horizontalAlignment HorizontalAlignment.Left
                             ComboBox.dataItems (tags |> List.map label)
                             ComboBox.selectedIndex (
