@@ -105,6 +105,8 @@ module private StructureView =
         (findings: FindingMarkers.Findings)
         (layoutRegions: ((int -> StructureGeometry list) option) ref)
         (detectOrder: int -> StructureGeometry list)
+        // Cancelled as the window closes: a model download it started stops.
+        (closing: CancellationToken)
         =
         // What's drawn outside every tag, most likely decoration first.
         let tagged = sortUntagged tagged
@@ -569,7 +571,7 @@ module private StructureView =
                                     let downloading = Progress<float>(fun fraction -> working.Set $"Downloading the table-structure model: {fraction:P0}")
                                     Task.Run(fun () ->
                                         if not (TableModel.isDownloaded ()) then
-                                            (TableModel.download downloading CancellationToken.None).Wait()
+                                            (TableModel.download downloading closing).Wait()
                                             // Then what it's doing now, not the download's last percentage (after it, on the window's thread).
                                             Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> working.Set "Finding the table's rows and cells…")
                                         use suggester = new LayoutSuggester(sourceFilePath, review.Language)
@@ -602,7 +604,9 @@ module private StructureView =
                             working.Set ""
                             // A download that failed, the model, or the PDF unreadable here.
                             let ex = match ex with :? AggregateException as a -> (match a.InnerException with null -> ex | inner -> inner) | ex -> ex
-                            do! Dialogs.showMessage window $"The table's rows and cells couldn't be found: {ex.Message}" "Rebuild Rows and Cells"
+                            // (Not once it's closed, which stopped the download.)
+                            if not closing.IsCancellationRequested then
+                                do! Dialogs.showMessage window $"The table's rows and cells couldn't be found: {ex.Message}" "Rebuild Rows and Cells"
                         finally
                             rebuilding.Value <- false
                     }
@@ -687,7 +691,7 @@ module private StructureView =
                                             let downloading = Progress<float>(fun fraction -> working.Set $"Downloading the table-structure model: {fraction:P0}")
                                             Task.Run(fun () ->
                                                 if not (TableModel.isDownloaded ()) then
-                                                    (TableModel.download downloading CancellationToken.None).Wait()
+                                                    (TableModel.download downloading closing).Wait()
                                                     // Then what it's doing now, not the download's last percentage (after it, on the window's thread).
                                                     Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> working.Set "Finding the table's rows and cells…")
                                                 use suggester = new LayoutSuggester(sourceFilePath, review.Language)
@@ -745,7 +749,8 @@ module private StructureView =
                             window.Cursor <- cursor
                             working.Set ""
                             let ex = match ex with :? AggregateException as a -> (match a.InnerException with null -> ex | inner -> inner) | ex -> ex
-                            do! Dialogs.showMessage window $"The table's rows and cells couldn't be found: {ex.Message}" "Convert Paragraphs to Table"
+                            if not closing.IsCancellationRequested then
+                                do! Dialogs.showMessage window $"The table's rows and cells couldn't be found: {ex.Message}" "Convert Paragraphs to Table"
                         finally
                             window.Cursor <- cursor
                             convertingParagraphs.Value <- false
@@ -890,6 +895,21 @@ module private StructureView =
             let asked = ctx.useState (Collections.Generic.HashSet<string>(), false)
             let status = ctx.useState ""
             let downloadProgress = ctx.useState (None: float option)
+            // What stops the layout models' download under way (its Cancel, or the window closing).
+            let downloadCancel = ctx.useStateLazy(fun () -> ref (None: CancellationTokenSource option)).Current
+            /// Downloads the layout models, showing how it's going; OperationCanceledException if
+            /// it's cancelled.
+            let downloadModels () =
+                task {
+                    use cancel = CancellationTokenSource.CreateLinkedTokenSource closing
+                    downloadCancel.Value <- Some cancel
+                    downloadProgress.Set(Some 0.0)
+                    try
+                        do! LayoutModel.download (Progress<float>(fun fraction -> downloadProgress.Set(Some fraction))) cancel.Token
+                    finally
+                        downloadCancel.Value <- None
+                        downloadProgress.Set None
+                }
 
             /// Reads the titles of the pages a found page's QR codes go to, if allowed and not read
             /// yet; then builds the pages again, their alt text prefilled with them.
@@ -977,16 +997,15 @@ module private StructureView =
 
             let download _ =
                 task {
-                    downloadProgress.Set(Some 0.0)
                     try
-                        do! LayoutModel.download (Progress<float>(fun fraction -> downloadProgress.Set(Some fraction))) CancellationToken.None
-                        downloadProgress.Set None
+                        do! downloadModels ()
                         modelReady.Set true
                         suggested |> Option.iter (fun (_, prefetcher) -> prefetcher.Start())
                         showPage selected.Current
-                    with ex ->
-                        downloadProgress.Set None
-                        status.Set $"Couldn't download the layout model: {ex.Message}"
+                    with
+                    | :? OperationCanceledException when closing.IsCancellationRequested -> ()
+                    | :? OperationCanceledException -> status.Set "Cancelled: the layout models weren't downloaded."
+                    | ex -> status.Set $"Couldn't download the layout model: {ex.Message}"
                 }
                 |> ignore
 
@@ -1072,9 +1091,7 @@ module private StructureView =
                                     | None ->
                                         task {
                                             if not (LayoutModel.isDownloaded ()) then
-                                                downloadProgress.Set(Some 0.0)
-                                                do! LayoutModel.download (Progress<float>(fun fraction -> downloadProgress.Set(Some fraction))) CancellationToken.None
-                                                downloadProgress.Set None
+                                                do! downloadModels ()
                                             // (One suggester for the window: the PDF and the detector loaded once.)
                                             return! Task.Run(fun () -> detectOrder page)
                                         }
@@ -1086,9 +1103,10 @@ module private StructureView =
                                     // Put in that order at once, as moves; Restore Page N Original Order undoes them.
                                     status.Set ""
                                     recordOrder edits.Current parent suggestion |> saveEdits |> ignore
-                            with ex ->
-                                downloadProgress.Set None
-                                status.Set $"Couldn't find page {page}'s layout: {ex.Message}"
+                            with
+                            | :? OperationCanceledException when closing.IsCancellationRequested -> ()
+                            | :? OperationCanceledException -> status.Set "Cancelled: the layout models weren't downloaded."
+                            | ex -> status.Set $"Couldn't find page {page}'s layout: {ex.Message}"
                         finally
                             ordering.Set false
                 }
@@ -1872,12 +1890,27 @@ module private StructureView =
                                     )
                                     match downloadProgress.Current with
                                     | Some fraction ->
-                                        ProgressBar.create [
-                                            ProgressBar.minimum 0.0
-                                            ProgressBar.maximum 1.0
-                                            ProgressBar.value fraction
-                                            AttrBuilder<ProgressBar>.CreateProperty<string | null>(
-                                                Automation.AutomationProperties.NameProperty, $"Downloading the layout models: {fraction:P0}", ValueNone)
+                                        DockPanel.create [
+                                            DockPanel.children [
+                                                Button.create [
+                                                    DockPanel.dock Dock.Right
+                                                    Button.margin (8.0, 0.0, 0.0, 0.0)
+                                                    Button.content "Cancel"
+                                                    ToolTip.tip "Stop downloading; nothing is kept."
+                                                    Button.onClick (
+                                                        (fun _ -> downloadCancel.Value |> Option.iter (fun cancel -> try cancel.Cancel() with :? ObjectDisposedException -> ())),
+                                                        SubPatchOptions.Always
+                                                    )
+                                                ]
+                                                ProgressBar.create [
+                                                    ProgressBar.minimum 0.0
+                                                    ProgressBar.maximum 1.0
+                                                    ProgressBar.value fraction
+                                                    ProgressBar.verticalAlignment VerticalAlignment.Center
+                                                    AttrBuilder<ProgressBar>.CreateProperty<string | null>(
+                                                        Automation.AutomationProperties.NameProperty, $"Downloading the layout models: {fraction:P0}", ValueNone)
+                                                ]
+                                            ]
                                         ]
                                     | None ->
                                         Button.create [
@@ -2037,6 +2070,8 @@ type StructureTreeWindow
         )
     // Keeps the PDF open and recent pages rendered while the window is open.
     let renderer = new PdfRegionRenderer()
+    // Cancelled as it closes: what it's downloading stops.
+    let closing = new Threading.CancellationTokenSource()
     // For a suggested layout: what finds each page's, in the background.
     let finding =
         match source with
@@ -2066,7 +2101,7 @@ type StructureTreeWindow
             if Threading.Interlocked.Decrement &detecting = 0 && Threading.Volatile.Read &closed = 1 then disposeOrderSuggester ()
     do
         let tagged = match source with Tagged root -> root | Suggested -> SuggestedTree.build []
-        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged findings layoutRegions detectOrder
+        this.Content <- view this renderer tagged review (finding |> Option.map snd) sourceFilePath onEditsChanged findings layoutRegions detectOrder closing.Token
 
     /// The review its edits change.
     member _.Review = review
@@ -2091,6 +2126,7 @@ type StructureTreeWindow
 
     override _.OnClosed(e) =
         base.OnClosed e
+        closing.Cancel()
         match finding with
         | Some(suggester, prefetcher) ->
             // A page may still be being found: stop after it, then let go of the suggester.

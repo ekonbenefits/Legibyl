@@ -609,6 +609,35 @@ let ``Fix link titles leaves links without a web address, or with a description,
     linkContentsOf output.Path |> should equal [ None; Some "Our home page"; None ]
 
 [<Fact>]
+let ``Fix cancelled while reading link titles stops at once, rather than when the web pages answer`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWithLinks input.Path Body [ "click here", None ]
+    setLinkAddresses input.Path [ Some "https://example.com/apply" ]
+    use answer = new Threading.ManualResetEventSlim(false)
+    use asked = new Threading.ManualResetEventSlim(false)
+    // Web pages that take their time: until the test's done.
+    let slow =
+        { new IPageTitleSource with
+            member _.PageTitles _ =
+                asked.Set()
+                answer.Wait(TimeSpan.FromMinutes 2.0) |> ignore
+                Collections.Generic.Dictionary<string, string>() }
+    use cancel = new Threading.CancellationTokenSource()
+    let fixing =
+        Threading.Tasks.Task.Run(fun () ->
+            VeraPdfValidator(PageTitleSource = slow).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkTitlesFromWeb, null, cancel.Token) |> ignore)
+    asked.Wait(TimeSpan.FromSeconds 60.0) |> should be True
+    let stopwatch = Diagnostics.Stopwatch.StartNew()
+    cancel.Cancel()
+
+    (fun () -> fixing.GetAwaiter().GetResult()) |> should throw typeof<OperationCanceledException>
+
+    stopwatch.Elapsed |> should be (lessThan (TimeSpan.FromSeconds 10.0))
+    File.Exists output.Path |> should be False
+    answer.Set()
+
+[<Fact>]
 let ``Fix reads no link titles unless asked to`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"

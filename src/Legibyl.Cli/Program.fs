@@ -98,7 +98,8 @@ let private untilStopped (files: string seq) (each: string -> 'T) : 'T list * bo
                 with :? OperationCanceledException when stopped () ->
                     (reporter ()).Done "stopped"
                     cancelled <- true
-    List.ofSeq results, cancelled
+    // (Stopped during the last file's after-check, say, which keeps its result.)
+    List.ofSeq results, cancelled || stopped ()
 
 /// Says the run was stopped, and how far it got; its exit code.
 let private stoppedAfter (done': int) (count: int) (what: string) =
@@ -123,15 +124,21 @@ let private ensureLayoutModel () =
                 member _.Report fraction =
                     lastData.Restart()
                     (reporter ()).Status("Downloading the layout models, once", (int (fraction * float total), total), "MB") }
-        use _watchdog =
+        let watchdog =
             new Threading.Timer(
                 (fun _ -> if lastData.Elapsed > stalled then cancel.Cancel()),
                 null,
                 TimeSpan.FromSeconds 5.0,
                 TimeSpan.FromSeconds 5.0
             )
-        (reporter ()).Status("Downloading the layout models, once", (0, total), "MB")
-        Legibyl.Layout.LayoutModel.download progress cancel.Token |> _.GetAwaiter().GetResult()
+        try
+            (reporter ()).Status("Downloading the layout models, once", (0, total), "MB")
+            Legibyl.Layout.LayoutModel.download progress cancel.Token |> _.GetAwaiter().GetResult()
+        finally
+            // Waiting for a check under way, so it can't cancel what's been let go of.
+            use stopped = new Threading.ManualResetEvent(false)
+            if watchdog.Dispose stopped then
+                stopped.WaitOne() |> ignore
 
 /// Says where validation has got, as activity ("Validating").
 let private validationProgress (activity: string) =
@@ -628,6 +635,13 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                     | Some layout, Some review when tagged -> LayoutFile.unmatched layout (ReviewFile.edits review)
                     | _ -> []
                 let notApplied = Array.ofList (List.ofSeq fix.NotApplied @ unmatched @ noReview)
+                // The copy's written by now: stopped (Ctrl+C) while it's checked, it's still reported,
+                // unchecked (and the run stops after it).
+                let checkCopy (copy: string) : Compliance | null =
+                    try
+                        compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy", cancel = stopToken ()))
+                    with :? OperationCanceledException when stopped () ->
+                        null
                 match fix.OutputPath with
                 | _ when request.Layout.IsSome && not tagged ->
                     { result with
@@ -638,7 +652,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                         Before = before
                         After =
                             match fix.OutputPath with
-                            | NonNull copy -> compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy", cancel = stopToken ()))
+                            | NonNull copy -> checkCopy copy
                             | Null -> null }
                 | NonNull copy ->
                     { result with
@@ -647,7 +661,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
                         Applied = applied
                         NotApplied = notApplied
                         Before = before
-                        After = compliance (validator.Validate(copy, profile, validationProgress "Validating the fixed copy", cancel = stopToken ())) }
+                        After = checkCopy copy }
                 | Null -> { result with Status = FixStatus.NothingToDo; Applied = applied; NotApplied = notApplied; Before = before }
             with
             | :? VeraPdfValidationException as ex -> { result with Error = ex.Message }
@@ -676,6 +690,8 @@ let private fixText (results: FixOutcome list) =
         | FixStatus.Error, _, _ -> line $"{r.File}: ERROR — {r.Error}"
         | FixStatus.Fixed, NonNull before, NonNull after ->
             line $"{r.File}: fixed → {r.OutputPath} (before: {standing before}; after: {standing after})"
+        | FixStatus.Fixed, NonNull before, Null ->
+            line $"{r.File}: fixed → {r.OutputPath} (before: {standing before}; the copy wasn't checked: stopped)"
         | FixStatus.AlreadyTagged, _, _ -> line $"{r.File}: already tagged; a layout is for an untagged file"
         | _, NonNull before, _ -> line $"{r.File}: nothing to do ({standing before})"
         | status, _, _ -> line $"{r.File}: {status}"

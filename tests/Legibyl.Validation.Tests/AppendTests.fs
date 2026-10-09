@@ -828,4 +828,4 @@ let ``appending cancelled stops, and writes nothing`` () =
 
     File.Exists joined |> should be False
     // Nor the scratch copy it joins them into.
-    Directory.GetFiles(Path.GetDirectoryName joined |> nonNull) |> Array.filter (fun file -> (Path.GetFileName file).StartsWith ".packet") |> should be Empty
+    Directory.GetFiles(Path.GetDirectoryName joined |> nonNull) |> Array.filter (fun file -> (string (Path.GetFileName file)).StartsWith ".packet") |> should be Empty

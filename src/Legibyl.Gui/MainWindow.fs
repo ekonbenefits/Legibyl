@@ -236,7 +236,9 @@ module private MainView =
                     Avalonia.Threading.Dispatcher.UIThread.Post(
                         (fun () ->
                             match before with
-                            | Some(:? InputElement as element) when element.IsEffectivelyEnabled && element.IsEffectivelyVisible -> element.Focus() |> ignore
+                            // (Not taken back from a window it opened, Structure… or the exported copy.)
+                            | Some(:? InputElement as element) when window.IsActive && element.IsEffectivelyEnabled && element.IsEffectivelyVisible ->
+                                element.Focus() |> ignore
                             | _ -> ()),
                         Avalonia.Threading.DispatcherPriority.Background
                     )
@@ -730,6 +732,8 @@ module private MainView =
 
                     match selectedFile.Current with
                     | Some filePath when focusOpen filePath || structureOpening.Contains filePath -> ()
+                    // Not while something else runs (the checklist's Structure… is still on).
+                    | Some _ when isBusy.Current -> ()
                     | Some filePath ->
                         structureOpening.Add filePath |> ignore
                         try
@@ -2088,7 +2092,8 @@ module private MainView =
                                                 // Escape stops it too.
                                                 Button.isCancel true
                                                 ToolTip.tip "Stop it (Escape); nothing is written."
-                                                Button.onClick (fun _ -> try source.Cancel() with :? ObjectDisposedException -> ())
+                                                // (Always the run under way's, not the first's.)
+                                                Button.onClick ((fun _ -> try source.Cancel() with :? ObjectDisposedException -> ()), SubPatchOptions.Always)
                                             ]
                                         | _ -> ()
                                         match busyProgress.Current with
