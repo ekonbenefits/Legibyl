@@ -582,3 +582,32 @@ let ``a review inside a copy is honoured, and the file next to it wins; --review
         given.Value.GetProperty("dismissedWarnings").GetInt32() |> should equal 1
         given.Value.GetProperty("review").GetString() |> should equal other
         missing |> should equal 64)
+
+/// Runs the CLI over several files, returning its exit code and each file's result, in order.
+let private runAll (args: string list) =
+    let output = Path.GetTempFileName()
+    try
+        let report = match args with "fix" :: _ -> [ "--report"; output ] | _ -> [ "--output"; output ]
+        let code = Legibyl.Cli.Program.main (Array.ofList (args @ report))
+        code, [ for result in JsonDocument.Parse(File.ReadAllText output).RootElement.EnumerateArray() -> result.Clone() ]
+    finally
+        File.Delete output
+
+[<Fact>]
+let ``a file that isn't a PDF among others is its own error, and the others' results are kept`` () =
+    withTaggedPdf (fun pdf ->
+        let folder = Path.GetDirectoryName pdf |> nonNull
+        let broken = Path.Combine(folder, "broken.pdf")
+        File.WriteAllText(broken, "This isn't a PDF.")
+        let other = Path.Combine(folder, "other.pdf")
+        File.Copy(pdf, other)
+
+        let validated, results = runAll [ "validate"; pdf; broken; other ]
+        let fixedCode, fixes = runAll [ "fix"; pdf; broken; other; "--fixes"; "none" ]
+
+        validated |> should equal 2
+        [ for r in results -> Path.GetFileName(r.GetProperty("file").GetString() |> string), r.GetProperty("error").ValueKind = JsonValueKind.String ]
+        |> should equal [ "garden.pdf", false; "broken.pdf", true; "other.pdf", false ]
+        fixedCode |> should equal 2
+        [ for r in fixes -> Path.GetFileName(r.GetProperty("file").GetString() |> string), r.GetProperty("status").GetString() ]
+        |> should equal [ "garden.pdf", "nothing-to-do"; "broken.pdf", "error"; "other.pdf", "nothing-to-do" ])

@@ -82,8 +82,12 @@ let private failure (ex: exn) =
     | :? Threading.Tasks.TaskCanceledException -> "Couldn't download the layout model: the connection timed out."
     | ex -> ex.Message
 
-/// The standard a file is checked against when even that couldn't be read from it.
-let private unknownTarget: Target = { Profile = PdfProfile.PdfUa1; PdfVersion = null; FromFile = true }
+/// The standard a file is checked against when its PDF version couldn't be read: --ua's, if given.
+let private unknownTarget (ua: string option) : Target =
+    match ua with
+    | Some "2" -> { Profile = PdfProfile.PdfUa2; PdfVersion = null; FromFile = false }
+    | Some _ -> { Profile = PdfProfile.PdfUa1; PdfVersion = null; FromFile = false }
+    | None -> { Profile = PdfProfile.PdfUa1; PdfVersion = null; FromFile = true }
 
 // ---- Shared inputs ----
 
@@ -338,7 +342,9 @@ let private runValidate (args: ValidateArgs) =
                   try
                       validateFile validator args given file
                   with ex ->
-                      { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget)) with Error = failure ex } ]
+                      let message = failure ex
+                      eprintfn $"error: {file}: {message}"
+                      { ValidationResult.Empty(file, (try targetFor args.Ua file with _ -> unknownTarget args.Ua)) with Error = message } ]
         write args.Output (if args.Format = "json" then toJson results else validationText results)
         results
         |> List.map (fun r ->
@@ -595,7 +601,7 @@ let private runFixes (validator: VeraPdfValidator) (files: string list) (request
     let failed (file: string) (ex: exn) : FixOutcome =
         // On stderr as well: after a download's last percentage, say, rather than nothing.
         eprintfn $"error: {file}: {failure ex}"
-        let target = try targetFor request.Ua file with _ -> unknownTarget
+        let target = try targetFor request.Ua file with _ -> unknownTarget request.Ua
         { File = file
           Standard = PdfUaTarget.displayName target.Profile
           PdfVersion = target.PdfVersion
