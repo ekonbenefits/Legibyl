@@ -109,7 +109,11 @@ type PdfFixOptions =
     /// an English document, say. Told apart among the document's language and those with a
     /// language pack (see PassageLanguages).
     | PassageLanguages = 268435456
-    | All = 536870911
+    /// Removes Span tags with nothing in them (see EmptySpans): an authoring app's spacers between
+    /// words, a space for replacement text. The space goes into the replacement text beside them
+    /// where the words would otherwise run together; where it can't, they're left, and reported.
+    | EmptySpans = 536870912
+    | All = 1073741823
 
 /// The PDF/UA standard to check a document against. Which applies comes from the file's PDF
 /// version (see PdfUaTarget): PDF/UA-1 is defined on PDF 1.7, PDF/UA-2 on PDF 2.0.

@@ -136,6 +136,7 @@ let ``showing all fixes lists the ones this PDF doesn't need too, still in order
               "Remove empty paragraphs"
               "Remove empty contents entries"
               "Remove empty figures"
+              "Remove empty spans"
               "Join split paragraphs"
               "Fix words split across spans"
               "Tag lists"

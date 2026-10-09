@@ -16,6 +16,7 @@ let order =
       PdfFixOptions.EmptyParagraphs
       PdfFixOptions.EmptyTocEntries
       PdfFixOptions.EmptyFigures
+      PdfFixOptions.EmptySpans
       PdfFixOptions.JoinSplitParagraphs
       PdfFixOptions.JoinSplitWords
       PdfFixOptions.Lists

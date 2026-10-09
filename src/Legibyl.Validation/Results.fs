@@ -24,6 +24,7 @@ module PdfFixDescriptions =
           PdfFixOptions.EmptyParagraphs, "Remove empty paragraph tags"
           PdfFixOptions.EmptyTocEntries, "Remove empty table-of-contents entries"
           PdfFixOptions.EmptyFigures, "Remove figure tags that draw nothing"
+          PdfFixOptions.EmptySpans, "Remove span tags with nothing in them, keeping the spaces between words"
           PdfFixOptions.LinkContents, "Describe table-of-contents links with their own text"
           PdfFixOptions.LinkTitlesFromWeb, "Describe web links and QR codes by the titles of the pages they go to"
           PdfFixOptions.HeadingsFromToc, "Tag headings the table of contents lists (H1–H6) and point its links at them"

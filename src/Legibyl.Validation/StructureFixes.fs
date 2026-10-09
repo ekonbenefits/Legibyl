@@ -650,9 +650,10 @@ let private setLanguage (chosen: string option) (document: PdfDocument) context 
 ///   1. Headings from the table of contents next. Its analysis has to see the tree the
 ///      warnings were computed from, and a numbered heading ("1. Scope") has to become a
 ///      heading before the list fix could take it for a list item.
-///   2. Empty paragraphs, table-of-contents entries and figures next, so blank lines between list items
+///   2. Empty paragraphs, table-of-contents entries, figures and spans next, so blank lines between list items
 ///      are gone before lists are tagged. (The list fix copes with them either way, keeping
-///      them in the item.)
+///      them in the item.) Empty spans are spacers: the space one stands for goes into the
+///      replacement text beside it, read before paragraphs are joined or split words fixed.
 ///   3. Paragraphs tagged line by line are joined, so a list item's second line is part of
 ///      the item before lists are found (a line starting with a marker is never joined on).
 ///   4. Lists.
@@ -1341,6 +1342,7 @@ let orderedFixes
       PdfFixOptions.EmptyParagraphs, removeEmptyParagraphs
       PdfFixOptions.EmptyTocEntries, removeEmptyTocEntries
       PdfFixOptions.EmptyFigures, EmptyFigures.remove
+      PdfFixOptions.EmptySpans, EmptySpans.remove
       PdfFixOptions.JoinSplitParagraphs, joinSplitParagraphs layout
       PdfFixOptions.JoinSplitWords, SplitWordSpans.apply
       // Once paragraphs are joined: one fragment of a split sentence marked would keep it apart.
@@ -1380,6 +1382,7 @@ let private readsText =
           PdfFixOptions.HeadingsFromToc
           PdfFixOptions.EmptyParagraphs
           PdfFixOptions.EmptyTocEntries
+          PdfFixOptions.EmptySpans
           PdfFixOptions.JoinSplitParagraphs
           PdfFixOptions.JoinSplitWords
           PdfFixOptions.LinkUrls
