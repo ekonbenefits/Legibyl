@@ -105,7 +105,7 @@ type private Folder() =
 let private validator = lazy (VeraPdfValidator())
 
 let private run (files: string list) (output: string) (options: Append.Options) =
-    Append.run validator.Value files output options ignore
+    Append.run validator.Value files output options ignore Threading.CancellationToken.None
 
 let private failures (outcome: Append.Outcome) =
     outcome.After |> Option.map (fun after -> [ for f in after.PdfUaFailures -> $"{f.Clause}-{f.TestNumber} {f.Message}" ]) |> Option.defaultValue []
@@ -143,7 +143,7 @@ let ``files with links, figures drawn by Form XObjects and tags inside them join
     createInput garden "Garden" "en-US" "P"
     createInput jardin "Jardin" "es-ES" "H2"
     let steps = Collections.Concurrent.ConcurrentQueue<Append.Step>()
-    let outcome = Append.run validator.Value [ garden; jardin ] joined Append.Options.Default steps.Enqueue
+    let outcome = Append.run validator.Value [ garden; jardin ] joined Append.Options.Default steps.Enqueue Threading.CancellationToken.None
     outcome.Refusals |> should be Empty
     // Where it's got, as it goes: each validation and structure read with its pages.
     let said = List.ofSeq steps
@@ -812,3 +812,20 @@ let ``a PDF's own tag named NotInTags is compared, and Legibyl's own node of tha
         node "StructTreeRoot" null [ node "Document" null [ node "Sect" null [ node "P" "One" []; node "NotInTags" "Changed" [] ] ]; outside "an image" ]
     Append.differences part 0 input joined
     |> should equal [ "garden.pdf: part 1 › <NotInTags> 2: the text was \"Two\", is \"Changed\" in the joined file." ]
+
+[<Fact>]
+let ``appending cancelled stops, and writes nothing`` () =
+    use folder = new Folder()
+    let garden, jardin, joined = folder.File "garden.pdf", folder.File "jardin.pdf", folder.File "packet.pdf"
+    createInput garden "Garden" "en-US" "P"
+    createInput jardin "Jardin" "es-ES" "H2"
+    use cancel = new Threading.CancellationTokenSource()
+    // Cancelled once it's joined them, as it validates what it joined.
+    let step (step: Append.Step) = if step.Doing = "Validating packet.pdf" then cancel.Cancel()
+
+    (fun () -> Append.run validator.Value [ garden; jardin ] joined Append.Options.Default step cancel.Token |> ignore)
+    |> should throw typeof<OperationCanceledException>
+
+    File.Exists joined |> should be False
+    // Nor the scratch copy it joins them into.
+    Directory.GetFiles(Path.GetDirectoryName joined |> nonNull) |> Array.filter (fun file -> (Path.GetFileName file).StartsWith ".packet") |> should be Empty

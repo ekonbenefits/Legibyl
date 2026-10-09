@@ -598,17 +598,32 @@ module internal VeraPdf =
     /// withStageProgress for PDF/UA's pass: the stage from the page it's on.
     let withProgress validator pageCount progress validate = withStageProgress None validator pageCount progress validate
 
+    /// Runs validate, a pass of validator's, stopping it (between the objects it checks) if
+    /// cancel is cancelled, which then throws OperationCanceledException.
+    let cancellable (cancel: CancellationToken) (validator: PDFAValidator) (validate: unit -> 'T) =
+        cancel.ThrowIfCancellationRequested()
+        use _ = cancel.Register(fun () -> validator.cancelValidation org.verapdf.processor.reports.enums.JobEndStatus.CANCELLED)
+        let result =
+            try
+                validate ()
+            with _ when cancel.IsCancellationRequested ->
+                // (However veraPDF ends a pass it's stopped.)
+                raise (OperationCanceledException cancel)
+        cancel.ThrowIfCancellationRequested()
+        result
+
     /// WCAG 2.2's machine checks of pdfPath (see wcagProfile), reporting the CheckingWcag stage to
-    /// progress if given.
-    let validateWcag (foundry: VeraPDFFoundry) (pdfPath: string) (pageCount: int) (progress: IProgress<ValidationProgress> | null) =
+    /// progress if given; stopped if cancel is.
+    let validateWcag (foundry: VeraPDFFoundry) (pdfPath: string) (pageCount: int) (progress: IProgress<ValidationProgress> | null) (cancel: CancellationToken) =
         let profile = wcagProfile.Value
         use parser = foundry.createParser (java.io.File pdfPath, profile.getPDFAFlavour ())
         // Its error messages kept: they say the measured contrast ratio, the text size, how many
         // characters repeat.
         let validator = org.verapdf.pdfa.validation.validators.ValidatorFactory.createValidator (profile, -1, false, true, false)
-        match progress with
-        | null -> validator.validate parser
-        | progress -> withStageProgress (Some ValidationStage.CheckingWcag) validator pageCount progress (fun () -> validator.validate parser)
+        cancellable cancel validator (fun () ->
+            match progress with
+            | null -> validator.validate parser
+            | progress -> withStageProgress (Some ValidationStage.CheckingWcag) validator pageCount progress (fun () -> validator.validate parser))
 
     /// veraPDF's detail for a finding, in words where it's a measurement: WCAG 2.2's contrast
     /// ("contrastRatio = 1.6059…") as the ratio it is, and what's needed.
@@ -838,7 +853,9 @@ type VeraPdfValidator() =
             [<Optional; DefaultParameterValue(null: IProgress<ValidationProgress> | null)>] progress: IProgress<ValidationProgress> | null,
             /// Whether to run WCAG 2.2's machine checks too, as every validation does but Append's,
             /// which is about PDF/UA's tags.
-            [<Optional; DefaultParameterValue(true)>] checkWcag: bool
+            [<Optional; DefaultParameterValue(true)>] checkWcag: bool,
+            /// Stops it (OperationCanceledException), between the objects veraPDF checks.
+            [<Optional>] cancel: CancellationToken
         ) : ValidationReport =
         ensureExists pdfPath
         ensureInitialised ()
@@ -864,6 +881,7 @@ type VeraPdfValidator() =
                 // again as Legibyl's own checks finish.
                 let mutable last: ValidationProgress option = None
                 let result =
+                  cancellable cancel validator (fun () ->
                     match progress with
                     | null -> validator.validate parser
                     | progress ->
@@ -872,7 +890,7 @@ type VeraPdfValidator() =
                                 member _.Report p =
                                     last <- Some p
                                     progress.Report p }
-                        withProgress validator pageCount tracked (fun () -> validator.validate parser)
+                        withProgress validator pageCount tracked (fun () -> validator.validate parser))
                 // Then WCAG 2.2's machine checks, with every validation. What veraPDF logs while it
                 // reads the file for them is PDF/UA's notes again, and its WCAG heuristics' workings
                 // ("Semantic span contains child of unexpected semantic type"): left out.
@@ -896,7 +914,7 @@ type VeraPdfValidator() =
                     if not checkWcag then None, null
                     else
                         try
-                            Some(ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued)), null
+                            Some(ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued cancel)), null
                         with
                         | :? OperationCanceledException
                         | :? OutOfMemoryException -> reraise ()
@@ -905,6 +923,8 @@ type VeraPdfValidator() =
                 match progress, last with
                 | NonNull progress, Some last when not analysis.IsCompleted -> progress.Report { last with Stage = ValidationStage.CheckingLegibyl }
                 | _ -> ()
+                // (Waited for until cancelled.)
+                Task.WaitAny([| analysis :> Task |], cancel) |> ignore
                 { toReport pdfPath profile result wcag (analysis.GetAwaiter().GetResult()) with WcagError = wcagError }))
             let wcagNote =
                 match report.WcagError with
@@ -916,7 +936,11 @@ type VeraPdfValidator() =
                 | Null -> []
             { report with Notes = Array.ofList (notes @ wcagNote) }
         finally
-            closeLegibylAnalysis analysis
+            // Cancelled: its document is closed once it's done, not waited for.
+            if cancel.IsCancellationRequested then
+                analysis.ContinueWith(fun (analysis: Task<LegibylAnalysis>) -> closeLegibylAnalysis analysis) |> ignore
+            else
+                closeLegibylAnalysis analysis
 
     member this.Fix
         (
@@ -924,7 +948,10 @@ type VeraPdfValidator() =
             profile: PdfProfile,
             outputPath: string,
             [<Optional; DefaultParameterValue(PdfFixOptions.Metadata)>] options: PdfFixOptions,
-            [<Optional; DefaultParameterValue(null: IProgress<FixProgress> | null)>] progress: IProgress<FixProgress> | null
+            [<Optional; DefaultParameterValue(null: IProgress<FixProgress> | null)>] progress: IProgress<FixProgress> | null,
+            /// Stops it (OperationCanceledException): between pages where it goes page by page,
+            /// and between steps; nothing is written to outputPath.
+            [<Optional>] cancel: CancellationToken
         ) : FixResult =
         ensureExists pdfPath
         ensureInitialised ()
@@ -944,7 +971,9 @@ type VeraPdfValidator() =
               if tagging then yield FixStage.Tagging
               if options &&& structuralOptions <> PdfFixOptions.None then yield FixStage.Fixing
               if options.HasFlag PdfFixOptions.Metadata then yield FixStage.FixingMetadata ]
+        // Said as each step and page starts, which is where it stops if it's cancelled.
         let report stage page pageCount =
+            cancel.ThrowIfCancellationRequested()
             match progress with
             | NonNull progress ->
                 progress.Report
@@ -970,7 +999,7 @@ type VeraPdfValidator() =
                                 report FixStage.CheckingOriginal p.Page p.PageCount
                             elif p.Stage = ValidationStage.CheckingWcag then
                                 report FixStage.CheckingWcag 0 0 }
-                this.Validate(pdfPath, profile, validationProgress)
+                this.Validate(pdfPath, profile, validationProgress, cancel = cancel)
         let appliedFixes = ResizeArray<string>()
         let notApplied = ResizeArray<string>()
         let mutable currentInput = pdfPath
@@ -1039,6 +1068,7 @@ type VeraPdfValidator() =
                             (Option.ofObj this.Language |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.map _.Trim())
                             (this.RoleMap |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
                             (this.Attachments |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq)
+                            cancel
                     unneeded <- nothingToDo
                     notApplied.AddRange notes
                     match structuralFixes with
@@ -1107,6 +1137,7 @@ type VeraPdfValidator() =
                             currentInput <- tempOutput
                         | Null -> ()
                     | Null -> ()
+                    cancel.ThrowIfCancellationRequested()
                     moveToOutput currentInput outputPath
                     { result with OutputPath = outputPath }
             with
@@ -1130,11 +1161,25 @@ type VeraPdfValidator() =
     member _.ReadStructureTree
         (
             pdfPath: string,
-            [<Optional; DefaultParameterValue(null: IProgress<StructureReadProgress> | null)>] progress: IProgress<StructureReadProgress> | null
+            [<Optional; DefaultParameterValue(null: IProgress<StructureReadProgress> | null)>] progress: IProgress<StructureReadProgress> | null,
+            /// Stops it (OperationCanceledException), as it says where it's got.
+            [<Optional>] cancel: CancellationToken
         ) : StructureNode | null =
         ensureExists pdfPath
         ensureInitialised ()
-        wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath progress)
+        cancel.ThrowIfCancellationRequested()
+        let progress: IProgress<StructureReadProgress> | null =
+            if not cancel.CanBeCanceled then progress
+            else
+                { new IProgress<StructureReadProgress> with
+                    member _.Report p =
+                        cancel.ThrowIfCancellationRequested()
+                        match progress with
+                        | NonNull progress -> progress.Report p
+                        | Null -> () }
+        let tree = wrapErrors $"veraPDF failed to read the structure tree of '{pdfPath}'" (fun () -> StructureTreeWalk.read pdfPath progress)
+        cancel.ThrowIfCancellationRequested()
+        tree
 
     /// Each record veraPDF logs (WARNING and above) as it comes, for a caller to show as it goes
     /// (the CLI's --verbose prints them); the report's Notes keep them too, counted. Nothing veraPDF

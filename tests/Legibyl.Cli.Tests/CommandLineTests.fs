@@ -693,3 +693,52 @@ let ``a stage that runs on is said again every few seconds, redirected, without 
     lines[0] |> should equal "slow.pdf: Reading the titles of linked pages"
     lines[1] |> should startWith "slow.pdf: Reading the titles of linked pages (still working, "
     lines[2] |> should equal "slow.pdf: PASS"
+
+[<Fact>]
+let ``Ctrl+C stops a run cleanly: the file it's on is left, and the report has those done (exit 130)`` () =
+    if OperatingSystem.IsWindows() then
+        Assert.Skip "Ctrl+C is sent as SIGINT, which Windows hasn't."
+    withTaggedPdf (fun pdf ->
+        let folder = Path.GetDirectoryName pdf |> nonNull
+        // Long enough to be stopped partway.
+        let long = Path.Combine(folder, "long.pdf")
+        do
+            use document = new PdfDocument(new PdfWriter(long))
+            document.SetTagged() |> ignore
+            use layout = new iText.Layout.Document(document)
+            for page in 1..300 do
+                for line in 1..30 do
+                    layout.Add(iText.Layout.Element.Paragraph $"Page {page}, line {line}: text for veraPDF to check.") |> ignore
+                if page < 300 then layout.Add(iText.Layout.Element.AreaBreak()) |> ignore
+        let last = Path.Combine(folder, "last.pdf")
+        File.Copy(pdf, last)
+        let report = Path.Combine(folder, "report.json")
+        // The CLI itself, as its own process, sent SIGINT as a terminal's Ctrl+C is.
+        let cli = Path.Combine(AppContext.BaseDirectory, "legibyl.dll")
+        let start =
+            Diagnostics.ProcessStartInfo(
+                "dotnet",
+                [ cli; "validate"; pdf; long; last; "--output"; report; "--progress"; "plain" ],
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            )
+        use cli = Diagnostics.Process.Start start |> nonNull
+        let said = Collections.Concurrent.ConcurrentQueue<string>()
+        let onLong = new Threading.ManualResetEventSlim(false)
+        cli.ErrorDataReceived.Add(fun e ->
+            match e.Data with
+            | NonNull line ->
+                said.Enqueue line
+                if line.StartsWith "[2/3] long.pdf: Validating: page" then onLong.Set()
+            | Null -> ())
+        cli.BeginErrorReadLine()
+        onLong.Wait(TimeSpan.FromSeconds 60.0) |> should be True
+        use interrupt = Diagnostics.Process.Start("kill", [ "-INT"; string cli.Id ]) |> nonNull
+        interrupt.WaitForExit()
+        cli.WaitForExit(TimeSpan.FromSeconds 60.0) |> should be True
+        cli.WaitForExit()
+
+        cli.ExitCode |> should equal 130
+        said |> should contain "Stopped (Ctrl+C): 1 of 3 files done; the report has those."
+        let files = JsonDocument.Parse(File.ReadAllText report).RootElement.EnumerateArray() |> Seq.map (fun r -> Path.GetFileName(r.GetProperty("file").GetString() |> string)) |> List.ofSeq
+        files |> should equal [ "garden.pdf" ])

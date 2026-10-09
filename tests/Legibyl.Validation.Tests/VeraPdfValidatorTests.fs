@@ -297,3 +297,63 @@ let ``Fix given a report of the file as it is uses it, rather than validating it
     let other = { report with FilePath = "elsewhere.pdf" }
     let fixAgain = VeraPdfValidator(Validated = Some other).Fix(input.Path, PdfProfile.PdfUa1, again.Path, PdfFixOptions.Metadata)
     obj.ReferenceEquals(fixAgain.OriginalReport, other) |> should be False
+
+// ---- Cancelling ----
+
+[<Fact>]
+let ``Validate cancelled stops veraPDF partway, and WCAG 2.2's pass isn't started`` () =
+    use input = new TempPdf()
+    createPdfWithUntitledFigures input.Path 30
+    let full = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1, checkWcag = false)
+    use cancel = new Threading.CancellationTokenSource()
+    let reports = Collections.Concurrent.ConcurrentQueue<ValidationProgress>()
+    let progress =
+        { new IProgress<ValidationProgress> with
+            member _.Report value =
+                reports.Enqueue value
+                // Once it's on a page.
+                if value.Stage = ValidationStage.CheckingPages then cancel.Cancel() }
+
+    (fun () -> VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1, progress, cancel = cancel.Token) |> ignore)
+    |> should throw typeof<OperationCanceledException>
+
+    // Fewer checks than the whole file has: it stopped.
+    (Seq.last reports).Checks |> should be (lessThan full.TotalAssertions)
+    reports |> Seq.exists (fun r -> r.Stage = ValidationStage.CheckingWcag) |> should be False
+
+[<Fact>]
+let ``Validate, Fix and ReadStructureTree already cancelled don't start, and Fix writes nothing`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPdfWithUntitledFigures input.Path 2
+    let cancelled = Threading.CancellationToken(true)
+    let validator = VeraPdfValidator()
+
+    (fun () -> validator.Validate(input.Path, PdfProfile.PdfUa1, cancel = cancelled) |> ignore) |> should throw typeof<OperationCanceledException>
+    (fun () -> validator.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.All, cancel = cancelled) |> ignore)
+    |> should throw typeof<OperationCanceledException>
+    (fun () -> validator.ReadStructureTree(input.Path, cancel = cancelled) |> ignore) |> should throw typeof<OperationCanceledException>
+    IO.File.Exists output.Path |> should be False
+
+[<Fact>]
+let ``Fix cancelled partway writes nothing, and leaves no temporary file`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createPdfWithUntitledFigures input.Path 2
+    let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1)
+    use cancel = new Threading.CancellationTokenSource()
+    // Cancelled as Legibyl's own fixes start, past the original's check.
+    let progress = { new IProgress<FixProgress> with member _.Report value = if value.Stage = FixStage.Fixing then cancel.Cancel() }
+    let folder = IO.Path.GetDirectoryName output.Path |> nonNull
+    let before = IO.Directory.GetFiles folder |> set
+
+    (fun () ->
+        VeraPdfValidator(Validated = Some report).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.All &&& ~~~PdfFixOptions.LinkTitlesFromWeb, progress, cancel.Token)
+        |> ignore)
+    |> should throw typeof<OperationCanceledException>
+
+    IO.File.Exists output.Path |> should be False
+    // (Tests run side by side: only files named for this output count.)
+    IO.Directory.GetFiles folder
+    |> Array.filter (fun file -> not (before.Contains file) && (IO.Path.GetFileName file).Contains(IO.Path.GetFileNameWithoutExtension output.Path))
+    |> should be Empty

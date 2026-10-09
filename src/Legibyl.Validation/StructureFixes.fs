@@ -1306,6 +1306,7 @@ let applyFixes
     (language: string option)
     (roleMap: Map<string, string>)
     (attachments: Map<string, Attachments.AttachmentEdit>)
+    (cancel: Threading.CancellationToken)
     : string list * PdfFixOptions list * string list =
     use reader = new PdfReader(inputPath)
     use writer = new PdfWriter(outputPath)
@@ -1318,6 +1319,8 @@ let applyFixes
     let results =
         [ for option, apply in orderedFixes titles layout edits title language roleMap attachments do
               if options.HasFlag option then
+                  // (Stopped between fixes; joining split paragraphs stops between pages too, as it says them.)
+                  cancel.ThrowIfCancellationRequested()
                   let notes = context.Notes.Count
                   let lines = apply document context
                   let skipped = unreadable.Count > 0 && readsText.Contains option
