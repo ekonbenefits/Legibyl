@@ -75,6 +75,9 @@ type ValidationResult =
       MeetsWcag: Nullable<bool>
       /// How many of FailedCount's failures are WCAG 2.2's; null if validation errored.
       WcagFailedCount: Nullable<int>
+      /// Why WCAG 2.2's checks couldn't run, when they failed to (MeetsWcag is then false);
+      /// null otherwise.
+      WcagError: string | null
       TotalAssertions: Nullable<int>
       FailedCount: Nullable<int>
       /// Only the failed rule checks; empty (never null) when compliant or errored.
@@ -110,6 +113,7 @@ type ValidationResult =
           IsCompliant = Nullable()
           MeetsWcag = Nullable()
           WcagFailedCount = Nullable()
+          WcagError = null
           TotalAssertions = Nullable()
           FailedCount = Nullable()
           Failures = [||]
@@ -124,7 +128,12 @@ type ValidationResult =
 
 /// A document's standing: whether it complies with PDF/UA, whether WCAG 2.2's machine checks pass
 /// (it passes when both do), and how many checks failed, of both.
-type Compliance = { IsCompliant: bool; MeetsWcag: bool; FailedCount: int }
+type Compliance =
+    { IsCompliant: bool
+      MeetsWcag: bool
+      FailedCount: int
+      /// Why WCAG 2.2's checks couldn't run, when they failed to.
+      WcagError: string | null }
 
 /// What `fix` or `layout apply` did to one file.
 module FixStatus =

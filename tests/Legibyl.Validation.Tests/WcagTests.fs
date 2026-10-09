@@ -198,3 +198,20 @@ let ``WCAG's contrast check draws pages with PDFium: PDFBox isn't in veraPDF's a
     let verapdf = System.Reflection.Assembly.Load "verapdf"
     verapdf.GetType "org.apache.pdfbox.pdmodel.PDDocument" |> should be Null
     verapdf.GetType "legibyl.wcag.PageRasterizers" |> should not' (be Null)
+
+[<Fact>]
+let ``WCAG 2.2's checks that couldn't run don't pass, and aren't kept as current`` () =
+    use pdf = new TempPdf()
+    createPdf pdf.Path false [ "The garden opens at nine on Saturdays.", DeviceRgb(0x20, 0x20, 0x20), 12f ]
+    let report = { validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1) with WcagError = "it stopped" }
+
+    report.WcagFailures |> should be Empty
+    report.MeetsWcag |> should be False
+    report.Passes |> should be False
+    ValidationReportTextFormatter.BuildReport report |> should haveSubstring "machine checks: not checked (it stopped)"
+    // Saved, it reads back as not checked, and isn't current: opening the PDF checks it again.
+    let hash = SavedResults.hashOf pdf.Path
+    let saved = SavedResults.ofReport report hash System.DateTime.Now
+    (SavedResults.toReport saved pdf.Path).MeetsWcag |> should be False
+    SavedResults.isCurrent saved hash PdfProfile.PdfUa1 |> should be False
+    SavedResults.isCurrent { saved with WcagError = null } hash PdfProfile.PdfUa1 |> should be True

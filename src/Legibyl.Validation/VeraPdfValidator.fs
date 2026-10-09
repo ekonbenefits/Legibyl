@@ -649,7 +649,8 @@ module internal VeraPdf =
           ProfileDetected = false
           TotalAssertions = result.getTotalAssertions () + (wcag |> Option.map _.getTotalAssertions() |> Option.defaultValue 0)
           Assertions = List.toArray (withLegibylAnalysis analysis assertions)
-          Notes = [||] }
+          Notes = [||]
+          WcagError = null }
 
     let createTemporaryPdfPath (outputPath: string) =
         let prefix =
@@ -867,9 +868,26 @@ type VeraPdfValidator() =
                                         ProcessedObjects = before.ProcessedObjects + p.ProcessedObjects
                                         Elapsed = before.Elapsed + p.Elapsed } }
                     | progress, _ -> progress
-                let wcag = if checkWcag then Some(ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued)) else None
-                toReport pdfPath profile result wcag (analysis.GetAwaiter().GetResult())))
-            { report with Notes = Array.ofList notes }
+                // A WCAG pass that fails (a page veraPDF's heuristics can't take, say) doesn't fail
+                // the validation: PDF/UA's result stands, and WCAG 2.2 is said not checked.
+                let wcag, wcagError =
+                    if not checkWcag then None, null
+                    else
+                        try
+                            Some(ValidatorLog.quietly (fun () -> validateWcag foundry pdfPath pageCount continued)), null
+                        with
+                        | :? OperationCanceledException -> reraise ()
+                        | e -> None, (match e.Message with NonNull m when not (String.IsNullOrWhiteSpace m) -> m | _ -> e.GetType().Name)
+                { toReport pdfPath profile result wcag (analysis.GetAwaiter().GetResult()) with WcagError = wcagError }))
+            let wcagNote =
+                match report.WcagError with
+                | NonNull error ->
+                    [ { Level = "SEVERE"
+                        Logger = "Legibyl"
+                        Message = $"{WcagSpecification.Name}'s checks couldn't run ({error}), so this PDF isn't counted as passing them. Validate it again; if this stays, report it with the PDF if you can share it."
+                        Count = 1 } ]
+                | Null -> []
+            { report with Notes = Array.ofList (notes @ wcagNote) }
         finally
             closeLegibylAnalysis analysis
 

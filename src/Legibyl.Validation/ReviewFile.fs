@@ -132,7 +132,12 @@ type SavedValidation =
       /// What veraPDF logged while it read the file (see ValidatorNote); none in older reviews.
       [<JsonPropertyName "notes">]
       [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
-      Notes: SavedNote array | null }
+      Notes: SavedNote array | null
+      /// Why WCAG 2.2's checks couldn't run, when they failed to (see ValidationReport.WcagError);
+      /// such a result isn't current, so the PDF is checked again when it's opened.
+      [<JsonPropertyName "wcagError">]
+      [<JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)>]
+      WcagError: string | null }
 
 /// The steps of a passing PDF's checklist a person has ticked (see the GUI's Pass finding), for
 /// the exact file checked: its hash, as its validation has it. Ticks don't carry to another

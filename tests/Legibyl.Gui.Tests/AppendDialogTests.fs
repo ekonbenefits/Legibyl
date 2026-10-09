@@ -65,7 +65,8 @@ let private report (compliant: bool) : ValidationReport =
       IsCompliant = compliant
       TotalAssertions = 100
       Assertions = []
-      Notes = [] }
+      Notes = []
+      WcagError = null }
 
 [<Fact>]
 let ``the summary says why nothing was written, or how the joined file checks out and what was renamed`` () =

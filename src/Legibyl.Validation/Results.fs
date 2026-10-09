@@ -160,7 +160,11 @@ type ValidationReport =
       /// are only counted (TotalAssertions), not recorded.
       Assertions: IReadOnlyList<RuleViolation>
       /// What veraPDF logged while it read the file, WARNING and above; empty for none.
-      Notes: IReadOnlyList<ValidatorNote> }
+      Notes: IReadOnlyList<ValidatorNote>
+      /// Why WCAG 2.2's machine checks couldn't run, when they failed to: then the PDF isn't
+      /// counted as meeting them (MeetsWcag), and a note says so. Null when they ran (or weren't
+      /// asked for, as appending doesn't).
+      WcagError: string | null }
 
     /// Convenience accessor for only the failed assertions.
     member this.FailedAssertions: RuleViolation seq = this.Assertions |> Seq.filter (fun a -> not a.Passed)
@@ -183,8 +187,8 @@ type ValidationReport =
     member this.PdfUaFailures: RuleViolation seq =
         this.FailedAssertions |> Seq.filter (fun a -> not (WcagSpecification.isWcag a.Specification))
 
-    /// Whether WCAG 2.2's machine checks pass.
-    member this.MeetsWcag = Seq.isEmpty this.WcagFailures
+    /// Whether WCAG 2.2's machine checks pass: they ran (WcagError), and none failed.
+    member this.MeetsWcag = isNull this.WcagError && Seq.isEmpty this.WcagFailures
 
     /// Whether the document passes: PDF/UA (IsCompliant) and WCAG 2.2's machine checks.
     member this.Passes = this.IsCompliant && this.MeetsWcag
