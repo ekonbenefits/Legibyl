@@ -103,6 +103,7 @@ let private validationProgress (activity: string) =
             | ValidationStage.CheckingPages -> (reporter ()).Status(activity, (p.Page, p.PageCount))
             | ValidationStage.Finishing -> (reporter ()).Status $"{activity}: finishing up"
             | ValidationStage.CheckingWcag -> (reporter ()).Status $"{activity}: checking {WcagSpecification.Name} (contrast, text size and more)"
+            | ValidationStage.CheckingLegibyl -> (reporter ()).Status $"{activity}: running Legibyl's checks"
             | _ -> (reporter ()).Status activity }
 
 /// Says where reading the structure has got.

@@ -1220,8 +1220,8 @@ let run (validator: VeraPdfValidator) (files: string list) (output: string) (opt
     | _ :: _ as refused -> { none with Refusals = refused }
     | [] ->
         let checks =
-            [ for file in files ->
-                  stage $"Validating {Path.GetFileName file}…"
+            [ for index, file in List.indexed files ->
+                  stage $"Validating {Path.GetFileName file} ({index + 1} of {files.Length})…"
                   let profile, _ = PdfUaTarget.detect file
                   file,
                   (try Ok(validator.Validate(file, profile, checkWcag = false)) with :? VeraPdfValidationException as ex -> Error ex.Message) ]

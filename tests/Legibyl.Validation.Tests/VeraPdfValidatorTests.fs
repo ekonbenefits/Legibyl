@@ -104,8 +104,9 @@ let ``Validate reports progress, ending with the final counts`` () =
     last.FailedRules |> should equal (report.FailedAssertions |> Seq.filter (fun f -> f.RuleId <> "7.1-9") |> Seq.distinctBy _.RuleId |> Seq.length)
     last.ProcessedObjects |> should be (greaterThan 0)
     last.QueuedObjects |> should equal 0
-    // WCAG 2.2's machine checks come last, with every validation.
-    last.Stage |> should equal ValidationStage.CheckingWcag
+    // WCAG 2.2's machine checks come last, with every validation; or, where Legibyl's own checks
+    // outlast them, running those.
+    [ ValidationStage.CheckingWcag; ValidationStage.CheckingLegibyl ] |> should contain last.Stage
     last.PageCount |> should be (greaterThanOrEqualTo 10)
     last.Page |> should equal last.PageCount
     // Seeing a page mid-run shows Legibyl can still read where veraPDF is (a private field).
@@ -277,3 +278,22 @@ let ``PDF/UA-2 failures map to the fixes that fix them, by rule`` () =
     // And each has its guide.
     for finding in report.FailedAssertions do
         RuleGuide.forFinding finding |> Option.isSome |> should be True
+
+[<Fact>]
+let ``Fix given a report of the file as it is uses it, rather than validating it again; one of another file isn't used`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    use again = new TempPdf()
+    createPdfWithUntitledFigures input.Path 2
+    let report = VeraPdfValidator().Validate(input.Path, PdfProfile.PdfUa1)
+    let stages = Collections.Concurrent.ConcurrentQueue<FixStage>()
+    let progress = { new IProgress<FixProgress> with member _.Report value = stages.Enqueue value.Stage }
+
+    let fix = VeraPdfValidator(Validated = Some report).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Metadata, progress)
+
+    obj.ReferenceEquals(fix.OriginalReport, report) |> should be True
+    stages |> should not' (contain FixStage.CheckingOriginal)
+    // Another file's report: validated again.
+    let other = { report with FilePath = "elsewhere.pdf" }
+    let fixAgain = VeraPdfValidator(Validated = Some other).Fix(input.Path, PdfProfile.PdfUa1, again.Path, PdfFixOptions.Metadata)
+    obj.ReferenceEquals(fixAgain.OriginalReport, other) |> should be False
