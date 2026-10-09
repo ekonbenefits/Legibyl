@@ -118,7 +118,6 @@ let ``dismissals are kept next to the PDF once saved, and reloaded`` () =
             let editedTitle = window.Title
             let unsaved = File.Exists(Dismissals.filePath pdf)
             let canSave = Reviews.chooseFromFileMenu window "Save"
-            pump ()
             let savedTitle = window.Title
             close window
 
