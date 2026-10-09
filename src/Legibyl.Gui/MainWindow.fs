@@ -403,7 +403,22 @@ module private MainView =
                     | Some filePath when not isBusy.Current ->
                         isBusy.Set true
                         clearResults ()
-                        busyProgress.Set None
+                        // Said from the start, not a bare bar until veraPDF's first report.
+                        busyProgress.Set(
+                            Some(
+                                Validating(
+                                    activity,
+                                    { Stage = ValidationStage.Preparing
+                                      Page = 0
+                                      PageCount = 0
+                                      Checks = 0
+                                      FailedRules = 0
+                                      ProcessedObjects = 0
+                                      QueuedObjects = 0
+                                      Elapsed = TimeSpan.Zero }
+                                )
+                            )
+                        )
                         let review = layoutReviews.For filePath
                         let saved = if fresh then None else review.Validation
                         // Created on the UI thread, so its reports arrive there too.
@@ -674,7 +689,7 @@ module private MainView =
                                 | Some structure -> do! show structure filePath
                                 | None ->
                                     isBusy.Set true
-                                    busyProgress.Set None
+                                    busyProgress.Set(Some(Working "Reading the structure…"))
                                     // Created on the UI thread, so its reports arrive there too.
                                     let progress = Progress<StructureReadProgress>(fun p -> busyProgress.Set(Some(ReadingStructure p)))
                                     let stamp = structureCache.Stamp filePath
@@ -762,6 +777,7 @@ module private MainView =
                         match outputPath, review.Validation with
                         | Some outputPath, Some validation ->
                             isBusy.Set true
+                            busyProgress.Set(Some(Working "Exporting a copy carrying the steps checked…"))
                             let! written =
                                 task {
                                     try
@@ -780,6 +796,7 @@ module private MainView =
                                         | :? UnauthorizedAccessException as ex -> return Error ex.Message
                                         | :? iText.Commons.Exceptions.ITextException as ex -> return Error ex.Message
                                     finally
+                                        busyProgress.Set None
                                         isBusy.Set false
                                 }
                             match written with
@@ -815,7 +832,7 @@ module private MainView =
                                 | Validated(report, _) -> report.Profile
                                 | _ -> fst (PdfUaTarget.detect sourcePath)
                             isBusy.Set true
-                            busyProgress.Set None
+                            busyProgress.Set(Some(Working "Exporting…"))
                             let! fixOutcome =
                                 task {
                                     // Tagging from the layout and joining split paragraphs run the layout
@@ -839,6 +856,12 @@ module private MainView =
                                                         CancellationToken.None
                                             source.Value |> Option.iter (fun (_, reviewed) -> validator.LayoutSource <- reviewed)
                                             let progress = Progress<FixProgress>(fun p -> busyProgress.Set(Some(Fixing p)))
+                                            // The report shown, validated here (a saved one may not keep all a
+                                            // fix reads), of the file as it is still: not validated again.
+                                            let shown =
+                                                match report, checkedAt.Current, review.Validation with
+                                                | Some report, None, Some validation -> Some(report, validation.Hash)
+                                                | _ -> None
                                             let! fix =
                                                 Task.Run(fun () ->
                                                     // The review, as it is now, goes in the fixed copy. Recording
@@ -848,6 +871,10 @@ module private MainView =
                                                     validator.Edits <- RegionEdits.toElementEdits review.Edits
                                                     validator.Title <- (review.Title |> Option.filter (String.IsNullOrWhiteSpace >> not) |> Option.toObj)
                                                     validator.Language <- Option.toObj review.Language
+                                                    validator.Validated <-
+                                                        shown
+                                                        |> Option.filter (fun (_, hash) -> (try SavedResults.hashOf sourcePath with _ -> "") = hash)
+                                                        |> Option.map fst
                                                     validator.RoleMap <- Collections.Generic.Dictionary<string, string>(review.RoleMap)
                                                     validator.Attachments <- Collections.Generic.Dictionary<string, Attachments.AttachmentEdit>(review.Attachments)
                                                     validator.Fix(sourcePath, profile, outputPath, options, progress))
@@ -866,6 +893,7 @@ module private MainView =
                                         validator.LayoutSource <- null
                                         validator.Review <- null
                                         validator.Edits <- []
+                                        validator.Validated <- None
                                         try
                                             source.Value |> Option.iter (fun (suggester, _) -> (suggester :> IDisposable).Dispose())
                                         with _ ->
@@ -913,6 +941,7 @@ module private MainView =
                             | None -> ()
                             | Some outputPath ->
                                 isBusy.Set true
+                                busyProgress.Set(Some(Appending "starting…"))
                                 let stage (text: string) = Avalonia.Threading.Dispatcher.UIThread.Post(fun () -> busyProgress.Set(Some(Appending text)))
                                 let! outcome =
                                     task {

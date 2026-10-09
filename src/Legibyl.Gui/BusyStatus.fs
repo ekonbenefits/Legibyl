@@ -28,6 +28,7 @@ let statusText (progress: BusyProgress) : string =
             | ValidationStage.Finishing -> $"{activity}: finishing up…"
             // veraPDF doesn't say which page it's on here, so no page count.
             | ValidationStage.CheckingWcag -> $"{activity}: checking {WcagSpecification.Name} (contrast, text size and more)…"
+            | ValidationStage.CheckingLegibyl -> $"{activity}: running Legibyl's checks…"
             | _ -> $"{activity}: reading the PDF…"
         status
     | ReadingStructure progress ->

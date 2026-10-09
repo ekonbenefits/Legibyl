@@ -128,6 +128,9 @@ module private StructureView =
                     SuggestedTree.build [ for number in Seq.sort pageNodes.Current.Keys -> pageNodes.Current[number] ]
                 | None -> tagged
             let root = ctx.useStateLazy buildRoot
+            // What runs behind the wait cursor (the table-structure model, OCR, reading a region or
+            // edits), said and shown: the cursor isn't heard.
+            let working = ctx.useState ""
             // The highlighted borders and the styles to restore when the selection moves.
             let highlighted = ctx.useState (([]: (Border * (IBrush | null) * Thickness) list), false)
             // The selected blocks' nodes, in document order, and the one a shift-click extends from.
@@ -376,6 +379,7 @@ module private StructureView =
                         figureBox.Set None
                         showPage selected.Current
                     try
+                        working.Set "Reading the region…"
                         let! preview =
                             Task.Run(fun () ->
                                 match ElementEdits.figureRegionPreview sourceFilePath box with
@@ -384,6 +388,7 @@ module private StructureView =
                                     // The page alone, so the dashed outline over it is all that's marked.
                                     try Ok(summary, renderer.RenderPageWithRegions(sourceFilePath, box.PageNumber, Seq.empty<PageRegion>, previewScale))
                                     with ex -> Error $"the page couldn't be shown: {ex.Message}")
+                        working.Set ""
                         match preview with
                         | Error reason ->
                             do! Dialogs.showMessage window $"This region can't be made a Figure: {reason}." title
@@ -420,6 +425,7 @@ module private StructureView =
                                 finish ()
                             | None -> finish ()
                     with ex ->
+                        working.Set ""
                         do! Dialogs.showMessage window $"The region couldn't be made a Figure: {ex.Message}" title
                         finish ()
                 }
@@ -516,20 +522,24 @@ module private StructureView =
                 if texts |> List.forall ((<>) "") then
                     Task.FromResult texts
                 else
-                    Task.Run(fun () ->
+                    working.Set "Reading the cells' text…"
+                    task {
                         try
-                            use suggester = new LayoutSuggester(sourceFilePath, review.Language)
-                            let read = suggester.CellTexts(page, [ for cell in cells -> cell.Box ])
-                            List.map2 (fun text read -> if text = "" then read else text) texts read
-                        with _ -> texts)
+                            return!
+                                Task.Run(fun () ->
+                                    try
+                                        use suggester = new LayoutSuggester(sourceFilePath, review.Language)
+                                        let read = suggester.CellTexts(page, [ for cell in cells -> cell.Box ])
+                                        List.map2 (fun text read -> if text = "" then read else text) texts read
+                                    with _ -> texts)
+                        finally
+                            working.Set ""
+                    }
 
             /// A tagged table's rows and cells rebuilt from the page: found by the table-structure
             /// model (the cells kept from before, if it was rebuilt already), shown for a person to
             /// check, and kept as the table's edit.
             let rebuilding = ref false
-            // What runs behind the wait cursor (the table-structure model), for a screen reader to
-            // hear: the cursor isn't.
-            let working = ctx.useState ""
 
             let rebuildTable (node: StructureNode) =
                 match node.Geometry with
@@ -555,9 +565,11 @@ module private StructureView =
                                 match kept with
                                 | Some cells -> Task.FromResult(Some cells)
                                 | None ->
+                                    // (Made here, on the window's thread, so its reports land there.)
+                                    let downloading = Progress<float>(fun fraction -> working.Set $"Downloading the table-structure model: {fraction:P0}")
                                     Task.Run(fun () ->
                                         if not (TableModel.isDownloaded ()) then
-                                            (TableModel.download (Progress<float>(ignore)) CancellationToken.None).Wait()
+                                            (TableModel.download downloading CancellationToken.None).Wait()
                                         use suggester = new LayoutSuggester(sourceFilePath, review.Language)
                                         suggester.TableCells(box.PageNumber, box)
                                         |> Option.map (List.map (fun (header, g) -> ({ Tag = (if header then Tags.TH else Tags.TD); Box = g }: TableCell))))
@@ -670,9 +682,10 @@ module private StructureView =
                                         // One row a paragraph, as the conversion needs, where a grid kept from before hasn't.
                                         | Some cells -> Task.FromResult(Some(TableGrid.fitRows boxes cells))
                                         | None ->
+                                            let downloading = Progress<float>(fun fraction -> working.Set $"Downloading the table-structure model: {fraction:P0}")
                                             Task.Run(fun () ->
                                                 if not (TableModel.isDownloaded ()) then
-                                                    (TableModel.download (Progress<float>(ignore)) CancellationToken.None).Wait()
+                                                    (TableModel.download downloading CancellationToken.None).Wait()
                                                 use suggester = new LayoutSuggester(sourceFilePath, review.Language)
                                                 suggester.TableCells(region.PageNumber, region)
                                                 |> Option.map (List.map (fun (header, geometry) ->
@@ -989,7 +1002,9 @@ module private StructureView =
                     match files |> Seq.tryHead |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath())) with
                     | Some path ->
                         try
+                            working.Set $"Reading the edits in {Path.GetFileName path}…"
                             let! imported = Task.Run(fun () -> RegionEdits.fromFileOrPdf path)
+                            working.Set ""
                             let merged, added = RegionEdits.merge edits.Current imported
                             if added > 0 then do! saveEdits merged
                             do!
@@ -999,6 +1014,7 @@ module private StructureView =
                                      else $"Imported {added} of {imported.Length} edits from {Path.GetFileName path}; the rest were already here. They're in the Edits tab.")
                                     "Import Edits"
                         with ex ->
+                            working.Set ""
                             do! Dialogs.showMessage window $"The edits in {Path.GetFileName path} couldn't be imported: {Dialogs.failureMessage ex}" "Import Edits"
                     | None -> ()
                 }
@@ -1825,6 +1841,18 @@ module private StructureView =
                                     + "A table's cells are shown in its rows: a cell's Tag picker makes it a header (TH) or data (TD) cell, and giving the table the tag P tags it as text instead."
                                 )
                                 secondary (String.Join(" ", progress))
+                                if modelReady.Current && prefetcher.PageCount > 0 && readyCount.Current < prefetcher.PageCount then
+                                    ProgressBar.create [
+                                        ProgressBar.minimum 0.0
+                                        ProgressBar.maximum (float prefetcher.PageCount)
+                                        ProgressBar.value (float readyCount.Current)
+                                        ProgressBar.height 4.0
+                                        ProgressBar.minHeight 4.0
+                                        AttrBuilder<ProgressBar>.CreateProperty<string | null>(
+                                            Automation.AutomationProperties.NameProperty,
+                                            $"{readyCount.Current} of {prefetcher.PageCount} pages' layouts found",
+                                            ValueNone)
+                                    ]
                                 // Heard a tenth of the way at a time, not every page.
                                 Dialogs.announcer (
                                     if finished && failures.Current.IsEmpty then "Every page's layout found."
@@ -1881,6 +1909,18 @@ module private StructureView =
                         StackPanel.spacing 10.0
                         StackPanel.children [
                             Dialogs.announcer working.Current
+                            // What runs behind the wait cursor, seen too.
+                            if working.Current <> "" then
+                                StackPanel.create [
+                                    StackPanel.spacing 4.0
+                                    StackPanel.children [
+                                        TextBlock.create [
+                                            TextBlock.text working.Current
+                                            Theme.resources [ TextBlock.ForegroundProperty, Theme.Tokens.SecondaryText ]
+                                        ]
+                                        ProgressBar.create [ ProgressBar.isIndeterminate true; ProgressBar.height 4.0; ProgressBar.minHeight 4.0 ]
+                                    ]
+                                ]
                             match suggested with
                             | Some(review, prefetcher) ->
                                 banner review prefetcher

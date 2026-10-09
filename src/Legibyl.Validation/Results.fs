@@ -229,6 +229,9 @@ type ValidationStage =
     /// nothing of its pages as it goes, so Page stays at PageCount (PDF/UA's are done), and
     /// Checks and FailedRules count on from PDF/UA's.
     | CheckingWcag = 3
+    /// veraPDF done, Legibyl's own checks (run beside it; see LegibylChecks) still running.
+    /// (3 is WCAG's.)
+    | CheckingLegibyl = 4
 
 /// How far a running validation has got. veraPDF checks the pages in order, which is
 /// where nearly all the time goes, so Page of PageCount is a fair measure of progress.

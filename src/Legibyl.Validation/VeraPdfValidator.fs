@@ -812,6 +812,11 @@ type VeraPdfValidator() =
         with get (): string | null = language
         and set (value: string | null) = language <- value
 
+    /// A report of the file Fix is given, as it is now, against the standard asked for (one the
+    /// caller has already, e.g. the window it's shown in): Fix uses it rather than validating the
+    /// file again. Only for a file unchanged since (see SavedResults.hashOf); None to validate it.
+    member val Validated: ValidationReport option = None with get, set
+
     /// The standard tag a person chose for each of the PDF's own tag names (Structure…'s Role
     /// map, or a review's "roleMap"), which the ApplyEdits fix writes to its role map before the
     /// RoleMap fix maps the others by what they say.
@@ -855,7 +860,8 @@ type VeraPdfValidator() =
                     match parser with
                     | :? GFModelParser as parser -> try parser.getPDDocument().getNumberOfPages () with _ -> 0
                     | _ -> 0
-                // The last progress PDF/UA's pass reported, for WCAG's to count on from.
+                // The last progress said: PDF/UA's pass's, for WCAG's to count on from; then WCAG's, to say
+                // again as Legibyl's own checks finish.
                 let mutable last: ValidationProgress option = None
                 let result =
                     match progress with
@@ -875,12 +881,14 @@ type VeraPdfValidator() =
                     | NonNull progress, Some before ->
                         { new IProgress<ValidationProgress> with
                             member _.Report p =
-                                progress.Report
+                                let p =
                                     { p with
                                         Checks = before.Checks + p.Checks
                                         FailedRules = before.FailedRules + p.FailedRules
                                         ProcessedObjects = before.ProcessedObjects + p.ProcessedObjects
-                                        Elapsed = before.Elapsed + p.Elapsed } }
+                                        Elapsed = before.Elapsed + p.Elapsed }
+                                last <- Some p
+                                progress.Report p }
                     | progress, _ -> progress
                 // A WCAG pass that fails (a page veraPDF's heuristics can't take, say) doesn't fail
                 // the validation: PDF/UA's result stands, and WCAG 2.2 is said not checked.
@@ -893,6 +901,10 @@ type VeraPdfValidator() =
                         | :? OperationCanceledException
                         | :? OutOfMemoryException -> reraise ()
                         | e -> None, (if e.Message.Trim() = "" then e.GetType().Name else e.Message)
+                // veraPDF's done; Legibyl's own checks, run beside it, may not be.
+                match progress, last with
+                | NonNull progress, Some last when not analysis.IsCompleted -> progress.Report { last with Stage = ValidationStage.CheckingLegibyl }
+                | _ -> ()
                 { toReport pdfPath profile result wcag (analysis.GetAwaiter().GetResult()) with WcagError = wcagError }))
             let wcagNote =
                 match report.WcagError with
@@ -924,9 +936,11 @@ type VeraPdfValidator() =
         let structuralOptions =
             StructureFixes.orderedFixes this.PageTitleSource None [] None None Map.empty Map.empty |> List.fold (fun all (option, _) -> all ||| option) PdfFixOptions.None
         let tagging = options.HasFlag PdfFixOptions.TagFromLayout && not (isNull this.LayoutSource)
+        // A report of the file as it is, given: it isn't validated again.
+        let known = this.Validated |> Option.filter (fun report -> report.FilePath = pdfPath && report.Profile = profile)
         // The steps this fix runs, in order, so progress can say "step 2 of 4".
         let steps =
-            [ yield FixStage.CheckingOriginal
+            [ if known.IsNone then yield FixStage.CheckingOriginal
               if tagging then yield FixStage.Tagging
               if options &&& structuralOptions <> PdfFixOptions.None then yield FixStage.Fixing
               if options.HasFlag PdfFixOptions.Metadata then yield FixStage.FixingMetadata ]
@@ -942,17 +956,21 @@ type VeraPdfValidator() =
                       PageCount = pageCount }
             | Null -> ()
 
-        report FixStage.CheckingOriginal 0 0
-        let validationProgress =
-            { new IProgress<ValidationProgress> with
-                member _.Report p =
-                    // Pages as they're checked, and all of them once they're done (a short
-                    // document can finish before the first page is ever sampled).
-                    if p.Stage = ValidationStage.CheckingPages || p.Stage = ValidationStage.Finishing then
-                        report FixStage.CheckingOriginal p.Page p.PageCount
-                    elif p.Stage = ValidationStage.CheckingWcag then
-                        report FixStage.CheckingWcag 0 0 }
-        let originalReport = this.Validate(pdfPath, profile, validationProgress)
+        let originalReport =
+            match known with
+            | Some report -> report
+            | None ->
+                report FixStage.CheckingOriginal 0 0
+                let validationProgress =
+                    { new IProgress<ValidationProgress> with
+                        member _.Report p =
+                            // Pages as they're checked, and all of them once they're done (a short
+                            // document can finish before the first page is ever sampled).
+                            if p.Stage = ValidationStage.CheckingPages || p.Stage = ValidationStage.Finishing then
+                                report FixStage.CheckingOriginal p.Page p.PageCount
+                            elif p.Stage = ValidationStage.CheckingWcag then
+                                report FixStage.CheckingWcag 0 0 }
+                this.Validate(pdfPath, profile, validationProgress)
         let appliedFixes = ResizeArray<string>()
         let notApplied = ResizeArray<string>()
         let mutable currentInput = pdfPath
