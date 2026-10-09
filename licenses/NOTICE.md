@@ -133,9 +133,9 @@ via the `Tesseract.CrossPlatform` NuGet package (a fork of
 its `Tesseract.Native` binaries (Tesseract and Leptonica, built with vcpkg), all
 licensed under the Apache License, Version 2.0 (Leptonica under its own
 BSD-2-Clause-style license). They're used unmodified via NuGet package references.
-The app also ships Tesseract's English model, `eng.traineddata` from
-[tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache License
-2.0), unmodified.
+The app also ships Tesseract's English and Spanish models, `eng.traineddata` and
+`spa.traineddata` from [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast)
+(Apache License 2.0), unmodified, in its built-in language packs.
 
 ## URW base 35 and Liberation fonts
 
