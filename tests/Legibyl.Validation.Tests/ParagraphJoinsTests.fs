@@ -164,3 +164,28 @@ let ``the layout is only asked about pages with paragraphs next to each other`` 
     |> ignore
 
     layout.Asked |> should equal 1
+
+[<Fact>]
+let ``a Spanish sentence tagged line by line is joined at Spanish's "Y", once the language fix has said it's Spanish`` () =
+    use untagged = new TempPdf()
+    use input = new TempPdf()
+    use output = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(untagged.Path))
+        let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
+        let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA, "WinAnsi")
+        let text (y: float) (value: string) =
+            canvas.BeginText().SetFontAndSize(font, 10f).MoveText(72.0, y).ShowText(value).EndText() |> ignore
+        text 700.0 "El jardín comunitario del barrio abre todos los sábados por la mañana para"
+        text 686.0 "Y también los domingos por la tarde, con entrada libre para todas las familias."
+    let wide (bottom, top) = { region (bottom, top) with Geometry = { PageNumber = 1; Left = 66.0; Bottom = bottom; Right = 560.0; Top = top } }
+    VeraPdfValidator(LayoutSource = FixedLayout [ wide (696.0, 711.0); wide (682.0, 697.0) ]).Fix(untagged.Path, PdfProfile.PdfUa1, input.Path, PdfFixOptions.TagFromLayout)
+    |> ignore
+    paragraphs input.Path |> List.length |> should equal 2
+
+    let result =
+        VeraPdfValidator(LayoutSource = FixedLayout [ wide (682.0, 711.0) ])
+            .Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Language ||| PdfFixOptions.JoinSplitParagraphs)
+
+    result.AppliedFixes |> should contain "Joined 2 paragraphs tagged line by line into 1, where the page layout shows one block of text."
+    paragraphs output.Path |> List.length |> should equal 1

@@ -605,6 +605,8 @@ let private setLanguageFromText (document: PdfDocument) context =
         match DocumentLanguage.detect (DocumentLanguage.sample document context) with
         | Some language ->
             document.GetCatalog().GetPdfObject().Put(PdfName.Lang, PdfString language) |> ignore
+            // So the fixes after it read the text in it.
+            context.Language <- Some language
             [ $"Declared the document's language as {language} ({DocumentLanguage.nameOf language}), detected from its text." ]
         | None -> []
 
