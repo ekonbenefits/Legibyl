@@ -128,6 +128,8 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
                               | None when owners |> List.exists Option.isNone -> None, Some "its text isn't in the tags"
                               | None ->
                                   None, Some "it's drawn in more than one piece, in different tags, which would have to be joined to tag it as a link"
+                              | Some _ when address.Interleaved ->
+                                  None, Some "a piece of it is read on both sides of another, so its pieces can't be tagged in the address's order"
                               | Some _ when not address.WholeRun ->
                                   None, Some "it's part of a longer piece of text, which would have to be split to tag the address alone"
                               | Some(_, owner) when inLink owner context ->

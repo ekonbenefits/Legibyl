@@ -38,7 +38,10 @@ type Found =
       /// The MCIDs of its glyphs, each once (-1 for glyphs in none).
       Mcids: int list
       /// Whether each of its marked content is all of it (whitespace aside): no other text shares it.
-      WholeRun: bool }
+      WholeRun: bool
+      /// Whether a marked content's glyphs are read on both sides of another's (0, then 1, then 0
+      /// again): then its pieces, however they're tagged, can't be read in the address's order.
+      Interleaved: bool }
 
 /// "http(s)://" or "www.", not inside a word, a number or an e-mail address, up to whitespace.
 let private addressPattern =
@@ -144,4 +147,5 @@ let find (glyphs: Glyph array) : Found list =
                     Right = glyphs |> List.map _.Right |> List.max
                     Top = glyphs |> List.map _.Top |> List.max
                     Mcids = mcids
-                    WholeRun = mcids |> List.forall (fun mcid -> mcid >= 0 && all mcid) } ]
+                    WholeRun = mcids |> List.forall (fun mcid -> mcid >= 0 && all mcid)
+                    Interleaved = (glyphs |> List.map _.Mcid |> List.fold (fun runs mcid -> match runs with last :: _ when last = mcid -> runs | _ -> mcid :: runs) []).Length > mcids.Length } ]
