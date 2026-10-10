@@ -2,11 +2,13 @@
 /// same: "diversification." drawn as one piece becomes "diversification" and "." (see
 /// UnlinkedUrls, which links an address without the full stop after it).
 ///
-/// Only the end of the last text the piece draws, with nothing drawn after it, and nothing marked
-/// inside it. The text-showing operator is cut in two between glyphs. A piece begun inside a text
-/// object (BT … ET) ends and the new one begins between the two halves. A piece that holds its
-/// own text object has that ended (ET) and a new one begun (BT) for the end: the text state lasts
-/// past ET, and the text matrix is set where the end was drawn.
+/// Only the end of the last text the piece draws, with nothing drawn after it, and nothing tagged
+/// (with an MCID of its own) inside it. The text-showing operator is cut in two between glyphs.
+/// Whatever is open inside the piece at the cut (a layer's marked content, a text object) is
+/// ended before the piece ends, and begun again inside the new one, the same: the text state
+/// lasts past ET, and the text matrix is set where the end was drawn. A piece begun inside a text
+/// object ends and the new one begins between the two halves. Marked as an artifact at the cut
+/// isn't split: the end would read as the artifact does.
 module internal Legibyl.Validation.MarkedContentSplit
 
 open System
@@ -71,6 +73,13 @@ let private shownBy (bytes: byte array) (resources: PdfResources) =
     processor.ProcessContent(bytes, resources)
     shown.Shown
 
+/// What's open inside the piece where it's cut: a marked-content sequence (its BDC or BMC), or a
+/// text object.
+type Frame =
+    private
+    | Marked of Operation
+    | TextObject
+
 /// What a split takes: the page's content and where to cut it.
 type Plan =
     private
@@ -79,8 +88,9 @@ type Plan =
           Operation: Operation
           Head: PdfObject list
           Tail: PdfObject list
-          /// Whether the piece began inside a text object.
-          InText: bool
+          /// What's open inside the piece at the cut, outermost first: ended before the piece
+          /// ends, and begun again inside the new one.
+          Inside: Frame list
           /// Where the end is drawn (its first glyph's text matrix).
           At: Matrix
           Tag: PdfName
@@ -121,20 +131,37 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
             // Its end: the EMC closing it.
             let mutable depth = 0
             let mutable last = -1
-            let mutable nested = false
+            let mutable tagged = false
             let mutable i = first + 1
             while last < 0 && i < operations.Count do
                 let name = operations[i].Name
                 if name = ContentOperators.BDC || name = ContentOperators.BMC then
-                    nested <- true
+                    if (mcidOf resources operations[i]).IsSome then tagged <- true
                     depth <- depth + 1
                 elif name = ContentOperators.EMC then
                     if depth = 0 then last <- i else depth <- depth - 1
                 i <- i + 1
+            let isBT (op: Operation) = op.Name = ContentOperators.BT
             let inText =
                 operations
                 |> Seq.take first
-                |> Seq.fold (fun open' op -> if op.Name = ContentOperators.BT then true elif op.Name = ContentOperators.ET then false else open') false
+                |> Seq.fold (fun open' op -> if isBT op then true elif op.Name = ContentOperators.ET then false else open') false
+            // What's open inside the piece before operator at, outermost first.
+            let insideAt at =
+                let mutable frames = []
+                for k in first + 1 .. at - 1 do
+                    let op = operations[k]
+                    if op.Name = ContentOperators.BDC || op.Name = ContentOperators.BMC then frames <- Marked op :: frames
+                    elif isBT op then frames <- TextObject :: frames
+                    elif op.Name = ContentOperators.EMC || op.Name = ContentOperators.ET then
+                        match frames with
+                        | _ :: rest -> frames <- rest
+                        | [] -> ()
+                List.rev frames
+            let isArtifact frame =
+                match frame with
+                | Marked op -> op.Operands.Length > 0 && op.Operands[0] = (PdfName.Artifact :> PdfObject)
+                | TextObject -> false
             let tag = operations[first].Operands[0] :?> PdfName
             let properties =
                 match operations[first].Operands[1] with
@@ -146,7 +173,7 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
                 | _ -> None
             let showing = [ for k in first + 1 .. last - 1 do if textShowing.Contains operations[k].Name then k ]
             if last < 0 then Error "its marked content isn't ended"
-            elif nested then Error "its marked content holds other marked content"
+            elif tagged then Error "its marked content holds tagged marked content of its own"
             elif properties.IsNone then Error "its marked content's properties can't be read"
             elif [ PdfName.ActualText; PdfName.Alt; PdfName.E ] |> List.exists properties.Value.ContainsKey then
                 Error "its marked content says what it reads as, for all of it"
@@ -156,11 +183,14 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
             else
                 let at = List.last showing
                 let operation = operations[at]
+                let inside = insideAt at
                 if [ for k in at + 1 .. last - 1 -> operations[k] ] |> List.exists paints then
                     Error "something is drawn after it, in the same piece"
                 elif operation.Name <> ContentOperators.Tj && operation.Name <> ContentOperators.TJ then
                     Error "the text drawing it moves to a new line first, which the fix doesn't cut"
-                elif not inText && not ([ for k in first + 1 .. at - 1 -> operations[k].Name ] |> List.contains ContentOperators.BT) then
+                elif inside |> List.exists isArtifact then
+                    Error "it's marked as an artifact inside its piece"
+                elif inText = (inside |> List.exists (function TextObject -> true | Marked _ -> false)) then
                     Error "its text isn't drawn in the usual way"
                 else
                     let shown = shownBy bytes resources
@@ -237,7 +267,7 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
                                       Operation = operation
                                       Head = head
                                       Tail = tailItems
-                                      InText = inText
+                                      Inside = inside
                                       At = firstGlyph.Matrix
                                       Tag = tag
                                       Properties = properties.Value
@@ -266,13 +296,22 @@ let split (document: PdfDocument) (page: PdfPage) (plan: Plan) =
     properties.Put(PdfName.MCID, PdfNumber plan.Mcid) |> ignore
     let opening = Array.concat [ written plan.Tag; Encoding.ASCII.GetBytes " "; written properties; Encoding.ASCII.GetBytes " BDC\n" ]
     let m = plan.At
+    let at =
+        String.Join(" ", [ m.Get Matrix.I11; m.Get Matrix.I12; m.Get Matrix.I21; m.Get Matrix.I22; m.Get Matrix.I31; m.Get Matrix.I32 ] |> List.map number)
+    let ending frame =
+        match frame with
+        | Marked _ -> Encoding.ASCII.GetBytes "\nEMC\n"
+        | TextObject -> Encoding.ASCII.GetBytes "\nET\n"
+    let beginning frame =
+        match frame with
+        | Marked op -> Array.append plan.Bytes[int op.Start .. int op.End - 1] (Encoding.ASCII.GetBytes "\n")
+        | TextObject -> Encoding.ASCII.GetBytes $"BT\n{at} Tm\n"
     let between =
-        if plan.InText then
-            Array.append (Encoding.ASCII.GetBytes "\nEMC\n") opening
-        else
-            let at =
-                String.Join(" ", [ m.Get Matrix.I11; m.Get Matrix.I12; m.Get Matrix.I21; m.Get Matrix.I22; m.Get Matrix.I31; m.Get Matrix.I32 ] |> List.map number)
-            Array.concat [ Encoding.ASCII.GetBytes "\nET\nEMC\n"; opening; Encoding.ASCII.GetBytes $"BT\n{at} Tm\n" ]
+        Array.concat
+            [ yield! plan.Inside |> List.rev |> List.map ending
+              Encoding.ASCII.GetBytes "\nEMC\n"
+              opening
+              yield! plan.Inside |> List.map beginning ]
     use output = new MemoryStream()
     let write (bytes: byte array) = output.Write(bytes, 0, bytes.Length)
     output.Write(plan.Bytes, 0, int plan.Operation.Start)
