@@ -273,21 +273,41 @@ module private MainView =
                     | Some validation -> Set.difference (review.CheckedFor validation.Hash) review.CarriedChecked
                     | None -> Set.empty
                 | _ -> Set.empty
-            /// The warnings dismissed (or brought back) here that the PDF doesn't carry so yet: what
-            /// Export writes into a copy, as it does steps checked, when that's all it writes.
+            /// The warnings dismissed here that the PDF doesn't carry dismissed, and those brought
+            /// back that it does: what Export writes into a copy, as it does steps checked, when
+            /// that's all it writes.
             let dismissalsToCarry () =
                 match outcome.Current, selectedFile.Current with
                 | Validated(_, rows), Some path ->
                     let carried = (layoutReviews.For path).CarriedDismissed
-                    rows |> List.filter (fun row -> row.Dismissed <> Dismissals.isDismissed carried row.Violation) |> List.length
-                | _ -> 0
+                    let differ = rows |> List.filter (fun row -> row.Dismissed <> Dismissals.isDismissed carried row.Violation)
+                    differ |> List.filter _.Dismissed |> List.length, differ |> List.filter (not << _.Dismissed) |> List.length
+                | _ -> 0, 0
+            /// "a, b and c".
+            let listed (parts: string list) =
+                match List.rev parts with
+                | [] -> ""
+                | [ one ] -> one
+                | last :: rest -> String.Join(", ", List.rev rest) + " and " + last
+            /// What a person decided that a copy will carry: "2 steps checked and 1 warning dismissed";
+            /// None for nothing.
+            let toCarry () =
+                let ticks = (ticksToCarry ()).Count
+                let dismissedHere, broughtBack = dismissalsToCarry ()
+                let count (n: int) (what: string) = if n = 1 then $"1 {what}" else $"{n} {what}s"
+                match [ if ticks > 0 then count ticks "step" + " checked"
+                        if dismissedHere > 0 then count dismissedHere "warning" + " dismissed"
+                        if broughtBack > 0 then count broughtBack "warning" + " brought back" ] with
+                | [] -> None
+                | parts -> Some(listed parts)
             /// What a copy carrying only the review carries: "the steps checked", "the warnings
-            /// dismissed", or both.
+            /// dismissed", "the warnings brought back", or more than one.
             let carrying () =
-                match not (ticksToCarry ()).IsEmpty, dismissalsToCarry () > 0 with
-                | true, true -> "the steps checked and the warnings dismissed"
-                | true, false -> "the steps checked"
-                | _ -> "the warnings dismissed"
+                let dismissedHere, broughtBack = dismissalsToCarry ()
+                listed
+                    [ if not (ticksToCarry ()).IsEmpty then "the steps checked"
+                      if dismissedHere > 0 then "the warnings dismissed"
+                      if broughtBack > 0 then "the warnings brought back" ]
             // What it passes: PDF/UA, and WCAG 2.2's machine checks, which run with every validation.
             let profileName =
                 report |> Option.map (fun r -> $"{PdfUaTarget.displayName r.Profile} and {WcagSpecification.Name}") |> Option.defaultValue "PDF/UA"
@@ -837,7 +857,7 @@ module private MainView =
                     match selectedFile.Current with
                     // Only steps a person checked, or warnings dismissed: a copy of the PDF as it is,
                     // carrying them.
-                    | Some sourcePath when saveOptions () = PdfFixOptions.None && (not (ticksToCarry ()).IsEmpty || dismissalsToCarry () > 0) ->
+                    | Some sourcePath when saveOptions () = PdfFixOptions.None && (toCarry ()).IsSome ->
                         let review = layoutReviews.For sourcePath
                         let carried = carrying ()
                         let! outputPath =
@@ -2062,7 +2082,7 @@ module private MainView =
             | Some(save, exportItem) ->
                 save.IsEnabled <- not busy && edited.Current
                 exportItem.IsEnabled <-
-                    not busy && selectedFile.Current.IsSome && (saveOptions () <> PdfFixOptions.None || not (ticksToCarry ()).IsEmpty || dismissalsToCarry () > 0)
+                    not busy && selectedFile.Current.IsSome && (saveOptions () <> PdfFixOptions.None || (toCarry ()).IsSome)
             | None -> ()
 
             DockPanel.create [
@@ -2266,17 +2286,17 @@ module private MainView =
                                     Button.onClick chooseAutoFixes
                                 ]
                                 // Badged with what a person decided that the copy will carry and no other
-                                // button counts: the steps checked, and the warnings dismissed.
+                                // button counts: the steps checked, and the warnings dismissed or brought back.
                                 let ticks = (ticksToCarry ()).Count
                                 let steps = if ticks = 1 then "1 step" else $"{ticks} steps"
-                                let dismissals = dismissalsToCarry ()
-                                let warnings = if dismissals = 1 then "1 warning" else $"{dismissals} warnings"
-                                let toCarry =
-                                    match ticks, dismissals with
-                                    | 0, 0 -> None
-                                    | _, 0 -> Some $"{steps} checked"
-                                    | 0, _ -> Some $"{warnings} dismissed"
-                                    | _ -> Some $"{steps} checked and {warnings} dismissed"
+                                let dismissedHere, broughtBack = dismissalsToCarry ()
+                                let dismissals = dismissedHere + broughtBack
+                                let toCarry = toCarry ()
+                                // The warnings' part of it, for a fixed copy (which carries them, not the steps).
+                                let warnings =
+                                    listed
+                                        [ if dismissedHere > 0 then (if dismissedHere = 1 then "the 1 warning dismissed" else $"the {dismissedHere} warnings dismissed")
+                                          if broughtBack > 0 then (if broughtBack = 1 then "the 1 warning brought back" else $"the {broughtBack} warnings brought back") ]
                                 Button.create [
                                     Button.content (badged None "Export…" (ticks + dismissals))
                                     AttrBuilder<Button>.CreateProperty<string | null>(
@@ -2291,9 +2311,9 @@ module private MainView =
                                         | Some what when saveOptions () = PdfFixOptions.None ->
                                             $"{what}, to go into the copy: writes the next version of the PDF (flyer.v2.pdf), unchanged, carrying them, and opens it. The original isn't changed."
                                         | _ when ticks > 0 && dismissals > 0 ->
-                                            $"Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and the {warnings} dismissed, and opens it. The {steps} checked don't go into it: its content changes, and they were checks of this one."
+                                            $"Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and {warnings}, and opens it. The {steps} checked don't go into it: its content changes, and they were checks of this one."
                                         | _ when dismissals > 0 ->
-                                            $"Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and the {warnings} dismissed, and opens it. The original isn't changed."
+                                            $"Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and {warnings}, and opens it. The original isn't changed."
                                         | _ when ticks > 0 ->
                                             $"Writes the next version of the PDF (flyer.v2.pdf) with your edits and the chosen auto fixes, and opens it. The {steps} checked don't go into it: its content changes, and they were checks of this one."
                                         | _ ->

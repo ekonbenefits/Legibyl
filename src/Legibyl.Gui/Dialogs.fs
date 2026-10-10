@@ -42,10 +42,16 @@ let failureMessage (ex: exn) =
         | ex -> ex
     (inner ex).Message
 
+/// For tests: answers the save dialog (a path, or None for cancelled) instead of showing it, for
+/// what runs where it's set (it follows that onto what it starts, and no further).
+let saveAnswer = System.Threading.AsyncLocal<FilePickerSaveOptions -> string option>()
+
 /// Shows a save dialog starting in nearPath's folder and returns the chosen local
 /// path, or None if the user cancelled.
 let pickSavePath (topLevel: TopLevel) (options: FilePickerSaveOptions) (nearPath: string) : Task<string option> =
     task {
+      match box saveAnswer.Value with
+      | null ->
         match Path.GetDirectoryName nearPath with
         | NonNull folder when folder <> "" ->
             let! start = topLevel.StorageProvider.TryGetFolderFromPathAsync folder
@@ -54,6 +60,7 @@ let pickSavePath (topLevel: TopLevel) (options: FilePickerSaveOptions) (nearPath
 
         let! file = topLevel.StorageProvider.SaveFilePickerAsync options
         return file |> Option.ofObj |> Option.bind (fun f -> Option.ofObj (f.TryGetLocalPath()))
+      | _ -> return saveAnswer.Value options
     }
 
 /// The most a dialog can be tall on owner's screen, so its buttons stay on it (its content
