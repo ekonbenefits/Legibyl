@@ -15,7 +15,7 @@ open Legibyl.Validation.Tests.TestSupport
 /// A tagged page of two paragraphs, each drawing its text inside a layer within its marked
 /// content (/P <</MCID n>> BDC /OC /oc1 BDC … EMC EMC). The second's layer has an artifact in it
 /// too, a page number, which isn't the paragraph's.
-let private create (path: string) =
+let private createWith (path: string) (paragraphs: (string * string option) list) =
     use document = new PdfDocument(new PdfWriter(path))
     document.SetTagged() |> ignore
     document.GetCatalog().SetLang(PdfString "en-US") |> ignore
@@ -34,8 +34,10 @@ let private create (path: string) =
             |> ignore)
         canvas.EndLayer().CloseTag() |> ignore
         pointer.MoveToParent() |> ignore
-    paragraph "The garden opens at eight." 700.0 None
-    paragraph "Tickets are sold at the gate." 670.0 (Some "17")
+    paragraphs |> List.iteri (fun i (text, artifact) -> paragraph text (700.0 - 30.0 * float i) artifact)
+
+let private create (path: string) =
+    createWith path [ "The garden opens at eight.", None; "Tickets are sold at the gate.", Some "17" ]
 
 let rec private nodes (node: StructureNode) : StructureNode list =
     node :: (node.Children |> Seq.collect nodes |> List.ofSeq)
@@ -68,3 +70,18 @@ let ``paragraphs whose text is in a layer aren't called empty, nor removed as em
 
     warnings |> should be Empty
     result.WasFixed |> should be False
+
+[<Fact>]
+let ``a web address in a layer inside a paragraph's marked content is the paragraph's, and linked`` () =
+    use pdf = new TempPdf()
+    use output = new TempPdf()
+    createWith pdf.Path [ "https://example.com/garden", None ]
+
+    let unlinked =
+        VeraPdfValidator().Validate(pdf.Path, PdfProfile.PdfUa1).Assertions
+        |> Seq.filter (fun a -> a.Specification = "Legibyl" && a.TestNumber = 18)
+        |> List.ofSeq
+    let result = VeraPdfValidator().Fix(pdf.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls)
+
+    unlinked |> List.map _.FixOptions |> should equal [ PdfFixOptions.LinkUrls ]
+    result.AppliedFixes |> should contain "Linked 1 web address shown as text, to where it goes."
