@@ -289,7 +289,14 @@ let private paragraphKids (path: string) =
                 member _.GetSupportedEvents() = null }
         iText.Kernel.Pdf.Canvas.Parser.PdfCanvasProcessor(listener).ProcessPageContent(document.GetPage 1)
         string text
-    let paragraph = (document.GetStructTreeRoot().GetKids()[0] :?> Tagging.PdfStructElem).GetKids()[0] :?> Tagging.PdfStructElem
+    let rec paragraphIn (element: Tagging.IStructureNode) : Tagging.PdfStructElem option =
+        match element with
+        | :? Tagging.PdfStructElem as e when e.GetRole().GetValue() = "P" -> Some e
+        | _ ->
+            match element.GetKids() with
+            | null -> None
+            | kids -> kids |> Seq.tryPick (fun kid -> match kid with null -> None | kid -> paragraphIn kid)
+    let paragraph = paragraphIn (document.GetStructTreeRoot()) |> Option.get
     [ for kid in paragraph.GetKids() ->
           match kid with
           | :? Tagging.PdfMcr as mcr -> drawn (mcr.GetMcid())
@@ -367,14 +374,48 @@ let private rawParagraph (path: string) (content: PdfName -> PdfPage -> string) 
         stream.SetData(System.Text.Encoding.ASCII.GetBytes(content name page)) |> ignore)
 
 [<Fact>]
+let ``an address's full stop drawn inside a layer in its piece is split off, the layer begun again around it`` () =
+    // As Affinity's PDFs draw a paragraph: its text object inside a layer, inside its marked
+    // content; then the text object begun before the layer, and the piece begun inside it.
+    let layered (font: PdfName) (page: PdfPage) (draw: string -> string -> string) =
+        let layer = iText.Kernel.Pdf.Layer.PdfLayer("Publisher layout", page.GetDocument())
+        let oc = page.GetResources().AddProperties(layer.GetPdfObject()).GetValue()
+        let f = font.GetValue()
+        draw $"/{f} 12 Tf" $"/OC /{oc} BDC"
+    let cases: (string * (PdfName -> PdfPage -> string)) list =
+        [ "text object inside the layer",
+          (fun font page ->
+              layered font page (fun tf oc ->
+                  $"/P <</MCID 0>> BDC {oc} 0 0 1 rg BT {tf} 72 700 Td (https://example.org/beds.) Tj ET EMC EMC\n"
+                  + $"/P <</MCID 1>> BDC BT {tf} 250 700 Td ( Open daily.) Tj ET EMC"))
+          "layer inside the text object",
+          (fun font page ->
+              layered font page (fun tf oc ->
+                  $"/P <</MCID 0>> BDC BT {tf} 72 700 Td {oc} (https://example.org/beds.) Tj EMC ET EMC\n"
+                  + $"/P <</MCID 1>> BDC BT {tf} 250 700 Td ( Open daily.) Tj ET EMC"))
+          "piece and layer inside the text object",
+          (fun font page ->
+              layered font page (fun tf oc ->
+                  $"BT {tf} 72 700 Td /P <</MCID 0>> BDC /Span BMC EMC {oc} (https://example.org/beds.) Tj EMC EMC\n"
+                  + "/P <</MCID 1>> BDC ( Open daily.) Tj EMC ET")) ]
+    for _, content in cases do
+        use input = new TempPdf()
+        use output = new TempPdf ".fixed"
+        rawParagraph input.Path content
+
+        named input.Path |> should equal [ "https://example.org/beds", true ]
+        linksAlike input.Path output.Path
+        paragraphKids output.Path |> should equal [ "Link"; "."; " Open daily." ]
+
+[<Fact>]
 let ``an address's full stop isn't split off where its piece can't be cut safely, and each says why`` () =
     let lines (font: PdfName) (first: string) (draw: string) (after: string) =
         $"BT /{font.GetValue()} 12 Tf 72 700 Td\n{first} BDC {draw} EMC\n/P <</MCID 1>> BDC ( Open daily.) Tj EMC\nET\n{after}"
     let cases: (string * (PdfName -> PdfPage -> string)) list =
         [ // As the fix can split: the case the others change one thing of.
           "none", (fun font _ -> lines font "/P <</MCID 0>>" "(https://example.org/beds.) Tj" "")
-          "its marked content holds other marked content",
-          (fun font _ -> lines font "/P <</MCID 0>>" "/Span BMC EMC (https://example.org/beds.) Tj" "")
+          "its marked content holds tagged marked content of its own",
+          (fun font _ -> lines font "/P <</MCID 0>>" "/Span <</MCID 2>> BDC EMC (https://example.org/beds.) Tj" "")
           "its marked content says what it reads as, for all of it",
           (fun font _ -> lines font "/P <</MCID 0 /ActualText (https://example.org/beds.)>>" "(https://example.org/beds.) Tj" "")
           "the text drawing it moves to a new line first, which the fix doesn't cut",
