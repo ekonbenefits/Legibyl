@@ -49,6 +49,7 @@
     <Compile Include="RoleMapTests.fs" />
     <Compile Include="DescriptionEditsTests.fs" />
     <Compile Include="IconTextTests.fs" />
+    <Compile Include="NestedMarkedContentTests.fs" />
     <Compile Include="AttachmentsTests.fs" />
     <Compile Include="TableRebuildTests.fs" />
     <Compile Include="TableHeaderScopeTests.fs" />

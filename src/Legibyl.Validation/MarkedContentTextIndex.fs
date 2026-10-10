@@ -134,15 +134,16 @@ let private concatenateLetters (letters: IReadOnlyList<Letter>) =
 let private pageGlyphs (page: Page) : WebAddressText.Glyph array =
     let mcids = Dictionary<int, int>()
     let artifacts = HashSet<int>()
-    let rec mark (elements: IReadOnlyList<MarkedContentElement>) (inArtifact: bool) =
+    let rec mark (elements: IReadOnlyList<MarkedContentElement>) (inArtifact: bool) (outerMcid: int) =
         for element in elements do
             let inArtifact = inArtifact || element.IsArtifact
+            // Marked content with no MCID of its own (an optional content layer's) is its outer's.
+            let mcid = if element.MarkedContentIdentifier >= 0 then element.MarkedContentIdentifier else outerMcid
             for letter in element.Letters do
-                mcids[letter.TextSequence] <- element.MarkedContentIdentifier
+                mcids[letter.TextSequence] <- mcid
                 if inArtifact then artifacts.Add letter.TextSequence |> ignore
-            // Inner marked content after its outer, so the innermost is kept.
-            mark element.Children inArtifact
-    mark (page.GetMarkedContents()) false
+            mark element.Children inArtifact mcid
+    mark (page.GetMarkedContents()) false -1
     [| for letter in page.Letters do
            if not (artifacts.Contains letter.TextSequence) then
                let box = if hasArea letter.GlyphRectangle then letter.GlyphRectangle else whitespaceRectangle letter
@@ -158,10 +159,20 @@ let private pageGlyphs (page: Page) : WebAddressText.Glyph array =
                      Size = (if letter.PointSize > 0.0 then letter.PointSize else max 1.0 (box.Top - box.Bottom))
                      Mcid = match mcids.TryGetValue letter.TextSequence with | true, mcid -> mcid | _ -> -1 } |]
 
+/// The marked content whose drawing is element's: itself, and what's inside it with no MCID of its
+/// own, as an optional content layer (/OC) inside a tag's MCID is, but not an artifact. PdfPig
+/// gives each glyph to the innermost marked content only.
+let rec private drawnBy (element: MarkedContentElement) : MarkedContentElement list =
+    element
+    :: [ for child in element.Children do
+             if child.MarkedContentIdentifier < 0 && not child.IsArtifact then
+                 yield! drawnBy child ]
+
 let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedContentElement>) (index: Index) =
     for element in elements do
-        let text = concatenateLetters element.Letters
-        let geometry = geometryFromMarkedContent pageNumber element
+        let drawn = drawnBy element
+        let text = concatenateLetters (ResizeArray(drawn |> Seq.collect _.Letters))
+        let geometry = unionGeometry (drawn |> List.choose (geometryFromMarkedContent pageNumber))
         if not (String.IsNullOrEmpty text) || geometry.IsSome then
             index[(pageNumber, element.MarkedContentIdentifier)] <- { Text = text; Geometry = geometry }
         if element.Children.Count > 0 then
