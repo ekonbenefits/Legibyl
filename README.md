@@ -600,7 +600,12 @@ the same menu dismisses every warning of that type in the PDF, wherever it is,
 including ones that turn up later; **Restore all *rule* warnings** on any of them
 brings them back. Dismissals are part of the PDF's review: **Save** keeps them, with your
 edits, in `<name>.pdf.legibyl.json` next to it, which is loaded automatically
-when the PDF is opened again (see Saving below). Failures can't be dismissed. The CLI applies their edits with `--edits` (see below).
+when the PDF is opened again (see Saving below). As ticked checklist steps do, a
+dismissal enables **Export…**, badged with the warnings dismissed (or brought
+back) that the PDF doesn't carry yet. With nothing else to write, Export writes
+the PDF unchanged, carrying its review inside it, so the copy opens with those
+warnings dismissed; with edits or auto fixes, the fixed copy carries them too.
+Failures can't be dismissed. The CLI applies their edits with `--edits` (see below).
 
 ### Legibyl's own accessibility
 
