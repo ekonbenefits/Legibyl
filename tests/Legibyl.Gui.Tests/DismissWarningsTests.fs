@@ -244,29 +244,39 @@ let private exportButton (window: Window) =
     badge |> Option.defaultValue 0, button.IsEnabled, string (Automation.AutomationProperties.GetName button)
 
 [<Fact>]
-let ``a dismissed warning enables Export, badged; the copy carries it, and has nothing more to carry`` () =
+let ``a dismissed warning enables Export, badged; File › Export… writes a copy carrying it, where bringing it back is counted`` () =
     withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
         onUiThread (fun () ->
+            let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
+            // The save dialog, answered.
+            Dialogs.saveAnswer.Value <- fun _ -> Some copy
             let window = openPdf pdf
             let before = exportButton window
             dismissFirstWarning window
             let after = exportButton window
-            Reviews.chooseFromFileMenu window "Save" |> ignore
-            pump ()
+            let menuOn = Reviews.chooseFromFileMenu window "Export…"
+            // Written, and opened in a window of its own.
+            HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 20.0) (fun () -> File.Exists copy && texts window |> List.exists (fun t -> t.StartsWith "Exported")) |> ignore
+            let notice = texts window |> List.tryFind (fun t -> t.StartsWith "Exported")
             close window
-            // The copy Export writes for it: the PDF as it is, carrying its review.
-            let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
-            let review = Reviews.read pdf
-            review.WriteCheckedCopy(pdf, copy, Legibyl.Validation.SavedResults.hashOf pdf)
 
             let opened = openPdf copy
             let inCopy = exportButton opened
             let dismissedThere = texts opened |> List.exists (fun t -> t.Contains "1 dismissed")
+            // Brought back there: that's what a copy of it would carry.
+            clickButton opened "Show 1 dismissed"
+            rightClickRow opened (rows opened |> List.findIndex _.Dismissed)
+            click (menuItem opened "Restore warning")
+            let broughtBack = exportButton opened
             close opened
+            Dialogs.saveAnswer.Value <- Unchecked.defaultof<_>
 
             before |> should equal (0, false, "Export…")
             after |> should equal (1, true, "Export…, 1 warning dismissed to go into the copy")
+            menuOn |> should be True
+            notice |> should equal (Some $"Exported {Path.GetFileName copy}, carrying the warnings dismissed.")
             dismissedThere |> should be True
             inCopy |> should equal (0, false, "Export…")
+            broughtBack |> should equal (1, true, "Export…, 1 warning brought back to go into the copy")
             // Only the dismissal: no steps checked.
             Legibyl.Validation.ReviewFile.carriedChecklist copy |> should equal None))
