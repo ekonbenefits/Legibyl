@@ -235,3 +235,38 @@ let ``right-clicking a row selects it, so its menu acts on it`` () =
             let expected = FindingItem(List.item 1 (rows window))
             close window
             selectedAfter |> should equal (box expected)))
+
+/// Export…: its badge (what's to go into the copy, 0 for none), and whether it's enabled.
+let private exportButton (window: Window) =
+    let button = descendants<Button> window |> List.find (fun b -> (string (Automation.AutomationProperties.GetName b)).StartsWith "Export…")
+    let badge =
+        descendants<TextBlock> button |> List.map (fun t -> string t.Text) |> List.tryPick (fun t -> match Int32.TryParse t with true, n -> Some n | _ -> None)
+    badge |> Option.defaultValue 0, button.IsEnabled, string (Automation.AutomationProperties.GetName button)
+
+[<Fact>]
+let ``a dismissed warning enables Export, badged; the copy carries it, and has nothing more to carry`` () =
+    withSampleCopy "libreoffice-empty-paragraph.pdf" (fun pdf ->
+        onUiThread (fun () ->
+            let window = openPdf pdf
+            let before = exportButton window
+            dismissFirstWarning window
+            let after = exportButton window
+            Reviews.chooseFromFileMenu window "Save" |> ignore
+            pump ()
+            close window
+            // The copy Export writes for it: the PDF as it is, carrying its review.
+            let copy = Path.ChangeExtension(pdf, ".v2.pdf") |> nonNull
+            let review = Reviews.read pdf
+            review.WriteCheckedCopy(pdf, copy, Legibyl.Validation.SavedResults.hashOf pdf)
+
+            let opened = openPdf copy
+            let inCopy = exportButton opened
+            let dismissedThere = texts opened |> List.exists (fun t -> t.Contains "1 dismissed")
+            close opened
+
+            before |> should equal (0, false, "Export…")
+            after |> should equal (1, true, "Export…, 1 warning dismissed to go into the copy")
+            dismissedThere |> should be True
+            inCopy |> should equal (0, false, "Export…")
+            // Only the dismissal: no steps checked.
+            Legibyl.Validation.ReviewFile.carriedChecklist copy |> should equal None))
