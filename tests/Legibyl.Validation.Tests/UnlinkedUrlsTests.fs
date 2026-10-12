@@ -416,6 +416,17 @@ let ``an address's full stop isn't split off where its piece can't be cut safely
           "none", (fun font _ -> lines font "/P <</MCID 0>>" "(https://example.org/beds.) Tj" "")
           "its marked content holds tagged marked content of its own",
           (fun font _ -> lines font "/P <</MCID 0>>" "/Span <</MCID 2>> BDC EMC (https://example.org/beds.) Tj" "")
+          // Marked content open at the cut, saying what it reads as: begun again around the end,
+          // it would be said twice. Inline, and named in the page's resources.
+          "marked content around it inside its piece says what it reads as, for all of it",
+          (fun font _ ->
+              lines font "/P <</MCID 0>>" "/Span <</ActualText (https://example.org/beds.)>> BDC (https://example.org/beds.) Tj EMC" "")
+          "marked content around it inside its piece says what it reads as, for all of it",
+          (fun font page ->
+              let properties = PdfDictionary()
+              properties.Put(PdfName.ActualText, PdfString "https://example.org/beds.") |> ignore
+              let name = page.GetResources().AddProperties properties
+              lines font "/P <</MCID 0>>" $"/Span /{name.GetValue()} BDC (https://example.org/beds.) Tj EMC" "")
           "its marked content says what it reads as, for all of it",
           (fun font _ -> lines font "/P <</MCID 0 /ActualText (https://example.org/beds.)>>" "(https://example.org/beds.) Tj" "")
           "the text drawing it moves to a new line first, which the fix doesn't cut",
@@ -433,21 +444,20 @@ let ``an address's full stop isn't split off where its piece can't be cut safely
               properties.Put(PdfName "Extra", inner) |> ignore
               let name = page.GetResources().AddProperties properties
               lines font $"/P /{name.GetValue()}" "(https://example.org/beds.) Tj" "") ]
-    [ for why, content in cases ->
-          use input = new TempPdf()
-          use output = new TempPdf ".fixed"
-          rawParagraph input.Path content
-          let fixedOnes = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed
-          why, unlinked input.Path, fixedOnes ]
-    |> should
-        equal
-        [ for why, _ in cases ->
-              if why = "none" then
-                  why, [ "Page 1: \"https://example.org/beds\".", true ], true
-              else
-                  why,
-                  [ $"Page 1: \"https://example.org/beds\". Not fixable here: the \".\" after it is drawn in the same piece, and can't be split off: {why}.", false ],
-                  false ]
+    for why, content in cases do
+        use input = new TempPdf()
+        use output = new TempPdf ".fixed"
+        rawParagraph input.Path content
+        let fixedOnes = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed
+        (why, unlinked input.Path, fixedOnes)
+        |> should
+            equal
+            (if why = "none" then
+                 why, [ "Page 1: \"https://example.org/beds\".", true ], true
+             else
+                 why,
+                 [ $"Page 1: \"https://example.org/beds\". Not fixable here: the \".\" after it is drawn in the same piece, and can't be split off: {why}.", false ],
+                 false)
 
 [<Fact>]
 let ``an address's full stop with something drawn after it in the same piece isn't split off, and says why`` () =
