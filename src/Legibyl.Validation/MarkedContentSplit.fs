@@ -162,20 +162,34 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
                 match frame with
                 | Marked op -> op.Operands.Length > 0 && op.Operands[0] = (PdfName.Artifact :> PdfObject)
                 | TextObject -> false
+            let propertiesOf (op: Operation) =
+                if op.Operands.Length < 2 then None
+                else
+                    match op.Operands[1] with
+                    | :? PdfDictionary as properties -> Some properties
+                    | :? PdfName as name ->
+                        match resources.GetResource PdfName.Properties with
+                        | null -> None
+                        | all -> Option.ofObj (all.GetAsDictionary name)
+                    | _ -> None
+            let saysWhatItReadsAs (properties: PdfDictionary) =
+                [ PdfName.ActualText; PdfName.Alt; PdfName.E ] |> List.exists properties.ContainsKey
+            // Marked content open at the cut is begun again around the end: what it says it reads
+            // as would be said twice.
+            let readsAsSomethingElse frame =
+                match frame with
+                | Marked op when op.Name = ContentOperators.BDC ->
+                    match propertiesOf op with
+                    | Some properties -> saysWhatItReadsAs properties
+                    | None -> true
+                | _ -> false
             let tag = operations[first].Operands[0] :?> PdfName
-            let properties =
-                match operations[first].Operands[1] with
-                | :? PdfDictionary as properties -> Some properties
-                | :? PdfName as name ->
-                    match resources.GetResource PdfName.Properties with
-                    | null -> None
-                    | all -> Option.ofObj (all.GetAsDictionary name)
-                | _ -> None
+            let properties = propertiesOf operations[first]
             let showing = [ for k in first + 1 .. last - 1 do if textShowing.Contains operations[k].Name then k ]
             if last < 0 then Error "its marked content isn't ended"
             elif tagged then Error "its marked content holds tagged marked content of its own"
             elif properties.IsNone then Error "its marked content's properties can't be read"
-            elif [ PdfName.ActualText; PdfName.Alt; PdfName.E ] |> List.exists properties.Value.ContainsKey then
+            elif saysWhatItReadsAs properties.Value then
                 Error "its marked content says what it reads as, for all of it"
             elif properties.Value.KeySet() |> Seq.exists (fun key -> holdsReference (properties.Value.Get(key, false))) then
                 Error "its marked content's properties can't be copied"
@@ -188,8 +202,11 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
                     Error "something is drawn after it, in the same piece"
                 elif operation.Name <> ContentOperators.Tj && operation.Name <> ContentOperators.TJ then
                     Error "the text drawing it moves to a new line first, which the fix doesn't cut"
+                // (Its text isn't the paragraph's, so not an address's: kept in case that changes.)
                 elif inside |> List.exists isArtifact then
                     Error "it's marked as an artifact inside its piece"
+                elif inside |> List.exists readsAsSomethingElse then
+                    Error "marked content around it inside its piece says what it reads as, for all of it"
                 elif inText = (inside |> List.exists (function TextObject -> true | Marked _ -> false)) then
                     Error "its text isn't drawn in the usual way"
                 else
