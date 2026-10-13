@@ -167,6 +167,12 @@ let private connectToPublicAddress (context: SocketsHttpConnectionContext) (toke
         }
     )
 
+/// How Legibyl introduces itself to the sites it reads titles from: its name and version, what
+/// it's doing, and where to read about it. Some sites (dol.gov, for one) turn away tools that
+/// don't say where to find out about them.
+let userAgent =
+    $"Legibyl/{Reflection.Assembly.GetExecutingAssembly().GetName().Version} (PDF accessibility checker; reading link titles; +https://github.com/ekonbenefits/Legibyl)"
+
 let private createClient () =
     let handler =
         new SocketsHttpHandler(
@@ -181,7 +187,7 @@ let private createClient () =
             ConnectTimeout = timeout
         )
     let client = new HttpClient(handler, true, Timeout = timeout)
-    client.DefaultRequestHeaders.UserAgent.ParseAdd "Legibyl (PDF accessibility checker; reading link titles)"
+    client.DefaultRequestHeaders.UserAgent.ParseAdd userAgent
     client.DefaultRequestHeaders.Accept.ParseAdd "text/html, application/xhtml+xml;q=0.9"
     client
 
