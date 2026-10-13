@@ -200,9 +200,6 @@ let describeWebLinks (titles: IPageTitleSource) (document: PdfDocument) (context
         | 0 -> []
         | 1 -> [ "Described 1 web link by the title of the page it goes to, read from the web: to check." ]
         | n -> [ $"Described {n} web links by the titles of the pages they go to, read from the web: to check." ]
-        | 0 -> []
-        | 1 -> [ "Described 1 web link by the title of the page it goes to, read from the web: to check." ]
-        | n -> [ $"Described {n} web links by the titles of the pages they go to, read from the web: to check." ]
 
 // ---- Document title ----
 
