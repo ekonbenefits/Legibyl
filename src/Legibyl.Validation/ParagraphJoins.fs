@@ -111,15 +111,14 @@ let private continuesLine (previousEnd: StructureGeometry) (nextStart: Structure
 /// Whether the text starting at nextStart is the next line of the text ending at previousEnd,
 /// wrapped there: what's left of the line after previousEnd (to block's right edge, block being
 /// the text around them) is narrower than nextWord, next's first word, needs, and nextStart
-/// starts the line just below at block's left edge. Were there room, the line was broken on
-/// purpose (a heading over its text, say).
-let private wrapsLine (block: StructureGeometry) (previousEnd: StructureGeometry) (nextWord: float) (nextStart: StructureGeometry) =
-    let line = min (previousEnd.Top - previousEnd.Bottom) (nextStart.Top - nextStart.Bottom)
+/// starts the line just below at block's left edge, no further below than lines of text at size
+/// are spaced (paragraphs are often spaced further apart). Were there room, the line was broken
+/// on purpose (a heading over its text, say).
+let private wrapsLine (block: StructureGeometry) (size: float) (previousEnd: StructureGeometry) (nextWord: float) (nextStart: StructureGeometry) =
     let below = previousEnd.Bottom - nextStart.Top
     previousEnd.PageNumber = nextStart.PageNumber
-    && line > 0.0
-    && below >= -0.5 * line
-    && below <= line
+    && below >= -0.5 * size
+    && below <= 0.6 * size
     && block.Right - previousEnd.Right < nextWord
     && abs (nextStart.Left - block.Left) <= SameEdge
 
@@ -139,11 +138,12 @@ let continuesTextOf context (previous: PdfDictionary, previousPage: int option) 
         let endsSentence =
             let text = previousText.TrimEnd('”', '’', '"', '\'', ')', ']', '»')
             text <> "" && ".:;!?…".Contains text[text.Length - 1]
-        let sameSize =
+        // The size both are drawn at, if it's the same (within a tenth).
+        let size =
             match last |> Option.bind _.FontSize, first |> Option.bind _.FontSize with
-            | Some a, Some b -> abs (a - b) <= 0.1 * max a b
-            | _ -> false
-        let wraps () =
+            | Some a, Some b when abs (a - b) <= 0.1 * max a b -> Some(max a b)
+            | _ -> None
+        let wraps size =
             // The room next's first word needs, at the previous piece's average width a character
             // (a piece drawn over several lines gives less, so a wrap is found less often, not more).
             let nextWord =
@@ -151,20 +151,19 @@ let continuesTextOf context (previous: PdfDictionary, previousPage: int option) 
                 let word = nextText.Split(' ')[0]
                 if characters = 0 then 0.0 else float word.Length * (previousEnd.Right - previousEnd.Left) / float characters
             not endsSentence
-            && sameSize
             && (match resolve (previous.Get PdfName.P) with
                 | :? PdfDictionary as parent ->
                     textPieces parent context previousPage
                     |> List.choose _.Geometry
                     |> List.filter (fun geometry -> geometry.PageNumber = previousEnd.PageNumber)
                     |> unionGeometry
-                    |> Option.exists (fun block -> wrapsLine block previousEnd nextWord nextStart)
+                    |> Option.exists (fun block -> wrapsLine block size previousEnd nextWord nextStart)
                 | _ -> false)
         previousText <> ""
         && nextText <> ""
         && not (ParagraphLists.isMarkerOnly previousText)
         && not (ParagraphLists.startsWithMarker nextText)
-        && (continuesLine previousEnd nextStart || wraps ())
+        && (continuesLine previousEnd nextStart || size |> Option.exists wraps)
     | _ -> false
 
 /// A paragraph that can take part in a join, with its page and where its text is drawn.

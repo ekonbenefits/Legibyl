@@ -284,6 +284,16 @@ let ``a larger heading as wide as its text isn't a wrapped line`` () =
     splitWarnings input.Path |> should be Empty
 
 [<Fact>]
+let ``paragraphs spaced further apart than lines aren't a wrapped line`` () =
+    use input = new TempPdf()
+    taggedInPieces
+        input.Path
+        [ { X = 72.0; Y = 700.0; Size = 12f; Text = "Payments and your age at retirement under the plan" }
+          { X = 72.0; Y = 676.0; Size = 12f; Text = "Your payments begin when you reach the age." } ]
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
 let ``a paragraph ending in a quotation isn't wrapped into the next`` () =
     use input = new TempPdf()
     taggedInPieces
