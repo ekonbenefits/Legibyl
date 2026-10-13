@@ -27,6 +27,15 @@ let ``a web address is an absolute http(s) one, or www. taken as https`` (text: 
 let ``anything else isn't a web address, nor is one carrying credentials`` (text: string) =
     LinkTitles.webAddress text |> should equal (None: string option)
 
+[<Fact>]
+let ``reading titles, Legibyl says its name and version, what it's doing, and where to read about it`` () =
+    use request = new Http.HttpRequestMessage()
+    request.Headers.UserAgent.ParseAdd LinkTitles.userAgent
+    let product = request.Headers.UserAgent |> Seq.head |> _.Product |> nonNull
+    product.Name |> should equal "Legibyl"
+    product.Version |> should equal (string (typeof<VeraPdfValidator>.Assembly.GetName().Version))
+    LinkTitles.userAgent |> should endWith "(PDF accessibility checker; reading link titles; +https://github.com/ekonbenefits/Legibyl)"
+
 [<Theory>]
 [<InlineData("127.0.0.1")>]
 [<InlineData("127.1.2.3")>]
