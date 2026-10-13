@@ -734,8 +734,8 @@ let private withoutComments (program: string) =
         i <- i + 1
     out.ToString()
 
-/// The glyphs an embedded TrueType font program draws (those with an outline in its glyf table,
-/// by its loca table), or None if it can't be read.
+/// Every glyph ID in an embedded TrueType font, including empty glyphs such as spaces,
+/// or None if its glyph count can't be read.
 let private trueTypeGlyphs (program: byte array) : Set<int> option =
     try
         let u16 (at: int) = (int program[at] <<< 8) ||| int program[at + 1]
@@ -745,10 +745,7 @@ let private trueTypeGlyphs (program: byte array) : Set<int> option =
                        let entry = 12 + 16 * i
                        Text.Encoding.ASCII.GetString(program, entry, 4), int (u32 (entry + 8)) ]
         let glyphs = u16 (tables["maxp"] + 4)
-        let longOffsets = u16 (tables["head"] + 50) = 1
-        let loca = tables["loca"]
-        let offset (glyph: int) = if longOffsets then u32 (loca + 4 * glyph) else int64 (u16 (loca + 2 * glyph)) * 2L
-        Some(set [ for g in 0 .. glyphs - 1 do if offset (g + 1) > offset g then g ])
+        Some(set [ 0 .. glyphs - 1 ])
     with _ -> None
 
 /// Embedded fonts' dictionaries made to agree with their font programs and CMaps, as PDF/UA asks,
@@ -786,7 +783,8 @@ let private repairFontDictionaries (document: PdfDocument) (context: Context) =
                 uncheckedLists <- uncheckedLists + 1
             elif (PdfName.CIDFontType0.Equals subtype || PdfName.CIDFontType2.Equals subtype) && not (isNull (descriptor.Get PdfName.CIDSet)) then
                 // A TrueType font's (with CIDs as its glyph numbers) is checked: kept if it lists
-                // every glyph the program draws. Another kind's can't be, and goes: it's optional.
+                // every glyph in the program, even one with no outline. Another kind's can't
+                // be, and goes: it's optional.
                 let identity = PdfName.CIDFontType2.Equals subtype && (match font.Get PdfName.CIDToGIDMap with :? PdfName as m -> PdfName.Identity.Equals m | null -> true | _ -> false)
                 let complete =
                     match descriptor.GetAsStream PdfName.FontFile2, descriptor.GetAsStream PdfName.CIDSet with
