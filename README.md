@@ -550,13 +550,17 @@ Lists tagged as plain paragraphs are detected too (`ParagraphLists.fs`,
 Structure-6): two or more sibling paragraphs on one page, at one indent, that
 each start with a list marker — the same bullet (`•`, `◦`, `▪`, or a dash
 followed by a space), or ordinals of one style and punctuation that count up by
-one (`(1)` `(2)`, `a.` `b.`, `(i)` `(ii)`). Paragraphs in a table of contents are
+one (`(1)` `(2)`, `a.` `b.`, `(i)` `(ii)`). A marker can also be a paragraph of its
+own (a bullet tagged apart from its text, as some exports do): its item's text is
+then the paragraphs after it, to the right of the marker, up to the next marker.
+Paragraphs in a table of contents are
 left alone. The matching Auto Fixes dialog option (off by default) wraps each run in
 `L` > `LI` > `LBody` around the original paragraphs and sets `/ListNumbering`
 from the markers. Only the structure tree changes, never the drawn page, so the
-document looks exactly the same; the marker stays part of each item's text
-rather than being split into an `Lbl`, since that would mean editing the page's
-content.
+document looks exactly the same; a marker that starts its paragraph stays part of
+the item's text rather than being split into an `Lbl`, since that would mean
+editing the page's content. A marker that's a paragraph of its own is retagged as
+the item's `Lbl`.
 
 A tagged document whose parent tree is missing or incomplete gets a warning
 (`ParentTree.fs`, Structure-9). The parent tree says which element each piece of
@@ -853,7 +857,10 @@ bottom, right, top]` (points) and `"alt"`.
 Legibyl also looks for likely tables tagged as paragraphs (Structure-15,
 `ParagraphTables.fs`, no model needed): consecutive sibling paragraphs whose
 text boxes repeat in at least two horizontal positions across multiple aligned
-rows. This is a review hint, not proof of a table—aligned text can also trigger
+rows. Paragraphs that Structure-6 finds are a list aren't counted: a column of
+bullets beside their items' text lines up the same way. Nor is a sentence tagged
+as several paragraphs along its lines: pieces of text no more than a word's gap
+apart are one cell. This is a review hint, not proof of a table—aligned text can also trigger
 it, and a table whose cells are not individually tagged as paragraphs may not
 be detected. Check the page before changing its tags; it is not an automatic fix.
 For a real table, select its consecutive paragraph rows in Structure… and choose

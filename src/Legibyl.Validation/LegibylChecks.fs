@@ -179,11 +179,11 @@ let private tocHeadingFindings (document: PdfDocument) context =
 let private ParagraphListMessage =
     "Looks like a list tagged as plain paragraphs: consecutive paragraphs start with list markers, so screen readers won't announce them as a list. An auto fix can tag them as one."
 
-let private paragraphListFindings (document: PdfDocument) context =
-    [ for run in ParagraphLists.find document context ->
+let private paragraphListFindings (runs: ParagraphLists.ListRun list) =
+    [ for run in runs ->
           warning
               ParagraphListMessage
-              $"{run.Items.Length} paragraphs on page {run.Page}, marked \"{run.FirstMarker}\" to \"{run.LastMarker}\"."
+              $"{run.Items.Length} items on page {run.Page}, marked \"{run.FirstMarker}\" to \"{run.LastMarker}\"."
               run.Path
               6
               PdfFixOptions.Lists
@@ -496,6 +496,7 @@ let run (document: PdfDocument) context : RuleViolation list =
         // warned of, but without offering the fix, which would do nothing.
         let discardable = lazy (ParentTree.discardable document context)
         let pruned = PdfFixOptions.EmptyParagraphs ||| PdfFixOptions.EmptyTocEntries
+        let lists = ParagraphLists.find document context
         [ for check in all do
               for visit in visits do
                   match check.Inspect context visit with
@@ -516,7 +517,7 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! disconnectedFindings document context ties
           yield! unlinkedUrlFindings document context
           yield! tocHeadingFindings document context
-          yield! paragraphListFindings document context
+          yield! paragraphListFindings lists
           yield! splitFigureFindings document context
           yield! emptyFigureFindings document context
           yield! readingJumpFindings document context
@@ -531,7 +532,11 @@ let run (document: PdfDocument) context : RuleViolation list =
                   14
                   (if candidate.Fixable then PdfFixOptions.JoinSplitWords else PdfFixOptions.None)
                   (Option.toObj candidate.Geometry)
-          for candidate in ParagraphTables.find context visits do
+          let listed = Collections.Generic.HashSet<PdfDictionary>(HashIdentity.Reference)
+          for run in lists do
+              for item in run.Items do
+                  listed.UnionWith(Option.toList item.Label @ item.Body)
+          for candidate in ParagraphTables.find context visits listed do
               warning
                   ParagraphTableMessage
                   $"Page {candidate.Page}: {candidate.ParagraphCount} paragraphs in a repeated-row layout."

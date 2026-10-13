@@ -109,3 +109,17 @@ let ``a left-aligned label column beside a right-aligned value column is reporte
           value 650.0 "Gold PPO plus" ]
     |> List.map _.ErrorMessage
     |> should equal [ "Page 1: 6 paragraphs in a repeated-row layout." ]
+
+[<Fact>]
+let ``a sentence tagged as paragraphs along its lines is not reported`` () =
+    // Each line's sentence in two paragraphs, the second straight after the first (a date
+    // tagged on its own, say): a line of text, not a row of cells.
+    let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA)
+    let opening = "The rate is as of "
+    let after = 72.0 + float (font.GetWidth(opening, 12f))
+    warnings
+        [ 72.0, 700.0, opening
+          after, 700.0, "September 1, 2026, and"
+          72.0, 675.0, opening
+          after, 675.0, "October 1, 2026." ]
+    |> should be Empty
