@@ -70,6 +70,33 @@ let private createPdf (path: string) (container: Container) (paragraphs: (float3
 
 let private at72 texts = texts |> List.map (fun text -> 72f, text)
 
+/// One page of paragraphs, each tagged P straight under Document and drawn where it says: its
+/// left edge, and its line (0 at the top, 20 points apart), so a bullet and its text can share one.
+let private createPdfPlaced (path: string) (paragraphs: (float32 * int * string) list) =
+    use document = new PdfDocument(new PdfWriter(path))
+    let page = document.AddNewPage()
+    let canvas = PdfCanvas(page)
+    let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA)
+    let tagged =
+        paragraphs
+        |> List.mapi (fun mcid (left, line, text) ->
+            let properties = PdfDictionary()
+            properties.Put(PdfName.MCID, PdfNumber mcid) |> ignore
+            canvas
+                .BeginMarkedContent(PdfName.P, properties)
+                .BeginText()
+                .SetFontAndSize(font, 12f)
+                .MoveText(float left, 700.0 - float line * 20.0)
+                .ShowText(text)
+                .EndText()
+                .EndMarkedContent()
+            |> ignore
+            element "P" page [ PdfNumber mcid ] :> PdfObject)
+    let root = PdfDictionary()
+    root.Put(PdfName.Type, PdfName.StructTreeRoot) |> ignore
+    root.Put(PdfName.K, element "Document" page tagged) |> ignore
+    document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, root) |> ignore
+
 let private listWarnings (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
     |> Seq.filter (fun a -> a.Specification = "Legibyl" && a.TestNumber = 6)
@@ -117,7 +144,7 @@ let ``numbered paragraphs are reported and tagged as a decimal list`` () =
     createPdf input.Path Body numbered
 
     let warning = listWarnings input.Path |> List.exactlyOne
-    warning.ErrorMessage |> should equal "3 paragraphs on page 1, marked \"(1)\" to \"(3)\"."
+    warning.ErrorMessage |> should equal "3 items on page 1, marked \"(1)\" to \"(3)\"."
     warning.FixOptions |> should equal PdfFixOptions.Lists
 
     let result = fixLists input.Path output.Path
@@ -173,6 +200,7 @@ let ``other marker styles get the matching numbering`` (texts: string, numbering
 [<InlineData("-5% change in the first year|-3% change in the second")>] // a minus sign, not a dash bullet
 [<InlineData("(1) the first condition|and a paragraph continuing it|(2) the second condition")>] // interrupted
 [<InlineData("• a bullet|(2) then a number")>] // mixed markers
+[<InlineData("•|•")>] // bullets with no text
 let ``paragraphs that aren't clearly a list are left alone`` (texts: string) =
     warningsFor Body (at72 (List.ofArray (texts.Split '|'))) |> should be Empty
 
@@ -220,7 +248,7 @@ let ``blank paragraphs between items don't split the list`` () =
     createPdf input.Path Body (at72 [ "(1) the first"; ""; "(2) the second"; ""; "(3) the third" ])
 
     (listWarnings input.Path |> List.exactlyOne).ErrorMessage
-    |> should equal "3 paragraphs on page 1, marked \"(1)\" to \"(3)\"."
+    |> should equal "3 items on page 1, marked \"(1)\" to \"(3)\"."
 
     // On its own, each blank paragraph stays in the item before it; nothing is lost or moved on the page.
     fixLists input.Path listsOnly.Path |> ignore
@@ -231,3 +259,47 @@ let ``blank paragraphs between items don't split the list`` () =
         VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, withEmptyRemoval.Path, PdfFixOptions.Lists ||| PdfFixOptions.EmptyParagraphs)
     List.ofSeq result.AppliedFixes |> should equal [ "Removed 2 empty /P structure element(s)."; "Tagged 1 run(s) of marked paragraphs as lists." ]
     shape withEmptyRemoval.Path |> should equal [ "L(LI(LBody(P)),LI(LBody(P)),LI(LBody(P)))" ]
+
+/// A bulleted list whose bullets are tagged as paragraphs of their own, each item's text in
+/// the paragraphs beside it (the first item's on two lines), between two ordinary paragraphs.
+let private bulletsApart =
+    [ 72f, 0, "The terms are as follows."
+      72f, 1, "•"
+      84f, 1, "The first item, which runs"
+      84f, 2, "on to a second line."
+      72f, 3, "•"
+      84f, 3, "The second item."
+      72f, 4, "That's all of them." ]
+
+[<Fact>]
+let ``bullets tagged apart from their text are a list, not a table`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfPlaced input.Path bulletsApart
+    let structureWarnings path =
+        VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
+        |> Seq.filter (fun a -> a.Specification = "Legibyl" && (a.TestNumber = 6 || a.TestNumber = 15))
+        |> Seq.map (fun a -> a.TestNumber, a.ErrorMessage)
+        |> List.ofSeq
+
+    structureWarnings input.Path |> should equal [ 6, "2 items on page 1, marked \"•\" to \"•\"." ]
+
+    fixLists input.Path output.Path |> ignore
+
+    // Each bullet is its item's label, and the item's text its body.
+    shape output.Path |> should equal [ "P"; "L(LI(Lbl,LBody(P,P)),LI(Lbl,LBody(P)))"; "P" ]
+    listNumbering output.Path |> should equal [ PdfName "Disc" ]
+    structureWarnings output.Path |> should be Empty
+    Set.difference (failedRules output.Path) (failedRules input.Path) |> should be Empty
+    use renderer = new PdfRegionRenderer()
+    let page = { PageNumber = 1; Left = 0.0; Bottom = 0.0; Right = 1.0; Top = 1.0 }
+    renderer.RenderPageWithHighlight(output.Path, page).PngBytes
+    |> should equal (renderer.RenderPageWithHighlight(input.Path, page).PngBytes)
+
+[<Fact>]
+let ``a bullet on its own isn't an item when what follows isn't beside it`` () =
+    use input = new TempPdf()
+    // The text under each bullet, at the margin, rather than beside it: maybe not its item's.
+    createPdfPlaced input.Path [ 72f, 0, "•"; 72f, 1, "Under the first bullet."; 72f, 2, "•"; 72f, 3, "Under the second." ]
+
+    listWarnings input.Path |> should be Empty

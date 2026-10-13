@@ -49,7 +49,10 @@ let rec private textFragments (context: Context) (page: int option) (obj: PdfObj
         textFragments context page (dictionary.Get(PdfName.K))
     | _ -> []
 
-let private joinedFragments (paragraph: Paragraph) =
+/// The boxes a row's text makes, its paragraphs' pieces of text joined where they're no more
+/// than a word's gap apart: a sentence tagged as several paragraphs along a line is one box,
+/// not a row of cells.
+let private joinedFragments (paragraphs: Paragraph list) =
     let merge (left: StructureGeometry) (right: StructureGeometry) : StructureGeometry =
         { left with
             Left = min left.Left right.Left
@@ -63,8 +66,10 @@ let private joinedFragments (paragraph: Paragraph) =
         | None, next :: rest -> group (Some next) rest
         | Some box, next :: rest when next.Left - box.Right <= 8.0 -> group (Some(merge box next)) rest
         | Some box, next :: rest -> box :: group (Some next) rest
-    let fragments = if paragraph.Fragments.IsEmpty then [ paragraph.Box ] else paragraph.Fragments
-    fragments |> List.sortBy _.Left |> group None
+    paragraphs
+    |> List.collect (fun paragraph -> if paragraph.Fragments.IsEmpty then [ paragraph.Box ] else paragraph.Fragments)
+    |> List.sortBy _.Left
+    |> group None
 
 let private rows (paragraphs: Paragraph list) : (int * StructureGeometry * Paragraph list) list =
     let overlap (a: StructureGeometry) (b: StructureGeometry) =
@@ -108,7 +113,7 @@ let private hasRepeatedColumns (rows: (int * StructureGeometry * Paragraph list)
     // Each cell box, by its row and its place among the row's boxes.
     let boxes =
         [ for row, _, cells in rows do
-              for i, box in cells |> List.collect joinedFragments |> List.indexed -> (row, i), box ]
+              for i, box in joinedFragments cells |> List.indexed -> (row, i), box ]
     let columns alignment =
         let entries = boxes |> List.map (fun (cell, box) -> anchor alignment box, cell) |> List.sortBy fst
         let rec group (current: (float * (int * int)) list) (entries: (float * (int * int)) list) =
@@ -141,11 +146,13 @@ let private hasRepeatedColumns (rows: (int * StructureGeometry * Paragraph list)
 let private tableRows (paragraphs: Paragraph list) =
     let rows =
         rows paragraphs
-        |> List.filter (fun (_, _, cells) -> cells |> List.sumBy (joinedFragments >> List.length) >= 2)
+        |> List.filter (fun (_, _, cells) -> (joinedFragments cells).Length >= 2)
     if rows.Length >= 2 && hasRepeatedColumns rows then Some rows else None
 
 /// Finds maximal consecutive runs of same-page sibling paragraphs that resemble a table grid.
-let find (context: Context) (visits: StructElemVisit list) : Finding list =
+/// Paragraphs in listed (a list's items, as ParagraphLists finds them) aren't counted: a column
+/// of bullets beside their items' text lines up as rows and columns too.
+let find (context: Context) (visits: StructElemVisit list) (listed: Collections.Generic.IReadOnlySet<PdfDictionary>) : Finding list =
     let siblings =
         visits
         |> List.choose (fun visit ->
@@ -154,7 +161,7 @@ let find (context: Context) (visits: StructElemVisit list) : Finding list =
                 let geometry = textGeometry visit.Element context visit.Page
                 let page = visit.Page |> Option.orElse (geometry |> Option.map _.PageNumber)
                 let paragraph =
-                    if isParagraph visit.Element context then
+                    if isParagraph visit.Element context && not (listed.Contains visit.Element) then
                         match page, geometry with
                         | Some page, Some box ->
                             if String.IsNullOrWhiteSpace(extractText visit.Element context (Some page)) then None
