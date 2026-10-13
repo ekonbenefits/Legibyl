@@ -235,23 +235,27 @@ let rec private collectGeometries (obj: PdfObject | null) context (inheritedPage
 let subtreeGeometry (obj: PdfObject | null) context (inheritedPage: int option) =
     collectGeometries obj context inheritedPage |> unionGeometry
 
-let rec private collectTextGeometries (obj: PdfObject | null) context (inheritedPage: int option) : StructureGeometry list =
+let rec private collectTextContent (obj: PdfObject | null) context (inheritedPage: int option) : MarkedContentTextIndex.MarkedContentInfo list =
     match resolve obj with
-    | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do yield! collectTextGeometries (array.Get i) context inheritedPage ]
+    | :? PdfArray as array -> [ for i in 0 .. array.Size() - 1 do yield! collectTextContent (array.Get i) context inheritedPage ]
     | :? PdfNumber as mcid when inheritedPage.IsSome ->
-        markedContent context mcid inheritedPage.Value |> Option.bind _.Geometry |> Option.toList
+        markedContent context mcid inheritedPage.Value |> Option.filter _.Geometry.IsSome |> Option.toList
     | :? PdfDictionary as dictionary when isNull (dictionary.GetAsDictionary(PdfName.Obj)) ->
         let page = structElemPage dictionary context inheritedPage
         match dictionary.GetAsNumber PdfName.MCID, page with
         // A marked-content reference (/MCR) with its MCID in /MCID.
-        | NonNull mcid, Some page -> markedContent context mcid page |> Option.bind _.Geometry |> Option.toList
-        | _ -> collectTextGeometries (dictionary.Get(PdfName.K)) context page
+        | NonNull mcid, Some page -> markedContent context mcid page |> Option.filter _.Geometry.IsSome |> Option.toList
+        | _ -> collectTextContent (dictionary.Get(PdfName.K)) context page
     | _ -> []
 
 /// Like subtreeGeometry, but only what's drawn: annotation rectangles (/OBJR) are left out,
 /// since a link's rectangle often spans the whole line whatever its text's indent.
 let textGeometry (obj: PdfObject | null) context (inheritedPage: int option) =
-    collectTextGeometries obj context inheritedPage |> unionGeometry
+    collectTextContent obj context inheritedPage |> List.choose _.Geometry |> unionGeometry
+
+/// Each piece of marked content under obj that draws something, in the order the tags read them.
+let textPieces (obj: PdfObject | null) context (inheritedPage: int option) =
+    collectTextContent obj context inheritedPage
 
 /// A table-of-contents entry's own text without its dot leaders and printed page number:
 /// "Scope of this document ..... 3" becomes "Scope of this document". Text without leaders

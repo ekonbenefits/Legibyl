@@ -78,7 +78,8 @@ let private splitParagraph context (visit: StructElemVisit) =
         let currentText = ParagraphJoins.normalizeText (extractText visit.Element context visit.Page)
         let nextText = ParagraphJoins.normalizeText (extractText next.Element context next.Page)
         if not onDifferentPages
-           && ParagraphJoins.looksSplit (languageOf visit.Element context, currentText) (languageOf next.Element context, nextText) then
+           && (ParagraphJoins.looksSplit (languageOf visit.Element context, currentText) (languageOf next.Element context, nextText)
+               || ParagraphJoins.continuesTextOf context (visit.Element, visit.Page) (next.Element, next.Page)) then
             Some
                 { Location = $"{visit.Path} + {next.Path}"
                   Geometry =
@@ -112,7 +113,7 @@ let all: Check list =
         Inspect = emptyParagraph }
       { TestNumber = 2
         Message =
-          "Likely split paragraph: neighbouring paragraph tags look like lines of the same sentence, so a screen reader reads one sentence as several paragraphs. Best fixed where the PDF was made; an auto fix can join them where the page shows one block of text, or in Structure…, shift-click the paragraphs and Merge them."
+          "Likely split paragraph: neighbouring paragraph tags look like parts of the same sentence (its lines, or pieces along a line), so a screen reader reads one sentence as several paragraphs. Best fixed where the PDF was made; an auto fix can join them where the page shows one block of text, or in Structure…, shift-click the paragraphs and Merge them."
         FixOptions = PdfFixOptions.JoinSplitParagraphs
         Inspect = splitParagraph }
       { TestNumber = 8

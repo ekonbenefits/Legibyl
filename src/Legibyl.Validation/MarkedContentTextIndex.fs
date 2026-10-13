@@ -18,7 +18,11 @@ open UglyToad.PdfPig.Core
 // public IPdfImage interface in this version only exposes Bounds.
 #nowarn "44"
 
-type MarkedContentInfo = { Text: string; Geometry: StructureGeometry option }
+type MarkedContentInfo =
+    { Text: string
+      Geometry: StructureGeometry option
+      /// The size its text is drawn at, in points (the middle one of its seen glyphs'), if it has text.
+      FontSize: float option }
 
 /// What each (page number, MCID) draws.
 type Index() =
@@ -173,8 +177,17 @@ let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedCon
         let drawn = drawnBy element
         let text = concatenateLetters (ResizeArray(drawn |> Seq.collect _.Letters))
         let geometry = unionGeometry (drawn |> List.choose (geometryFromMarkedContent pageNumber))
+        let fontSize =
+            let sizes =
+                drawn
+                |> Seq.collect _.Letters
+                |> Seq.filter (fun letter -> not (String.IsNullOrWhiteSpace letter.Value) && letter.PointSize > 0.0)
+                |> Seq.map _.PointSize
+                |> Seq.sort
+                |> Array.ofSeq
+            if sizes.Length = 0 then None else Some sizes[sizes.Length / 2]
         if not (String.IsNullOrEmpty text) || geometry.IsSome then
-            index[(pageNumber, element.MarkedContentIdentifier)] <- { Text = text; Geometry = geometry }
+            index[(pageNumber, element.MarkedContentIdentifier)] <- { Text = text; Geometry = geometry; FontSize = fontSize }
         if element.Children.Count > 0 then
             indexMarkedContent pageNumber element.Children index
 

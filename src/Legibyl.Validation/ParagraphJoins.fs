@@ -81,6 +81,92 @@ let looksSplit (currentLanguage: string option, currentText: string) (nextLangua
     && (Char.IsLower nextText[0]
         || continuations |> List.exists (fun word -> nextText.StartsWith(word + " ", StringComparison.OrdinalIgnoreCase)))
 
+/// How far apart, in points, two pieces of text on one line can be and still read as one run of
+/// words (a space, not a column's gap).
+[<Literal>]
+let private WordGap = 8.0
+
+/// How near, in points, a line's start must be to the left edge of the text around it.
+[<Literal>]
+let private SameEdge = 3.0
+
+/// Whether the text starting at nextStart picks up on the line where the text ending at
+/// previousEnd stops, just after it: a sentence tagged in pieces along its line (a date, number
+/// or name dropped into it, each its own paragraph). Pieces of a line are about as tall as each
+/// other; one drawn over several lines is taller, and its edges aren't where its line ends or
+/// starts, so it isn't taken for one.
+let private continuesLine (previousEnd: StructureGeometry) (nextStart: StructureGeometry) =
+    let previousHeight = previousEnd.Top - previousEnd.Bottom
+    let nextHeight = nextStart.Top - nextStart.Bottom
+    let shorter, taller = min previousHeight nextHeight, max previousHeight nextHeight
+    let overlap = min previousEnd.Top nextStart.Top - max previousEnd.Bottom nextStart.Bottom
+    let gap = nextStart.Left - previousEnd.Right
+    previousEnd.PageNumber = nextStart.PageNumber
+    && shorter > 0.0
+    && taller <= 2.0 * shorter
+    && overlap >= 0.5 * shorter
+    && gap >= -1.0
+    && gap <= WordGap
+
+/// Whether the text starting at nextStart is the next line of the text ending at previousEnd,
+/// wrapped there: what's left of the line after previousEnd (to block's right edge, block being
+/// the text around them) is narrower than nextWord, next's first word, needs, and nextStart
+/// starts the line just below at block's left edge. Were there room, the line was broken on
+/// purpose (a heading over its text, say).
+let private wrapsLine (block: StructureGeometry) (previousEnd: StructureGeometry) (nextWord: float) (nextStart: StructureGeometry) =
+    let line = min (previousEnd.Top - previousEnd.Bottom) (nextStart.Top - nextStart.Bottom)
+    let below = previousEnd.Bottom - nextStart.Top
+    previousEnd.PageNumber = nextStart.PageNumber
+    && line > 0.0
+    && below >= -0.5 * line
+    && below <= line
+    && block.Right - previousEnd.Right < nextWord
+    && abs (nextStart.Left - block.Left) <= SameEdge
+
+/// Whether next's text carries on previous's sentence where the page draws it: on the same line,
+/// just after it (see continuesLine), or wrapped onto the next line (see wrapsLine) at the same
+/// size where previous doesn't end a sentence (not a heading over its text). Not where previous
+/// is a list item's marker drawn beside its text, nor where next starts with a marker of its own.
+let continuesTextOf context (previous: PdfDictionary, previousPage: int option) (next: PdfDictionary, nextPage: int option) =
+    let pieceGeometry (piece: MarkedContentTextIndex.MarkedContentInfo option) = piece |> Option.bind _.Geometry
+    let last = List.tryLast (textPieces previous context previousPage)
+    let first = List.tryHead (textPieces next context nextPage)
+    match pieceGeometry last, pieceGeometry first with
+    | Some previousEnd, Some nextStart ->
+        let previousText = normalizeText (extractText previous context previousPage)
+        let nextText = normalizeText (extractText next context nextPage)
+        // A sentence ends at its full stop, even inside closing quotes or brackets.
+        let endsSentence =
+            let text = previousText.TrimEnd('”', '’', '"', '\'', ')', ']', '»')
+            text <> "" && ".:;!?…".Contains text[text.Length - 1]
+        let sameSize =
+            match last |> Option.bind _.FontSize, first |> Option.bind _.FontSize with
+            | Some a, Some b -> abs (a - b) <= 0.1 * max a b
+            | _ -> false
+        let wraps () =
+            // The room next's first word needs, at the previous piece's average width a character
+            // (a piece drawn over several lines gives less, so a wrap is found less often, not more).
+            let nextWord =
+                let characters = (normalizeText (last |> Option.map _.Text |> Option.defaultValue "")).Length
+                let word = nextText.Split(' ')[0]
+                if characters = 0 then 0.0 else float word.Length * (previousEnd.Right - previousEnd.Left) / float characters
+            not endsSentence
+            && sameSize
+            && (match resolve (previous.Get PdfName.P) with
+                | :? PdfDictionary as parent ->
+                    textPieces parent context previousPage
+                    |> List.choose _.Geometry
+                    |> List.filter (fun geometry -> geometry.PageNumber = previousEnd.PageNumber)
+                    |> unionGeometry
+                    |> Option.exists (fun block -> wrapsLine block previousEnd nextWord nextStart)
+                | _ -> false)
+        previousText <> ""
+        && nextText <> ""
+        && not (ParagraphLists.isMarkerOnly previousText)
+        && not (ParagraphLists.startsWithMarker nextText)
+        && (continuesLine previousEnd nextStart || wraps ())
+    | _ -> false
+
 /// A paragraph that can take part in a join, with its page and where its text is drawn.
 type private Piece =
     { Paragraph: PdfDictionary
@@ -111,9 +197,10 @@ let private pieceOf context (obj: PdfObject | null) =
 /// Whether next can be joined onto previous if the layout agrees: the split-paragraph warning
 /// flags them (so only what it reported is joined), and they're on the same page, in the same
 /// language, and next isn't a list item of its own.
-let private couldFollow (previous: Piece) (next: Piece) =
+let private couldFollow context (previous: Piece) (next: Piece) =
     previous.Page = next.Page
-    && looksSplit (previous.Language, previous.Text) (next.Language, next.Text)
+    && (looksSplit (previous.Language, previous.Text) (next.Language, next.Text)
+        || continuesTextOf context (previous.Paragraph, Some previous.Page) (next.Paragraph, Some next.Page))
     // In the same language: their own, or the one around them.
     && (previous.Language |> Option.map _.ToLowerInvariant()) = (next.Language |> Option.map _.ToLowerInvariant())
     && not (ParagraphLists.startsWithMarker next.Text)
@@ -141,7 +228,7 @@ let find (document: PdfDocument) context (regions: int -> IReadOnlyList<LayoutRe
                   let pieces = Array.init (kids.Size()) (fun i -> pieceOf context (kids.Get i))
                   let joinsPrevious i =
                       match pieces[i - 1], pieces[i] with
-                      | Some previous, Some next when couldFollow previous next ->
+                      | Some previous, Some next when couldFollow context previous next ->
                           let regions = regionsOn next.Page
                           match regionOf regions previous.Geometry, regionOf regions next.Geometry with
                           | Some a, Some b -> a = b
