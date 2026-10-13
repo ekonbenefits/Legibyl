@@ -93,7 +93,7 @@ let ``paragraphs the split warning flags are joined where the layout shows one b
         VeraPdfValidator(LayoutSource = FixedLayout blocks).Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.JoinSplitParagraphs)
 
     result.AppliedFixes
-    |> should contain "Joined 4 paragraphs tagged line by line into 2, where the page layout shows one block of text."
+    |> should contain "Joined 4 paragraphs tagged line by line or in pieces into 2, where the page layout shows one block of text."
     paragraphs output.Path
     |> List.map (fun (tag, content) -> tag, (string content).Replace("  ", " ").Trim())
     |> should
@@ -187,5 +187,118 @@ let ``a Spanish sentence tagged line by line is joined at Spanish's "Y", once th
         VeraPdfValidator(LayoutSource = FixedLayout [ wide (682.0, 711.0) ])
             .Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Language ||| PdfFixOptions.JoinSplitParagraphs)
 
-    result.AppliedFixes |> should contain "Joined 2 paragraphs tagged line by line into 1, where the page layout shows one block of text."
+    result.AppliedFixes |> should contain "Joined 2 paragraphs tagged line by line or in pieces into 1, where the page layout shows one block of text."
     paragraphs output.Path |> List.length |> should equal 1
+
+// ---- Sentences tagged in pieces, as the page draws them ----
+
+/// A piece of text: where it starts (x, baseline), its size, and its text, each tagged its own
+/// paragraph (a region around it); pieces drawn one after another along a line follow on from
+/// each other's ends.
+type private Drawn = { X: float; Y: float; Size: float32; Text: string }
+
+let private helvetica () = PdfFontFactory.CreateFont(StandardFonts.HELVETICA, "WinAnsi")
+
+/// Pieces drawn one after another along the line at y, from x.
+let private along (x: float) (y: float) (size: float32) (texts: string list) =
+    let font = helvetica ()
+    texts
+    |> List.mapFold (fun x text -> { X = x; Y = y; Size = size; Text = text }, x + float (font.GetWidth(text, size))) x
+    |> fst
+
+/// A PDF whose pieces are each tagged as a paragraph, in the order given.
+let private taggedInPieces (path: string) (pieces: Drawn list) =
+    use untagged = new TempPdf()
+    do
+        use document = new PdfDocument(new PdfWriter(untagged.Path))
+        let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
+        let font = helvetica ()
+        for piece in pieces do
+            canvas.BeginText().SetFontAndSize(font, piece.Size).MoveText(piece.X, piece.Y).ShowText(piece.Text).EndText() |> ignore
+    let font = helvetica ()
+    let regions =
+        [ for piece in pieces ->
+              let size = float piece.Size
+              let left = piece.X + float (font.GetWidth(piece.Text.TrimEnd(), piece.Size)) - float (font.GetWidth(piece.Text.Trim(), piece.Size))
+              { region (piece.Y - 0.3 * size, piece.Y + 0.9 * size) with
+                  Geometry =
+                    { PageNumber = 1
+                      Left = left + 0.5
+                      Bottom = piece.Y - 0.3 * size
+                      Right = piece.X + float (font.GetWidth(piece.Text.TrimEnd(), piece.Size)) - 0.5
+                      Top = piece.Y + 0.9 * size } } ]
+    VeraPdfValidator(LayoutSource = FixedLayout regions).Fix(untagged.Path, PdfProfile.PdfUa1, path, PdfFixOptions.TagFromLayout)
+    |> ignore
+    paragraphs path |> List.length |> should equal pieces.Length
+
+/// The split-paragraph warnings (Structure-2): each one's place.
+let private splitWarnings (path: string) =
+    VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
+    |> Seq.filter (fun finding -> finding.Specification = "Legibyl" && finding.TestNumber = 2)
+    |> List.ofSeq
+
+/// A sentence with a date and an age dropped into it, each piece its own paragraph: along the
+/// first line, wrapped onto the second, and along that. None reads as split by its words alone.
+let private dropIns =
+    along 72.0 700.0 12f [ "Payments assume they begin on "; "September 30, 2026"; " and that you are" ]
+    @ along 72.0 686.0 12f [ "age "; "67"; " on that date." ]
+
+[<Fact>]
+let ``a sentence tagged in pieces along its lines is warned of as split, and joined where the layout shows one block`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    taggedInPieces input.Path dropIns
+
+    let warnings = splitWarnings input.Path
+
+    warnings |> List.length |> should equal 5
+    warnings |> List.forall (fun warning -> warning.FixOptions = PdfFixOptions.JoinSplitParagraphs) |> should be True
+    let result =
+        VeraPdfValidator(LayoutSource = FixedLayout [ { region (680.0, 712.0) with Geometry = { PageNumber = 1; Left = 66.0; Bottom = 680.0; Right = 560.0; Top = 712.0 } } ])
+            .Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.JoinSplitParagraphs)
+    result.AppliedFixes
+    |> should contain "Joined 6 paragraphs tagged line by line or in pieces into 1, where the page layout shows one block of text."
+    paragraphs output.Path
+    |> List.map (fun (_, content) -> System.Text.RegularExpressions.Regex.Replace(string content, @"\s+", " ").Trim())
+    |> should equal [ "Payments assume they begin on September 30, 2026 and that you are age 67 on that date." ]
+    splitWarnings output.Path |> should be Empty
+
+[<Fact>]
+let ``a heading over its text isn't a wrapped line: its text's first word would have fitted after it`` () =
+    use input = new TempPdf()
+    taggedInPieces
+        input.Path
+        [ { X = 72.0; Y = 700.0; Size = 12f; Text = "Payments and your age" }
+          { X = 72.0; Y = 686.0; Size = 12f; Text = "Your payments begin when you reach the age the plan sets." } ]
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a larger heading as wide as its text isn't a wrapped line`` () =
+    use input = new TempPdf()
+    taggedInPieces
+        input.Path
+        [ { X = 72.0; Y = 700.0; Size = 18f; Text = "Payments and your age at retirement" }
+          { X = 72.0; Y = 682.0; Size = 10f; Text = "Your payments begin when you reach the age the plan sets." } ]
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a paragraph ending in a quotation isn't wrapped into the next`` () =
+    use input = new TempPdf()
+    taggedInPieces
+        input.Path
+        [ { X = 72.0; Y = 700.0; Size = 12f; Text = "Economists gave the years after it a name: the “jobless recovery.”" }
+          { X = 72.0; Y = 686.0; Size = 12f; Text = "Hiring picked up again the next year." } ]
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a list item's number beside its text isn't a piece of its sentence`` () =
+    use input = new TempPdf()
+    taggedInPieces
+        input.Path
+        [ { X = 72.0; Y = 700.0; Size = 12f; Text = "1." }
+          { X = 86.0; Y = 700.0; Size = 12f; Text = "Your payments begin when you reach the age the plan sets." } ]
+
+    splitWarnings input.Path |> should be Empty

@@ -34,7 +34,7 @@ module PdfFixDescriptions =
           PdfFixOptions.LinkTargets, "Point links and bookmarks within a PDF 2.0 document at the tags they go to"
           PdfFixOptions.Title, "Set a document title and show it in the title bar"
           PdfFixOptions.TitleFromFirstPage, "Title an untitled document from its title page's text"
-          PdfFixOptions.JoinSplitParagraphs, "Join paragraphs tagged line by line where the page layout shows one block of text"
+          PdfFixOptions.JoinSplitParagraphs, "Join paragraphs tagged line by line or in pieces where the page layout shows one block of text"
           PdfFixOptions.JoinSplitWords, "Give text blocks replacement text where adjacent Span tags split words"
           PdfFixOptions.LinkUrls, "Link web addresses shown as text that nothing links"
           PdfFixOptions.ApplyEdits, "Write the edits a person made (alt text, replacement text, merged paragraphs)" ]

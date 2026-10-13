@@ -532,7 +532,7 @@ let private joinSplitParagraphs (layout: PageLayout option) (document: PdfDocume
         | [] -> []
         | runs ->
             let joined = ParagraphJoins.join runs
-            [ $"Joined {joined + runs.Length} paragraphs tagged line by line into {runs.Length}, where the page layout shows one block of text." ]
+            [ $"Joined {joined + runs.Length} paragraphs tagged line by line or in pieces into {runs.Length}, where the page layout shows one block of text." ]
 
 let private addBookmarks (document: PdfDocument) context =
     match Bookmarks.find document context with

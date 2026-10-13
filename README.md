@@ -499,7 +499,8 @@ marks known fixable rows in the **Fix** column: a wrench for what an auto fix
 fixes (as on the **Auto Fixes…** button), and a wand for what tagging from the
 suggested structure fixes (as on **Suggest Structure…**). It also warns about
 adjacent sibling `/P` tags that look like visual line fragments from the same
-sentence (Structure-2); those are intentionally warning-only because the safest fix is
+sentence, or pieces of one line where the next starts right after the last one
+ends (Structure-2); those are intentionally warning-only because the safest fix is
 usually in the source document (for example, the original Word file) rather
 than rewriting paragraph semantics in the PDF after export. These warnings
 (reported as `Legibyl` / `Structure-N`) are all defined in
@@ -509,7 +510,7 @@ new one. All of them:
 | Check | Warns about | Auto fix |
 |---|---|---|
 | Structure-1 | An empty paragraph tag | `empty-paragraphs` |
-| Structure-2 | Neighbouring paragraphs that look like lines of one sentence | `join-split-paragraphs`, where the page layout agrees |
+| Structure-2 | Neighbouring paragraphs that look like parts of one sentence: its lines, or pieces of one line (a date or number dropped into it) | `join-split-paragraphs`, where the page layout agrees |
 | Structure-3 | A paragraph the table of contents lists as a heading | `headings-from-toc` |
 | Structure-4 | A table-of-contents entry that matches no one paragraph | — |
 | Structure-5 | Headings the table of contents lists that couldn't be recovered | — |
@@ -1310,7 +1311,7 @@ keeps this table in step with it):
 | `empty-toc-entries` | Remove empty table-of-contents entries |  |
 | `empty-figures` | Remove figure tags that draw nothing |  |
 | `empty-spans` | Remove span tags with nothing in them, keeping the spaces between words |  |
-| `join-split-paragraphs` | Join paragraphs tagged line by line where the page layout shows one block of text | uses the layout models |
+| `join-split-paragraphs` | Join paragraphs tagged line by line or in pieces where the page layout shows one block of text | uses the layout models |
 | `join-split-words` | Give text blocks replacement text where adjacent Span tags split words |  |
 | `lists` | Tag paragraphs that start with list markers (or are one) as a list |  |
 | `table-header-scope` | Say which cells each table header cell heads (its Scope: column or row) |  |

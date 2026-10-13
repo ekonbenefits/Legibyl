@@ -158,6 +158,9 @@ let private markerOnly (text: string) =
     | Some(_, markerText) as found when markerText = text -> found
     | _ -> None
 
+/// Whether text is a list marker and nothing else ("•", "1.").
+let isMarkerOnly (text: string) = (markerOnly (text.Trim())).IsSome
+
 // ---- Finding runs ----
 
 // Items of one list share an indent, within this many points.
