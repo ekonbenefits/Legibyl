@@ -401,11 +401,13 @@ module internal VeraPdf =
                             assertion.FixOptions &&& ~~~PdfFixOptions.LinkContents
                         else
                             assertion.FixOptions
+                    // Titles from the web only describe web links described by nothing but their address.
                     let options =
-                        if assertion.FixOptions.HasFlag PdfFixOptions.LinkContents && isIn webLinkAnnotations then
+                        if (assertion.FixOptions &&& (PdfFixOptions.LinkContents ||| PdfFixOptions.LinkTitlesFromWeb)) <> PdfFixOptions.None
+                           && isIn webLinkAnnotations then
                             options ||| PdfFixOptions.LinkTitlesFromWeb
                         else
-                            options
+                            options &&& ~~~PdfFixOptions.LinkTitlesFromWeb
                     // Titling from the first page does what DocumentTitle does, and can only
                     // add a title where the document has a title page to take it from.
                     let options =
