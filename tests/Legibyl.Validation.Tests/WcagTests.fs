@@ -128,6 +128,31 @@ let ``a WCAG criterion above level AA is a warning a review can dismiss, not a f
     ReviewFile.dismisses review linkPurpose.Head |> should be True
 
 [<Fact>]
+let ``a link described only as its address isn't offered titles from the web unless it goes to a web page`` () =
+    use pdf = new TempPdf()
+    do
+        use document = new PdfUADocument(new PdfWriter(pdf.Path), PdfUAConfig(PdfUAConformance.PDF_UA_1, "Garden Links", "en-US"))
+        let font =
+            iText.Kernel.Font.PdfFontFactory.CreateFont(
+                corpusFile (Path.Combine("fonts", "Lato-Regular.ttf")),
+                iText.IO.Font.PdfEncodings.WINANSI,
+                iText.Kernel.Font.PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED
+            )
+        use layout = new iText.Layout.Document(document)
+        layout.SetFont font |> ignore
+        let address = "mailto:plan@example.org"
+        let link = Link(address, iText.Kernel.Pdf.Action.PdfAction.CreateURI address)
+        link.GetLinkAnnotation().SetContents address |> ignore
+        link.GetAccessibilityProperties().SetAlternateDescription address |> ignore
+        layout.Add(Paragraph().Add link) |> ignore
+
+    let report = validator.Value.Validate(pdf.Path, PdfProfile.PdfUa1)
+
+    let linkPurpose = report.Findings |> Seq.filter (fun f -> f.RuleId = "2.4.9-1") |> List.ofSeq
+    linkPurpose |> List.length |> should equal 1
+    linkPurpose.Head.FixOptions |> should equal PdfFixOptions.None
+
+[<Fact>]
 let ``a link with no description at all fails WCAG 2.2 at level A, not only AAA's warning`` () =
     use made = new TempPdf()
     use pdf = new TempPdf()

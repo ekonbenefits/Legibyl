@@ -138,7 +138,20 @@ let private webLinkAddress (annotation: PdfDictionary) =
         | Null -> None
     | _ -> None
 
-/// Every link annotation without a description that goes to a web address, with the address.
+/// Whether a link's /Contents says nothing more than its address does: none, blank, or the
+/// address itself (which a screen reader just reads out).
+let private onlyItsAddress (annotation: PdfDictionary) (address: string) =
+    match annotation.GetAsString PdfName.Contents with
+    | Null -> true
+    | NonNull contents ->
+        let said = contents.ToUnicodeString().Trim()
+        said = ""
+        || (match LinkTitles.webAddress said with
+            | Some written -> String.Equals(written.TrimEnd '/', address.TrimEnd '/', StringComparison.OrdinalIgnoreCase)
+            | None -> false)
+
+/// Every link annotation that goes to a web address with no description but that address,
+/// with the address.
 let private undescribedWebLinks (document: PdfDocument) =
     [ for pageNumber in 1 .. document.GetNumberOfPages() do
           match document.GetPage(pageNumber).GetPdfObject().GetAsArray PdfName.Annots with
@@ -146,11 +159,11 @@ let private undescribedWebLinks (document: PdfDocument) =
           | annotations ->
               for i in 0 .. annotations.Size() - 1 do
                   match annotations.GetAsDictionary i with
-                  | NonNull annotation when isBlankString (annotation.GetAsString PdfName.Contents) ->
+                  | NonNull annotation ->
                       match webLinkAddress annotation with
-                      | Some address -> yield annotation, address
-                      | None -> ()
-                  | _ -> () ]
+                      | Some address when onlyItsAddress annotation address -> yield annotation, address
+                      | _ -> ()
+                  | Null -> () ]
 
 /// Object numbers of the link annotations describeWebLinks could give a /Contents: those going
 /// to web addresses. Lets validation mark those findings as fixable by it.
@@ -161,23 +174,32 @@ let webLinkAnnotationNumbers (document: PdfDocument) : Set<int> =
               | null -> ()
               | reference -> yield reference.GetObjNumber() ]
 
-/// Gives each link to a web address that has no description one from the title of the page it
-/// goes to, with its host ("Apply for benefits (example.com)"), from titles. Wherever the link
-/// is: unlike its visible text ("click here"), the page's title does say where it goes. A link
-/// whose page has no title that can be read is left for a person to describe.
-let describeWebLinks (titles: IPageTitleSource) (document: PdfDocument) (_: Context) =
+/// Gives each link to a web address that has no description (or only the address) one from the
+/// title of the page it goes to, with its host ("Apply for benefits (example.com)"), from titles.
+/// Wherever the link is: unlike its visible text ("click here"), the page's title does say where
+/// it goes. A link whose page has no title that can be read is left for a person to describe,
+/// and noted.
+let describeWebLinks (titles: IPageTitleSource) (document: PdfDocument) (context: Context) =
     match undescribedWebLinks document with
     | [] -> []
     | links ->
         let found = titles.PageTitles(links |> List.map snd |> List.distinct)
         let mutable described = 0
+        let left = ResizeArray<string>()
         for annotation, address in links do
             match LinkTitles.linkDescription found address with
             | Some description ->
                 annotation.Put(PdfName.Contents, textString description) |> ignore
                 described <- described + 1
-            | None -> ()
+            | None -> if not (left.Contains address) then left.Add address
+        if left.Count > 0 then
+            let addresses = String.Join(", ", left)
+            context.Notes.Add
+                $"No title could be read from the page(s) {addresses} (the site refused, didn't answer, or has none that says more than its address), so their links weren't described: in Structure…, right-click each link › Edit Link Description…."
         match described with
+        | 0 -> []
+        | 1 -> [ "Described 1 web link by the title of the page it goes to, read from the web: to check." ]
+        | n -> [ $"Described {n} web links by the titles of the pages they go to, read from the web: to check." ]
         | 0 -> []
         | 1 -> [ "Described 1 web link by the title of the page it goes to, read from the web: to check." ]
         | n -> [ $"Described {n} web links by the titles of the pages they go to, read from the web: to check." ]
