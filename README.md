@@ -1322,6 +1322,11 @@ keeps this table in step with it):
 | `metadata` | Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP) | safe |
 <!-- fixes:end -->
 
+`font-dictionaries` checks a subset font's glyph list against every glyph in
+the embedded font, including spaces and other glyphs with no visible outline.
+It removes an incomplete list, which is optional, without changing how the
+page looks or what its text reads as.
+
 Each file's result says what happened and how the document stands before and
 after:
 
