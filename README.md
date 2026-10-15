@@ -500,7 +500,8 @@ fixes (as on the **Auto Fixes…** button), and a wand for what tagging from the
 suggested structure fixes (as on **Suggest Structure…**). It also warns about
 adjacent sibling `/P` tags that look like visual line fragments from the same
 sentence, or pieces of one line where the next starts right after the last one
-ends (Structure-2); those are intentionally warning-only because the safest fix is
+ends with a space between, or a line wrapped onto the next one as lines are
+spaced (left-to-right text drawn upright only) (Structure-2); those are intentionally warning-only because the safest fix is
 usually in the source document (for example, the original Word file) rather
 than rewriting paragraph semantics in the PDF after export. These warnings
 (reported as `Legibyl` / `Structure-N`) are all defined in

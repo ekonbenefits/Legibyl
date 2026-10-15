@@ -7,6 +7,7 @@ module internal Legibyl.Validation.ParagraphJoins
 
 open System
 open System.Collections.Generic
+open System.Runtime.CompilerServices
 open System.Text.RegularExpressions
 open iText.Kernel.Pdf
 open iText.Kernel.Pdf.Tagging
@@ -111,27 +112,69 @@ let private continuesLine (previousEnd: StructureGeometry) (nextStart: Structure
 /// Whether the text starting at nextStart is the next line of the text ending at previousEnd,
 /// wrapped there: what's left of the line after previousEnd (to block's right edge, block being
 /// the text around them) is narrower than nextWord, next's first word, needs, and nextStart
-/// starts the line just below at block's left edge, no further below than lines of text at size
-/// are spaced (paragraphs are often spaced further apart). Were there room, the line was broken
-/// on purpose (a heading over its text, say).
-let private wrapsLine (block: StructureGeometry) (size: float) (previousEnd: StructureGeometry) (nextWord: float) (nextStart: StructureGeometry) =
-    let below = previousEnd.Bottom - nextStart.Top
+/// starts the line just below at block's left edge, its baseline as far below previous's as
+/// lines of text at size are spaced (not as paragraphs often are, further apart). Baselines, not
+/// glyph boxes, which grow and shrink with the letters on the line. Were there room, the line
+/// was broken on purpose (a heading over its text, say).
+let private wrapsLine
+    (block: StructureGeometry)
+    (size: float)
+    (previousEnd: StructureGeometry, previousBaseline: float)
+    (nextWord: float)
+    (nextStart: StructureGeometry, nextBaseline: float)
+    =
+    let drop = previousBaseline - nextBaseline
     previousEnd.PageNumber = nextStart.PageNumber
-    && below >= -0.5 * size
-    && below <= 0.6 * size
+    && drop >= 0.8 * size
+    && drop <= 1.35 * size
     && block.Right - previousEnd.Right < nextWord
     && abs (nextStart.Left - block.Left) <= SameEdge
+
+/// Whether text has right-to-left letters (Hebrew, Arabic, their presentation forms), whose
+/// lines end at the left: where they end and start isn't measured as left-to-right text's is.
+let private hasRightToLeft (text: string) =
+    text |> Seq.exists (fun c -> (c >= '\u0590' && c <= '\u08FF') || (c >= '\uFB1D' && c <= '\uFDFF') || (c >= '\uFE70' && c <= '\uFEFF'))
+
+/// The pieces of text an element draws: not what only draws an image or a path, nor spaces alone,
+/// which aren't where a sentence ends or starts.
+let private drawnText (obj: PdfDictionary) context (page: int option) =
+    textPieces obj context page |> List.filter (fun piece -> not (String.IsNullOrWhiteSpace piece.Text))
+
+/// The text around parent's paragraphs on a page, by parent: worked out once for each, not once
+/// for each pair of its paragraphs (a Word document's are all under its Document).
+let private blocks = ConditionalWeakTable<Context, Dictionary<PdfDictionary, Dictionary<int, StructureGeometry option>>>()
+
+let private blockOf context (parent: PdfDictionary) (page: int option) (pageNumber: int) =
+    let byParent = blocks.GetValue(context, fun _ -> Dictionary<PdfDictionary, Dictionary<int, StructureGeometry option>>(HashIdentity.Reference))
+    let byPage =
+        match byParent.TryGetValue parent with
+        | true, found -> found
+        | _ ->
+            let found = Dictionary<int, StructureGeometry option>()
+            byParent[parent] <- found
+            found
+    match byPage.TryGetValue pageNumber with
+    | true, found -> found
+    | _ ->
+        let found =
+            drawnText parent context page
+            |> List.choose _.Geometry
+            |> List.filter (fun geometry -> geometry.PageNumber = pageNumber)
+            |> unionGeometry
+        byPage[pageNumber] <- found
+        found
 
 /// Whether next's text carries on previous's sentence where the page draws it: on the same line,
 /// just after it (see continuesLine), or wrapped onto the next line (see wrapsLine) at the same
 /// size where previous doesn't end a sentence (not a heading over its text). Not where previous
-/// is a list item's marker drawn beside its text, nor where next starts with a marker of its own.
+/// is a list item's marker drawn beside its text, nor where next starts with a marker of its own;
+/// not for text drawn sideways or right to left, whose lines don't run as these measure them.
 let continuesTextOf context (previous: PdfDictionary, previousPage: int option) (next: PdfDictionary, nextPage: int option) =
-    let pieceGeometry (piece: MarkedContentTextIndex.MarkedContentInfo option) = piece |> Option.bind _.Geometry
-    let last = List.tryLast (textPieces previous context previousPage)
-    let first = List.tryHead (textPieces next context nextPage)
-    match pieceGeometry last, pieceGeometry first with
-    | Some previousEnd, Some nextStart ->
+    let last = List.tryLast (drawnText previous context previousPage)
+    let first = List.tryHead (drawnText next context nextPage)
+    match last, first with
+    | Some({ Geometry = Some previousEnd; Upright = true } as last), Some({ Geometry = Some nextStart; Upright = true } as first) ->
+        let last, first = Some last, Some first
         let previousText = normalizeText (extractText previous context previousPage)
         let nextText = normalizeText (extractText next context nextPage)
         // A sentence ends at its full stop, even inside closing quotes or brackets.
@@ -151,19 +194,29 @@ let continuesTextOf context (previous: PdfDictionary, previousPage: int option) 
                 let word = nextText.Split(' ')[0]
                 if characters = 0 then 0.0 else float word.Length * (previousEnd.Right - previousEnd.Left) / float characters
             not endsSentence
-            && (match resolve (previous.Get PdfName.P) with
-                | :? PdfDictionary as parent ->
-                    textPieces parent context previousPage
-                    |> List.choose _.Geometry
-                    |> List.filter (fun geometry -> geometry.PageNumber = previousEnd.PageNumber)
-                    |> unionGeometry
-                    |> Option.exists (fun block -> wrapsLine block size previousEnd nextWord nextStart)
+            && (match resolve (previous.Get PdfName.P), last |> Option.bind _.Baselines, first |> Option.bind _.Baselines with
+                | :? PdfDictionary as parent, Some(_, previousBaseline), Some(nextBaseline, _) ->
+                    blockOf context parent previousPage previousEnd.PageNumber
+                    |> Option.exists (fun block -> wrapsLine block size (previousEnd, previousBaseline) nextWord (nextStart, nextBaseline))
                 | _ -> false)
+        // Pieces along a line read as one where a space is drawn between them, or they touch (a
+        // superscript "rd" after its "3"): joined across a gap with no space, a screen reader would
+        // run the words together ("is4.79%").
+        // (The space can be a piece of its own, as Word draws one.)
+        let spaced =
+            let gap = nextStart.Left - previousEnd.Right
+            let height = defaultArg (last |> Option.bind _.FontSize) (previousEnd.Top - previousEnd.Bottom)
+            let ends = textPieces previous context previousPage |> List.tryLast |> Option.map _.Text |> Option.defaultValue ""
+            let starts = textPieces next context nextPage |> List.tryHead |> Option.map _.Text |> Option.defaultValue ""
+            (ends <> "" && Char.IsWhiteSpace ends[ends.Length - 1])
+            || (starts <> "" && Char.IsWhiteSpace starts[0])
+            || gap < 0.15 * height
         previousText <> ""
         && nextText <> ""
+        && not (hasRightToLeft previousText || hasRightToLeft nextText)
         && not (ParagraphLists.isMarkerOnly previousText)
         && not (ParagraphLists.startsWithMarker nextText)
-        && (continuesLine previousEnd nextStart || size |> Option.exists wraps)
+        && ((continuesLine previousEnd nextStart && spaced) || size |> Option.exists wraps)
     | _ -> false
 
 /// A paragraph that can take part in a join, with its page and where its text is drawn.
