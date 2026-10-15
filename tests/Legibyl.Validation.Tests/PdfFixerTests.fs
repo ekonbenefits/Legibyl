@@ -654,15 +654,31 @@ let ``Fix reads no link titles unless asked to`` () =
 let ``Fix link titles describes a web link whose only description is its address`` () =
     use input = new TempPdf()
     use output = new TempPdf ".fixed"
-    createPdfWithLinks input.Path Body [ "Plan", Some "https://example.com/plan/"; "Elsewhere", Some "https://example.com/other" ]
-    setLinkAddresses input.Path [ Some "https://example.com/plan"; Some "https://example.com/apply" ]
-    let titles = FixedTitles [ "https://example.com/plan", "Retirement plan"; "https://example.com/apply", "Apply for benefits" ]
+    createPdfWithLinks
+        input.Path
+        Body
+        [ "Plan", Some "https://example.com/plan/"
+          "Elsewhere", Some "https://example.com/other"
+          // The same page, written another way: another scheme, without "www.", or without one at all.
+          "Plan again", Some "http://example.com/Plan/"
+          "Plan, bare", Some "example.com/plan" ]
+    setLinkAddresses
+        input.Path
+        [ Some "https://example.com/plan"; Some "https://example.com/apply"; Some "https://www.example.com/plan"; Some "https://example.com/plan" ]
+    let titles =
+        FixedTitles
+            [ "https://example.com/plan", "Retirement plan"
+              "https://www.example.com/plan", "Retirement plan"
+              "https://example.com/apply", "Apply for benefits" ]
 
     let result = fixWithTitles titles input.Path output.Path PdfFixOptions.LinkTitlesFromWeb
 
-    result.AppliedFixes |> should contain "Described 1 web link by the title of the page it goes to, read from the web: to check."
-    // An address written as the description of a link to another one says something: it's kept.
-    linkContentsOf output.Path |> should equal [ Some "Retirement plan (example.com)"; Some "https://example.com/other" ]
+    result.AppliedFixes |> should contain "Described 3 web links by the titles of the pages they go to, read from the web: to check."
+    // An address written as the description of a link to another one says something: it's kept,
+    // and its page isn't read.
+    linkContentsOf output.Path
+    |> should equal [ Some "Retirement plan (example.com)"; Some "https://example.com/other"; Some "Retirement plan (www.example.com)"; Some "Retirement plan (example.com)" ]
+    titles.Asked |> List.ofSeq |> should equal [ "https://example.com/plan"; "https://www.example.com/plan" ]
 
 [<Fact>]
 let ``Validate marks a missing description on a web link fixable from its page's title`` () =

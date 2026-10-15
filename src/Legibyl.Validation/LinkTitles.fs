@@ -37,6 +37,32 @@ let webAddress (text: string) =
         Some candidate
     | _ -> None
 
+/// Whether two web addresses are the same page, as a person writes one: whatever the scheme
+/// (http or https), with or without "www.", the case of the host, or a trailing "/".
+let samePage (a: string) (b: string) =
+    match Uri.TryCreate(a, UriKind.Absolute), Uri.TryCreate(b, UriKind.Absolute) with
+    | (true, NonNull a), (true, NonNull b) ->
+        let host (uri: Uri) =
+            let host = uri.Host.ToLowerInvariant()
+            if host.StartsWith "www." then host.Substring 4 else host
+        host a = host b
+        // (http's port and https's are each the default.)
+        && (a.Port = b.Port || (a.IsDefaultPort && b.IsDefaultPort))
+        && String.Equals(a.AbsolutePath.TrimEnd '/', b.AbsolutePath.TrimEnd '/', StringComparison.OrdinalIgnoreCase)
+        && a.Query = b.Query
+        && a.Fragment = b.Fragment
+    | _ -> false
+
+/// The web address text is, as a person writes one: "https://example.com/plan", "www.example.com",
+/// or "example.com/plan" (a host with a dot, and no spaces).
+let writtenAddress (text: string) =
+    match webAddress text with
+    | Some address -> Some address
+    | None ->
+        let text = text.Trim()
+        let host = text.Split('/').[0]
+        if text <> "" && not (text.Contains ' ') && host.Contains '.' && not (host.EndsWith ".") then webAddress ("https://" + text) else None
+
 /// Whether address is on the public internet. IPv4 addresses in the private, loopback,
 /// link-local (including 169.254.169.254, cloud metadata), shared (CGNAT), documentation,
 /// benchmarking, multicast and reserved ranges aren't. For IPv6 only global unicast
@@ -145,7 +171,7 @@ let private maxBytes = 256 * 1024
 let private timeout = TimeSpan.FromSeconds 10.0
 
 /// The most pages fetched for one document, and at once.
-let private maxAddresses = 100
+let maxAddresses = 100
 let private maxConcurrent = 8
 
 /// Connects only to public internet addresses (see isPublic): the name is resolved here, every
@@ -171,7 +197,12 @@ let private connectToPublicAddress (context: SocketsHttpConnectionContext) (toke
 /// it's doing, and where to read about it. Some sites (dol.gov, for one) turn away tools that
 /// don't say where to find out about them.
 let userAgent =
-    $"Legibyl/{Reflection.Assembly.GetExecutingAssembly().GetName().Version} (PDF accessibility checker; reading link titles; +https://github.com/ekonbenefits/Legibyl)"
+    // (A version, even if the build didn't stamp one: "Legibyl/" alone isn't a product.)
+    let version =
+        match Reflection.Assembly.GetExecutingAssembly().GetName().Version with
+        | NonNull version -> string version
+        | Null -> "0"
+    $"Legibyl/{version} (PDF accessibility checker; reading link titles; +https://github.com/ekonbenefits/Legibyl)"
 
 let private createClient () =
     let handler =
