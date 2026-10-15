@@ -303,3 +303,35 @@ let ``a bullet on its own isn't an item when what follows isn't beside it`` () =
     createPdfPlaced input.Path [ 72f, 0, "•"; 72f, 1, "Under the first bullet."; 72f, 2, "•"; 72f, 3, "Under the second." ]
 
     listWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a last bullet's item doesn't take the next column, beside it but above`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfPlaced
+        input.Path
+        [ 72f, 0, "•"; 84f, 0, "The first item."; 72f, 1, "•"; 84f, 1, "The second item."
+          // The next column, from the top of the page.
+          320f, 0, "A column beside the list."; 320f, 1, "Its second paragraph." ]
+
+    fixLists input.Path output.Path |> ignore
+
+    shape output.Path |> should equal [ "L(LI(Lbl,LBody(P)),LI(Lbl,LBody(P)))"; "P"; "P" ]
+
+[<Fact>]
+let ``a table whose first column is a mark isn't a list: a row's cells are beside each other, not below`` () =
+    use input = new TempPdf()
+    createPdfPlaced
+        input.Path
+        [ 72f, 0, "•"; 100f, 0, "Apples"; 200f, 0, "3"
+          72f, 1, "•"; 100f, 1, "Pears"; 200f, 1, "5" ]
+
+    listWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a stray bullet after a list is left out of it, not taking the list with it`` () =
+    use input = new TempPdf()
+    createPdfPlaced input.Path [ 72f, 0, "•"; 84f, 0, "The first item."; 72f, 1, "•"; 84f, 1, "The second item."; 72f, 2, "•" ]
+
+    (listWarnings input.Path |> List.exactlyOne).ErrorMessage |> should equal "2 items on page 1, marked \"•\" to \"•\"."
+

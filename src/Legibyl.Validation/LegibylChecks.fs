@@ -177,7 +177,7 @@ let private tocHeadingFindings (document: PdfDocument) context =
 
 [<Literal>]
 let private ParagraphListMessage =
-    "Looks like a list tagged as plain paragraphs: consecutive paragraphs start with list markers, so screen readers won't announce them as a list. An auto fix can tag them as one."
+    "Looks like a list tagged as plain paragraphs: consecutive paragraphs start with list markers (or are one, the item's text beside it), so screen readers won't announce them as a list. An auto fix can tag them as one."
 
 let private paragraphListFindings (runs: ParagraphLists.ListRun list) =
     [ for run in runs ->
