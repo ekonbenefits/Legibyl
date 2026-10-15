@@ -312,3 +312,62 @@ let ``a list item's number beside its text isn't a piece of its sentence`` () =
           { X = 86.0; Y = 700.0; Size = 12f; Text = "Your payments begin when you reach the age the plan sets." } ]
 
     splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a piece starting with a list marker on the same line isn't the rest of the sentence before it`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    taggedInPieces input.Path (along 72.0 700.0 12f [ "Your options include "; "1. a lump sum" ])
+
+    splitWarnings input.Path |> should be Empty
+    VeraPdfValidator(LayoutSource = FixedLayout [ { region (690.0, 712.0) with Geometry = { PageNumber = 1; Left = 66.0; Bottom = 690.0; Right = 560.0; Top = 712.0 } } ])
+        .Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.JoinSplitParagraphs)
+    |> _.WasFixed
+    // Nothing joined: no copy written.
+    |> should be False
+
+[<Fact>]
+let ``paragraphs spaced a little further apart than lines aren't a wrapped line, whatever letters they have`` () =
+    use input = new TempPdf()
+    // Lines 14 points apart at 12 points, paragraphs 3 more: the first line's descenders and the
+    // next's capitals bring their glyph boxes nearer than its lines' are.
+    taggedInPieces
+        input.Path
+        [ { X = 72.0; Y = 700.0; Size = 12f; Text = "Payments and your age at retirement under the plan, saying" }
+          { X = 72.0; Y = 683.0; Size = 12f; Text = "Your payments begin when you reach the age." } ]
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``pieces along a line with a gap but no space between them aren't joined, which would run their words together`` () =
+    use input = new TempPdf()
+    let font = helvetica ()
+    let first = "Your rate this year is"
+    taggedInPieces
+        input.Path
+        [ { X = 72.0; Y = 700.0; Size = 12f; Text = first }
+          { X = 72.0 + float (font.GetWidth(first, 12f)) + 4.0; Y = 700.0; Size = 12f; Text = "4.79% of what you earn" } ]
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``lines of text drawn sideways aren't pieces of one line`` () =
+    use untagged = new TempPdf()
+    use input = new TempPdf()
+    let font = helvetica ()
+    // Turned a quarter turn, reading upwards: each line to the right of the one before.
+    let lines = [ 100.0, "Payments and your age at retirement under the plan"; 114.0, "Your payments begin when you reach the age." ]
+    do
+        use document = new PdfDocument(new PdfWriter(untagged.Path))
+        let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
+        for x, text in lines do
+            canvas.BeginText().SetFontAndSize(font, 12f).SetTextMatrix(0f, 1f, -1f, 0f, float32 x, 300f).ShowText(text).EndText() |> ignore
+    let regions =
+        [ for x, text in lines ->
+              { region (300.0, 300.0 + float (font.GetWidth(text, 12f))) with
+                  Geometry = { PageNumber = 1; Left = x - 10.8; Bottom = 300.0; Right = x + 3.6; Top = 300.0 + float (font.GetWidth(text, 12f)) } } ]
+    VeraPdfValidator(LayoutSource = FixedLayout regions).Fix(untagged.Path, PdfProfile.PdfUa1, input.Path, PdfFixOptions.TagFromLayout)
+    |> ignore
+    paragraphs input.Path |> List.length |> should equal 2
+
+    splitWarnings input.Path |> should be Empty

@@ -22,7 +22,12 @@ type MarkedContentInfo =
     { Text: string
       Geometry: StructureGeometry option
       /// The size its text is drawn at, in points (the middle one of its seen glyphs'), if it has text.
-      FontSize: float option }
+      FontSize: float option
+      /// The baselines its seen text starts and ends on (as the page is shown), if it has text.
+      Baselines: (float * float) option
+      /// Whether its seen text all runs upright, left to right (within 45 degrees), as the page
+      /// is shown: lines along x, one below the other. False for sideways text, or none.
+      Upright: bool }
 
 /// What each (page number, MCID) draws.
 type Index() =
@@ -172,6 +177,16 @@ let rec private drawnBy (element: MarkedContentElement) : MarkedContentElement l
              if child.MarkedContentIdentifier < 0 && not child.IsArtifact then
                  yield! drawnBy child ]
 
+/// Whether letter's baseline runs upright, left to right within 45 degrees, as the page is shown
+/// (PdfPig gives it with the page's /Rotate applied); None for one with no direction (a space).
+let private isUpright (letter: Letter) =
+    let dx = letter.EndBaseLine.X - letter.StartBaseLine.X
+    let dy = letter.EndBaseLine.Y - letter.StartBaseLine.Y
+    if String.IsNullOrWhiteSpace letter.Value || letter.RenderingMode = TextRenderingMode.Neither || abs dx + abs dy <= 1e-6 then None
+    else
+        let angle = ((Math.Atan2(dy, dx) * 180.0 / Math.PI) % 360.0 + 360.0) % 360.0
+        Some(angle < 45.0 || angle > 315.0)
+
 let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedContentElement>) (index: Index) =
     for element in elements do
         let drawn = drawnBy element
@@ -186,8 +201,15 @@ let rec private indexMarkedContent pageNumber (elements: IReadOnlyList<MarkedCon
                 |> Seq.sort
                 |> Array.ofSeq
             if sizes.Length = 0 then None else Some sizes[sizes.Length / 2]
+        let seen =
+            drawn |> Seq.collect _.Letters |> Seq.filter (fun letter -> not (String.IsNullOrWhiteSpace letter.Value)) |> Seq.sortBy _.TextSequence |> Array.ofSeq
+        let baselines =
+            if seen.Length = 0 then None else Some(seen[0].StartBaseLine.Y, seen[seen.Length - 1].StartBaseLine.Y)
+        let directions = seen |> Array.choose isUpright
+        let upright = directions.Length > 0 && Array.forall id directions
         if not (String.IsNullOrEmpty text) || geometry.IsSome then
-            index[(pageNumber, element.MarkedContentIdentifier)] <- { Text = text; Geometry = geometry; FontSize = fontSize }
+            index[(pageNumber, element.MarkedContentIdentifier)] <-
+                { Text = text; Geometry = geometry; FontSize = fontSize; Baselines = baselines; Upright = upright }
         if element.Children.Count > 0 then
             indexMarkedContent pageNumber element.Children index
 
@@ -197,11 +219,10 @@ let private textDirection (page: Page) : TextDirection =
     let mutable upright = 0
     let mutable turned = 0
     for letter in page.Letters do
-        let dx = letter.EndBaseLine.X - letter.StartBaseLine.X
-        let dy = letter.EndBaseLine.Y - letter.StartBaseLine.Y
-        if not (String.IsNullOrWhiteSpace letter.Value) && letter.RenderingMode <> TextRenderingMode.Neither && abs dx + abs dy > 1e-6 then
-            let angle = ((Math.Atan2(dy, dx) * 180.0 / Math.PI) % 360.0 + 360.0) % 360.0
-            if angle < 45.0 || angle > 315.0 then upright <- upright + 1 else turned <- turned + 1
+        match isUpright letter with
+        | Some true -> upright <- upright + 1
+        | Some false -> turned <- turned + 1
+        | None -> ()
     { Upright = upright; Turned = turned }
 
 /// Builds the index, calling onPage (page number, page count) as each page starts.
