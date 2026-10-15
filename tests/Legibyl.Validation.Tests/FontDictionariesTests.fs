@@ -67,7 +67,7 @@ let ``a subset font's incomplete CIDSet is removed`` () =
 
     before |> should contain "7.21.4.2-2"
     after |> should not' (contain "7.21.4.2-2")
-    report |> should contain "Removed the incomplete glyph list (CharSet or CIDSet) of 1 subset font(s): it's optional, and isn't used to draw."
+    report |> should contain "Removed the incomplete glyph list (CharSet or CIDSet) of 1 subset font(s), or one naming glyphs the font hasn't: it's optional, and isn't used to draw."
     same |> should be True
 
 [<Fact>]
@@ -96,7 +96,30 @@ let ``a CIDSet that lists every outlined glyph but omits empty glyphs is removed
 
     before |> should contain "7.21.4.2-2"
     after |> should not' (contain "7.21.4.2-2")
-    report |> should contain "Removed the incomplete glyph list (CharSet or CIDSet) of 1 subset font(s): it's optional, and isn't used to draw."
+    report |> should contain "Removed the incomplete glyph list (CharSet or CIDSet) of 1 subset font(s), or one naming glyphs the font hasn't: it's optional, and isn't used to draw."
+    same |> should be True
+
+[<Fact>]
+let ``a CIDSet that lists every glyph, and more the font hasn't, is removed`` () =
+    let before, after, report, same =
+        check (fun document _ cidFont ->
+            let descriptor = cidFont.GetAsDictionary PdfName.FontDescriptor
+            let program = descriptor.GetAsStream(PdfName.FontFile2).GetBytes()
+            let u16 at = (int program[at] <<< 8) ||| int program[at + 1]
+            let u32 at = (u16 at <<< 16) ||| u16 (at + 2)
+            let tables =
+                dict [ for i in 0 .. u16 4 - 1 ->
+                           let entry = 12 + 16 * i
+                           Text.Encoding.ASCII.GetString(program, entry, 4), u32 (entry + 8) ]
+            let count = u16 (tables["maxp"] + 4)
+            // Every bit set, padded past the font's last glyph (as some producers write it).
+            let cidSet = PdfStream(Array.create ((count + 7) / 8 + 1) 0xFFuy)
+            cidSet.MakeIndirect document |> ignore
+            descriptor.Put(PdfName.CIDSet, cidSet) |> ignore)
+
+    before |> should contain "7.21.4.2-2"
+    after |> should not' (contain "7.21.4.2-2")
+    report |> should contain "Removed the incomplete glyph list (CharSet or CIDSet) of 1 subset font(s), or one naming glyphs the font hasn't: it's optional, and isn't used to draw."
     same |> should be True
 
 [<Fact>]

@@ -783,8 +783,9 @@ let private repairFontDictionaries (document: PdfDocument) (context: Context) =
                 uncheckedLists <- uncheckedLists + 1
             elif (PdfName.CIDFontType0.Equals subtype || PdfName.CIDFontType2.Equals subtype) && not (isNull (descriptor.Get PdfName.CIDSet)) then
                 // A TrueType font's (with CIDs as its glyph numbers) is checked: kept if it lists
-                // every glyph in the program, even one with no outline. Another kind's can't
-                // be, and goes: it's optional.
+                // exactly the glyphs in the program, even those with no outline, as veraPDF reads
+                // it: every one but .notdef (0, which it doesn't ask about), and none the program
+                // hasn't. Another kind's can't be, and goes: it's optional.
                 let identity = PdfName.CIDFontType2.Equals subtype && (match font.Get PdfName.CIDToGIDMap with :? PdfName as m -> PdfName.Identity.Equals m | null -> true | _ -> false)
                 let complete =
                     match descriptor.GetAsStream PdfName.FontFile2, descriptor.GetAsStream PdfName.CIDSet with
@@ -792,7 +793,9 @@ let private repairFontDictionaries (document: PdfDocument) (context: Context) =
                         trueTypeGlyphs (program.GetBytes())
                         |> Option.map (fun glyphs ->
                             let bits = cidSet.GetBytes()
-                            glyphs |> Set.forall (fun g -> g / 8 < bits.Length && (bits[g / 8] &&& (0x80uy >>> (g % 8))) <> 0uy))
+                            let listed (g: int) = g / 8 < bits.Length && (bits[g / 8] &&& (0x80uy >>> (g % 8))) <> 0uy
+                            (glyphs |> Set.forall (fun g -> g = 0 || listed g))
+                            && Seq.forall (fun g -> not (listed g) || glyphs.Contains g) (seq { 1 .. bits.Length * 8 - 1 }))
                     | _ -> None
                 match complete with
                 | Some true -> ()
@@ -960,7 +963,7 @@ let private repairFontDictionaries (document: PdfDocument) (context: Context) =
         | :? PdfDictionary as font when PdfName.Font.Equals(font.GetAsName PdfName.Type) && seen.Add font -> fix font
         | _ -> ()
     [ if glyphLists > 0 then
-          $"Removed the incomplete glyph list (CharSet or CIDSet) of {glyphLists} subset font(s): it's optional, and isn't used to draw."
+          $"Removed the incomplete glyph list (CharSet or CIDSet) of {glyphLists} subset font(s), or one naming glyphs the font hasn't: it's optional, and isn't used to draw."
       if uncheckedLists > 0 then
           $"Removed the glyph list (CharSet or CIDSet) of {uncheckedLists} subset font(s) whose list couldn't be checked against the font: it's optional, and isn't used to draw."
       if collections > 0 then

@@ -1322,10 +1322,14 @@ keeps this table in step with it):
 | `metadata` | Write the metadata PDF/UA asks for, and its PDF/UA identifier (XMP) | safe |
 <!-- fixes:end -->
 
-`font-dictionaries` checks a subset font's glyph list against every glyph in
-the embedded font, including spaces and other glyphs with no visible outline.
-It removes an incomplete list, which is optional, without changing how the
-page looks or what its text reads as.
+`font-dictionaries` compares a subset TrueType CID font's glyph list (CIDSet),
+when its CIDs are its glyph numbers, with the glyphs in the embedded font,
+spaces and other glyphs with no outline included: it keeps a list that names
+exactly those, and removes one that leaves any out or names glyphs the font
+hasn't. Other subset fonts' glyph lists (a Type 1 font's CharSet, or a CIDSet it
+can't check) are removed without being checked. The lists are optional and not
+used to draw, so removing one doesn't change how the page looks or what its
+text reads as.
 
 Each file's result says what happened and how the document stands before and
 after:
