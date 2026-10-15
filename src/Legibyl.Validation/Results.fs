@@ -28,7 +28,7 @@ module PdfFixDescriptions =
           PdfFixOptions.LinkContents, "Describe table-of-contents links with their own text"
           PdfFixOptions.LinkTitlesFromWeb, "Describe web links and QR codes by the titles of the pages they go to"
           PdfFixOptions.HeadingsFromToc, "Tag headings the table of contents lists (H1–H6) and point its links at them"
-          PdfFixOptions.Lists, "Tag paragraphs that start with list markers as a list"
+          PdfFixOptions.Lists, "Tag paragraphs that start with list markers (or are one) as a list"
           PdfFixOptions.TableHeaderScope, "Say which cells each table header cell heads (its Scope: column or row)"
           PdfFixOptions.Bookmarks, "Add bookmarks for the H1 and H2 headings"
           PdfFixOptions.LinkTargets, "Point links and bookmarks within a PDF 2.0 document at the tags they go to"

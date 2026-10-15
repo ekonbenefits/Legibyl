@@ -252,6 +252,22 @@ let find (document: PdfDocument) context : ListRun list =
                   // the next marker.
                   let runs = List<List<Candidate>>()
                   let mutable blanks: (int * PdfDictionary) list = []
+                  // Whether a paragraph at text is more of the text of a marker on its own: its first
+                  // on the marker's line and right of it (past its middle: a bullet's slack is most of
+                  // it); the rest straight below the one before, at its indent. Not a paragraph beside
+                  // that one (a table's next cell), nor one further off (the next column's top).
+                  let isItemText (marker: StructureGeometry) (before: StructureGeometry list) (text: StructureGeometry) =
+                      match before with
+                      | [] ->
+                          text.Left >= marker.Right - SameIndent
+                          && text.Left > (marker.Left + marker.Right) / 2.0
+                          && text.Bottom < marker.Top
+                          && text.Top > marker.Bottom
+                      | first :: _ ->
+                          let previous = List.last before
+                          let line = max 12.0 ((marker.Top - marker.Bottom) * 2.5)
+                          let below = previous.Bottom - text.Top
+                          abs (text.Left - first.Left) <= SameIndent && below >= -2.0 && below <= line
                   // The run's last item, if what's at i would follow straight on from it.
                   let lastItemBefore i =
                       if runs.Count = 0 then None
@@ -284,7 +300,7 @@ let find (document: PdfDocument) context : ListRun list =
                               && last.MarkerOnly
                               && page = Some last.Page
                               && (match last.Geometry, geometry with
-                                  | Some marker, Some text -> text.Left >= marker.Right - SameIndent
+                                  | Some marker, Some text -> isItemText marker last.TextGeometry text
                                   | _ -> false)
                               ->
                               run[run.Count - 1] <-
@@ -297,9 +313,12 @@ let find (document: PdfDocument) context : ListRun list =
                           | _ -> blanks <- []
 
                   for run in runs do
-                      // A marker on its own with no text after it isn't an item.
-                      let items = run |> List.ofSeq |> List.filter (fun item -> not item.MarkerOnly || not item.TextGeometry.IsEmpty)
-                      if items.Length >= 2 && items.Length = run.Count then
+                      // A marker on its own with no text after it isn't an item: at the end (a stray
+                      // bullet) it's left out; anywhere else the run isn't a list.
+                      let isItem (item: Candidate) = not item.MarkerOnly || not item.TextGeometry.IsEmpty
+                      let run = run |> List.ofSeq |> List.rev |> List.skipWhile (isItem >> not) |> List.rev
+                      let items = run |> List.filter isItem
+                      if items.Length >= 2 && items.Length = run.Length then
                           match numberingOf (items |> List.map _.Marker) with
                           | Some numbering ->
                               yield
