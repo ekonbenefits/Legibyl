@@ -146,8 +146,8 @@ let private onlyItsAddress (annotation: PdfDictionary) (address: string) =
     | NonNull contents ->
         let said = contents.ToUnicodeString().Trim()
         said = ""
-        || (match LinkTitles.webAddress said with
-            | Some written -> String.Equals(written.TrimEnd '/', address.TrimEnd '/', StringComparison.OrdinalIgnoreCase)
+        || (match LinkTitles.writtenAddress said with
+            | Some written -> LinkTitles.samePage written address
             | None -> false)
 
 /// Every link annotation that goes to a web address with no description but that address,
@@ -183,19 +183,32 @@ let describeWebLinks (titles: IPageTitleSource) (document: PdfDocument) (context
     match undescribedWebLinks document with
     | [] -> []
     | links ->
-        let found = titles.PageTitles(links |> List.map snd |> List.distinct)
+        let addresses = links |> List.map snd |> List.distinct
+        let found = titles.PageTitles addresses
+        // Only so many are read from the web (see LinkTitles): the rest weren't asked about.
+        let asked = addresses |> List.truncate LinkTitles.maxAddresses |> set
         let mutable described = 0
         let left = ResizeArray<string>()
+        let notAsked = ResizeArray<string>()
         for annotation, address in links do
             match LinkTitles.linkDescription found address with
             | Some description ->
                 annotation.Put(PdfName.Contents, textString description) |> ignore
                 described <- described + 1
+            | None when not (asked.Contains address) -> if not (notAsked.Contains address) then notAsked.Add address
             | None -> if not (left.Contains address) then left.Add address
+        // A few named (as escaped, so the PDF's own characters can't disguise one), and how many more.
+        let named (addresses: string seq) =
+            let shown = addresses |> Seq.map (fun address -> try Uri(address).AbsoluteUri with _ -> address) |> List.ofSeq
+            match List.splitAt (min 10 shown.Length) shown with
+            | first, [] -> String.Join(", ", first)
+            | first, rest -> $"""{String.Join(", ", first)} and {rest.Length} more"""
         if left.Count > 0 then
-            let addresses = String.Join(", ", left)
             context.Notes.Add
-                $"No title could be read from the page(s) {addresses} (the site refused, didn't answer, or has none that says more than its address), so their links weren't described: in Structure…, right-click each link › Edit Link Description…."
+                $"No title could be read from the page(s) {named left} (the site refused, didn't answer, or has none that says more than its address), so their links weren't described: in Structure…, right-click each link › Edit Link Description…."
+        if notAsked.Count > 0 then
+            context.Notes.Add
+                $"Only the first {LinkTitles.maxAddresses} web addresses' titles are read, so the links to {named notAsked} weren't described: in Structure…, right-click each link › Edit Link Description…."
         match described with
         | 0 -> []
         | 1 -> [ "Described 1 web link by the title of the page it goes to, read from the web: to check." ]

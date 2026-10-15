@@ -37,6 +37,25 @@ let ``reading titles, Legibyl says its name and version, what it's doing, and wh
     LinkTitles.userAgent |> should endWith "(PDF accessibility checker; reading link titles; +https://github.com/ekonbenefits/Legibyl)"
 
 [<Theory>]
+[<InlineData("https://example.com/plan", "http://example.com/plan/", true)>]
+[<InlineData("https://www.example.com/plan", "https://EXAMPLE.com/Plan", true)>]
+[<InlineData("https://example.com/plan", "https://example.com/plan?a=1", false)>]
+[<InlineData("https://example.com/plan", "https://example.org/plan", false)>]
+[<InlineData("https://example.com:8443/plan", "https://example.com/plan", false)>]
+let ``two addresses are the same page whatever the scheme, "www.", the host's case or a trailing slash`` (a: string, b: string, same: bool) =
+    LinkTitles.samePage a b |> should equal same
+
+[<Theory>]
+[<InlineData("https://example.com/plan", "https://example.com/plan")>]
+[<InlineData("www.example.com", "https://www.example.com")>]
+[<InlineData("example.com/plan", "https://example.com/plan")>]
+[<InlineData("click here", null)>]
+[<InlineData("Plan.", null)>]
+[<InlineData("mailto:help@example.com", null)>]
+let ``an address is read as a person writes one`` (text: string, address: string) =
+    LinkTitles.writtenAddress text |> should equal (Option.ofObj address)
+
+[<Theory>]
 [<InlineData("127.0.0.1")>]
 [<InlineData("127.1.2.3")>]
 [<InlineData("0.0.0.0")>]
