@@ -33,6 +33,23 @@ let BX = "BX"
 [<Literal>]
 let EX = "EX"
 
+// Positioning text.
+
+/// Moves to the start of the next line, by an offset from this one's start.
+[<Literal>]
+let Td = "Td"
+
+/// As Td, and sets the leading.
+[<Literal>]
+let TD = "TD"
+
+/// To the start of the next line, by the leading.
+[<Literal>]
+let TStar = "T*"
+
+[<Literal>]
+let Tm = "Tm"
+
 // Showing text.
 
 [<Literal>]

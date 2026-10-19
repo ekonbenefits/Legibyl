@@ -56,7 +56,7 @@ let private render (path: string) =
     bitmap.Pixels
 
 [<Fact>]
-let ``a web address shown as text is warned about, and the fix offered only when it's all of its tagged text`` () =
+let ``a web address shown as text is warned about, and the fix offered, all of its tagged text or not`` () =
     use pdf = new TempPdf()
     createPdf
         pdf.Path
@@ -68,7 +68,7 @@ let ``a web address shown as text is warned about, and the fix offered only when
     |> should
         equal
         [ "Page 1: \"https://example.org/plan\".", true
-          "Page 1: \"https://example.org/garden\". Not fixable here: it's part of a longer piece of text, which would have to be split to tag the address alone.", false
+          "Page 1: \"https://example.org/garden\".", true
           "Page 1: \"www.example.org\".", true ]
 
 [<Fact>]
@@ -82,8 +82,7 @@ let ``trailing punctuation is left off, a balanced bracket kept, and look-alikes
     unlinked pdf.Path |> List.map fst
     |> should
         equal
-        [ "Page 1: \"https://example.org/wiki/Garden_(plants)\". Not fixable here: it's part of a longer piece of text, which would have to be split to tag the address alone."
-          "Page 1: \"https://example.org/notes\". Not fixable here: it's part of a longer piece of text, which would have to be split to tag the address alone." ]
+        [ "Page 1: \"https://example.org/wiki/Garden_(plants)\"."; "Page 1: \"https://example.org/notes\"." ]
 
 [<Fact>]
 let ``an address that's already a link isn't warned about`` () =
@@ -109,7 +108,7 @@ let ``the fix links each address that's all of its tagged text, the page looks t
     createPdf
         input.Path
         [ [ Plain "Our plan: "; Plain "https://example.org/plan" ]
-          [ Plain "Visit https://example.org/garden today." ]
+          [ Plain "Visit "; Plain "https://exam"; Plain "ple.org/garden" ]
           [ Plain "Or "; Plain "www.example.org" ] ]
 
     let result = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls)
@@ -119,7 +118,7 @@ let ``the fix links each address that's all of its tagged text, the page looks t
     result.NotApplied
     |> should
         contain
-        "Page 1: \"https://example.org/garden\" isn't linked: it's part of a longer piece of text, which would have to be split to tag the address alone."
+        "Page 1: \"https://example.org/garden\" isn't linked: it's drawn in more than one piece, in different tags, which would have to be joined to tag it as a link."
     // Still PDF/UA, with only the address left that the fix can't tag.
     validator.Value.Validate(output.Path, PdfProfile.PdfUa1).IsCompliant |> should be True
     unlinked output.Path |> List.map snd |> should equal [ false ]
@@ -217,9 +216,10 @@ let ``an address goes on past a gap to a hyphen touching the rest of it, and isn
         inTags pointer page font [ "P"; "Span" ] (72.0 + width "https://example.org/go/dol" + gap) 700.0 "-diversification."
         // A dash set off by gaps on both sides is prose's, not the address's.
         inTags pointer page font [ "P"; "Span" ] 72.0 680.0 "https://example.org/plan - then the beds.")
-    named input.Path |> should equal [ "https://example.org/go/dol-diversification", false; "https://example.org/plan", false ]
+    named input.Path |> should equal [ "https://example.org/go/dol-diversification", false; "https://example.org/plan", true ]
 
-    validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed |> should be False
+    validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls) |> ignore
+    named output.Path |> should equal [ "https://example.org/go/dol-diversification", false ]
 
 /// One P on a page, of marked content drawn at x, y, one after another, each piece's text.
 let private paragraphOfPieces (path: string) (pieces: (float * float * string) list) =
@@ -274,9 +274,9 @@ let ``an address whose pieces aren't side by side in their tag isn't linked, and
         equal
         [ "Page 1: \"https://example.org/garden\". Not fixable here: its pieces aren't side by side in its tag, in the order they're read.", false ]
 
-/// The P's kids (the first page's, under the Document): a piece of marked content by the text it
-/// draws, an element by its tag.
-let private paragraphKids (path: string) =
+/// The kids of the first element tagged role (the first page's): a piece of marked content by the
+/// text it draws, an element by its tag.
+let private kidsOf (role: string) (path: string) =
     use document = new PdfDocument(new PdfReader(path))
     let drawn mcid =
         let text = System.Text.StringBuilder()
@@ -291,7 +291,7 @@ let private paragraphKids (path: string) =
         string text
     let rec paragraphIn (element: Tagging.IStructureNode) : Tagging.PdfStructElem option =
         match element with
-        | :? Tagging.PdfStructElem as e when e.GetRole().GetValue() = "P" -> Some e
+        | :? Tagging.PdfStructElem as e when e.GetRole().GetValue() = role -> Some e
         | _ ->
             match element.GetKids() with
             | null -> None
@@ -302,6 +302,9 @@ let private paragraphKids (path: string) =
           | :? Tagging.PdfMcr as mcr -> drawn (mcr.GetMcid())
           | :? Tagging.PdfStructElem as element -> element.GetRole().GetValue()
           | _ -> "?" ]
+
+/// The P's kids (see kidsOf).
+let private paragraphKids = kidsOf "P"
 
 /// Linking input to output: the fix applied, no warning left, no new failures, the page the same.
 let private linksAlike (input: string) (output: string) =
@@ -475,6 +478,118 @@ let ``an address's full stop with something drawn after it in the same piece isn
     |> should
         equal
         [ "Page 1: \"https://example.org/beds\". Not fixable here: the \".\" after it is drawn in the same piece, and can't be split off: something is drawn after it, in the same piece.", false ]
+
+// ---- An address in the middle of a sentence: carved out of its piece of text ----
+
+[<Fact>]
+let ``addresses in the middle of a sentence are carved out of its text and linked, the text around them read as it was`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    // Two in one piece of text: the second is in what's left after the first is carved out.
+    createPdf input.Path [ [ Plain "Visit https://example.org/garden today, or www.example.org/beds." ] ]
+    named input.Path |> should equal [ "https://example.org/garden", true; "www.example.org/beds", true ]
+
+    let result = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls)
+
+    result.AppliedFixes |> should contain "Linked 2 web addresses shown as text, each to where it goes."
+    named output.Path |> should be Empty
+    let failed (path: string) = validator.Value.Validate(path, PdfProfile.PdfUa1).PdfUaFailures |> Seq.map _.RuleId |> Set.ofSeq
+    Set.difference (failed output.Path) (failed input.Path) |> should be Empty
+    render output.Path |> should equal (render input.Path)
+    let rec holderOf (node: StructureNode) : StructureNode option =
+        if node.Children |> Seq.exists (fun child -> child.Tag = "Link") then Some node else node.Children |> Seq.tryPick holderOf
+    let holder = (validator.Value.ReadStructureTree output.Path |> notNull) |> holderOf |> Option.get
+    // (The tree's text for the Span leaves out its Links'.)
+    (string holder.Content, [ for child in holder.Children -> child.Tag, string child.Content, string child.LinkUri ])
+    |> should
+        equal
+        ("Visit   today, or  .",
+         [ "Link", "https://example.org/garden", "https://example.org/garden"; "Link", "www.example.org/beds", "https://www.example.org/beds" ])
+    kidsOf "Span" output.Path |> should equal [ "Visit "; "Link"; " today, or "; "Link"; "." ]
+
+[<Fact>]
+let ``an address in the middle of its piece is carved out however its text is drawn, its lines kept where they were`` () =
+    // As a paragraph is drawn inside one text object, the piece begun inside it, each line moved
+    // to from the last: by Td, by ', and the address's letters spaced by TJ.
+    let cases: (string * (PdfName -> PdfPage -> string)) list =
+        [ "Tj, then a line moved to",
+          (fun font _ ->
+              $"BT /{font.GetValue()} 12 Tf 72 700 Td\n/P <</MCID 0>> BDC (Visit https://example.org/beds for more.) Tj 0 -14 Td (Then the paths.) Tj EMC\n"
+              + "/P <</MCID 1>> BDC ( Open daily.) Tj EMC\nET")
+          "TJ, spaced inside the address and around it",
+          (fun font _ ->
+              $"BT /{font.GetValue()} 12 Tf 72 700 Td\n/P <</MCID 0>> BDC [(Visit https://exa) -20 (mple.org/beds) 30 ( for more.)] TJ 0 -14 Td (Then the paths.) Tj EMC\n"
+              + "/P <</MCID 1>> BDC ( Open daily.) Tj EMC\nET")
+          "', the next line's text",
+          (fun font _ ->
+              $"BT /{font.GetValue()} 12 Tf 14 TL 72 714 Td\n/P <</MCID 0>> BDC (Visit https://example.org/beds for more.) ' (Then the paths.) ' EMC\n"
+              + "/P <</MCID 1>> BDC ( Open daily.) Tj EMC\nET")
+          "the address its own Tj, the text around it others",
+          (fun font _ ->
+              $"BT /{font.GetValue()} 12 Tf 72 700 Td\n/P <</MCID 0>> BDC (Visit ) Tj (https://example.org/beds) Tj ( for more.) Tj 0 -14 Td (Then the paths.) Tj EMC\n"
+              + "/P <</MCID 1>> BDC ( Open daily.) Tj EMC\nET") ]
+    for case, content in cases do
+        use input = new TempPdf()
+        use output = new TempPdf ".fixed"
+        rawParagraph input.Path content
+        (case, named input.Path) |> should equal (case, [ "https://example.org/beds", true ])
+
+        linksAlike input.Path output.Path
+
+        (case, paragraphKids output.Path) |> should equal (case, [ "Visit "; "Link"; " for more.Then the paths."; " Open daily." ])
+
+[<Fact>]
+let ``an address in the middle of its piece isn't carved out where it can't be cut safely, and each says why`` () =
+    let paragraph (font: PdfName) (draw: string) =
+        $"BT /{font.GetValue()} 12 Tf 72 700 Td\n/P <</MCID 0>> BDC {draw} EMC\n/P <</MCID 1>> BDC ( Open daily.) Tj EMC\nET"
+    let cases: (string * (PdfName -> PdfPage -> string)) list =
+        [ // As the fix can carve: the case the others change one thing of.
+          "none", (fun font _ -> paragraph font "(Visit https://example.org/beds today.) Tj")
+          "it's shown more than once in its piece",
+          (fun font _ -> paragraph font "(Visit https://example.org/beds today.) Tj 0 -14 Td (Again: https://example.org/beds today.) Tj")
+          // Its letters drawn in two parts, with other text drawn between them (put back in place).
+          "its letters aren't drawn one after another in its piece",
+          (fun font _ ->
+              let width = (iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA).GetWidth("Visit https://exam", 12f)
+              paragraph font $"""(Visit https://exam) Tj 0 -14 Td (Later.) Tj {width.ToString(System.Globalization.CultureInfo.InvariantCulture)} 14 Td (ple.org/beds today.) Tj""")
+          "marked content around it inside its piece says what it reads as, for all of it",
+          (fun font _ -> paragraph font "/Span <</ActualText (Visit the beds.)>> BDC (Visit https://example.org/beds today.) Tj EMC")
+          // Its piece begun outside the text object, a line after it moved to from the last: the
+          // text object begun again at the cut would move it.
+          "its text is begun inside its piece, and lines after it are placed from where theirs begin, which the fix can't keep once it's cut",
+          (fun font _ ->
+              $"/P <</MCID 0>> BDC BT /{font.GetValue()} 12 Tf 72 700 Td (Visit https://example.org/beds today.) Tj 0 -14 Td (Then the paths.) Tj ET EMC\n"
+              + $"/P <</MCID 1>> BDC BT /{font.GetValue()} 12 Tf 72 650 Td ( Open daily.) Tj ET EMC") ]
+    for why, content in cases do
+        use input = new TempPdf()
+        use output = new TempPdf ".fixed"
+        rawParagraph input.Path content
+        let found = unlinked input.Path |> List.distinct
+        let fixedOnes = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls).WasFixed
+        (why, found, fixedOnes)
+        |> should
+            equal
+            (if why = "none" then
+                 why, [ "Page 1: \"https://example.org/beds\".", true ], true
+             else
+                 why,
+                 [ $"Page 1: \"https://example.org/beds\". Not fixable here: it's part of a longer piece of text, which can't be cut around it: {why}.", false ],
+                 false)
+
+[<Fact>]
+let ``an address in the middle of a piece begun outside its text object is carved out when no line after it moves from the last`` () =
+    // As Word draws a line: its piece around its own text object, the line placed by Tm.
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    rawParagraph input.Path (fun font _ ->
+        let f = font.GetValue()
+        $"/P <</MCID 0>> BDC BT /{f} 12 Tf 1 0 0 1 72 700 Tm [(Visit https://exa) -20 (mple.org/beds today.)] TJ 1 0 0 1 72 686 Tm (Then the paths.) Tj ET EMC\n"
+        + $"/P <</MCID 1>> BDC BT /{f} 12 Tf 72 650 Td ( Open daily.) Tj ET EMC")
+    named input.Path |> should equal [ "https://example.org/beds", true ]
+
+    linksAlike input.Path output.Path
+
+    paragraphKids output.Path |> should equal [ "Visit "; "Link"; " today.Then the paths."; " Open daily." ]
 
 [<Fact>]
 let ``an address one of whose pieces is read on both sides of another isn't linked, and says why`` () =
