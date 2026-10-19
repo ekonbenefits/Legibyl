@@ -101,8 +101,9 @@ type PdfFixOptions =
     /// Links web addresses a page shows as text that nothing links: a link annotation over each,
     /// going to it, and a Link tag holding its text and the annotation (see UnlinkedUrls). Only
     /// an address whose tagged text is its own, in one piece or in pieces side by side in one tag
-    /// (punctuation drawn after it in its last piece is split off into a piece of its own first);
-    /// others are left, and reported.
+    /// (punctuation drawn after it in its last piece is split off into a piece of its own first),
+    /// or drawn in the middle of one piece with other text (carved out of it, the text before and
+    /// after it read as before); others are left, and reported.
     | LinkUrls = 134217728
     /// Gives each block of text (a paragraph, a heading, a list item, a cell) whose text clearly
     /// reads as another language than the one it's read in its own /Lang: a Spanish paragraph in
