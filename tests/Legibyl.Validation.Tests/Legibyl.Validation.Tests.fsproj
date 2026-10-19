@@ -23,6 +23,7 @@
     <Compile Include="TechniqueSampleTests.fs" />
     <Compile Include="TocHeadingsTests.fs" />
     <Compile Include="ParagraphListsTests.fs" />
+    <Compile Include="ListItemsOutsideTests.fs" />
     <Compile Include="ParagraphTablesTests.fs" />
     <Compile Include="ParagraphJoinsTests.fs" />
     <Compile Include="EmbeddedReviewTests.fs" />

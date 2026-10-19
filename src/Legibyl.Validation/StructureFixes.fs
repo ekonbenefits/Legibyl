@@ -367,13 +367,19 @@ let private removeEmptyTocEntries =
     removeEmpty isTocItem (fun removed -> $"Removed {removed} empty table-of-contents entr(ies) (TOCI).")
 
 let private tagParagraphLists (document: PdfDocument) context =
-    match ParagraphLists.find document context with
-    | [] -> []
-    | runs ->
-        // Later runs first: tagging one shortens its parent's /K, which would move the ones after it.
-        for run in List.rev runs do
-            ParagraphLists.tagAsList document run
-        [ $"Tagged {runs.Length} run(s) of marked paragraphs as lists." ]
+    let found = ParagraphLists.find document context
+    // Later ones first: each takes paragraphs out of its parent's /K, which would move the ones
+    // after them (a run's paragraphs and those added to a list are never interleaved).
+    let changes =
+        [ for run in found.Runs -> List.min run.Indexes, (fun () -> ParagraphLists.tagAsList document run)
+          for addition in found.Additions -> List.min addition.Indexes, (fun () -> ParagraphLists.addToList document addition) ]
+    for _, change in List.sortByDescending fst changes do
+        change ()
+    let added = found.Additions |> List.sumBy (fun addition -> addition.Before.Length + addition.After.Length)
+    [ if not found.Runs.IsEmpty then
+          $"Tagged {found.Runs.Length} run(s) of marked paragraphs as lists."
+      if added > 0 then
+          $"Moved {added} item(s) that start with a list's marker into the list beside them." ]
 
 /// The table attributes (attribute dictionaries with /O /Table) that apply to a structure element:
 /// its own (/A, one dictionary or an array of them, with revision numbers between), then its

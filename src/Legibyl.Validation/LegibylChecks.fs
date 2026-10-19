@@ -23,8 +23,9 @@
 /// tagged as aligned paragraphs, Structure-15; no single Document tag at the top, Structure-16;
 /// content tied to a tag that's gone, Structure-17; web addresses shown as text that nothing
 /// links, Structure-18, which untagged documents get too; a declared language the text isn't
-/// in, Structure-19, as well; and passages in another language, not marked, Structure-20) are
-/// added in `run` directly, and their messages to messageFor.
+/// in, Structure-19, as well; passages in another language, not marked, Structure-20; and a
+/// list's items left outside it, Structure-21) are added in `run` directly, and their messages to
+/// messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -189,6 +190,28 @@ let private paragraphListFindings (runs: ParagraphLists.ListRun list) =
               6
               PdfFixOptions.Lists
               (Option.toObj run.Geometry) ]
+
+// ---- Structure-21: a list's items outside it (see ParagraphLists) ----
+
+[<Literal>]
+let private ListItemOutsideMessage =
+    "A paragraph starts with the same list marker as the list beside it, but isn't in that list, so a screen reader announces the list without it, one item short. An auto fix can move it into the list."
+
+let private listItemOutsideFindings (additions: ParagraphLists.ListAddition list) =
+    [ for addition in additions ->
+          let items = addition.Before.Length + addition.After.Length
+          let where =
+              match addition.Before, addition.After with
+              | _, [] -> "just before"
+              | [], _ -> "just after"
+              | _ -> "on both sides of"
+          warning
+              ListItemOutsideMessage
+              $"Page {addition.Page}: {items} item(s) marked \"{addition.Marker}\" {where} a list of {addition.ListItems}."
+              addition.Path
+              21
+              PdfFixOptions.Lists
+              (Option.toObj addition.Geometry) ]
 
 // ---- Structure-7: headings but no bookmarks (see Bookmarks) ----
 
@@ -518,7 +541,8 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! disconnectedFindings document context ties
           yield! unlinkedUrlFindings document context
           yield! tocHeadingFindings document context
-          yield! paragraphListFindings lists
+          yield! paragraphListFindings lists.Runs
+          yield! listItemOutsideFindings lists.Additions
           yield! splitFigureFindings document context
           yield! emptyFigureFindings document context
           yield! readingJumpFindings document context
@@ -534,9 +558,11 @@ let run (document: PdfDocument) context : RuleViolation list =
                   (if candidate.Fixable then PdfFixOptions.JoinSplitWords else PdfFixOptions.None)
                   (Option.toObj candidate.Geometry)
           let listed = Collections.Generic.HashSet<PdfDictionary>(HashIdentity.Reference)
-          for run in lists do
+          for run in lists.Runs do
               for item in run.Items do
                   listed.UnionWith(Option.toList item.Label @ item.Body)
+          for addition in lists.Additions do
+              listed.UnionWith(List.concat (addition.Before @ addition.After))
           for candidate in ParagraphTables.find context visits listed do
               warning
                   ParagraphTableMessage
@@ -573,6 +599,7 @@ let messageFor (testNumber: int) : string option =
         | 18 -> Some UnlinkedUrlMessage
         | 19 -> Some LanguageMismatchMessage
         | 20 -> Some PassageLanguageMessage
+        | 21 -> Some ListItemOutsideMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.

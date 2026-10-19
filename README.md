@@ -530,6 +530,7 @@ new one. All of them:
 | Structure-18 | A web address shown as text that nothing links | `link-urls`, when the address's tagged text is its own (in one piece, or in pieces side by side in one tag; punctuation drawn with it is split off), or it's drawn in the middle of one piece of text, which is cut around it |
 | Structure-19 | A declared language the text clearly isn't in (Spanish text in a document that says it's English) | `language`, or choose the language in Structure… |
 | Structure-20 | A passage (a paragraph, heading, list item or cell) in another language than the one around it that doesn't say so | `passage-languages` |
+| Structure-21 | A paragraph that starts with the same list marker as the list beside it, left outside it (a list's first item, often) | `lists` |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -563,6 +564,16 @@ document looks exactly the same; a marker that starts its paragraph stays part o
 the item's text rather than being split into an `Lbl`, since that would mean
 editing the page's content. A marker that's a paragraph of its own is retagged as
 the item's `Lbl`.
+
+A paragraph that starts with a marker right before or after a tagged list (`L`)
+in the same parent, at its items' indent on the same page, whose marker goes
+with the list's (the same bullet, or the number before its first or after its
+last), is one of its items left outside it: some exports tag a list's first item
+as a paragraph. It's warned of (Structure-21), and the same `lists` fix moves it
+into the list as an `LI` > `LBody` around the paragraph. Paragraphs straight
+below it that carry on its text (its lines tagged apart: at its indent or a
+little right of it, not starting with a marker, after text that doesn't end a
+sentence) go into the same item.
 
 A tagged document whose parent tree is missing or incomplete gets a warning
 (`ParentTree.fs`, Structure-9). The parent tree says which element each piece of

@@ -5,6 +5,9 @@
 /// never the page's drawn content, so the document looks the same; a marker that starts its
 /// paragraph stays part of the item's text rather than being split out into an Lbl, and a
 /// marker that's a paragraph of its own becomes the item's Lbl.
+///
+/// It also finds a list's items left outside it: paragraphs that start with its marker just
+/// before or after an L, at its items' indent (see ListAddition), which the fix moves into it.
 module internal Legibyl.Validation.ParagraphLists
 
 open System
@@ -38,6 +41,33 @@ type ListRun =
       /// The /ListNumbering the markers call for, e.g. Decimal or Disc.
       Numbering: PdfName
       Geometry: StructureGeometry option }
+
+/// Paragraphs that start with a list's marker, beside the list (L) in their parent but outside
+/// it: more of its items, one before its first, say, as some exports leave a list's first item.
+type ListAddition =
+    { /// The list they belong in.
+      List: PdfDictionary
+      /// The element whose /K array holds the list and the paragraphs.
+      Parent: PdfDictionary
+      /// The items to go before the list's first and after its last: each one's paragraphs, its
+      /// marker's first, then any that carry on its text on the lines below it.
+      Before: PdfDictionary list list
+      After: PdfDictionary list list
+      /// The paragraphs' positions in the parent's /K.
+      Indexes: int list
+      /// Where the first one is, e.g. "StructTreeRoot/K[0]/K[3]".
+      Path: string
+      Page: int
+      /// The first one's marker, e.g. "•".
+      Marker: string
+      /// How many items the list has already.
+      ListItems: int
+      Geometry: StructureGeometry option }
+
+/// What find finds: runs of paragraphs to tag as lists, and paragraphs to add to lists beside them.
+type Found =
+    { Runs: ListRun list
+      Additions: ListAddition list }
 
 // ---- Markers ----
 
@@ -190,13 +220,16 @@ let private isExcluded (tag: PdfName | null) =
     PdfName.TOC.Equals tag || PdfName.TOCI.Equals tag || PdfName.Lbl.Equals tag
 
 /// Every run of two or more sibling paragraphs on one page that each start with a marker,
-/// share an indent, and whose markers form one list. Paragraphs in a table of contents or a
-/// list item's label are left alone.
-let find (document: PdfDocument) context : ListRun list =
+/// share an indent, and whose markers form one list; and paragraphs that start with a marker
+/// beside a list of the same markers, at its items' indent (see ListAddition), which aren't
+/// taken into runs of their own. Paragraphs in a table of contents or a list item's label are
+/// left alone.
+let find (document: PdfDocument) context : Found =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
-    | null -> []
+    | null -> { Runs = []; Additions = [] }
     | structTreeRoot ->
         let visits = walk structTreeRoot context |> Array.ofSeq
+        let additions = List<ListAddition>()
 
         // Elements inside an excluded container (walk goes depth first, and each path extends
         // its parent's, so those we're inside are a stack of path prefixes).
@@ -216,7 +249,8 @@ let find (document: PdfDocument) context : ListRun list =
                   if not (inside.Contains visit.Element) && not (isExcluded (standardTag visit.Element context)) then
                       yield visit.Element, $"{visit.Path}/K" ]
 
-        [ for parent, kidsPath in parents do
+        let runs =
+          [ for parent, kidsPath in parents do
               match resolve (parent.Get(PdfName.K)) with
               | :? PdfArray as kids ->
                   let paragraphAt i =
@@ -248,8 +282,125 @@ let find (document: PdfDocument) context : ListRun list =
                           | None -> None
                       | _ -> None
 
-                  // Maximal runs of consecutive marked paragraphs on one page, sharing an indent.
-                  // Empty paragraphs between items (blank lines, common in exported documents)
+                  // ---- Paragraphs that are more items of a list beside them ----
+
+                  // A sentence ends at its full stop, even inside closing quotes or brackets.
+                  let endsSentence (text: string) =
+                      let text = text.TrimEnd('”', '’', '"', '\'', ')', ']', '»')
+                      text <> "" && ".:;!?…".Contains text[text.Length - 1]
+                  // An item at i: a paragraph that starts with a marker, and the indexes of those that
+                  // carry on its text (its lines tagged apart): straight below, at its indent or a
+                  // little right of it, not starting with a marker, where the text before them
+                  // doesn't end a sentence.
+                  let itemAt i : (Candidate * int list) option =
+                      match candidateAt i, paragraphAt i with
+                      | Some({ MarkerOnly = false; Geometry = Some start } as candidate), Some(_, _, _, text) ->
+                          let line = max 12.0 ((start.Top - start.Bottom) * 2.5)
+                          let rec more j (previous: StructureGeometry) previousText rest =
+                              match (if j < kids.Size() then paragraphAt j else None) with
+                              | Some(_, Some page, Some geometry, text) when
+                                  page = candidate.Page
+                                  && text <> ""
+                                  && not (startsWithMarker text)
+                                  && not (endsSentence previousText)
+                                  && geometry.Left >= start.Left - SameIndent
+                                  && geometry.Left <= start.Left + 24.0
+                                  && previous.Bottom - geometry.Top >= -2.0
+                                  && previous.Bottom - geometry.Top <= line
+                                  ->
+                                  more (j + 1) geometry text (j :: rest)
+                              | _ -> List.rev rest
+                          Some(candidate, more (i + 1) start text [])
+                      | _ -> None
+                  let items = Array.init (kids.Size()) itemAt
+                  // The item ending at each index (its last paragraph's), to walk up from a list.
+                  let endingAt = Dictionary<int, Candidate * int list>()
+                  for found in items do
+                      match found with
+                      | Some(candidate, rest) -> endingAt[List.last (candidate.Index :: rest)] <- (candidate, rest)
+                      | None -> ()
+                  // A list's items: its page, where each is and its marker; only a list of items
+                  // that each start with one.
+                  let listAt k =
+                      match resolve (kids.Get k) with
+                      | :? PdfDictionary as list when PdfName.L.Equals(standardTag list context) ->
+                          let entries =
+                              match resolve (list.Get(PdfName.K)) with
+                              | :? PdfArray as array -> [ for j in 0 .. array.Size() - 1 -> resolve (array.Get j) ]
+                              | NonNull single -> [ single ]
+                              | Null -> []
+                          let itemOf (entry: PdfObject | null) =
+                              match entry with
+                              | :? PdfDictionary as item when PdfName.LI.Equals(standardTag item context) ->
+                                  let page = structElemPage item context None
+                                  let geometry = textGeometry item context page
+                                  let page = page |> Option.orElse (geometry |> Option.map _.PageNumber)
+                                  let text = Regex.Replace(extractText item context page, @"\s+", " ").Trim()
+                                  match page, geometry, markerOf text with
+                                  | Some page, Some geometry, Some(marker, _) -> Some(page, geometry, marker)
+                                  | _ -> None
+                              | _ -> None
+                          let listItems = List.map itemOf entries
+                          if not listItems.IsEmpty && List.forall Option.isSome listItems then
+                              Some(list, List.choose id listItems)
+                          else
+                              None
+                      | _ -> None
+                  let claimed = HashSet<int>()
+                  for k in 0 .. kids.Size() - 1 do
+                      match listAt k with
+                      | Some(list, listItems) ->
+                          let beside (candidate: Candidate) (page, geometry: StructureGeometry, _) =
+                              not (claimed.Contains candidate.Index)
+                              && candidate.Page = page
+                              && (candidate.Geometry |> Option.exists (fun at -> abs (at.Left - geometry.Left) <= SameIndent))
+                          let rec before e found =
+                              match endingAt.TryGetValue e with
+                              | true, ((candidate, _) as item) when beside candidate listItems.Head -> before (candidate.Index - 1) (item :: found)
+                              | _ -> found
+                          let rec after s found =
+                              match (if s < items.Length then items[s] else None) with
+                              | Some((candidate, rest) as item) when beside candidate (List.last listItems) ->
+                                  after (List.last (candidate.Index :: rest) + 1) (item :: found)
+                              | _ -> List.rev found
+                          let markers = List.map (fun (candidate: Candidate, _) -> candidate.Marker)
+                          let listMarkers = listItems |> List.map (fun (_, _, marker) -> marker)
+                          let fits (before, after) =
+                              not (List.isEmpty before && List.isEmpty after)
+                              && (numberingOf (markers before @ listMarkers @ markers after)).IsSome
+                          let before, after = before (k - 1) [], after (k + 1) []
+                          match [ before, after; before, []; [], after ] |> List.tryFind fits with
+                          | Some(before, after) ->
+                              let paragraphs (candidate: Candidate, rest) =
+                                  candidate.Paragraph :: [ for j in rest -> (Option.get (paragraphAt j) |> fun (p, _, _, _) -> p) ]
+                              let indexes = [ for candidate: Candidate, rest in before @ after do yield candidate.Index; yield! rest ]
+                              claimed.UnionWith indexes
+                              let first: Candidate = fst (List.head (before @ after))
+                              additions.Add
+                                  { List = list
+                                    Parent = parent
+                                    Before = List.map paragraphs before
+                                    After = List.map paragraphs after
+                                    Indexes = indexes
+                                    Path = first.Path
+                                    Page = first.Page
+                                    Marker = first.MarkerText
+                                    ListItems = listItems.Length
+                                    Geometry =
+                                      [ for candidate: Candidate, rest in before @ after do
+                                            yield! Option.toList candidate.Geometry
+                                            for j in rest do
+                                                match paragraphAt j with
+                                                | Some(_, _, Some geometry, _) -> yield geometry
+                                                | _ -> () ]
+                                      |> unionGeometry }
+                          | None -> ()
+                      | None -> ()
+                  // What's added to a list isn't a run of its own.
+                  let candidateAt i = if claimed.Contains i then None else candidateAt i
+                  let paragraphAt i = if claimed.Contains i then None else paragraphAt i
+
+                  // Maximal runs of consecutive marked paragraphs on one page, sharing an indent.                  // Empty paragraphs between items (blank lines, common in exported documents)
                   // don't end a run; they go with the item before them. After a marker that's a
                   // paragraph of its own, the paragraphs right of it are its item's text, up to
                   // the next marker.
@@ -340,6 +491,7 @@ let find (document: PdfDocument) context : ListRun list =
                                     Geometry = items |> List.collect (fun item -> Option.toList item.Geometry @ item.TextGeometry) |> unionGeometry }
                           | None -> ()
               | _ -> () ]
+        { Runs = runs; Additions = List.ofSeq additions }
 
 // ---- Tagging a run as a list ----
 
@@ -391,3 +543,33 @@ let tagAsList (document: PdfDocument) (run: ListRun) =
     for index in List.rev (List.tail run.Indexes) do
         kids.Remove index
     kids.Set(List.head run.Indexes, list) |> ignore
+
+/// Adds each of the paragraphs' items to the list, before its first item or after its last, as
+/// LI > LBody > the paragraphs, taking them out of their parent. Each paragraph keeps its own
+/// content (and parent-tree entries); only its parent changes.
+let addToList (document: PdfDocument) (addition: ListAddition) =
+    let list = addition.List
+    let item (paragraphs: PdfDictionary list) =
+        let item = structElement document PdfName.LI list
+        let body = structElement document PdfName.LBody item
+        let contents = PdfArray()
+        for paragraph in paragraphs do
+            contents.Add paragraph
+            paragraph.Put(PdfName.P, body) |> ignore
+        body.Put(PdfName.K, contents) |> ignore
+        item.Put(PdfName.K, body) |> ignore
+        item
+    let items =
+        match list.Get(PdfName.K) with
+        | :? PdfArray as items -> items
+        | single ->
+            let items = PdfArray()
+            if not (isNull single) then items.Add single
+            list.Put(PdfName.K, items) |> ignore
+            items
+    addition.Before |> List.iteri (fun i paragraphs -> items.Add(i, item paragraphs))
+    for paragraphs in addition.After do
+        items.Add(item paragraphs)
+    let kids = addition.Parent.GetAsArray(PdfName.K) |> nonNull
+    for index in List.sortDescending addition.Indexes do
+        kids.Remove index

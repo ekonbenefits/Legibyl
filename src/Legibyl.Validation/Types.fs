@@ -26,7 +26,8 @@ type PdfFixOptions =
     | Title = 16
     /// Tags paragraphs the table of contents lists as headings (H1-H6); see TocHeadings.
     | HeadingsFromToc = 32
-    /// Tags runs of paragraphs that start with list markers as lists; see ParagraphLists.
+    /// Tags runs of paragraphs that start with list markers as lists, and moves one that starts
+    /// with a list's marker beside that list into it; see ParagraphLists.
     | Lists = 64
     /// Like Title, but when the document carries no title anywhere, falls back to
     /// the text of a short first page (a title page); see StructureFixes.titlePageText.
