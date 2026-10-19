@@ -191,7 +191,7 @@ let ``a numbered paragraph goes in where its number does: before the list's firs
 
 [<Theory>]
 [<InlineData("• A benefit at another indent.", 100.0)>]
-[<InlineData("◦ A benefit with another bullet.", 72.0)>]
+[<InlineData("- A benefit with another bullet.", 72.0)>]
 [<InlineData("A benefit with no bullet.", 72.0)>]
 let ``a paragraph at another indent, or with another marker or none, is left beside the list`` (text: string, left: float) =
     use input = new TempPdf()
