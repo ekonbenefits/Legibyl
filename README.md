@@ -531,6 +531,7 @@ new one. All of them:
 | Structure-19 | A declared language the text clearly isn't in (Spanish text in a document that says it's English) | `language`, or choose the language in Structure… |
 | Structure-20 | A passage (a paragraph, heading, list item or cell) in another language than the one around it that doesn't say so | `passage-languages` |
 | Structure-21 | A paragraph that starts with the same list marker as the list beside it, left outside it (a list's first item, often) | `lists` |
+| Structure-22 | One list tagged as lists side by side: numbering that carries on from one to the next, or a list indented under an item tagged apart from it | `lists` |
 
 For documents that tag no headings at all but carry a linked table of
 contents, Legibyl also recovers the heading hierarchy from it
@@ -574,6 +575,15 @@ into the list as an `LI` > `LBody` around the paragraph. Paragraphs straight
 below it that carry on its text (its lines tagged apart: at its indent or a
 little right of it, not starting with a marker, after text that doesn't end a
 sentence) go into the same item.
+
+One list tagged as lists side by side in the same parent, on one page, is
+warned of too (Structure-22): a list at the first one's indent whose numbering
+counts on from it (steps 1–2, then 3–4), and lists indented further between
+them (a.–b. under step 2), or after a last item that ends with a colon. A
+bulleted list is only taken to carry on past a list indented between them.
+The `lists` fix joins them: the later lists' items become the first's, and
+each indented list goes inside the item above it, after its text, so a screen
+reader announces one list and the steps under the item that has them.
 
 A tagged document whose parent tree is missing or incomplete gets a warning
 (`ParentTree.fs`, Structure-9). The parent tree says which element each piece of

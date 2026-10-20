@@ -7,7 +7,8 @@
 /// marker that's a paragraph of its own becomes the item's Lbl.
 ///
 /// It also finds a list's items left outside it: paragraphs that start with its marker just
-/// before or after an L, at its items' indent (see ListAddition), which the fix moves into it.
+/// before or after an L, at its items' indent (see ListAddition), which the fix moves into it;
+/// and one list tagged as lists side by side (see ListJoin), which the fix joins.
 module internal Legibyl.Validation.ParagraphLists
 
 open System
@@ -64,10 +65,29 @@ type ListAddition =
       ListItems: int
       Geometry: StructureGeometry option }
 
-/// What find finds: runs of paragraphs to tag as lists, and paragraphs to add to lists beside them.
+/// One list tagged as lists side by side in a parent: its items numbered on from one list to
+/// the next (steps 1-2, then 3-4), or a list indented under an item tagged after its list
+/// rather than in the item (steps a-b under "2. Apply the formula:"), or both.
+type ListJoin =
+    { /// The element whose /K array holds the lists.
+      Parent: PdfDictionary
+      /// The lists at the first one's indent, in order: the first takes the others' items.
+      Lists: PdfDictionary list
+      /// The lists indented further, each with the item body (LBody) they go in, after its content.
+      Nested: (PdfDictionary * PdfDictionary list) list
+      /// Where the first list is, e.g. "StructTreeRoot/K[0]/K[3]".
+      Path: string
+      Page: int
+      /// The first list's first marker, e.g. "1.".
+      Marker: string
+      Geometry: StructureGeometry option }
+
+/// What find finds: runs of paragraphs to tag as lists, paragraphs to add to lists beside them,
+/// and lists tagged in pieces to join.
 type Found =
     { Runs: ListRun list
-      Additions: ListAddition list }
+      Additions: ListAddition list
+      Joins: ListJoin list }
 
 // ---- Markers ----
 
@@ -191,6 +211,15 @@ let private markerOnly (text: string) =
 /// Whether text is a list marker and nothing else ("•", "1.").
 let isMarkerOnly (text: string) = (markerOnly (text.Trim())).IsSome
 
+/// A list's item, as find reads it: where it's drawn and the marker its text starts with.
+type private ListEntry =
+    { Item: PdfDictionary
+      Page: int
+      Geometry: StructureGeometry
+      Marker: Marker
+      MarkerText: string
+      Text: string }
+
 // ---- Finding runs ----
 
 // Items of one list share an indent, within this many points.
@@ -226,10 +255,11 @@ let private isExcluded (tag: PdfName | null) =
 /// left alone.
 let find (document: PdfDocument) context : Found =
     match document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.StructTreeRoot) with
-    | null -> { Runs = []; Additions = [] }
+    | null -> { Runs = []; Additions = []; Joins = [] }
     | structTreeRoot ->
         let visits = walk structTreeRoot context |> Array.ofSeq
         let additions = List<ListAddition>()
+        let joins = List<ListJoin>()
 
         // Elements inside an excluded container (walk goes depth first, and each path extends
         // its parent's, so those we're inside are a stack of path prefixes).
@@ -347,7 +377,8 @@ let find (document: PdfDocument) context : Found =
                                   let page = page |> Option.orElse (geometry |> Option.map _.PageNumber)
                                   let text = Regex.Replace(extractText item context page, @"\s+", " ").Trim()
                                   match page, geometry, markerOf text with
-                                  | Some page, Some geometry, Some(marker, _) -> Some(page, geometry, marker)
+                                  | Some page, Some geometry, Some(marker, markerText) ->
+                                      Some { Item = item; Page = page; Geometry = geometry; Marker = marker; MarkerText = markerText; Text = text }
                                   | _ -> None
                               | _ -> None
                           let listItems = List.map itemOf entries
@@ -360,12 +391,12 @@ let find (document: PdfDocument) context : Found =
                   for k in 0 .. kids.Size() - 1 do
                       match listAt k with
                       | Some(list, listItems) ->
-                          let beside (candidate: Candidate) (page, geometry: StructureGeometry, _) =
+                          let beside (candidate: Candidate) (entry: ListEntry) =
                               not (claimed.Contains candidate.Index)
-                              && candidate.Page = page
-                              && (candidate.Geometry |> Option.exists (fun at -> abs (at.Left - geometry.Left) <= SameIndent))
+                              && candidate.Page = entry.Page
+                              && (candidate.Geometry |> Option.exists (fun at -> abs (at.Left - entry.Geometry.Left) <= SameIndent))
                           let markers = List.map (fun (candidate: Candidate, _) -> candidate.Marker)
-                          let listMarkers = listItems |> List.map (fun (_, _, marker) -> marker)
+                          let listMarkers = listItems |> List.map _.Marker
                           // Where an item's text starts and ends on the page.
                           let top (candidate: Candidate, _) = candidate.Geometry
                           let bottom (candidate: Candidate, rest) =
@@ -375,16 +406,16 @@ let find (document: PdfDocument) context : Found =
                           // As near the list (and each other) as its items are to each other, or about
                           // a line's height where it has one: not a heading after a blank line.
                           let spacing =
-                              let gaps = listItems |> List.pairwise |> List.map (fun ((_, upper: StructureGeometry, _), (_, lower: StructureGeometry, _)) -> upper.Bottom - lower.Top)
+                              let gaps = listItems |> List.pairwise |> List.map (fun (upper: ListEntry, lower: ListEntry) -> upper.Geometry.Bottom - lower.Geometry.Top)
                               match gaps with
-                              | [] -> let (_, only, _) = listItems.Head in only.Top - only.Bottom
+                              | [] -> listItems.Head.Geometry.Top - listItems.Head.Geometry.Bottom
                               | gaps -> List.max gaps
                           let near (upper: StructureGeometry option) (lower: StructureGeometry option) =
                               match upper, lower with
                               | Some upper, Some lower -> upper.Bottom - lower.Top <= 1.5 * spacing + 2.0
                               | _ -> false
-                          let (_, firstAt, _) = listItems.Head
-                          let (_, lastAt, _) = List.last listItems
+                          let firstAt = listItems.Head.Geometry
+                          let lastAt = (List.last listItems).Geometry
                           // Each side taken an item at a time, nearest the list first, as long as its
                           // markers carry the list's numbering on: a wrong one stops it, not the rest.
                           let rec before e found =
@@ -436,6 +467,88 @@ let find (document: PdfDocument) context : Found =
                                       |> unionGeometry }
                           | None -> ()
                       | None -> ()
+                  // ---- Lists tagged in pieces ----
+
+                  // From each list, the lists straight after it: at its indent, numbered on from it
+                  // (counting on, or the same bullet with a list indented under its last item between
+                  // them), they're more of its items; indented further, a list under its last item,
+                  // where a list at its indent numbers on after it, or that item ends with a colon
+                  // ("2. Apply the formula:"). Lists on another page, or anything else between them,
+                  // end it.
+                  let isOrdinal = function
+                      | Ordinal _ -> true
+                      | Bullet _ -> false
+                  let bodyOf (item: PdfDictionary) =
+                      let kids =
+                          match resolve (item.Get(PdfName.K)) with
+                          | :? PdfArray as array -> [ for j in 0 .. array.Size() - 1 -> resolve (array.Get j) ]
+                          | NonNull single -> [ single ]
+                          | Null -> []
+                      kids
+                      |> List.tryPick (function
+                          | :? PdfDictionary as body when PdfName.LBody.Equals(standardTag body context) -> Some body
+                          | _ -> None)
+                  let mutable k = 0
+                  while k < kids.Size() do
+                      match listAt k with
+                      | Some(first, (firstItems: ListEntry list)) ->
+                          let page = firstItems.Head.Page
+                          let indent = firstItems.Head.Geometry.Left
+                          let mutable markers = firstItems |> List.map _.Marker
+                          let mutable last = List.last firstItems
+                          let mutable lists = [ first ]
+                          let mutable nested = []
+                          let mutable deeper = []
+                          let mutable next = k + 1
+                          let mutable consumed = k + 1
+                          let mutable going = true
+                          while going && next < kids.Size() do
+                              match listAt next with
+                              | Some(list, (items: ListEntry list)) when items |> List.forall (fun entry -> entry.Page = page) ->
+                                  let left = items.Head.Geometry.Left
+                                  let numbersOn = (numberingOf (markers @ (items |> List.map _.Marker))).IsSome
+                                  if left > indent + SameIndent then
+                                      deeper <- deeper @ [ list ]
+                                      next <- next + 1
+                                  elif abs (left - indent) <= SameIndent && numbersOn && (isOrdinal markers.Head || not deeper.IsEmpty) then
+                                      match deeper, bodyOf last.Item with
+                                      | [], _ -> ()
+                                      | _, Some body ->
+                                          nested <- nested @ [ body, deeper ]
+                                          deeper <- []
+                                      | _, None -> going <- false
+                                      if going then
+                                          lists <- lists @ [ list ]
+                                          markers <- markers @ (items |> List.map _.Marker)
+                                          last <- List.last items
+                                          next <- next + 1
+                                          consumed <- next
+                                  else
+                                      going <- false
+                              | _ -> going <- false
+                          if not deeper.IsEmpty && last.Text.TrimEnd().EndsWith ":" then
+                              match bodyOf last.Item with
+                              | Some body ->
+                                  nested <- nested @ [ body, deeper ]
+                                  consumed <- consumed + deeper.Length
+                              | None -> ()
+                          if lists.Length > 1 || not nested.IsEmpty then
+                              joins.Add
+                                  { Parent = parent
+                                    Lists = lists
+                                    Nested = nested
+                                    Path = $"{kidsPath}[{k}]"
+                                    Page = page
+                                    Marker = firstItems.Head.MarkerText
+                                    Geometry =
+                                      [ for list in lists @ List.collect snd nested -> textGeometry list context (Some page) ]
+                                      |> List.choose id
+                                      |> unionGeometry }
+                              k <- consumed
+                          else
+                              k <- k + 1
+                      | None -> k <- k + 1
+
                   // What's added to a list isn't a run of its own.
                   let candidateAt i = if claimed.Contains i then None else candidateAt i
                   let paragraphAt i = if claimed.Contains i then None else paragraphAt i
@@ -532,7 +645,7 @@ let find (document: PdfDocument) context : Found =
                                     Geometry = items |> List.collect (fun item -> Option.toList item.Geometry @ item.TextGeometry) |> unionGeometry }
                           | None -> ()
               | _ -> () ]
-        { Runs = runs; Additions = List.ofSeq additions }
+        { Runs = runs; Additions = List.ofSeq additions; Joins = List.ofSeq joins }
 
 // ---- Tagging a run as a list ----
 
@@ -619,3 +732,41 @@ let addToList (document: PdfDocument) context (addition: ListAddition) =
     let kids = addition.Parent.GetAsArray(PdfName.K) |> nonNull
     for index in List.sortDescending addition.Indexes do
         kids.Remove index
+
+/// The element's /K as an array, made one if it's a single kid or none.
+let private kidsArray (element: PdfDictionary) =
+    match element.Get(PdfName.K) with
+    | :? PdfArray as kids -> kids
+    | single ->
+        let kids = PdfArray()
+        if not (isNull single) then kids.Add single
+        element.Put(PdfName.K, kids) |> ignore
+        kids
+
+/// Takes element out of parent's /K, wherever it is now.
+let private takeOut (parent: PdfDictionary) (element: PdfDictionary) =
+    let kids = kidsArray parent
+    match Seq.tryFindIndex (fun i -> Object.ReferenceEquals(resolve (kids.Get i), element)) (seq { 0 .. kids.Size() - 1 }) with
+    | Some index -> kids.Remove index
+    | None -> ()
+
+/// Joins the lists into the first: each list indented under an item goes in that item's body,
+/// after its content, and the items of the lists after the first become the first's. Lists
+/// are found by themselves in their parent, not by position, so this runs after the other
+/// changes. Only the tags change; the items keep their content.
+let joinLists (join: ListJoin) =
+    for body, lists in join.Nested do
+        for list in lists do
+            takeOut join.Parent list
+            (kidsArray body).Add list
+            list.Put(PdfName.P, body) |> ignore
+    let target = join.Lists.Head
+    for list in join.Lists.Tail do
+        let items = kidsArray list
+        for i in 0 .. items.Size() - 1 do
+            let item = items.Get(i, false)
+            (kidsArray target).Add item
+            match resolve item with
+            | :? PdfDictionary as item -> item.Put(PdfName.P, target) |> ignore
+            | _ -> ()
+        takeOut join.Parent list
