@@ -1457,7 +1457,7 @@ let applyFixes
     (attachments: Map<string, Attachments.AttachmentEdit>)
     (cancel: Threading.CancellationToken)
     : string list * PdfFixOptions list * string list =
-    use reader = new PdfReader(inputPath)
+    use reader = PdfFiles.reader inputPath
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let context = createContext document inputPath

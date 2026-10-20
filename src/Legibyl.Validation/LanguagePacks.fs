@@ -201,7 +201,7 @@ let writtenIn (document: PdfDocument) = DocumentLanguage.ofDocument document
 /// The language Legibyl writes a PDF's own text in (see writtenIn); None if it can't be read.
 let writtenInFile (pdfPath: string) =
     try
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         writtenIn document
     with _ -> None
 
@@ -215,7 +215,7 @@ let choices () =
 /// None if it can't be read.
 let ofFile (pdfPath: string) =
     try
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         DocumentLanguage.declared document, DocumentLanguage.readsAs document
     with _ -> None, None
 

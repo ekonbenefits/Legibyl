@@ -11,7 +11,7 @@ type TitleCandidate = { Title: string; Source: string }
 /// in the order the DocumentTitle and TitleFromFirstPage fixes would use them. Distinct titles
 /// only.
 let candidates (pdfPath: string) : TitleCandidate list =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     let info = document.GetDocumentInfo().GetTitle() |> Option.ofObj |> Option.filter (String.IsNullOrWhiteSpace >> not)
     [ yield! info |> Option.map (fun title -> { Title = title.Trim(); Source = "document info" }) |> Option.toList
       yield! StructureFixes.xmpTitle document |> Option.map (fun title -> { Title = title.Trim(); Source = "XMP metadata" }) |> Option.toList

@@ -258,7 +258,7 @@ module internal VeraPdf =
     let startLegibylAnalysis (pdfPath: string) : Task<LegibylAnalysis> =
         Task.Run(fun () ->
             try
-                let document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(pdfPath))
+                let document = PdfFiles.openToRead pdfPath
                 try
                     let context = StructureTreeObjects.createContext document pdfPath
                     Analysed(document, context, LegibylChecks.run document context)

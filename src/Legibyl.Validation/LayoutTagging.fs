@@ -183,7 +183,7 @@ let tag
     (chosen: string option)
     (onPage: int -> int -> unit)
     : string list * TaggedRegion list =
-    use reader = new PdfReader(pdfPath)
+    use reader = PdfFiles.reader pdfPath
     use writer = new PdfWriter(outputPath)
     use document = new PdfDocument(reader, writer)
     let catalog = document.GetCatalog().GetPdfObject()

@@ -287,7 +287,7 @@ let textIn (page: PdfPage) (box: StructureGeometry) =
 /// some, a "NotInTags" group of "Untagged" nodes, one per piece (its box, and what it is in
 /// Content). None for an untagged PDF (Suggest Structure tags it all).
 let nodes (pdfPath: string) : StructureNode list =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     [ for n in 1 .. (if tagged document then document.GetNumberOfPages() else 0) do
           let page = document.GetPage n
           match piecesOn page n with

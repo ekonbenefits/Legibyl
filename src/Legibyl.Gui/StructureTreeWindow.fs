@@ -66,7 +66,7 @@ module private StructureView =
     open StructureActions
     open StructureBlocks
 
-    let jsonOptions = JsonSerializerOptions(WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
+    let jsonOptions = JsonSerializerOptions(WriteIndented = true, NewLine = "\n", PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
 
     /// Whether the page preview draws only the selection, for this session: a busy page's
     /// outlines can hide it.

@@ -15,6 +15,7 @@
     <Compile Include="Tags.fs" />
     <Compile Include="Destinations.fs" />
     <Compile Include="Types.fs" />
+    <Compile Include="PdfFiles.fs" />
     <Compile Include="PdfUaTarget.fs" />
     <Compile Include="PdfLocationParser.fs" />
     <Compile Include="Results.fs" />

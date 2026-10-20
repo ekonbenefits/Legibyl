@@ -130,7 +130,7 @@ let usedNames (document: PdfDocument) : Map<string, int> =
 /// The tag names the elements of the PDF at pdfPath use, in the PDF 1.7 namespace (see usedNames):
 /// the names its role map is for.
 let usedNamesIn (pdfPath: string) : Map<string, int> =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     usedNames document
 
 /// What repairing a role map did: the names mapped by what they say (each with the tag and how
@@ -249,7 +249,7 @@ let pending (pdfPath: string) (chosen: Map<string, string>) : int =
     if chosen.IsEmpty then
         0
     else
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         let map =
             match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
             | null -> null

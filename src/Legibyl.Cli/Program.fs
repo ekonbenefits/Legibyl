@@ -42,6 +42,8 @@ let private usageError (message: string) =
 let private jsonOptions =
     JsonSerializerOptions(
         WriteIndented = true,
+        // (Its lines end the same on every system.)
+        NewLine = "\n",
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         Encoder = Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -581,7 +583,7 @@ let private fixFile (validator: VeraPdfValidator) (request: FixRequest) (file: s
         // The layout model, for the fixes that read the page's layout, unless a layout given or
         // reviewed has every page.
         let pageCount () =
-            use document = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(file))
+            use document = PdfFiles.openToRead file
             document.GetNumberOfPages()
         let model =
             let needed =

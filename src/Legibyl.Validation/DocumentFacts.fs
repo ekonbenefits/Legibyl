@@ -21,7 +21,7 @@ type Facts =
 
 /// The facts of the PDF at pdfPath.
 let read (pdfPath: string) : Facts =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     let title =
         DocumentTitles.candidates pdfPath
         |> List.tryFind (fun c -> c.Source = "document info" || c.Source = "XMP metadata")

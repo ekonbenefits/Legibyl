@@ -514,7 +514,7 @@ let private titleChanges (document: PdfDocument) (title: string) =
 
 /// Whether the title a person gave isn't pdfPath's yet.
 let titlePending (pdfPath: string) (title: string) =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     let changes = titleChanges document title
     changes.Info || changes.Xmp || changes.Shown
 
@@ -552,7 +552,7 @@ let unapplied (pdfPath: string) (edits: ElementEdit list) : string list =
     if edits.IsEmpty then
         []
     else
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         let context = createContext document pdfPath
         let figures, edits = edits |> List.partition (fun e -> e.Tag = FigureRegion.Tag)
         let outside, edits = edits |> List.partition isUntagged
@@ -620,7 +620,7 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
     if edits.IsEmpty then
         0
     else
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         let context = createContext document pdfPath
         let figures, edits = edits |> List.partition (fun e -> e.Tag = FigureRegion.Tag)
         let outside, edits = edits |> List.partition isUntagged
@@ -655,7 +655,7 @@ let pending (pdfPath: string) (edits: ElementEdit list) : int =
 /// needs review; Export and CLI --edits run the same preflight again.
 let figureRegionPreview (pdfPath: string) (box: StructureGeometry) : Result<string, string> =
     try
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         let context = createContext document pdfPath
         let edit: ElementEdit =
             { Page = box.PageNumber; Tag = FigureRegion.Tag; Box = box; Alt = "preview"; Text = null
@@ -670,7 +670,7 @@ let paragraphTableRefusal (pdfPath: string) (boxes: StructureGeometry list) : st
     match boxes with
     | first :: rest when not rest.IsEmpty ->
         try
-            use document = new PdfDocument(new PdfReader(pdfPath))
+            use document = PdfFiles.openToRead pdfPath
             let context = createContext document pdfPath
             let edit: ElementEdit =
                 { Page = first.PageNumber; Tag = Tags.P; Box = first; Alt = null; Text = null
