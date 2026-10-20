@@ -375,16 +375,26 @@ let private tagParagraphLists (document: PdfDocument) context =
           for addition in found.Additions -> List.min addition.Indexes, (fun () -> ParagraphLists.addToList document context addition) ]
     for _, change in List.sortByDescending fst changes do
         change ()
-    // After those: a join finds its lists by themselves, not by where they were.
-    for join in found.Joins do
-        ParagraphLists.joinLists join
+    // After those: a join finds its lists by themselves, not by where they were. Then again, on
+    // what those made (a list tagged from paragraphs between two lists, an item moved into one,
+    // a level joined that goes under the one above), until nothing's left to join.
+    let mutable joins =
+        if found.Runs.IsEmpty && found.Additions.IsEmpty then found.Joins else (ParagraphLists.find document context).Joins
+    let mutable joined = 0
+    let mutable rounds = 0
+    while not joins.IsEmpty && rounds < 5 do
+        for join in joins do
+            ParagraphLists.joinLists context join
+        joined <- joined + joins.Length
+        rounds <- rounds + 1
+        joins <- (ParagraphLists.find document context).Joins
     let added = found.Additions |> List.sumBy (fun addition -> addition.Before.Length + addition.After.Length)
     [ if not found.Runs.IsEmpty then
           $"Tagged {found.Runs.Length} run(s) of marked paragraphs as lists."
       if added > 0 then
           $"Moved {added} item(s) that start with a list's marker into the list beside them."
-      if not found.Joins.IsEmpty then
-          $"Joined {found.Joins.Length} list(s) tagged in pieces into one each, indented lists inside their items." ]
+      if joined > 0 then
+          $"Joined {joined} list(s) tagged in pieces into one each, indented lists inside their items." ]
 
 /// The table attributes (attribute dictionaries with /O /Table) that apply to a structure element:
 /// its own (/A, one dictionary or an array of them, with revision numbers between), then its

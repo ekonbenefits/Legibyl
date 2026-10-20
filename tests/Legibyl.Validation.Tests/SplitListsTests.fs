@@ -28,8 +28,14 @@ let private element (tag: string) (page: PdfPage) (kids: PdfObject list) =
     element.Put(PdfName.K, array) |> ignore
     element
 
-let private createPdf (path: string) (entries: Entry list) =
+/// As createPdf, with adjust given each element it makes (by its tag) and the document's catalog.
+let private createPdfWith (path: string) (entries: Entry list) (adjust: string -> PdfDictionary -> unit) (catalog: PdfDictionary -> unit) =
+    let element tag page kids =
+        let made = element tag page kids
+        adjust tag made
+        made
     use document = new PdfDocument(new PdfWriter(path))
+    catalog (document.GetCatalog().GetPdfObject())
     let page = document.AddNewPage()
     let canvas = PdfCanvas(page)
     let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA)
@@ -57,6 +63,8 @@ let private createPdf (path: string) (entries: Entry list) =
     root.Put(PdfName.Type, PdfName.StructTreeRoot) |> ignore
     root.Put(PdfName.K, element "Document" page body) |> ignore
     document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, root) |> ignore
+
+let private createPdf (path: string) (entries: Entry list) = createPdfWith path entries (fun _ _ -> ()) ignore
 
 let private splitWarnings (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
@@ -91,7 +99,7 @@ let ``steps numbered on across lists, with a list indented between them, are rep
 
     let warning = splitWarnings input.Path |> List.exactlyOne
     warning.ErrorMessage
-    |> should equal "Page 1: 3 lists side by side, starting \"1.\": 2 that number on as one, and 1 indented under an item of it."
+    |> should equal "Page 1: 3 lists side by side, starting \"1.\": 2 that carry on as one, and 1 indented under an item of it."
     warning.LocationContext |> should equal "StructTreeRoot/K/K[0]"
     warning.FixOptions |> should equal PdfFixOptions.Lists
 
@@ -124,7 +132,7 @@ let ``numbered lists side by side that count on are joined`` () =
           List [ 72.0, 2, "3. Add the two amounts together." ] ]
 
     (splitWarnings input.Path |> List.exactlyOne).ErrorMessage
-    |> should equal "Page 1: 2 lists side by side, starting \"1.\": 2 that number on as one."
+    |> should equal "Page 1: 2 lists side by side, starting \"1.\": 2 that carry on as one."
 
     fixLists input.Path output.Path |> ignore
 
@@ -194,3 +202,98 @@ let ``lists with a paragraph between them are left as they are`` () =
         [ List [ 72.0, 0, "1. Find the accrual rate."; 72.0, 1, "2. Apply the formula." ]
           Paragraph(36.0, 2, "Then:")
           List [ 72.0, 3, "3. Add the two amounts together." ] ]
+
+let private warnings testNumber (path: string) =
+    VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
+    |> Seq.filter (fun a -> a.Specification = "Legibyl" && a.TestNumber = testNumber)
+    |> List.ofSeq
+
+[<Fact>]
+let ``a list isn't put in an item that says what it reads as: it wouldn't be read`` () =
+    use input = new TempPdf()
+    // Only the item ending with a colon (the last LBody made) says what it reads as.
+    let mutable bodies = 0
+    createPdfWith
+        input.Path
+        [ List [ 76.0, 0, "1. Find the accrual rate."; 76.0, 1, "2. Apply the formula:" ]
+          List [ 108.0, 2, "a. Take all of the first $11."; 108.0, 3, "b. Take 75 percent of the next $33." ] ]
+        (fun tag element ->
+            if tag = "LBody" then
+                bodies <- bodies + 1
+                if bodies = 2 then element.Put(PdfName.ActualText, PdfString "2. Apply the formula below:") |> ignore)
+        ignore
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a list at the top of the next column isn't indented under an item ending with a colon`` () =
+    use input = new TempPdf()
+    createPdf
+        input.Path
+        [ List [ 76.0, 3, "1. Find the accrual rate."; 76.0, 4, "2. Apply the formula:" ]
+          List [ 320.0, 0, "a. Take all of the first $11."; 320.0, 1, "b. Take 75 percent." ] ]
+
+    splitWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``lists indented two levels go each under the item above them`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdf
+        input.Path
+        [ List [ 76.0, 0, "1. Find the accrual rate."; 76.0, 1, "2. Apply the formula:" ]
+          List [ 108.0, 2, "a. Take the first amount."; 108.0, 3, "b. Then the rest:" ]
+          List [ 140.0, 4, "i. At 75 percent."; 140.0, 5, "ii. Up to the limit." ]
+          List [ 76.0, 6, "3. Add the two amounts together."; 76.0, 7, "4. Multiply by years of service." ] ]
+
+    fixLists input.Path output.Path |> ignore
+
+    shape output.Path
+    |> should equal [ "L(LI(LBody),LI(LBody(L(LI(LBody),LI(LBody(L(LI(LBody),LI(LBody))))))),LI(LBody),LI(LBody))" ]
+    splitWarnings output.Path |> should be Empty
+
+[<Fact>]
+let ``items joined into a list in another language keep their own`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    let mutable lists = 0
+    createPdfWith
+        input.Path
+        [ List [ 76.0, 0, "1. Find the accrual rate."; 76.0, 1, "2. Apply the formula." ]
+          List [ 76.0, 2, "3. Add the two amounts together."; 76.0, 3, "4. Multiply by years of service." ] ]
+        (fun tag element ->
+            if tag = "L" then
+                lists <- lists + 1
+                if lists = 1 then element.Put(PdfName.Lang, PdfString "es") |> ignore)
+        (fun catalog -> catalog.Put(PdfName.Lang, PdfString "en-US") |> ignore)
+
+    fixLists input.Path output.Path |> ignore
+
+    let list = (VeraPdfValidator().ReadStructureTree output.Path |> notNull).Children[0].Children[0]
+    [ for item in list.Children -> item.Language ] |> should equal [ null; null; "en-US"; "en-US" ]
+
+[<Fact>]
+let ``an item tagged as a paragraph between two lists of one is joined in one go`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdf
+        input.Path
+        [ List [ 76.0, 0, "1. Find the accrual rate."; 76.0, 1, "2. Apply the formula." ]
+          Paragraph(76.0, 2, "3. Add the two amounts together.")
+          List [ 76.0, 3, "4. Multiply by years of service."; 76.0, 4, "5. Divide by twelve." ] ]
+
+    fixLists input.Path output.Path |> ignore
+
+    shape output.Path |> should equal [ "L(LI(LBody),LI(LBody),LI(LBody(P)),LI(LBody),LI(LBody))" ]
+    splitWarnings output.Path |> should be Empty
+    warnings 21 output.Path |> should be Empty
+
+[<Fact>]
+let ``a list further below than its items are apart isn't more of it`` () =
+    use input = new TempPdf()
+    createPdf
+        input.Path
+        [ List [ 76.0, 0, "1. Find the accrual rate."; 76.0, 1, "2. Apply the formula." ]
+          List [ 76.0, 6, "3. A note at the foot of the page."; 76.0, 7, "4. And another." ] ]
+
+    splitWarnings input.Path |> should be Empty
