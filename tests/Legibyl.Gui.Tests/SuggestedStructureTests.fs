@@ -300,7 +300,7 @@ let ``the document title is prefilled from the document, and only a change is ke
             let titleBox () = descendants<TextBox> window |> List.find (fun b -> b.PlaceholderText = "What a screen reader and the title bar call this document")
             let prefilled = titleBox().Text
             let editedAtFirst = review.IsEdited
-            titleBox().Text <- "Cub Scout Pack 721"
+            titleBox().Text <- "Riverside Community Garden"
             pump ()
             review.Save pdf
             let saved = File.ReadAllText(pdf + ".legibyl.json")
@@ -312,7 +312,7 @@ let ``the document title is prefilled from the document, and only a change is ke
 
             prefilled |> should equal "Design"
             editedAtFirst |> should be False
-            saved |> should haveSubstring "\"title\": \"Cub Scout Pack 721\""
+            saved |> should haveSubstring "\"title\": \"Riverside Community Garden\""
             removed |> should be True
             (reviews.For pdf).DocumentTitle |> should equal (Some "Design"))
     finally

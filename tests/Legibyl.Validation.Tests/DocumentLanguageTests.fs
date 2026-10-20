@@ -12,14 +12,14 @@ open Legibyl.Validation
 open Legibyl.Validation.Tests.TestSupport
 
 let private english =
-    [ "Adventures, badges and belonging, where kindergarten through fifth graders"
-      "try new things alongside their families, led by volunteer parents just like you."
-      "Campouts, caving, climbing, hiking, the pinewood derby and Scouting for Food." ]
+    [ "Raised beds, shared tools and a place to grow, where neighbours of every age"
+      "learn to plant alongside each other, helped by volunteer gardeners just like you."
+      "Planting, weeding, watering, composting, the harvest fair and the seed swap." ]
 
 let private french =
-    [ "Aventures, badges et appartenance : les enfants de la maternelle jusqu'au"
-      "primaire essaient de nouvelles choses avec leur famille, avec des parents"
-      "bénévoles comme vous. Camping, spéléologie, escalade et randonnée." ]
+    [ "Des potagers, des outils partagés et un endroit où cultiver : les voisins"
+      "de tout âge apprennent à planter les uns avec les autres, aidés par des"
+      "jardiniers bénévoles comme vous. Semis, désherbage, arrosage et compost." ]
 
 let private spanish =
     [ "Aventuras, insignias y compañerismo: niños de preescolar a quinto grado"
@@ -68,7 +68,7 @@ let ``French text is declared French`` () =
 let ``too little text, or a language already declared, is left alone`` () =
     use short = new TempPdf()
     use shortOutput = new TempPdf()
-    createPdf short.Path [ "Pack 721" ] None
+    createPdf short.Path [ "Plot 21" ] None
     (fixLanguage short.Path shortOutput.Path).OutputPath |> should be Null
 
     use declared = new TempPdf()

@@ -20,7 +20,7 @@ let ``a document with no XMP metadata gets a stream from its Info dictionary, wh
     do
         use document = new PdfDocument(new PdfWriter(input.Path))
         document.AddNewPage() |> ignore
-        document.GetDocumentInfo().SetTitle("Cub Scout Pack 721").SetAuthor "Pack 721" |> ignore
+        document.GetDocumentInfo().SetTitle("Riverside Community Garden").SetAuthor "Riverside Garden" |> ignore
     failedRules input.Path |> should contain "7.1-8"
 
     let result = VeraPdfValidator().Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.Metadata)
@@ -32,7 +32,7 @@ let ``a document with no XMP metadata gets a stream from its Info dictionary, wh
         let metadata = document.GetCatalog().GetPdfObject().GetAsStream PdfName.Metadata |> notNull
         (metadata.GetAsName PdfName.Type, metadata.GetAsName PdfName.Subtype) |> should equal (PdfName.Metadata, PdfName.XML)
         let xmp = document.GetXmpMetadata() |> notNull
-        xmp.GetLocalizedText(XMPConst.NS_DC, "title", null, XMPConst.X_DEFAULT).GetValue() |> should equal "Cub Scout Pack 721"
+        xmp.GetLocalizedText(XMPConst.NS_DC, "title", null, XMPConst.X_DEFAULT).GetValue() |> should equal "Riverside Community Garden"
     // (veraPDF doesn't add a PDF/UA identification while the document fails other rules:
     // it won't claim a conformance the document doesn't have.)
     failedRules output.Path |> should not' (contain "7.1-8")
@@ -82,7 +82,7 @@ let ``a titled document with no XMP metadata isn't reported for dc:title: the me
     do
         use document = new PdfDocument(new PdfWriter(input.Path))
         document.AddNewPage() |> ignore
-        document.GetDocumentInfo().SetTitle "Cub Scout Pack 721" |> ignore
+        document.GetDocumentInfo().SetTitle "Riverside Community Garden" |> ignore
 
     failures input.Path |> List.map _.RuleId |> should not' (contain "7.1-9")
 

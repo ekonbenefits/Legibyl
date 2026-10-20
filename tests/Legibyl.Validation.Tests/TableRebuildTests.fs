@@ -188,7 +188,7 @@ let ``paragraph table conversion refuses one span covering more than one cell`` 
 /// (holding nothing) after it; actualText, if given, on the second row's paragraph.
 /// Two paragraphs as rows, each cell's text in a span followed by an empty span. With perGlyph, the
 /// second row's text is a span per glyph, each with the glyph as its /ActualText, as
-/// summary_merge.v7.pdf's vesting table has it.
+/// a benefit statement's vesting table can have it.
 let private createParagraphRowsTagged (path: string) (actualText: string option) (perGlyph: bool) =
     use document = new PdfDocument(new PdfWriter(path))
     document.SetTagged() |> ignore
@@ -267,7 +267,7 @@ let ``a row paragraph whose replacement text says other than it draws isn't conv
 let ``a row paragraph whose replacement text says only what it draws is converted, the text in its cells`` () =
     use input = new TempPdf()
     use output = new TempPdf()
-    // As summary_merge.v5.pdf's vesting table has it: the row's text, spaced differently.
+    // As a benefit statement's vesting table can have it: the row's text, spaced differently.
     createParagraphRowsWithEmptySpans input.Path (Some " Tomato March    ")
     let edit = conversionOf input.Path
     ElementEdits.unapplied input.Path [ edit ] |> should be Empty

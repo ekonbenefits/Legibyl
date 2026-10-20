@@ -98,10 +98,10 @@ let ``OCR reads text in an image`` () =
         canvas.Clear SkiaSharp.SKColors.White
         use font = new SkiaSharp.SKFont(SkiaSharp.SKTypeface.Default, 56f)
         use paint = new SkiaSharp.SKPaint(Color = SkiaSharp.SKColors.Black, IsAntialias = true)
-        canvas.DrawText("Scouting for Food", 20f, 80f, font, paint)
+        canvas.DrawText("Harvest Fair Day", 20f, 80f, font, paint)
         use image = SkiaSharp.SKImage.FromBitmap bitmap
         use png = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
-        TextRecognition.recognize engine (png.ToArray()) |> should equal "Scouting for Food"
+        TextRecognition.recognize engine (png.ToArray()) |> should equal "Harvest Fair Day"
 
 [<Fact>]
 let ``OCR reads a Spanish document with Spanish's model, its accents and its punctuation kept`` () =
