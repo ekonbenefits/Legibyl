@@ -317,7 +317,7 @@ let ``consecutive selected paragraphs offer a deliberate table conversion`` () =
 let ``paragraphs with replacement text offer a table conversion, though not a merge`` () =
     onUiThread (fun () ->
         withPdf (fun pdf ->
-            // A row paragraph, as summary_merge.v5.pdf's vesting table has, with its text as /ActualText.
+            // A row paragraph, as a benefit statement's vesting table can have, with its text as /ActualText.
             let withText =
                 node "StructTreeRoot" null [
                     node "Document" null [

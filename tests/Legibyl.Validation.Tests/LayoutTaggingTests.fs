@@ -246,13 +246,13 @@ let ``a heading drawn in pieces is one marked sequence, and a wrapped line reads
         use document = new PdfDocument(new PdfWriter(input.Path))
         let canvas = PdfCanvas(document.AddNewPage PageSize.LETTER)
         let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
-        // "Our big events" in three text objects, each in its own saved state, as Quartz writes it.
+        // "Our open days" in three text objects, each in its own saved state, as Quartz writes it.
         let mutable x = 72.0
-        for piece in [ "Our big e"; "v"; "ents" ] do
+        for piece in [ "Our open d"; "a"; "ys" ] do
             canvas.SaveState().BeginText().SetFontAndSize(font, 20f).MoveText(x, 700.0).ShowText(piece).EndText().RestoreState() |> ignore
             x <- x + float (font.GetWidth(piece, 20f))
-        // "Arrow of Light" wrapped onto two lines in one text object.
-        canvas.BeginText().SetFontAndSize(font, 12f).SetLeading(14f).MoveText(72.0, 650.0).ShowText("Arrow of").NewlineShowText("Light").EndText()
+        // "Seeds of Spring" wrapped onto two lines in one text object.
+        canvas.BeginText().SetFontAndSize(font, 12f).SetLeading(14f).MoveText(72.0, 650.0).ShowText("Seeds of").NewlineShowText("Spring").EndText()
         |> ignore
     let regions = [ region "H1" (70.0, 695.0, 300.0, 720.0) null; region "P" (70.0, 630.0, 300.0, 665.0) null ]
 
@@ -260,7 +260,7 @@ let ``a heading drawn in pieces is one marked sequence, and a wrapped line reads
 
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
     [ for node in (root.Children |> Seq.exactlyOne).Children -> node.Tag, node.Content, node.ContentLeafCount ]
-    |> should equal [ "H1", "Our big events", 1; "P", "Arrow of Light", 1 ]
+    |> should equal [ "H1", "Our open days", 1; "P", "Seeds of Spring", 1 ]
 
 let private withQrCode (regions: LayoutRegion list) =
     regions |> List.map (fun r -> if r.Tag = "Figure" then { r with QrText = "https://example.com/apply" } else r)
@@ -416,14 +416,14 @@ let ``alt text written for a figure is its alt text, ahead of a QR code's own`` 
     use output = new TempPdf()
     createUntagged input.Path
     let written =
-        regions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = "Our pack's colour swatch"; QrText = "https://example.com/apply" } else r)
+        regions |> List.map (fun r -> if r.Tag = "Figure" then { r with Alt = "Our garden's colour swatch"; QrText = "https://example.com/apply" } else r)
 
     let result = tagFromLayout input.Path output.Path (Some(FixedLayout written))
 
     result.AppliedFixes |> should contain "Gave 1 figure the alt text a person wrote"
     result.AppliedFixes |> Seq.exists (fun line -> line.Contains "need alt text" || line.Contains "needs alt text") |> should be False
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
-    (flatten root |> List.find (fun node -> node.Tag = "Figure")).AlternateDescription |> should equal "Our pack's colour swatch"
+    (flatten root |> List.find (fun node -> node.Tag = "Figure")).AlternateDescription |> should equal "Our garden's colour swatch"
     failedRules output.Path |> should not' (contain "7.3-1")
 
 [<Fact>]
@@ -447,11 +447,11 @@ let ``a title from the layout source titles the document and shows it`` () =
     use output = new TempPdf()
     createUntagged input.Path
 
-    let result = tagFromLayout input.Path output.Path (Some(FixedLayout(regions, title = "Cub Scout Pack 721")))
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout(regions, title = "Riverside Community Garden")))
 
-    result.AppliedFixes |> should contain "Titled the document \"Cub Scout Pack 721\", as reviewed"
+    result.AppliedFixes |> should contain "Titled the document \"Riverside Community Garden\", as reviewed"
     use document = new PdfDocument(new PdfReader(output.Path))
-    document.GetDocumentInfo().GetTitle() |> should equal "Cub Scout Pack 721"
+    document.GetDocumentInfo().GetTitle() |> should equal "Riverside Community Garden"
     document.GetCatalog().GetPdfObject().GetAsDictionary(PdfName.ViewerPreferences).GetAsBoolean(PdfName.DisplayDocTitle).GetValue() |> should be True
 
 [<Fact>]

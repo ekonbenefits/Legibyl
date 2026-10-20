@@ -129,8 +129,8 @@ let ``a link is described as prefilled from its page's title, or as edited`` () 
         source.LinkDescription(pdf, 1, link.Box) |> should equal "Apply online (example.com)"
         // Only a change from what was prefilled is recorded.
         RegionEdits.setAltAgainst [] 1 "Link" link.Box "Apply online (example.com)" "Apply online (example.com)" |> should be Empty
-        review.Edits <- RegionEdits.setAltAgainst [] 1 "Link" link.Box "Apply online (example.com)" "Apply to join Pack 721"
-        source.LinkDescription(pdf, 1, link.Box) |> should equal "Apply to join Pack 721"
+        review.Edits <- RegionEdits.setAltAgainst [] 1 "Link" link.Box "Apply online (example.com)" "Apply for a garden plot"
+        source.LinkDescription(pdf, 1, link.Box) |> should equal "Apply for a garden plot"
         // Cleared: no description.
         review.Edits <- RegionEdits.setAltAgainst [] 1 "Link" link.Box "Apply online (example.com)" ""
         source.LinkDescription(pdf, 1, link.Box) |> should be Null)

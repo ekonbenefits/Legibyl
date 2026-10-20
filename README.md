@@ -1063,7 +1063,7 @@ and the report asks for it to be checked. It doesn't describe links outside a ta
 For an untagged PDF, the Structure window also has a **Document title** field, prefilled the way the
 title fixes find one: the document's own title (Info, then XMP), else a short
 first page's text, else the first H1 the layout found. The other candidates are
-offered beside it with where they came from (e.g. "Cub Scout Pack 721 · first
+offered beside it with where they came from (e.g. "Riverside Community Garden · first
 heading" when the document's own title is just "Design"). A title that's changed
 is saved as `title` in the file next to the PDF (by **Save**); tagging gives the document the
 title as edited, or as shown prefilled if the structure was viewed, with

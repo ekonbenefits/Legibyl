@@ -186,7 +186,7 @@ let ``edits on suggested regions leave them out, retag them, and give them alt t
     let heading = suggested "H" (70.0, 700.0, 300.0, 720.0) null null
     let item = suggested "LI" (70.0, 680.0, 300.0, 695.0) null "Disc"
     let figure = suggested "P" (70.0, 500.0, 200.0, 600.0) null null
-    let scanned = suggested "P" (70.0, 450.0, 300.0, 470.0) "Campouts, cavlng" null
+    let scanned = suggested "P" (70.0, 450.0, 300.0, 470.0) "Composting, weedlng" null
     let footer = suggested "P" (70.0, 30.0, 300.0, 45.0) null null
     let on (region: LayoutRegion) : ElementEdit = { altEdit with Tag = region.Tag; Box = region.Geometry; Alt = null }
     let edits =
@@ -194,7 +194,7 @@ let ``edits on suggested regions leave them out, retag them, and give them alt t
           { on item with Retag = "P" }
           // Retagged as a figure, so its alt text counts.
           { on figure with Retag = "Figure"; Alt = "A map of the campsite" }
-          { on scanned with Text = "Campouts, caving" }
+          { on scanned with Text = "Composting, weeding" }
           { on footer with Exclude = true } ]
 
     let regions = ElementEdits.onRegions edits [ heading; item; figure; scanned; footer ]
@@ -205,7 +205,7 @@ let ``edits on suggested regions leave them out, retag them, and give them alt t
         ([ "H1", None, None, None
            "P", None, None, None
            "Figure", None, Some "A map of the campsite", None
-           "P", None, None, Some "Campouts, caving" ]
+           "P", None, None, Some "Composting, weeding" ]
          : (string * string option * string option * string option) list)
 
 [<Fact>]

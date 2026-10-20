@@ -19,7 +19,7 @@ let ``cells without spans go one to a column`` () =
 
 [<Fact>]
 let ``a cell spanning columns pushes the next along, so the rows line up`` () =
-    // As on page 3 of the participant statement: a title across the table, and row headers
+    // As in a benefit statement's table: a title across the table, and row headers
     // across the first two columns of each row.
     layout [ [ wide "title" 3 ]; [ wide "header" 2; cell "x" ]; [ cell "h"; cell "y"; cell "z" ] ]
     |> should
