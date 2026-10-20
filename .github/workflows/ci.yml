@@ -1,0 +1,81 @@
+# Builds Legibyl and runs its three test suites on each platform it ships for.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.fsproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # What the build downloads, pinned and checked by SHA-256 in Directory.Build.props: veraPDF's
+      # jars, the bundled fonts, the layout models and Tesseract's language data.
+      - name: Cache the build's downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            src/Legibyl.Validation/obj/verapdf
+            src/Legibyl.Validation/obj/fonts
+            src/Legibyl.Layout/obj/models
+            src/Legibyl.Layout/obj/tessdata
+          key: downloads-${{ hashFiles('Directory.Build.props') }}
+
+      - name: Build
+        run: dotnet build Legibyl.slnx
+
+      # Each fails if fewer of its tests ran than it has (see tools/ci/test.sh).
+      - name: Validation tests
+        shell: bash
+        run: bash tools/ci/test.sh tests/Legibyl.Validation.Tests
+
+      - name: CLI tests
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: bash tools/ci/test.sh tests/Legibyl.Cli.Tests
+
+      - name: GUI tests
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: bash tools/ci/test.sh tests/Legibyl.Gui.Tests
+
+      - name: Keep the test results
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results-${{ matrix.os }}
+          path: TestResults/
+          retention-days: 7
