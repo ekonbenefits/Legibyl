@@ -42,8 +42,9 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.fsproj') }}
           restore-keys: nuget-${{ runner.os }}-
 
-      # What the build downloads, pinned and checked by SHA-256 in Directory.Build.props: veraPDF's
-      # jars, the bundled fonts, the layout models and Tesseract's language data.
+      # What the build downloads, pinned and checked by SHA-256 (in Directory.Build.props and the
+      # projects that fetch them): veraPDF's jars, the bundled fonts, the layout models and
+      # Tesseract's language data. A pin changed, the key changes, so it's fetched and checked again.
       - name: Cache the build's downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -52,7 +53,7 @@ jobs:
             src/Legibyl.Validation/obj/fonts
             src/Legibyl.Layout/obj/models
             src/Legibyl.Layout/obj/tessdata
-          key: downloads-${{ hashFiles('Directory.Build.props') }}
+          key: downloads-${{ hashFiles('Directory.Build.props', 'src/Legibyl.Validation/Legibyl.Validation.fsproj', 'src/Legibyl.Layout/Legibyl.Layout.fsproj') }}
 
       - name: Build
         run: dotnet build Legibyl.slnx
