@@ -372,7 +372,7 @@ let private tagParagraphLists (document: PdfDocument) context =
     // after them (a run's paragraphs and those added to a list are never interleaved).
     let changes =
         [ for run in found.Runs -> List.min run.Indexes, (fun () -> ParagraphLists.tagAsList document run)
-          for addition in found.Additions -> List.min addition.Indexes, (fun () -> ParagraphLists.addToList document addition) ]
+          for addition in found.Additions -> List.min addition.Indexes, (fun () -> ParagraphLists.addToList document context addition) ]
     for _, change in List.sortByDescending fst changes do
         change ()
     let added = found.Additions |> List.sumBy (fun addition -> addition.Before.Length + addition.After.Length)

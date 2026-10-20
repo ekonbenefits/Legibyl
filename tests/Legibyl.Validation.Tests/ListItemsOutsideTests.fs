@@ -28,8 +28,14 @@ let private element (tag: string) (page: PdfPage) (kids: PdfObject list) =
     element.Put(PdfName.K, array) |> ignore
     element
 
-let private createPdf (path: string) (entries: Entry list) =
+/// As createPdf, with adjust given each element it makes (by its tag) and the document's catalog.
+let private createPdfWith (path: string) (entries: Entry list) (adjust: string -> PdfDictionary -> unit) (catalog: PdfDictionary -> unit) =
+    let element tag page kids =
+        let made = element tag page kids
+        adjust tag made
+        made
     use document = new PdfDocument(new PdfWriter(path))
+    catalog (document.GetCatalog().GetPdfObject())
     let page = document.AddNewPage()
     let canvas = PdfCanvas(page)
     let font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA)
@@ -57,6 +63,8 @@ let private createPdf (path: string) (entries: Entry list) =
     root.Put(PdfName.Type, PdfName.StructTreeRoot) |> ignore
     root.Put(PdfName.K, element "Document" page body) |> ignore
     document.GetCatalog().GetPdfObject().Put(PdfName.StructTreeRoot, root) |> ignore
+
+let private createPdf (path: string) (entries: Entry list) = createPdfWith path entries (fun _ _ -> ()) ignore
 
 let private warnings testNumber (path: string) =
     VeraPdfValidator().Validate(path, PdfProfile.PdfUa1).Assertions
@@ -211,3 +219,78 @@ let ``a number that doesn't carry on the list's numbering is left beside it`` ()
           Paragraph(72.0, 2, "5. Multiply by years of service.") ]
 
     outsideWarnings input.Path |> should be Empty
+
+let private beforeBullets = [ introduction; Paragraph(72.0, 1, "• A benefit increase in its first five years."); bullets ]
+
+[<Fact>]
+let ``a list that says what it reads as, all of it, isn't given more items: they wouldn't be read`` () =
+    use input = new TempPdf()
+    createPdfWith input.Path beforeBullets (fun tag element -> if tag = "L" then element.Put(PdfName.ActualText, PdfString "Two benefits.") |> ignore) ignore
+
+    outsideWarnings input.Path |> should be Empty
+
+[<Fact>]
+let ``a list whose items take their page from it is still read`` () =
+    use input = new TempPdf()
+    createPdfWith input.Path beforeBullets (fun tag element -> if tag = "LI" || tag = "LBody" then element.Remove PdfName.Pg |> ignore) ignore
+
+    (outsideWarnings input.Path |> List.exactlyOne).ErrorMessage |> should equal "Page 1: 1 item(s) marked \"•\" just before a list of 2."
+
+[<Fact>]
+let ``another marker further from the list stops the items taken there, not the one beside it`` () =
+    use input = new TempPdf()
+    createPdf
+        input.Path
+        [ introduction
+          Paragraph(72.0, 1, "- Another kind of benefit.")
+          Paragraph(72.0, 2, "• A benefit increase in its first five years.")
+          List [ 72.0, 3, "• Any benefits above the normal retirement benefit."
+                 72.0, 4, "• Disability benefits in non-pay status." ] ]
+
+    (outsideWarnings input.Path |> List.exactlyOne).ErrorMessage |> should equal "Page 1: 1 item(s) marked \"•\" just before a list of 2."
+
+[<Fact>]
+let ``an item moved into a list in another language keeps its own`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdfWith
+        input.Path
+        beforeBullets
+        (fun tag element -> if tag = "L" then element.Put(PdfName.Lang, PdfString "es") |> ignore)
+        // (The document's own language, which the paragraph is read in.)
+        (fun catalog -> catalog.Put(PdfName.Lang, PdfString "en-US") |> ignore)
+
+    fixLists input.Path output.Path |> ignore
+
+    let moved = (VeraPdfValidator().ReadStructureTree output.Path |> notNull).Children[0].Children[1].Children[0].Children[0].Children[0]
+    moved.Content |> should equal "• A benefit increase in its first five years."
+    moved.Language |> should equal "en-US"
+
+[<Fact>]
+let ``body text at the margin after an item isn't its next line`` () =
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    createPdf
+        input.Path
+        [ introduction
+          List [ 72.0, 1, "• Any benefits above the normal retirement benefit."
+                 72.0, 2, "• Disability benefits in non-pay status." ]
+          Paragraph(72.0, 3, "• Health insurance")
+          Paragraph(72.0, 4, "Contact the plan office for details.") ]
+
+    fixLists input.Path output.Path |> ignore
+
+    shape output.Path |> should equal [ "P"; "L(LI(LBody),LI(LBody),LI(LBody(P)))"; "P" ]
+
+[<Fact>]
+let ``a numbered heading after a gap below a numbered list isn't its next item`` () =
+    use input = new TempPdf()
+    createPdf
+        input.Path
+        [ introduction
+          List [ 72.0, 1, "1. Any benefits above the normal retirement benefit."
+                 72.0, 2, "2. Disability benefits in non-pay status." ]
+          Paragraph(72.0, 4, "3. Results") ]
+
+    outsideWarnings input.Path |> should be Empty
+
