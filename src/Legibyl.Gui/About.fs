@@ -187,7 +187,7 @@ let show (owner: Window) : Task =
                     ]
                     heading "License"
                     line
-                        "Legibyl is free software under the GNU Affero General Public License v3.0 or later. It bundles veraPDF (GPLv3+ / MPLv2+), IKVM.NET (Apache 2.0) and others."
+                        "Legibyl is free software under the GNU Affero General Public License v3.0 or later. It bundles veraPDF (GPLv3+ / MPLv2+), IKVM.NET (zlib, its Java library GPLv2 with the Classpath exception) and others."
                         false
                     heading "Links"
                     link "Project page" projectPage
