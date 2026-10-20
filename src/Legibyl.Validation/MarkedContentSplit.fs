@@ -30,8 +30,25 @@ open iText.Kernel.Pdf.Canvas.Parser.Data
 open iText.Kernel.Pdf.Canvas.Parser.Listener
 open Legibyl.Validation.ContentOperations
 
-/// A glyph a text-showing operator draws: its bytes, its text, and the text matrix it's drawn at.
-type private Glyph = { Bytes: byte array; Text: string; Matrix: Matrix }
+/// A glyph a text-showing operator draws: its bytes, its text, and the text matrix it's drawn at;
+/// whether it's a clip (render modes 4 to 7, which clip once its text object ends), and whether
+/// its font writes downwards (a vertical CMap), where the text matrix iText gives isn't where it is.
+type private Glyph =
+    { Bytes: byte array
+      Text: string
+      Matrix: Matrix
+      Clips: bool
+      Vertical: bool }
+
+/// Whether font writes downwards: its encoding a vertical CMap ("-V", or one with /WMode 1).
+let private writesVertically (font: iText.Kernel.Font.PdfFont | null) =
+    match font with
+    | NonNull font ->
+        match font.GetPdfObject().Get PdfName.Encoding with
+        | :? PdfName as name -> name.GetValue().EndsWith "-V"
+        | :? PdfStream as cmap -> (match cmap.GetAsNumber(PdfName "WMode") with NonNull mode -> mode.IntValue() = 1 | Null -> false)
+        | _ -> false
+    | Null -> false
 
 /// The glyphs each top-level operator draws, by its index (as operationsOf numbers them): one
 /// array per string it shows.
@@ -46,11 +63,15 @@ type private Shown() =
             match eventType, data with
             // Only the page's own operators' text (not a form's, which is its Do's).
             | EventType.RENDER_TEXT, (:? TextRenderInfo as text) when this.Depth = 1 && this.Current >= 0 ->
+                let clips = text.GetTextRenderMode() >= 4
+                let vertical = writesVertically (text.GetFont())
                 let glyphs =
                     [| for glyph in text.GetCharacterRenderInfos() ->
                            { Bytes = glyph.GetPdfString().GetValueBytes()
                              Text = glyph.GetText()
-                             Matrix = glyph.GetTextMatrix() } |]
+                             Matrix = glyph.GetTextMatrix()
+                             Clips = clips
+                             Vertical = vertical } |]
                 match shown.TryGetValue this.Current with
                 | true, list -> list.Add glyphs
                 | _ -> shown[this.Current] <- List [ glyphs ]
@@ -206,6 +227,19 @@ let private pieceOf (page: PdfPage) (mcid: int) : Result<Piece, string> =
     | [] -> Error "its marked content isn't in the page's own content"
     | _ -> Error "its marked content is drawn in more than one place"
 
+/// Why the piece's text can't be cut where a text object would be ended and begun again: its text
+/// is a clip (ending the text object would clip to what's drawn so far), or written downwards
+/// (where it's begun again isn't where iText says the glyph is). None if it can be.
+let private uncuttable (piece: Piece) (shown: Dictionary<int, List<Glyph array>>) =
+    let glyphs =
+        [ for k in piece.First + 1 .. piece.Last - 1 do
+              match shown.TryGetValue k with
+              | true, list -> for glyphs in list do yield! glyphs
+              | _ -> () ]
+    if glyphs |> List.exists _.Clips then Some "its text is drawn as a clip, which cutting it would clip short"
+    elif glyphs |> List.exists _.Vertical then Some "its text is written downwards, which the fix doesn't cut"
+    else None
+
 /// What's open inside the piece before operator at, outermost first.
 let private insideAt (piece: Piece) at =
     let mutable frames = []
@@ -296,9 +330,11 @@ let plan (page: PdfPage) (mcid: int) (tail: string) (usedMcids: int seq) : Resul
             else
                 let shown = shownBy piece.Bytes piece.Resources
                 let events = match shown.TryGetValue at with | true, list -> List.ofSeq list | _ -> []
-                match pairedGlyphs operation events with
-                | None -> Error "the text drawing it can't be cut between its letters"
-                | Some(items, glyphsOf) ->
+                let endsTextObject = inside |> List.exists (function TextObject -> true | Marked _ -> false)
+                match pairedGlyphs operation events, (if endsTextObject then uncuttable piece shown else None) with
+                | _, Some why -> Error why
+                | None, None -> Error "the text drawing it can't be cut between its letters"
+                | Some(items, glyphsOf), None ->
                     // Every glyph the operator draws, by the string it's in.
                     let all =
                         [ for itemIndex, item in List.indexed items do
@@ -402,6 +438,17 @@ let around (page: PdfPage) (mcid: int) (text: string) (usedMcids: int seq) : Res
     try
         match pieceOf page mcid with
         | Error why -> Error why
+        // (An artifact's text isn't the paragraph's: one inside the piece could be read into the
+        // address searched for.)
+        | Ok piece when
+            [ piece.First + 1 .. piece.Last - 1 ]
+            |> List.exists (fun k ->
+                let op = piece.Operations[k]
+                (op.Name = ContentOperators.BDC || op.Name = ContentOperators.BMC)
+                && op.Operands.Length > 0
+                && op.Operands[0] = (PdfName.Artifact :> PdfObject))
+            ->
+            Error "an artifact is marked inside its piece"
         | Ok piece ->
             let shown = shownBy piece.Bytes piece.Resources
             // Every glyph the piece's own text draws, in the order it's drawn: its operator, and
@@ -462,7 +509,10 @@ let around (page: PdfPage) (mcid: int) (text: string) (usedMcids: int seq) : Res
                         elif piece.InText = inTextObject then Error "its text isn't drawn in the usual way"
                         elif inTextObject && nextLines then
                             Error "its text is begun inside its piece, and lines after it are placed from where theirs begin, which the fix can't keep once it's cut"
-                        else Ok(at, g, glyph, id, inside, inTextObject)
+                        else
+                            match (if inTextObject then uncuttable piece shown else None) with
+                            | Some why -> Error why
+                            | None -> Ok(at, g, glyph, id, inside, inTextObject)
                     let checkedCuts = cuts |> List.map checkCut
                     match checkedCuts |> List.tryPick (function Error why -> Some why | Ok _ -> None) with
                     | Some why -> Error why

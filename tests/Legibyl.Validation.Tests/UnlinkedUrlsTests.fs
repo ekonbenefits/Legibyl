@@ -556,6 +556,14 @@ let ``an address in the middle of its piece isn't carved out where it can't be c
           (fun font _ -> paragraph font "/Span <</ActualText (Visit the beds.)>> BDC (Visit https://example.org/beds today.) Tj EMC")
           // Its piece begun outside the text object, a line after it moved to from the last: the
           // text object begun again at the cut would move it.
+          "an artifact is marked inside its piece",
+          (fun font _ -> paragraph font "(Visit https://example.org/beds today.) Tj /Artifact BMC (*) Tj EMC")
+          // Its text a clip (filled, then clipping to it), in a piece begun outside its text
+          // object: ending the text object at the cut would clip to the part drawn so far.
+          "its text is drawn as a clip, which cutting it would clip short",
+          (fun font _ ->
+              $"/P <</MCID 0>> BDC BT /{font.GetValue()} 12 Tf 4 Tr 1 0 0 1 72 700 Tm (Visit https://example.org/beds today.) Tj ET EMC\n"
+              + $"/P <</MCID 1>> BDC BT /{font.GetValue()} 12 Tf 0 Tr 72 650 Td ( Open daily.) Tj ET EMC")
           "its text is begun inside its piece, and lines after it are placed from where theirs begin, which the fix can't keep once it's cut",
           (fun font _ ->
               $"/P <</MCID 0>> BDC BT /{font.GetValue()} 12 Tf 72 700 Td (Visit https://example.org/beds today.) Tj 0 -14 Td (Then the paths.) Tj ET EMC\n"
@@ -590,6 +598,25 @@ let ``an address in the middle of a piece begun outside its text object is carve
     linksAlike input.Path output.Path
 
     paragraphKids output.Path |> should equal [ "Visit "; "Link"; " today.Then the paths."; " Open daily." ]
+
+[<Fact>]
+let ``two addresses in one piece drawn in another order than they're read are each carved out of the piece they're left in`` () =
+    // The lower line drawn first: the upper line's address, read first, is carved first, which
+    // leaves the lower one's in the text kept before it, not in the rest after it.
+    use input = new TempPdf()
+    use output = new TempPdf ".fixed"
+    rawParagraph input.Path (fun font _ ->
+        let f = font.GetValue()
+        $"/P <</MCID 0>> BDC BT /{f} 12 Tf 1 0 0 1 72 686 Tm (Then https://example.org/paths now.) Tj 1 0 0 1 72 700 Tm (First https://example.org/beds here.) Tj ET EMC\n"
+        + $"/P <</MCID 1>> BDC BT /{f} 12 Tf 72 650 Td ( Open daily.) Tj ET EMC")
+    named input.Path |> should equal [ "https://example.org/beds", true; "https://example.org/paths", true ]
+
+    let result = validator.Value.Fix(input.Path, PdfProfile.PdfUa1, output.Path, PdfFixOptions.LinkUrls)
+
+    result.AppliedFixes |> should contain "Linked 2 web addresses shown as text, each to where it goes."
+    result.NotApplied |> should be Empty
+    named output.Path |> should be Empty
+    render output.Path |> should equal (render input.Path)
 
 [<Fact>]
 let ``an address one of whose pieces is read on both sides of another isn't linked, and says why`` () =
