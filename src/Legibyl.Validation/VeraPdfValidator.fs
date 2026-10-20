@@ -781,7 +781,10 @@ module internal VeraPdf =
         try
             let status, appliedFixes =
                 wrapErrors $"veraPDF failed to fix '{pdfPath}'" (fun () ->
-                    use parser = foundry.createParser (java.io.File pdfPath, flavour)
+                    // From its bytes: the metadata fixer reads the file again, and doesn't let go of
+                    // it (on Windows the PDF, or the fix's scratch copy, would stay held open).
+                    use input = new java.io.ByteArrayInputStream(File.ReadAllBytes pdfPath)
+                    use parser = foundry.createParser (input, flavour)
                     let result = foundry.createValidator(flavour, false).validate parser
                     let fixResult =
                         use outputStream = new java.io.FileOutputStream(fixedPath)
