@@ -289,13 +289,18 @@ let find (document: PdfDocument) context : Found =
                       let text = text.TrimEnd('”', '’', '"', '\'', ')', ']', '»')
                       text <> "" && ".:;!?…".Contains text[text.Length - 1]
                   // An item at i: a paragraph that starts with a marker, and the indexes of those that
-                  // carry on its text (its lines tagged apart): straight below, at its indent or a
-                  // little right of it, not starting with a marker, where the text before them
-                  // doesn't end a sentence.
+                  // carry on its text (its lines tagged apart): straight below, as near as lines of
+                  // its size are (not as far as a paragraph's spacing), indented past the marker (as
+                  // an item's lines hang; body text after it starts at the margin), not starting with
+                  // a marker, where the text before them doesn't end a sentence.
                   let itemAt i : (Candidate * int list) option =
                       match candidateAt i, paragraphAt i with
-                      | Some({ MarkerOnly = false; Geometry = Some start } as candidate), Some(_, _, _, text) ->
-                          let line = max 12.0 ((start.Top - start.Bottom) * 2.5)
+                      | Some({ MarkerOnly = false; Geometry = Some start } as candidate), Some(paragraph, _, _, text) ->
+                          let size =
+                              textPieces paragraph context (Some candidate.Page)
+                              |> List.tryPick _.FontSize
+                              |> Option.defaultValue 12.0
+                          let line = size
                           let rec more j (previous: StructureGeometry) previousText rest =
                               match (if j < kids.Size() then paragraphAt j else None) with
                               | Some(_, Some page, Some geometry, text) when
@@ -303,7 +308,7 @@ let find (document: PdfDocument) context : Found =
                                   && text <> ""
                                   && not (startsWithMarker text)
                                   && not (endsSentence previousText)
-                                  && geometry.Left >= start.Left - SameIndent
+                                  && geometry.Left > start.Left + SameIndent
                                   && geometry.Left <= start.Left + 24.0
                                   && previous.Bottom - geometry.Top >= -2.0
                                   && previous.Bottom - geometry.Top <= line
@@ -323,7 +328,11 @@ let find (document: PdfDocument) context : Found =
                   // that each start with one.
                   let listAt k =
                       match resolve (kids.Get k) with
-                      | :? PdfDictionary as list when PdfName.L.Equals(standardTag list context) ->
+                      // Not one that says what it reads as, all of it: what's moved into it wouldn't be read.
+                      | :? PdfDictionary as list when
+                          PdfName.L.Equals(standardTag list context)
+                          && not ([ PdfName.ActualText; PdfName.Alt ] |> List.exists (fun key -> match list.GetAsString key with NonNull said -> not (String.IsNullOrWhiteSpace(said.ToUnicodeString())) | Null -> false))
+                          ->
                           let entries =
                               match resolve (list.Get(PdfName.K)) with
                               | :? PdfArray as array -> [ for j in 0 .. array.Size() - 1 -> resolve (array.Get j) ]
@@ -332,7 +341,8 @@ let find (document: PdfDocument) context : Found =
                           let itemOf (entry: PdfObject | null) =
                               match entry with
                               | :? PdfDictionary as item when PdfName.LI.Equals(standardTag item context) ->
-                                  let page = structElemPage item context None
+                                  // (Its page its own, or its list's or above.)
+                                  let page = structElemPage item context (ancestorPage list context)
                                   let geometry = textGeometry item context page
                                   let page = page |> Option.orElse (geometry |> Option.map _.PageNumber)
                                   let text = Regex.Replace(extractText item context page, @"\s+", " ").Trim()
@@ -354,17 +364,47 @@ let find (document: PdfDocument) context : Found =
                               not (claimed.Contains candidate.Index)
                               && candidate.Page = page
                               && (candidate.Geometry |> Option.exists (fun at -> abs (at.Left - geometry.Left) <= SameIndent))
+                          let markers = List.map (fun (candidate: Candidate, _) -> candidate.Marker)
+                          let listMarkers = listItems |> List.map (fun (_, _, marker) -> marker)
+                          // Where an item's text starts and ends on the page.
+                          let top (candidate: Candidate, _) = candidate.Geometry
+                          let bottom (candidate: Candidate, rest) =
+                              match List.tryLast rest with
+                              | Some j -> paragraphAt j |> Option.bind (fun (_, _, geometry, _) -> geometry)
+                              | None -> candidate.Geometry
+                          // As near the list (and each other) as its items are to each other, or about
+                          // a line's height where it has one: not a heading after a blank line.
+                          let spacing =
+                              let gaps = listItems |> List.pairwise |> List.map (fun ((_, upper: StructureGeometry, _), (_, lower: StructureGeometry, _)) -> upper.Bottom - lower.Top)
+                              match gaps with
+                              | [] -> let (_, only, _) = listItems.Head in only.Top - only.Bottom
+                              | gaps -> List.max gaps
+                          let near (upper: StructureGeometry option) (lower: StructureGeometry option) =
+                              match upper, lower with
+                              | Some upper, Some lower -> upper.Bottom - lower.Top <= 1.5 * spacing + 2.0
+                              | _ -> false
+                          let (_, firstAt, _) = listItems.Head
+                          let (_, lastAt, _) = List.last listItems
+                          // Each side taken an item at a time, nearest the list first, as long as its
+                          // markers carry the list's numbering on: a wrong one stops it, not the rest.
                           let rec before e found =
                               match endingAt.TryGetValue e with
-                              | true, ((candidate, _) as item) when beside candidate listItems.Head -> before (candidate.Index - 1) (item :: found)
+                              | true, ((candidate, _) as item) when
+                                  beside candidate listItems.Head
+                                  && near (bottom item) (match found with next :: _ -> top next | [] -> Some firstAt)
+                                  && (numberingOf (markers (item :: found) @ listMarkers)).IsSome
+                                  ->
+                                  before (candidate.Index - 1) (item :: found)
                               | _ -> found
                           let rec after s found =
                               match (if s < items.Length then items[s] else None) with
-                              | Some((candidate, rest) as item) when beside candidate (List.last listItems) ->
+                              | Some((candidate, rest) as item) when
+                                  beside candidate (List.last listItems)
+                                  && near (match found with previous :: _ -> bottom previous | [] -> Some lastAt) (top item)
+                                  && (numberingOf (listMarkers @ markers (List.rev (item :: found)))).IsSome
+                                  ->
                                   after (List.last (candidate.Index :: rest) + 1) (item :: found)
                               | _ -> List.rev found
-                          let markers = List.map (fun (candidate: Candidate, _) -> candidate.Marker)
-                          let listMarkers = listItems |> List.map (fun (_, _, marker) -> marker)
                           let fits (before, after) =
                               not (List.isEmpty before && List.isEmpty after)
                               && (numberingOf (markers before @ listMarkers @ markers after)).IsSome
@@ -400,7 +440,8 @@ let find (document: PdfDocument) context : Found =
                   let candidateAt i = if claimed.Contains i then None else candidateAt i
                   let paragraphAt i = if claimed.Contains i then None else paragraphAt i
 
-                  // Maximal runs of consecutive marked paragraphs on one page, sharing an indent.                  // Empty paragraphs between items (blank lines, common in exported documents)
+                  // Maximal runs of consecutive marked paragraphs on one page, sharing an indent.
+                  // Empty paragraphs between items (blank lines, common in exported documents)
                   // don't end a run; they go with the item before them. After a marker that's a
                   // paragraph of its own, the paragraphs right of it are its item's text, up to
                   // the next marker.
@@ -546,16 +587,21 @@ let tagAsList (document: PdfDocument) (run: ListRun) =
 
 /// Adds each of the paragraphs' items to the list, before its first item or after its last, as
 /// LI > LBody > the paragraphs, taking them out of their parent. Each paragraph keeps its own
-/// content (and parent-tree entries); only its parent changes.
-let addToList (document: PdfDocument) (addition: ListAddition) =
+/// content (and parent-tree entries); only its parent changes, and the language it's read in
+/// doesn't (where the list's would be another, it's given its own).
+let addToList (document: PdfDocument) context (addition: ListAddition) =
     let list = addition.List
     let item (paragraphs: PdfDictionary list) =
         let item = structElement document PdfName.LI list
         let body = structElement document PdfName.LBody item
         let contents = PdfArray()
         for paragraph in paragraphs do
+            let language = languageOf paragraph context
             contents.Add paragraph
             paragraph.Put(PdfName.P, body) |> ignore
+            if languageOf paragraph context <> language then
+                // (An empty /Lang says its language isn't known, as it wasn't.)
+                paragraph.Put(PdfName.Lang, PdfString(defaultArg language "")) |> ignore
         body.Put(PdfName.K, contents) |> ignore
         item.Put(PdfName.K, body) |> ignore
         item
