@@ -223,7 +223,7 @@ let private splitListFindings (joins: ParagraphLists.ListJoin list) =
     [ for join in joins ->
           let nested = join.Nested |> List.sumBy (snd >> List.length)
           let parts =
-              [ if join.Lists.Length > 1 then $"{join.Lists.Length} that number on as one"
+              [ if join.Lists.Length > 1 then $"{join.Lists.Length} that carry on as one"
                 if nested > 0 then $"{nested} indented under an item of it" ]
           warning
               SplitListMessage

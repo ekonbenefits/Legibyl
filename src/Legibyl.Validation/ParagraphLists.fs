@@ -478,22 +478,46 @@ let find (document: PdfDocument) context : Found =
                   let isOrdinal = function
                       | Ordinal _ -> true
                       | Bullet _ -> false
+                  // What says what it reads as, all of it: a list put inside it wouldn't be read.
+                  let readsAs (element: PdfDictionary) =
+                      [ PdfName.ActualText; PdfName.Alt ]
+                      |> List.exists (fun key -> match element.GetAsString key with NonNull said -> not (String.IsNullOrWhiteSpace(said.ToUnicodeString())) | Null -> false)
+                  // An item's body, to put a list in: not where the item or the body reads as something else.
                   let bodyOf (item: PdfDictionary) =
                       let kids =
                           match resolve (item.Get(PdfName.K)) with
                           | :? PdfArray as array -> [ for j in 0 .. array.Size() - 1 -> resolve (array.Get j) ]
                           | NonNull single -> [ single ]
                           | Null -> []
-                      kids
-                      |> List.tryPick (function
-                          | :? PdfDictionary as body when PdfName.LBody.Equals(standardTag body context) -> Some body
-                          | _ -> None)
+                      if readsAs item then None
+                      else
+                          kids
+                          |> List.tryPick (function
+                              | :? PdfDictionary as body when PdfName.LBody.Equals(standardTag body context) && not (readsAs body) -> Some body
+                              | _ -> None)
+                  // A list joined into another goes, with what's said of it: not one that says
+                  // what it is (/E), or is named (/ID, which a name tree points to).
+                  let joinable (list: PdfDictionary) = not (list.ContainsKey PdfName.E || list.ContainsKey PdfName.ID)
                   let mutable k = 0
                   while k < kids.Size() do
                       match listAt k with
-                      | Some(first, (firstItems: ListEntry list)) ->
+                      // (A list on one page: its items' pages all its first's.)
+                      | Some(first, (firstItems: ListEntry list)) when firstItems |> List.forall (fun entry -> entry.Page = firstItems.Head.Page) ->
                           let page = firstItems.Head.Page
                           let indent = firstItems.Head.Geometry.Left
+                          // How far apart its items are (or a line, for one item): a list further
+                          // below than that (a footnote's, after a gap) isn't more of it.
+                          let spacing =
+                              match firstItems |> List.pairwise |> List.map (fun (upper, lower) -> upper.Geometry.Bottom - lower.Geometry.Top) with
+                              | [] -> firstItems.Head.Geometry.Top - firstItems.Head.Geometry.Bottom
+                              | gaps -> List.max gaps
+                          let follows (upper: StructureGeometry) (lower: StructureGeometry) =
+                              let below = upper.Bottom - lower.Top
+                              below >= -2.0 && below <= 1.5 * spacing + 2.0
+                          // The bottom of what was last taken: the last item, or the last list indented under it.
+                          let mutable lowest = (List.last firstItems).Geometry
+                          // The indent of the lists indented under the last item: one level, at one indent.
+                          let mutable deeperIndent: float option = None
                           let mutable markers = firstItems |> List.map _.Marker
                           let mutable last = List.last firstItems
                           let mutable lists = [ first ]
@@ -504,11 +528,22 @@ let find (document: PdfDocument) context : Found =
                           let mutable going = true
                           while going && next < kids.Size() do
                               match listAt next with
-                              | Some(list, (items: ListEntry list)) when items |> List.forall (fun entry -> entry.Page = page) ->
+                              | Some(list, (items: ListEntry list)) when
+                                  items |> List.forall (fun entry -> entry.Page = page)
+                                  && joinable list
+                                  && follows lowest items.Head.Geometry
+                                  ->
                                   let left = items.Head.Geometry.Left
                                   let numbersOn = (numberingOf (markers @ (items |> List.map _.Marker))).IsSome
-                                  if left > indent + SameIndent then
+                                  // Indented under the last item: right of its start but not past its end
+                                  // (not the next column's top), all at one indent (a level further in
+                                  // goes under one of theirs, when they're joined in turn).
+                                  if left > indent + SameIndent
+                                     && left < last.Geometry.Right
+                                     && (deeperIndent |> Option.forall (fun at -> abs (left - at) <= SameIndent)) then
                                       deeper <- deeper @ [ list ]
+                                      deeperIndent <- Some left
+                                      lowest <- (List.last items).Geometry
                                       next <- next + 1
                                   elif abs (left - indent) <= SameIndent && numbersOn && (isOrdinal markers.Head || not deeper.IsEmpty) then
                                       match deeper, bodyOf last.Item with
@@ -521,6 +556,8 @@ let find (document: PdfDocument) context : Found =
                                           lists <- lists @ [ list ]
                                           markers <- markers @ (items |> List.map _.Marker)
                                           last <- List.last items
+                                          lowest <- last.Geometry
+                                          deeperIndent <- None
                                           next <- next + 1
                                           consumed <- next
                                   else
@@ -753,13 +790,20 @@ let private takeOut (parent: PdfDictionary) (element: PdfDictionary) =
 /// Joins the lists into the first: each list indented under an item goes in that item's body,
 /// after its content, and the items of the lists after the first become the first's. Lists
 /// are found by themselves in their parent, not by position, so this runs after the other
-/// changes. Only the tags change; the items keep their content.
-let joinLists (join: ListJoin) =
+/// changes. Only the tags change; the items keep their content, and the language they're read in
+/// (where their new parent's would be another, they're given their own).
+let joinLists context (join: ListJoin) =
+    let moveUnder (parent: PdfDictionary) (element: PdfDictionary) =
+        let language = languageOf element context
+        element.Put(PdfName.P, parent) |> ignore
+        if languageOf element context <> language then
+            // (An empty /Lang says its language isn't known, as it wasn't.)
+            element.Put(PdfName.Lang, PdfString(defaultArg language "")) |> ignore
     for body, lists in join.Nested do
         for list in lists do
             takeOut join.Parent list
             (kidsArray body).Add list
-            list.Put(PdfName.P, body) |> ignore
+            moveUnder body list
     let target = join.Lists.Head
     for list in join.Lists.Tail do
         let items = kidsArray list
@@ -767,6 +811,6 @@ let joinLists (join: ListJoin) =
             let item = items.Get(i, false)
             (kidsArray target).Add item
             match resolve item with
-            | :? PdfDictionary as item -> item.Put(PdfName.P, target) |> ignore
+            | :? PdfDictionary as item -> moveUnder target item
             | _ -> ()
         takeOut join.Parent list

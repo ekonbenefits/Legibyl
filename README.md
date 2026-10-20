@@ -1335,7 +1335,7 @@ keeps this table in step with it):
 | `empty-spans` | Remove span tags with nothing in them, keeping the spaces between words |  |
 | `join-split-paragraphs` | Join paragraphs tagged line by line or in pieces where the page layout shows one block of text | uses the layout models |
 | `join-split-words` | Give text blocks replacement text where adjacent Span tags split words |  |
-| `lists` | Tag paragraphs that start with list markers (or are one) as a list, or move them into the list beside them |  |
+| `lists` | Tag paragraphs that start with list markers (or are one) as a list, or move them into the list beside them; join a list tagged in pieces |  |
 | `table-header-scope` | Say which cells each table header cell heads (its Scope: column or row) |  |
 | `bookmarks` | Add bookmarks for the H1 and H2 headings |  |
 | `link-urls` | Link web addresses shown as text that nothing links |  |
