@@ -26,7 +26,8 @@ let private wait (task: Threading.Tasks.Task<'T>) =
 
 let private fileMenu (window: Window) =
     let menu = NativeMenu.GetMenu window |> nonNull
-    let file = menu.Items |> Seq.cast<NativeMenuItem> |> Seq.exactlyOne
+    // (Beside it, on Windows and Linux, a Help menu.)
+    let file = menu.Items |> Seq.cast<NativeMenuItem> |> Seq.find (fun item -> string item.Header = "File")
     [ for item in (nonNull file.Menu).Items do
           match item with
           | :? NativeMenuItemSeparator -> ()

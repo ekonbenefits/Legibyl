@@ -20,7 +20,7 @@ let ``File › Append PDFs… lists the PDF open first, and joins only two or mo
     onUiThread (fun () ->
         let window = HeadlessWindow.show 1200.0 720.0
         HeadlessWindow.openPdf window pdf
-        let file = (NativeMenu.GetMenu window |> nonNull).Items |> Seq.cast<NativeMenuItem> |> Seq.exactlyOne
+        let file = (NativeMenu.GetMenu window |> nonNull).Items |> Seq.cast<NativeMenuItem> |> Seq.find (fun item -> string item.Header = "File")
         let append = (nonNull file.Menu).Items |> Seq.pick (function :? NativeMenuItem as item when string item.Header = "Append PDFs…" -> Some item | _ -> None)
         (nonNull append.Command).Execute null
         HeadlessWindow.pumpUntil (TimeSpan.FromSeconds 10.0) (fun () -> window.OwnedWindows.Count > 0) |> ignore
