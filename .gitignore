@@ -12,3 +12,21 @@ artifacts/
 
 # Finder's folder settings (macOS).
 .DS_Store
+
+# Claude Code's local state: each person's own, not the project's (the shared skills in
+# .claude/skills are).
+.claude/worktrees/
+.claude/settings.local.json
+.claude/scheduled_tasks.*
+.claude/routines/.state/
+.claude/checkpoints/
+.claude/mailbox/
+.claude/agent-registry.json
+.claude/agent-memory-local
+.claude/first-run
+.claude/assistant-daemon-state.json
+
+# JetBrains Rider's per-person files.
+.idea/**/workspace.xml
+.idea/**/usage.statistics.xml
+.idea/**/shelf/
