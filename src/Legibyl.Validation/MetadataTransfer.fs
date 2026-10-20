@@ -95,9 +95,11 @@ let private revisePdfUa2 (xmp: XMPMeta) =
 /// it also corrected the PDF/UA-2 identifier's revision.
 let apply (inputPath: string) (fixedPath: string) (outputPath: string) =
     let xmp, info = readFixed fixedPath
-    // (The writer its own, so it's closed if the document can't be opened.)
+    // Its bytes read before the writer starts the output, which may be the same file; each its
+    // own, so both are closed if the document can't be opened.
+    use reader = PdfFiles.reader inputPath
     use writer = new PdfWriter(outputPath)
-    use document = new PdfDocument(PdfFiles.reader inputPath, writer)
+    use document = new PdfDocument(reader, writer)
 
     let revised =
         match xmp with

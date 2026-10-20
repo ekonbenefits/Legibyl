@@ -192,6 +192,22 @@ let private withCheckedCopy (test: string -> string -> unit) =
         test pdf copy)
 
 [<Fact>]
+let ``a copy exported over the PDF itself keeps it whole, and carries the steps checked`` () =
+    withPassingPdf (fun pdf ->
+        let review = DocumentReviews().For pdf
+        let hash = SavedResults.hashOf pdf
+        let before = VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1)
+        review.Checklist <- Some(hash, set [ "title" ])
+
+        // As Export… writes it when the file chosen is the PDF itself.
+        review.WriteCheckedCopy(pdf, pdf, hash)
+
+        let after = VeraPdfValidator().Validate(pdf, PdfProfile.PdfUa1)
+        after.IsCompliant |> should equal before.IsCompliant
+        [ for a in after.Assertions -> a.RuleId ] |> should equal [ for a in before.Assertions -> a.RuleId ]
+        (ReviewFile.carriedChecklist pdf |> Option.get).Checked |> nonNull |> should equal [| "title" |])
+
+[<Fact>]
 let ``the copy carries the steps checked, the original's hash and the date, and checks the same`` () =
     withCheckedCopy (fun pdf copy ->
         let carried = ReviewFile.carriedChecklist copy |> Option.get

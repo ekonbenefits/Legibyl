@@ -32,9 +32,11 @@ let read (pdfPath: string) : string option =
 /// inputPath must read without errors (iText only appends to such a file): in Fix it's always
 /// one iText has just written.
 let write (inputPath: string) (outputPath: string) (json: string) =
-    // (The writer its own, so it's closed if the document can't be opened.)
+    // Its bytes read before the writer starts the output, which may be the same file (a copy
+    // exported over the PDF); each its own, so both are closed if the document can't be opened.
+    use reader = PdfFiles.reader inputPath
     use writer = new PdfWriter(outputPath)
-    use document = new PdfDocument(PdfFiles.reader inputPath, writer, StampingProperties().UseAppendMode())
+    use document = new PdfDocument(reader, writer, StampingProperties().UseAppendMode())
     let stream = PdfStream(Encoding.UTF8.GetBytes json)
     stream.SetCompressionLevel CompressionConstants.DEFAULT_COMPRESSION
     stream.MakeIndirect document |> ignore

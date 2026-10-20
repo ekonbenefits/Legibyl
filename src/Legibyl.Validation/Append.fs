@@ -1110,9 +1110,10 @@ let join (files: string list) (output: string) (options: Options) : Joined =
         |> fst
         |> List.rev
     do
-        // (The writer its own, so it's closed if the document can't be opened.)
+        // (Each its own, so both are closed if the document can't be opened.)
+        use reader = new PdfReader(new MemoryStream(hideStructure merged))
         use writer = new PdfWriter(output)
-        use document = new PdfDocument(new PdfReader(new MemoryStream(hideStructure merged)), writer)
+        use document = new PdfDocument(reader, writer)
         let elements = wrapParts document tag (prepared |> List.map _.Language) language
         combine document taken.RoleMap prepared
         carryDestinations document prepared parts
