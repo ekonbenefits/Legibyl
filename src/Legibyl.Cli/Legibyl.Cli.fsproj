@@ -37,6 +37,12 @@
     <PackageReference Include="FSharp.SystemCommandLine" />
   </ItemGroup>
 
+  <!-- The license texts and notices go beside the CLI, as the GUI carries them (see licenses/). -->
+  <ItemGroup>
+    <None Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\licenses\*" Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <AssemblyMetadata Include="VeraPdfVersion" Value="$(VeraPdfVersion)" />
   </ItemGroup>

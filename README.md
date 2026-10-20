@@ -1636,14 +1636,18 @@ changes that don't touch the vendored jar). `VersionPrefix` is derived from
 
 Copyright © 2026 Ekon Benefits <opensource@ekonbenefits.com>.
 
-This project's own code (everything outside `lib/vendor/`) is licensed
-under the **GNU Affero General Public License v3.0 or later** — see
-`LICENSE`.
+This project's own code is licensed under the **GNU Affero General Public
+License v3.0 or later** — see `LICENSE`. veraPDF's own files in it
+(`src/Legibyl.Validation/java/org/verapdf/…` and its WCAG profile,
+`src/Legibyl.Validation/Profiles/WCAG-2-2-Machine.xml`) keep veraPDF's license,
+as their headers say.
 
-It bundles the veraPDF `greenfield-apps` jar, which is separately
-dual-licensed by the veraPDF Consortium under GPLv3+ / MPLv2+ (see
-`licenses/LICENSE.GPL` and `licenses/LICENSE.MPL`), and uses IKVM.NET
-(Apache 2.0). See `licenses/NOTICE.md` for full third-party attribution.
+It bundles the veraPDF jars, which are separately dual-licensed by the veraPDF
+Consortium under GPLv3+ / MPLv2+ (see `licenses/LICENSE.GPL` and
+`licenses/LICENSE.MPL`), and uses IKVM.NET (a zlib-style license; its Java
+class library GPLv2 with the Classpath exception, `licenses/LICENSE.IKVM`). See
+`licenses/NOTICE.md` for full third-party attribution. Every build (the GUI, and
+the CLI's `licenses` folder beside it) carries these files.
 
 ### Source for a release
 

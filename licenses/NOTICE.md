@@ -67,10 +67,16 @@ PDFBox and the image readers veraPDF's class used aren't included.
 
 ## IKVM.NET
 
-This application also uses [IKVM.NET](https://github.com/ikvmnet/ikvm),
-licensed under the Apache License, Version 2.0 (full text in
-`LICENSE.Apache` in this directory), to execute the veraPDF Java bytecode
-from .NET.
+This application also uses [IKVM.NET](https://github.com/ikvmnet/ikvm) (the
+`IKVM` NuGet package, used unmodified) to execute the veraPDF Java bytecode
+from .NET. IKVM itself is copyright Jeroen Frijters, Windward Studios, Jerome
+Haltom, Shad Storhaug, and contributors, under a zlib-style license. Its Java
+class library, `IKVM.Java.dll`, is part of OpenJDK and GNU Classpath, copyright
+Oracle and/or its affiliates and the Free Software Foundation, under the GNU
+General Public License, version 2, with the "Classpath" exception. All of
+these, with the full GPLv2 and the Classpath exception, are in `LICENSE.IKVM`
+in this directory, as IKVM ships them. IKVM.ByteCode, which IKVM uses, is
+copyright Jerome Haltom, under the MIT License.
 
 ## PdfPig
 
@@ -129,9 +135,11 @@ The GUI's **Suggest Structure** preview uses
 [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), licensed under the
 Apache License, Version 2.0 (full text in `LICENSE.Apache` in this directory).
 It's used unmodified via a NuGet package reference. Its layout detection model,
-PP-DocLayoutV3 (Apache License 2.0, by PaddlePaddle), isn't shipped with
-Legibyl: the app downloads it only when the user asks, into PaddleOCR's own
-model cache.
+[PP-DocLayoutV3](https://huggingface.co/PaddlePaddle/PP-DocLayoutV3) (copyright
+PaddlePaddle Authors, Apache License 2.0), ships with Legibyl in its `models`
+folder, unmodified: the build fetches it at a fixed revision, checked against
+its SHA-256 (`LayoutModelRevision` in `Directory.Build.props`). A build without
+it downloads it when the user first asks.
 
 ## Table Transformer and ONNX Runtime (tables' rows and cells)
 
@@ -140,13 +148,15 @@ header and spanning cells with Microsoft's
 [Table Transformer](https://github.com/microsoft/table-transformer)
 structure-recognition model (copyright Microsoft Corporation, MIT License),
 in [Xenova's 8-bit ONNX export](https://huggingface.co/Xenova/table-transformer-structure-recognition)
-of version 1.0. The model isn't shipped with Legibyl: the app downloads it
-unmodified, at a fixed revision checked against its SHA-256, only when the user
-asks, into Legibyl's own folder. It's run with
+of version 1.0. The model ships with Legibyl in its `models` folder,
+unmodified: the build fetches it at a fixed revision, checked against its
+SHA-256 (`TableModelRevision` in `Directory.Build.props`); a build without it
+downloads it when the user first asks. It's run with
 [ONNX Runtime](https://github.com/microsoft/onnxruntime) (the
 `Microsoft.ML.OnnxRuntime` NuGet package, copyright Microsoft Corporation, MIT
 License), used unmodified via a NuGet package reference. The MIT License's full
-text is in `LICENSE.MIT` in this directory.
+text is in `LICENSE.MIT` in this directory, and ONNX Runtime's own third-party
+notices, as it ships them, in `ThirdPartyNotices.OnnxRuntime.txt`.
 
 ## Tesseract OCR
 
@@ -157,6 +167,11 @@ via the `Tesseract.CrossPlatform` NuGet package (a fork of
 its `Tesseract.Native` binaries (Tesseract and Leptonica, built with vcpkg), all
 licensed under the Apache License, Version 2.0 (Leptonica under its own
 BSD-2-Clause-style license). They're used unmodified via NuGet package references.
+The native binaries also build in other libraries (libpng, libjpeg-turbo,
+libtiff, libwebp, giflib, OpenJPEG, zlib, zstd, lz4, bzip2, liblzma, libarchive,
+libxml2, curl, OpenSSL and, on macOS, mbedTLS): Tesseract's, Leptonica's and
+each of theirs licenses, as the packages ship them, are in
+`NOTICE.Tesseract-native.txt` in this directory.
 The app also ships Tesseract's English and Spanish models, `eng.traineddata` and
 `spa.traineddata` from [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast)
 (Apache License 2.0), unmodified, in its built-in language packs.
@@ -226,7 +241,15 @@ pages with annotations and removing empty `/P` structure elements.
 
 iText Core is used via the `itext` NuGet package under the GNU Affero
 General Public License v3.0 or later. This is compatible with Legibyl's own
-AGPL-3.0-or-later license. It is used unmodified.
+AGPL-3.0-or-later license. It is used unmodified. iText's own notices, as its
+package ships them, are in `NOTICE.iText.txt` in this directory.
+
+## ANGLE
+
+On Windows, the GUI draws with [ANGLE](https://chromium.googlesource.com/angle/angle)
+(the `Avalonia.Angle.Windows.Natives` NuGet package), copyright The ANGLE
+Project Authors, licensed under the BSD 3-Clause License (full text in
+`LICENSE.ANGLE` in this directory), used unmodified.
 
 ## MIT-licensed components
 
@@ -256,6 +279,16 @@ unmodified via NuGet package references.
   graphics and text shaping, used by Avalonia and for drawing pages' highlights.
   Copyright (c) 2015-2016 Xamarin, Inc. Copyright (c) 2017-2018 Microsoft
   Corporation.
+- [Irihi.Avalonia.Shared](https://github.com/irihitech/Irihi.Avalonia.Shared)
+  — shared helpers Semi.Avalonia uses. Copyright (c) IRIHI Technology.
+- [Tmds.DBus.Protocol](https://github.com/tmds/Tmds.DBus) — D-Bus, which
+  Avalonia uses on Linux. Copyright (c) Tom Deseyn.
+- [MicroCom.Runtime](https://github.com/kekekeks/MicroCom) — COM interop
+  Avalonia uses. Copyright (c) 2021 Nikita Tsukanov.
+- [Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json) — JSON, used by
+  a dependency. Copyright (c) 2007 James Newton-King.
+- [IKVM.ByteCode](https://github.com/ikvmnet/ikvm.bytecode) — Java class file
+  reading, used by IKVM. Copyright (c) 2026 Jerome Haltom.
 
 These packages in turn depend on other open-source packages under their own
 licenses; consult the individual project pages for those.
