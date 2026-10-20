@@ -1,0 +1,3 @@
+# Text files check out with LF on every system, as they're committed: tests read some of them
+# (the licenses' text, the README) and compare what they say.
+* text=auto eol=lf

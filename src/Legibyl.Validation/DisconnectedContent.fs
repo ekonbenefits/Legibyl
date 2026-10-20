@@ -35,7 +35,7 @@ let private node kind tag content page geometry leaves children : StructureNode 
 
 /// The nodes for pdfPath, whose pages' text is already read (text: StructureTreeWalk.read's).
 let nodes (pdfPath: string) (text: MarkedContentTextIndex.Index) =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     match document.GetCatalog().GetPdfObject().GetAsDictionary PdfName.StructTreeRoot with
     | null -> []
     | _ ->

@@ -279,7 +279,7 @@ let private read (file: string) : Result<Input, Refusal list> =
         Error [ refuse "It doesn't exist." ]
     else
         try
-            use reader = new PdfReader(file)
+            use reader = PdfFiles.reader file
             use document = new PdfDocument(reader)
             let catalog = document.GetCatalog().GetPdfObject()
             let fields =
@@ -473,7 +473,7 @@ let private prepare (taken: Taken) (index: int) (input: Input) : Prepared =
     let mutable renamedTags = Map.empty
     let mutable language = input.Language
     do
-        use document = new PdfDocument(new PdfReader(input.File), writer)
+        use document = new PdfDocument(PdfFiles.reader input.File, writer)
         let root = document.GetStructTreeRoot().GetPdfObject()
         let all = elements root
 
@@ -1110,7 +1110,9 @@ let join (files: string list) (output: string) (options: Options) : Joined =
         |> fst
         |> List.rev
     do
-        use document = new PdfDocument(new PdfReader(new MemoryStream(hideStructure merged)), new PdfWriter(output))
+        // (The writer its own, so it's closed if the document can't be opened.)
+        use writer = new PdfWriter(output)
+        use document = new PdfDocument(new PdfReader(new MemoryStream(hideStructure merged)), writer)
         let elements = wrapParts document tag (prepared |> List.map _.Language) language
         combine document taken.RoleMap prepared
         carryDestinations document prepared parts

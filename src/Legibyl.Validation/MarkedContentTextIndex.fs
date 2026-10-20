@@ -228,7 +228,7 @@ let private textDirection (page: Page) : TextDirection =
 /// Builds the index, calling onPage (page number, page count) as each page starts.
 let buildReporting (pdfPath: string) (onPage: int -> int -> unit) : Index =
     let index = Index()
-    use document = PdfDocument.Open pdfPath
+    use document = PdfFiles.openWithPdfPig pdfPath
     let pageCount = document.NumberOfPages
     for pageNumber in 1..pageCount do
         onPage pageNumber pageCount

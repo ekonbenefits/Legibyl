@@ -18,7 +18,7 @@ let private key = PdfName "LBYL_Review"
 /// The review embedded in pdfPath, as JSON, or None if it has none (or can't be read).
 let read (pdfPath: string) : string option =
     try
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         match document.GetCatalog().GetPdfObject().GetAsStream key with
         | null -> None
         | stream -> Some(Encoding.UTF8.GetString(stream.GetBytes()))
@@ -32,8 +32,9 @@ let read (pdfPath: string) : string option =
 /// inputPath must read without errors (iText only appends to such a file): in Fix it's always
 /// one iText has just written.
 let write (inputPath: string) (outputPath: string) (json: string) =
-    use document =
-        new PdfDocument(new PdfReader(inputPath), new PdfWriter(outputPath), StampingProperties().UseAppendMode())
+    // (The writer its own, so it's closed if the document can't be opened.)
+    use writer = new PdfWriter(outputPath)
+    use document = new PdfDocument(PdfFiles.reader inputPath, writer, StampingProperties().UseAppendMode())
     let stream = PdfStream(Encoding.UTF8.GetBytes json)
     stream.SetCompressionLevel CompressionConstants.DEFAULT_COMPRESSION
     stream.MakeIndirect document |> ignore

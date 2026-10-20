@@ -91,7 +91,8 @@ let ``Validate reports every occurrence of a repeated failure`` () =
 [<Fact>]
 let ``Validate reports progress, ending with the final counts`` () =
     use input = new TempPdf()
-    createPdfWithUntitledFigures input.Path 10
+    // Long enough to be seen on a page, however fast it's validated (its progress is sampled).
+    createPdfWithUntitledFigures input.Path 40
     let reports = Collections.Concurrent.ConcurrentQueue<ValidationProgress>()
     let progress = { new IProgress<ValidationProgress> with member _.Report value = reports.Enqueue value }
 

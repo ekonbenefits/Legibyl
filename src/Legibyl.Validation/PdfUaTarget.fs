@@ -11,7 +11,7 @@ open iText.Kernel.Pdf
 /// /Version where that's later. None if the file can't be read (encrypted, damaged, missing).
 let pdfVersion (pdfPath: string) : string option =
     try
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         // "PDF-1.7" -> "1.7"
         Some(document.GetPdfVersion().ToString().Replace("PDF-", ""))
     with

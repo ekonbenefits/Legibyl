@@ -153,7 +153,7 @@ let private findIn (document: PdfDocument) : (Attachment * PdfDictionary) list =
 
 /// The attached files and media clips in the PDF at pdfPath.
 let list (pdfPath: string) : Attachment list =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     findIn document |> List.map fst
 
 /// What an edit changes on an attachment's dictionary: each key and its new value, where it
@@ -197,7 +197,7 @@ let pending (pdfPath: string) (edits: Map<string, AttachmentEdit>) : int =
     if edits.IsEmpty then
         0
     else
-        use document = new PdfDocument(new PdfReader(pdfPath))
+        use document = PdfFiles.openToRead pdfPath
         findIn document
         |> List.filter (fun (attachment, dictionary) ->
             match edits.TryFind attachment.Key with

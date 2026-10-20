@@ -83,7 +83,7 @@ let fingerprints (pdfPath: string) : Map<int, string> =
         Map.empty
     else
         try
-            use document = UglyToad.PdfPig.PdfDocument.Open pdfPath
+            use document = PdfFiles.openWithPdfPig pdfPath
             [ for page in document.GetPages() ->
                   let described = $"{page.Width:F1}x{page.Height:F1}\n{page.Text}"
                   let hash = Security.Cryptography.SHA256.HashData(Text.Encoding.UTF8.GetBytes described)
@@ -113,8 +113,9 @@ let current (pdfPath: string) (layout: SavedLayout) : SavedLayout =
 /// title); H1 to H6 are kept as they are.
 let tags = [ Tags.H1; Tags.H; Tags.H2; Tags.H3; Tags.H4; Tags.H5; Tags.H6; Tags.P; Tags.LI; Tags.Figure; Tags.Table; Tags.TH; Tags.TD; Tags.Caption; Tags.Note; Tags.Formula; Tags.Lbl; Tags.Artifact ]
 
+// (Its lines end the same on every system.)
 let private jsonOptions =
-    JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
+    JsonSerializerOptions(WriteIndented = true, NewLine = "\n", Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
 
 let toJson (layout: SavedLayout) = JsonSerializer.Serialize(layout, jsonOptions)
 

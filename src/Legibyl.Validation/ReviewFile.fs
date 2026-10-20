@@ -208,9 +208,10 @@ type SavedFile =
       Checklist: SavedChecklist | null }
 
 // Relaxed escaping keeps the text people write readable ("wolf's", not "wolf's") in a
-// file they may open by hand.
+// file they may open by hand. Its lines end the same on every system, so a review saved on one
+// reads, and compares, the same on another.
 let private jsonOptions =
-    JsonSerializerOptions(WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
+    JsonSerializerOptions(WriteIndented = true, NewLine = "\n", Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping)
 
 let parse (json: string) : SavedFile option =
     try

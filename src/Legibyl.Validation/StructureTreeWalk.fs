@@ -364,7 +364,7 @@ let private readITextLinkTarget (annotation: PdfDictionary) (pageNumberByObject:
                   Destination = pageNumber |> Option.bind destinationOf }
 
 let private buildLinkAnnotationIndex (pdfPath: string) =
-    use document = new PdfDocument(new PdfReader(pdfPath))
+    use document = PdfFiles.openToRead pdfPath
     let pageNumberByObject = StructureTreeObjects.pageNumberIndex document
     [ for pageNumber in 1 .. document.GetNumberOfPages() do
           match document.GetPage(pageNumber).GetPdfObject().GetAsArray(PdfName.Annots) with
