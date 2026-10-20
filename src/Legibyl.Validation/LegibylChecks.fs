@@ -24,8 +24,8 @@
 /// content tied to a tag that's gone, Structure-17; web addresses shown as text that nothing
 /// links, Structure-18, which untagged documents get too; a declared language the text isn't
 /// in, Structure-19, as well; passages in another language, not marked, Structure-20; and a
-/// list's items left outside it, Structure-21) are added in `run` directly, and their messages to
-/// messageFor.
+/// list's items left outside it, Structure-21; and one list tagged as lists side by side,
+/// Structure-22) are added in `run` directly, and their messages to messageFor.
 ///
 /// The whole list, for a check and for a fix (every place each is wired in, and the tests), is
 /// the add-check skill: .claude/skills/add-check/SKILL.md.
@@ -212,6 +212,26 @@ let private listItemOutsideFindings (additions: ParagraphLists.ListAddition list
               21
               PdfFixOptions.Lists
               (Option.toObj addition.Geometry) ]
+
+// ---- Structure-22: one list tagged as lists side by side (see ParagraphLists) ----
+
+[<Literal>]
+let private SplitListMessage =
+    "One list is tagged as several lists side by side: its numbering carries on from one to the next, or a list indented under an item is tagged apart from it. A screen reader announces separate lists, and doesn't say which item the indented one belongs to. An auto fix can join them into one list, with the indented list inside its item."
+
+let private splitListFindings (joins: ParagraphLists.ListJoin list) =
+    [ for join in joins ->
+          let nested = join.Nested |> List.sumBy (snd >> List.length)
+          let parts =
+              [ if join.Lists.Length > 1 then $"{join.Lists.Length} that number on as one"
+                if nested > 0 then $"{nested} indented under an item of it" ]
+          warning
+              SplitListMessage
+              $"""Page {join.Page}: {join.Lists.Length + nested} lists side by side, starting "{join.Marker}": {String.Join(", and ", parts)}."""
+              join.Path
+              22
+              PdfFixOptions.Lists
+              (Option.toObj join.Geometry) ]
 
 // ---- Structure-7: headings but no bookmarks (see Bookmarks) ----
 
@@ -543,6 +563,7 @@ let run (document: PdfDocument) context : RuleViolation list =
           yield! tocHeadingFindings document context
           yield! paragraphListFindings lists.Runs
           yield! listItemOutsideFindings lists.Additions
+          yield! splitListFindings lists.Joins
           yield! splitFigureFindings document context
           yield! emptyFigureFindings document context
           yield! readingJumpFindings document context
@@ -600,6 +621,7 @@ let messageFor (testNumber: int) : string option =
         | 19 -> Some LanguageMismatchMessage
         | 20 -> Some PassageLanguageMessage
         | 21 -> Some ListItemOutsideMessage
+        | 22 -> Some SplitListMessage
         | _ -> None
 
 /// Reported instead of the checks' results when the PDF can't be opened to run them.
