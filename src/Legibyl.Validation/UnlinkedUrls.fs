@@ -201,22 +201,26 @@ let find (document: PdfDocument) (context: Context) : Candidate list =
 let apply (document: PdfDocument) (context: Context) =
     let candidates = find document context
     let mutable linked = 0
-    // Where the rest of a piece an address was carved out of is now: by its page and MCID.
-    let carvedRest = Dictionary<int * int, int>()
+    // The pieces a piece an address was carved out of is in now (what's left before it, and after
+    // it), by its page and MCID: another address in it is in one of them.
+    let carvedPieces = Dictionary<int * int, int list>()
     for candidate in candidates do
         match candidate.Run, candidate.Left with
         | Some(found, owner), _ ->
             let page = document.GetPage candidate.Page
             let element = PdfStructElem owner
-            // An address carved out of a piece earlier on leaves the rest of the piece in one of
-            // its own: another address in it is there now.
-            let mcids =
+            // An address carved out of a piece earlier on leaves the rest of the piece in pieces of
+            // their own, before it and after it: another address in it is in one of them (the one
+            // a carve finds it in: addresses are taken in reading order, a piece is cut in drawing
+            // order, and those can differ).
+            let mcids, planned =
                 match candidate.Cut, found with
                 | Around, [ mcid ] ->
-                    match carvedRest.TryGetValue((candidate.Page, mcid)) with
-                    | true, rest -> [ rest ]
-                    | _ -> found
-                | _ -> found
+                    let pieces = match carvedPieces.TryGetValue((candidate.Page, mcid)) with | true, pieces -> pieces | _ -> [ mcid ]
+                    match pieces |> List.tryPick (fun piece -> match carving document context candidate.Page piece candidate.Text with Ok plan -> Some(piece, plan) | Error _ -> None) with
+                    | Some(piece, plan) -> [ piece ], Some plan
+                    | None -> [ List.head pieces ], None
+                | _ -> found, None
             match mcids |> List.map (fun mcid -> kidIndex owner mcid candidate.Page context) with
             | Some index :: _ as indexes when indexes |> List.forall Option.isSome ->
               // Its text on its own first: the punctuation after it split off into a piece of its
@@ -229,12 +233,19 @@ let apply (document: PdfDocument) (context: Context) =
                       | Ok plan -> Ok(false, mcids, Some(MarkedContentSplit.split document page plan))
                       | Error why -> Error $"the \"{tail}\" after it is drawn in the same piece, and can't be split off: {why}"
                   | Around ->
-                      match carving document context candidate.Page (List.head mcids) candidate.Text with
+                      match planned |> Option.map Ok |> Option.defaultWith (fun () -> carving document context candidate.Page (List.head mcids) candidate.Text) with
                       | Ok plan ->
                           let pieces = MarkedContentSplit.carve document page plan
-                          match pieces.After with
-                          | Some rest -> carvedRest[(candidate.Page, List.head found)] <- rest
-                          | None -> ()
+                          let key = (candidate.Page, List.head found)
+                          let carvedFrom = List.head mcids
+                          let now = match carvedPieces.TryGetValue key with | true, now -> now | _ -> [ carvedFrom ]
+                          // The piece carved is now what's before the address (its MCID kept), if
+                          // anything, and what's after it.
+                          carvedPieces[key] <-
+                              now
+                              |> List.collect (fun piece ->
+                                  if piece <> carvedFrom then [ piece ]
+                                  else (if pieces.Before then [ piece ] else []) @ Option.toList pieces.After)
                           Ok(pieces.Before, [ pieces.Address ], pieces.After)
                       | Error why -> Error(notCarved why)
                   | Whole -> Ok(false, mcids, None)
