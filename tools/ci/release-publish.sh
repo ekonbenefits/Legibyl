@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Publishes the GUI and CLI for RID, self-contained, and packs them into artifacts/release/dist as
-# VERSION's downloads. Windows' are left unpacked there (gui, cli), to be signed first.
+# Publishes the GUI for RID, self-contained, and packs it into artifacts/release/dist as VERSION's
+# download. Windows' is left unpacked there (gui), to be signed first. (The CLI is released as a
+# .NET tool, on NuGet.)
 set -euo pipefail
 : "${RID:?}" "${VERSION:?}"
 out=artifacts/release/out
@@ -23,12 +24,10 @@ publish() {
     check_models "$2"
 }
 
-publish src/Legibyl.Cli/Legibyl.Cli.fsproj "$out/cli"
-
 case "$RID" in
     win-*)
         publish src/Legibyl.Gui/Legibyl.Gui.fsproj "$out/gui"
-        mv "$out/gui" "$out/cli" "$dist"/
+        mv "$out/gui" "$dist"/
         ;;
     osx-*)
         dotnet msbuild src/Legibyl.Gui/Legibyl.Gui.fsproj -t:BundleApp -restore -p:Configuration=Release \
@@ -46,8 +45,4 @@ case "$RID" in
         ;;
 esac
 
-if [ -d "$out/cli" ]; then
-    mv "$out/cli" "$out/legibyl-cli-$VERSION-$RID"
-    tar -C "$out" -czf "$dist/legibyl-cli-$VERSION-$RID.tar.gz" "legibyl-cli-$VERSION-$RID"
-fi
 ls -la "$dist"

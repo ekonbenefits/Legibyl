@@ -1,5 +1,6 @@
-# Builds Legibyl for each platform it supports and, for a version tag, signs the Windows builds
-# and makes a draft release of them all, which a person publishes (#233).
+# Builds Legibyl's app for each platform it supports and, for a version tag, signs the Windows builds
+# and makes a draft release of them all, which a person publishes (#233). (The CLI is released as a
+# .NET tool, on NuGet.)
 #
 # A tag is v<Version> (Directory.Build.props), e.g. v1.28.1.0, or with a suffix for a prerelease,
 # e.g. v1.28.1.0-rc1. Run by hand on a branch, it builds and tests everything, unsigned, and keeps
@@ -106,7 +107,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Signs Legibyl's own programs and libraries in the Windows builds, builds each MSI from the signed
+  # Signs Legibyl's own program and libraries in the Windows builds, builds each MSI from the signed
   # files, signs it, and packs them. Only for a tag, in the release environment: it waits for a
   # reviewer, and only its jobs can sign in to Azure (OIDC, no stored secret) to sign.
   sign-windows:
@@ -140,7 +141,7 @@ jobs:
           name: unsigned-${{ matrix.rid }}
           path: payload
 
-      # Legibyl's own: the GUI's and CLI's programs and Legibyl's libraries. The others (.NET's,
+      # Legibyl's own: the GUI's program and Legibyl's libraries. The others (.NET's,
       # Avalonia's, IKVM's, the native libraries) are left as their makers shipped them.
       - name: List what to sign
         id: files
@@ -159,7 +160,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign the programs and libraries
+      - name: Sign the program and libraries
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
@@ -198,8 +199,6 @@ jobs:
           Copy-Item $msi "dist\Legibyl-$env:VERSION-$env:RID.msi"
           Rename-Item payload\gui "Legibyl-$env:VERSION-$env:RID"
           Compress-Archive "payload\Legibyl-$env:VERSION-$env:RID" "dist\Legibyl-$env:VERSION-$env:RID.zip"
-          Rename-Item payload\cli "legibyl-cli-$env:VERSION-$env:RID"
-          Compress-Archive "payload\legibyl-cli-$env:VERSION-$env:RID" "dist\legibyl-cli-$env:VERSION-$env:RID.zip"
           Get-ChildItem dist
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -238,17 +237,17 @@ jobs:
           cat > ../notes.md <<EOF
           ## Downloads
 
-          | Platform | App | Command line |
-          |---|---|---|
-          | Windows x64 | \`Legibyl-$VERSION-win-x64.msi\` (installer) or \`.zip\` | \`legibyl-cli-$VERSION-win-x64.zip\` |
-          | Windows Arm64 | \`Legibyl-$VERSION-win-arm64.msi\` (installer) or \`.zip\` | \`legibyl-cli-$VERSION-win-arm64.zip\` |
-          | macOS (Apple silicon) | \`Legibyl-$VERSION-osx-arm64.dmg\` | \`legibyl-cli-$VERSION-osx-arm64.tar.gz\` |
-          | Linux x64 | \`Legibyl-$VERSION-linux-x64.tar.gz\` | \`legibyl-cli-$VERSION-linux-x64.tar.gz\` |
-          | Linux Arm64 | \`Legibyl-$VERSION-linux-arm64.tar.gz\` | \`legibyl-cli-$VERSION-linux-arm64.tar.gz\` |
+          | Platform | Download |
+          |---|---|
+          | Windows x64 | \`Legibyl-$VERSION-win-x64.msi\` (installer), or \`.zip\` |
+          | Windows Arm64 | \`Legibyl-$VERSION-win-arm64.msi\` (installer), or \`.zip\` |
+          | macOS (Apple silicon) | \`Legibyl-$VERSION-osx-arm64.dmg\` |
+          | Linux x64 | \`Legibyl-$VERSION-linux-x64.tar.gz\` |
+          | Linux Arm64 | \`Legibyl-$VERSION-linux-arm64.tar.gz\` |
 
           \`SHA256SUMS\` has each file's checksum.
 
-          The Windows installers and programs are signed by Qualified Benefits Consultants, Inc. (doing business as Ekon Benefits). The macOS app isn't signed yet: the first time, open it from System Settings > Privacy & Security > **Open Anyway**.
+          The Windows installers and app are signed by Qualified Benefits Consultants, Inc. (doing business as Ekon Benefits). The macOS app isn't signed yet: the first time, open it from System Settings > Privacy & Security > **Open Anyway**.
           EOF
           prerelease=()
           if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi
