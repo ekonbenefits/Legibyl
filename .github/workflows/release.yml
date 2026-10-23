@@ -1,6 +1,10 @@
 # Builds Legibyl's app for each platform it supports and, for a version tag, signs the Windows builds
-# and makes a draft release of them all, which a person publishes (#233). (The CLI is released as a
-# .NET tool, on NuGet.)
+# and makes a draft release of them all, with the source, which a person publishes (#233). (The CLI
+# is released as a .NET tool, on NuGet.)
+#
+# The source: each release has Legibyl's own, and points to its dependencies', which is a release
+# of its own, deps-<fingerprint>, made once for each set of dependencies (tools/source-bundle.fsx):
+# the first release built with a new set makes it, as a draft beside its own, to publish with it.
 #
 # A tag is v<Version> (Directory.Build.props), e.g. v1.28.1.0, or with a suffix for a prerelease,
 # e.g. v1.28.1.0-rc1. Run by hand on a branch, it builds and tests everything, unsigned, and keeps
@@ -26,8 +30,44 @@ env:
   DOTNET_NOLOGO: 1
 
 jobs:
+  # The fingerprint of the dependencies the release is built with: the name of the release with
+  # their source, which each build says (About, legibyl --version).
+  fingerprint:
+    name: Dependencies' fingerprint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      # What the script reads: the app's and the CLI's restored packages, and veraPDF's jar.
+      - name: Build what the dependencies are read from
+        run: |
+          dotnet restore src/Legibyl.Gui/Legibyl.Gui.fsproj
+          dotnet build src/Legibyl.Cli/Legibyl.Cli.fsproj -c Release
+
+      - name: Fingerprint
+        id: fingerprint
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # to look up packages' submodules past GitHub's anonymous limit
+        run: |
+          fingerprint=$(dotnet fsi tools/source-bundle.fsx --fingerprint | tail -1)
+          if [[ ! "$fingerprint" =~ ^deps-[0-9a-f]{12}$ ]]; then echo "::error title=Fingerprint::Got '$fingerprint'."; exit 1; fi
+          echo "The dependencies' source: $fingerprint"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.rid }})
+    needs: fingerprint
     strategy:
       fail-fast: false
       matrix:
@@ -50,6 +90,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     env:
       RID: ${{ matrix.rid }}
+      # Stamped into the build (MSBuild reads it as a property), which says it.
+      DependencySource: ${{ needs.fingerprint.outputs.fingerprint }}
     defaults:
       run:
         shell: bash
@@ -212,11 +254,93 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # A draft release of every platform's builds, with their checksums. A person publishes it.
+  # The source: Legibyl's own, always; and its dependencies', unless their release is published
+  # already (a draft of it isn't seen here: this job can't see drafts, so it gathers it again, and
+  # the release job keeps the draft).
+  source:
+    name: Source
+    if: ${{ github.ref_type == 'tag' }}
+    needs: fingerprint
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      FINGERPRINT: ${{ needs.fingerprint.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build what the dependencies are read from
+        run: |
+          dotnet restore src/Legibyl.Gui/Legibyl.Gui.fsproj
+          dotnet build src/Legibyl.Cli/Legibyl.Cli.fsproj -c Release
+
+      - name: Is their source released already?
+        id: released
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$FINGERPRINT" > /dev/null 2>&1; then
+            echo "$FINGERPRINT is released: only Legibyl's own source is gathered."
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$FINGERPRINT isn't released: all the source is gathered."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # About 6 GB: what was fetched, then packed. The runner has about 14 GB free, less what's
+      # restored, so its preinstalled SDKs that Legibyl doesn't use go.
+      - name: Make room
+        if: ${{ steps.released.outputs.released == 'false' }}
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          df -h /
+
+      - name: Gather it
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # to look up packages' submodules past GitHub's anonymous limit
+          RELEASED: ${{ steps.released.outputs.released }}
+        run: |
+          if [ "$RELEASED" = true ]; then own=--own; else own=; fi
+          dotnet fsi tools/source-bundle.fsx $own | tee bundle.log
+          # The same dependencies the builds name.
+          got=$(grep -o "fingerprint: deps-[0-9a-f]*" bundle.log | tail -1 | cut -d' ' -f2)
+          if [ "$got" != "$FINGERPRINT" ]; then
+            echo "::error title=Source::The source gathered is of the dependencies $got, not $FINGERPRINT, which the builds name."
+            exit 1
+          fi
+          ls -la artifacts/source/release
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source
+          path: artifacts/source/release/legibyl-*-source.tar
+          if-no-files-found: error
+          retention-days: 1
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ steps.released.outputs.released == 'false' }}
+        with:
+          name: dependency-source
+          path: artifacts/source/release/${{ needs.fingerprint.outputs.fingerprint }}/
+          if-no-files-found: error
+          compression-level: 0 # tarballs already
+          retention-days: 1
+
+  # A draft release of every platform's builds and the source, with their checksums; and, the first
+  # time a set of dependencies is released, a draft of their source's release. A person publishes them.
   release:
     name: Draft release
     if: ${{ github.ref_type == 'tag' }}
-    needs: [build, sign-windows]
+    needs: [fingerprint, build, sign-windows, source]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -226,12 +350,47 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
       VERSION: ${{ needs.build.outputs.version }}
+      FINGERPRINT: ${{ needs.fingerprint.outputs.fingerprint }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: build-*
           path: dist
           merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: source
+          path: dist
+
+      # Made once for each set of dependencies, and never changed: a new set is a new fingerprint.
+      # (Drafts are seen here.)
+      - name: Has the dependencies' source a release?
+        id: deps
+        run: |
+          if gh release view "$FINGERPRINT" > /dev/null 2>&1; then
+            echo "$FINGERPRINT has its release already: it's linked to."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$FINGERPRINT has no release yet: it's made, as a draft."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ steps.deps.outputs.exists == 'false' }}
+        with:
+          name: dependency-source
+          path: deps
+
+      # A prerelease, so it's never the latest release.
+      - name: Release the dependencies' source
+        if: ${{ steps.deps.outputs.exists == 'false' }}
+        run: |
+          ls -la deps
+          gh release create --draft --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "Legibyl's dependencies' source ($FINGERPRINT)" --notes-file deps/SOURCE-README.md \
+            "$FINGERPRINT" deps/*
+          echo "**Publish $FINGERPRINT before Legibyl $VERSION**: it's a new draft too, the source of its dependencies, which Legibyl's release links to." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create the draft
         run: |
@@ -252,6 +411,10 @@ jobs:
           \`SHA256SUMS\` has each file's checksum.
 
           The Windows installers and app are signed by Qualified Benefits Consultants, Inc. (doing business as Ekon Benefits). The macOS app isn't signed yet: the first time, open it from System Settings > Privacy & Security > **Open Anyway**.
+
+          ## Source
+
+          Legibyl is free software under the AGPL-3.0-or-later. Its source for this release is \`legibyl-$VERSION-source.tar\` (with \`MANIFEST.md\`, every component it's built with). The source of everything it's built with is the release [$FINGERPRINT](https://github.com/$GH_REPO/releases/tag/$FINGERPRINT), shared by every release built with the same dependencies; \`legibyl --version\` and About name it too.
           EOF
           prerelease=()
           if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi

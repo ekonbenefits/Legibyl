@@ -238,6 +238,10 @@
     <!-- The bundled fonts' versions (see BuildInfo.validationComponents). -->
     <AssemblyMetadata Include="UrwFontsVersion" Value="$(UrwFontsVersion)" />
     <AssemblyMetadata Include="LiberationFontsVersion" Value="$(LiberationFontsVersion)" />
+    <!-- The release with the source of what it's built with, deps-<fingerprint> (see
+         tools/source-bundle.fsx): the release workflow sets it, so only a released build has it
+         (see BuildInfo.dependencySource). -->
+    <AssemblyMetadata Include="DependencySource" Value="$(DependencySource)" Condition="'$(DependencySource)' != ''" />
   </ItemGroup>
 
 </Project>
