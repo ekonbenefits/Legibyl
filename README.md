@@ -218,6 +218,10 @@ the build (no separate publish step needed):
 dotnet build installer\Legibyl.Gui.Installer\Legibyl.Gui.Installer.wixproj -c Release
 ```
 
+For Arm64, add `-p:GuiRuntime=win-arm64` (an Arm64 MSI of the Arm64 build). To
+build it from a GUI already published (and signed, as the release workflow does),
+add `-p:PublishGui=false -p:GuiPublishDir=<folder>`.
+
 The MSI is written to `artifacts\msi\en-US\LegibylSetup.msi`. Installing
 to `Program Files` requires administrator privileges (standard per-machine
 MSI behavior). The installer also bundles the `LICENSE`/`licenses/` files
@@ -276,6 +280,31 @@ Privacy & Security > **Open Anyway**, or run
 ```sh
 hdiutil create -volname Legibyl -srcfolder artifacts/macos/osx-arm64/Legibyl.app -ov -format UDZO artifacts/macos/Legibyl-osx-arm64.dmg
 ```
+
+## Releases
+
+`.github/workflows/release.yml` builds a release from a version tag:
+`v<version>` (the version the build stamps, see Versioning), e.g. `v1.28.1.0`,
+or with a suffix for a prerelease, e.g. `v1.28.1.0-rc1`. For each platform
+(Windows and Linux, x64 and Arm64, and macOS on Apple silicon), it builds,
+runs the Validation and CLI tests, checks the layout models are in the output,
+and publishes the GUI and the CLI. Then it signs the Windows builds and makes a
+draft release of them all, with a `SHA256SUMS`, for a person to publish. Run by
+hand (Actions › Release › Run workflow) on a branch, it builds and tests
+everything and keeps the builds as the run's artifacts, without signing or a
+release.
+
+The Windows builds are signed with Azure Artifact Signing, by **Qualified
+Benefits Consultants, Inc.** (doing business as Ekon Benefits): that's the
+publisher Windows names. Legibyl's own programs and libraries are signed
+(`Legibyl*.exe`, `Legibyl*.dll`, so the CLI's `legibyl.exe` too), and then the
+MSI, built from them; the libraries Legibyl ships from others are left as
+their makers shipped them. The signing jobs run in the `release` environment,
+which waits for a reviewer's approval and only deploys from `v*` tags; only
+they can sign in to Azure (with GitHub's OIDC token: no secret is stored). The
+environment's variables name the Azure app, tenant and subscription, and the
+signing account's endpoint, name and certificate profile. The macOS app isn't
+signed yet.
 
 ## Supported standards
 

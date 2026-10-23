@@ -1,0 +1,255 @@
+# Builds Legibyl for each platform it supports and, for a version tag, signs the Windows builds
+# and makes a draft release of them all, which a person publishes (#233).
+#
+# A tag is v<Version> (Directory.Build.props), e.g. v1.28.1.0, or with a suffix for a prerelease,
+# e.g. v1.28.1.0-rc1. Run by hand on a branch, it builds and tests everything, unsigned, and keeps
+# the builds as the run's artifacts: no signing, no release.
+#
+# Nothing here is cached: a cache restored into a run that publishes a release could be poisoned.
+# The downloads the build makes (models, tessdata, fonts, veraPDF) are pinned by SHA-256 anyway.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  build:
+    name: Build (${{ matrix.rid }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: win-arm64
+            os: windows-11-arm
+          - rid: osx-arm64
+            os: macos-latest
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: linux-arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      RID: ${{ matrix.rid }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      # The version the build stamps; a tag has to name it.
+      - name: Version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: bash tools/ci/release-version.sh
+
+      - name: Build
+        run: dotnet build Legibyl.slnx -c Release
+
+      # Each fails if fewer of its tests ran than it has (see tools/ci/test.sh). The GUI's tests
+      # run in CI, on every push to master.
+      - name: Validation tests
+        env:
+          CONFIGURATION: Release
+        run: bash tools/ci/test.sh tests/Legibyl.Validation.Tests
+
+      - name: CLI tests
+        env:
+          CONFIGURATION: Release
+        run: bash tools/ci/test.sh tests/Legibyl.Cli.Tests
+
+      - name: Publish
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash tools/ci/release-publish.sh
+
+      - name: Keep the test results
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results-${{ matrix.rid }}
+          path: TestResults/
+          retention-days: 7
+
+      # Windows' builds are packed once they're signed (below); the others are packed already.
+      - name: Keep the build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ startsWith(matrix.rid, 'win-') && 'unsigned' || 'build' }}-${{ matrix.rid }}
+          path: artifacts/release/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Signs Legibyl's own programs and libraries in the Windows builds, builds each MSI from the signed
+  # files, signs it, and packs them. Only for a tag, in the release environment: it waits for a
+  # reviewer, and only its jobs can sign in to Azure (OIDC, no stored secret) to sign.
+  sign-windows:
+    name: Sign (${{ matrix.rid }})
+    if: ${{ github.ref_type == 'tag' }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # to sign in to Azure Artifact Signing with OIDC
+    env:
+      RID: ${{ matrix.rid }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-${{ matrix.rid }}
+          path: payload
+
+      # Legibyl's own: the GUI's and CLI's programs and Legibyl's libraries. The others (.NET's,
+      # Avalonia's, IKVM's, the native libraries) are left as their makers shipped them.
+      - name: List what to sign
+        id: files
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem payload -Recurse -File -Include 'Legibyl*.exe', 'Legibyl*.dll' | ForEach-Object FullName
+          if ($files.Count -lt 3) { throw "Found only $($files.Count) of Legibyl's files to sign." }
+          $files
+          "list<<EOF" >> $env:GITHUB_OUTPUT
+          $files >> $env:GITHUB_OUTPUT
+          "EOF" >> $env:GITHUB_OUTPUT
+
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign the programs and libraries
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ steps.files.outputs.list }}
+          file-digest: SHA256
+          timestamp-digest: SHA256
+
+      - name: Build the MSI
+        shell: pwsh
+        run: dotnet build installer/Legibyl.Gui.Installer/Legibyl.Gui.Installer.wixproj -c Release -p:PublishGui=false "-p:GuiPublishDir=$PWD\payload\gui" "-p:GuiRuntime=$env:RID"
+
+      # The MSI's description is what Windows names it when it asks to install it.
+      - name: Sign the MSI
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\artifacts\msi\en-US\LegibylSetup.msi
+          file-digest: SHA256
+          timestamp-digest: SHA256
+          description: Legibyl
+          description-url: https://github.com/${{ github.repository }}
+
+      - name: Check the signatures and pack
+        shell: pwsh
+        run: |
+          $msi = 'artifacts\msi\en-US\LegibylSetup.msi'
+          foreach ($file in @($msi) + (Get-ChildItem payload -Recurse -File -Include 'Legibyl*.exe', 'Legibyl*.dll' | ForEach-Object FullName)) {
+            $signature = Get-AuthenticodeSignature $file
+            if ($signature.Status -ne 'Valid') { throw "$file isn't signed ($($signature.Status): $($signature.StatusMessage))." }
+          }
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item $msi "dist\Legibyl-$env:VERSION-$env:RID.msi"
+          Rename-Item payload\gui "Legibyl-$env:VERSION-$env:RID"
+          Compress-Archive "payload\Legibyl-$env:VERSION-$env:RID" "dist\Legibyl-$env:VERSION-$env:RID.zip"
+          Rename-Item payload\cli "legibyl-cli-$env:VERSION-$env:RID"
+          Compress-Archive "payload\legibyl-cli-$env:VERSION-$env:RID" "dist\legibyl-cli-$env:VERSION-$env:RID.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-${{ matrix.rid }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # A draft release of every platform's builds, with their checksums. A person publishes it.
+  release:
+    name: Draft release
+    if: ${{ github.ref_type == 'tag' }}
+    needs: [build, sign-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # to create the draft release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: build-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create the draft
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          cat > ../notes.md <<EOF
+          ## Downloads
+
+          | Platform | App | Command line |
+          |---|---|---|
+          | Windows x64 | \`Legibyl-$VERSION-win-x64.msi\` (installer) or \`.zip\` | \`legibyl-cli-$VERSION-win-x64.zip\` |
+          | Windows Arm64 | \`Legibyl-$VERSION-win-arm64.msi\` (installer) or \`.zip\` | \`legibyl-cli-$VERSION-win-arm64.zip\` |
+          | macOS (Apple silicon) | \`Legibyl-$VERSION-osx-arm64.dmg\` | \`legibyl-cli-$VERSION-osx-arm64.tar.gz\` |
+          | Linux x64 | \`Legibyl-$VERSION-linux-x64.tar.gz\` | \`legibyl-cli-$VERSION-linux-x64.tar.gz\` |
+          | Linux Arm64 | \`Legibyl-$VERSION-linux-arm64.tar.gz\` | \`legibyl-cli-$VERSION-linux-arm64.tar.gz\` |
+
+          \`SHA256SUMS\` has each file's checksum.
+
+          The Windows installers and programs are signed by Qualified Benefits Consultants, Inc. (doing business as Ekon Benefits). The macOS app isn't signed yet: the first time, open it from System Settings > Privacy & Security > **Open Anyway**.
+          EOF
+          prerelease=()
+          if [[ "$TAG" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create --draft --verify-tag "${prerelease[@]}" --title "Legibyl $VERSION" --notes-file ../notes.md "$TAG" ./*

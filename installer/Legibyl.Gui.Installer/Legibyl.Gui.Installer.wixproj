@@ -5,7 +5,15 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <OutputName>LegibylSetup</OutputName>
     <OutputPath>..\..\artifacts\msi\</OutputPath>
-    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- The runtime the GUI is published for: win-x64 (by default) or win-arm64, with the MSI's
+         platform to match. -->
+    <GuiRuntime Condition="'$(GuiRuntime)' == ''">win-x64</GuiRuntime>
+    <InstallerPlatform Condition="'$(GuiRuntime)' == 'win-arm64'">arm64</InstallerPlatform>
+    <InstallerPlatform Condition="'$(GuiRuntime)' != 'win-arm64'">x64</InstallerPlatform>
+    <!-- The published GUI the MSI installs. The release workflow publishes and signs it first,
+         then builds the MSI from it with PublishGui=false; by default the build publishes it here. -->
+    <GuiPublishDir Condition="'$(GuiPublishDir)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui</GuiPublishDir>
+    <PublishGui Condition="'$(PublishGui)' == ''">true</PublishGui>
     <Cabinet>embed</Cabinet>   <!-- Ensures all files are embedded in the MSI, no external CAB will be created -->
     <SuppressIces>ICE60</SuppressIces>
     <!--
@@ -15,7 +23,7 @@
       tool build number) is still shown to the user via SummaryInformation
       Comments below. See root Directory.Build.props / README "Versioning".
     -->
-    <DefineConstants>$(DefineConstants);AppVersion=$(VersionPrefix);FullVersion=$(Version);RepoRoot=$(MSBuildThisFileDirectory)..\..\;GuiPublishDir=$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui</DefineConstants>
+    <DefineConstants>$(DefineConstants);AppVersion=$(VersionPrefix);FullVersion=$(Version);RepoRoot=$(MSBuildThisFileDirectory)..\..\;GuiPublishDir=$(GuiPublishDir)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,14 +36,14 @@
   </ItemGroup>
 
   <!--
-    Publish a self-contained win-x64 build of the GUI as the MSI payload.
+    Publish a self-contained build of the GUI (for GuiRuntime) as the MSI payload.
     Self-contained is used (not framework-dependent) because it bundles
     IKVM's translated JRE, so the installed app has no external JDK/.NET
     runtime dependency, matching the standalone publish already verified
     during development.
   -->
-  <Target Name="PublishGuiPayload" BeforeTargets="BeforeBuild">
-    <MakeDir Directories="$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui" />
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\src\Legibyl.Gui\Legibyl.Gui.fsproj&quot; -c $(Configuration) -r win-x64 --self-contained true -o &quot;$(MSBuildThisFileDirectory)..\..\artifacts\publish\gui&quot;" />
+  <Target Name="PublishGuiPayload" BeforeTargets="BeforeBuild" Condition="'$(PublishGui)' == 'true'">
+    <MakeDir Directories="$(GuiPublishDir)" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\..\src\Legibyl.Gui\Legibyl.Gui.fsproj&quot; -c $(Configuration) -r $(GuiRuntime) --self-contained true -o &quot;$(GuiPublishDir)&quot;" />
   </Target>
 </Project>
