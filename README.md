@@ -288,7 +288,8 @@ hdiutil create -volname Legibyl -srcfolder artifacts/macos/osx-arm64/Legibyl.app
 or with a suffix for a prerelease, e.g. `v1.28.1.0-rc1`. For each platform
 (Windows and Linux, x64 and Arm64, and macOS on Apple silicon), it builds,
 runs the Validation and CLI tests, checks the layout models are in the output,
-and publishes the GUI and the CLI. Then it signs the Windows builds and makes a
+and publishes the GUI. (The CLI is to be released as a .NET tool, on NuGet.)
+Then it signs the Windows builds and makes a
 draft release of them all, with a `SHA256SUMS`, for a person to publish. Run by
 hand (Actions › Release › Run workflow) on a branch, it builds and tests
 everything and keeps the builds as the run's artifacts, without signing or a
@@ -296,9 +297,8 @@ release.
 
 The Windows builds are signed with Azure Artifact Signing, by **Qualified
 Benefits Consultants, Inc.** (doing business as Ekon Benefits): that's the
-publisher Windows names. Legibyl's own programs and libraries are signed
-(`Legibyl*.exe`, `Legibyl*.dll`, so the CLI's `legibyl.exe` too), and then the
-MSI, built from them; the libraries Legibyl ships from others are left as
+publisher Windows names. Legibyl's own program and libraries are signed
+(`Legibyl*.exe`, `Legibyl*.dll`), and then the MSI, built from them; the libraries Legibyl ships from others are left as
 their makers shipped them. The signing jobs run in the `release` environment,
 which waits for a reviewer's approval and only deploys from `v*` tags; only
 they can sign in to Azure (with GitHub's OIDC token: no secret is stored). The
