@@ -169,6 +169,8 @@ jobs:
           files: ${{ steps.files.outputs.list }}
           file-digest: SHA256
           timestamp-digest: SHA256
+          # Its default, but said: a cache restored here could be poisoned (see the top).
+          cache-dependencies: false
 
       - name: Build the MSI
         shell: pwsh
@@ -184,6 +186,8 @@ jobs:
           files: ${{ github.workspace }}\artifacts\msi\en-US\LegibylSetup.msi
           file-digest: SHA256
           timestamp-digest: SHA256
+          # Its default, but said: a cache restored here could be poisoned (see the top).
+          cache-dependencies: false
           description: Legibyl
           description-url: https://github.com/${{ github.repository }}
 
