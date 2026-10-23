@@ -429,7 +429,7 @@ let ``fix keeps what veraPDF logged reading the file as it was`` () =
         errors |> should not' (haveSubstring "Nested MCID"))
 
 [<Fact>]
-let ``--version prints the line the GUI's About window copies, then Legibyl's copyright`` () =
+let ``--version prints the line the GUI's About window copies, then Legibyl's copyright, and a released build's dependencies' source`` () =
     let original = Console.Out
     use writer = new StringWriter()
     Console.SetOut writer
@@ -440,7 +440,12 @@ let ``--version prints the line the GUI's About window copies, then Legibyl's co
             Console.SetOut original
 
     code |> should equal 0
-    writer.ToString().Trim().Split(Environment.NewLine) |> should equal [| BuildInfo.versionLine; "Copyright © 2026 Ekon Benefits <opensource@ekonbenefits.com>" |]
+    // (A build with no DependencySource, as the tests' are unless the release workflow sets it, has no third line.)
+    writer.ToString().Trim().Split(Environment.NewLine)
+    |> should equal
+        [| BuildInfo.versionLine
+           "Copyright © 2026 Ekon Benefits <opensource@ekonbenefits.com>"
+           yield! Option.toList BuildInfo.dependencySourceLine |]
     BuildInfo.versionLine |> should startWith $"legibyl {BuildInfo.version} (vendored veraPDF engine {VeraPdfValidator.EngineVersion})"
 
 [<Fact>]

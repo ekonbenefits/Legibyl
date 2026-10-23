@@ -9,11 +9,21 @@
 //   dotnet fsi tools/source-bundle.fsx --all           also the .NET runtime's and the build tools'
 //   dotnet fsi tools/source-bundle.fsx --out <folder>
 //   dotnet fsi tools/source-bundle.fsx --only itext,verapdf   just those (any part of a name), and Legibyl
+//   dotnet fsi tools/source-bundle.fsx --fingerprint   prints the dependencies' fingerprint, fetches nothing
+//   dotnet fsi tools/source-bundle.fsx --own           Legibyl's own source only (its dependencies' looked up)
 //
-// Then it packs them for a GitHub release (each file there must be under 2 GiB), into release/
-// beside the folder: legibyl-<version>-source.tar (Legibyl's own, and the manifest), and
-// legibyl-<version>-dependencies-source.tar, the rest, in parts under 1.9 GiB (.part01...), with
-// SHA256SUMS and how to join them. (Not for --dry-run or --only.)
+// The dependencies' source changes far less often than Legibyl, so it's released on its own, once
+// for each set of dependencies, and each release of Legibyl points to it (#233). The set is named
+// by a fingerprint of the manifest's lines but Legibyl's own (below): deps-<12 hex digits>, the
+// same for the same dependencies, whatever else changed. It's in the manifest, and --fingerprint
+// prints it last.
+//
+// Then it packs them for GitHub releases (each file there must be under 2 GiB), into release/
+// beside the folder: legibyl-<version>-source.tar (Legibyl's own, and the manifest), for the
+// release of Legibyl; and deps-<fingerprint>/, for the dependencies' own release: their source,
+// deps-<fingerprint>-source.tar in parts under 1.9 GiB (.part01...), with the manifest,
+// SHA256SUMS and how to join them. (Not for --dry-run, --fingerprint or --only; just the first for
+// --own.) It fails if any source can't be found.
 //
 // What's fetched, and from where, is in the folder's MANIFEST.md, a line for each component: its
 // version, its licence, and the source (or why there's none). It fetches:
@@ -50,12 +60,18 @@ open System.Text.Json
 open System.Text.RegularExpressions
 
 let args = fsi.CommandLineArgs |> Array.skip 1 |> List.ofArray
-let dryRun = List.contains "--dry-run" args
+let fingerprintOnly = List.contains "--fingerprint" args
+let ownOnly = List.contains "--own" args
+let dryRun = List.contains "--dry-run" args || fingerprintOnly
+/// Whether the dependencies' sources are only looked up, not fetched.
+let lookupOnly = dryRun || ownOnly
 let everything = List.contains "--all" args
 let only =
     match args |> List.tryFindIndex ((=) "--only") with
     | Some i when i + 1 < args.Length -> args[i + 1].Split(',') |> Array.map (fun s -> s.Trim().ToLowerInvariant()) |> List.ofArray
     | _ -> []
+if not only.IsEmpty && (fingerprintOnly || ownOnly) then
+    failwith "--fingerprint and --own are of every dependency: not with --only."
 /// Whether a component is wanted (with --only, whether its name has one of those in it).
 let wanted (name: string) = only.IsEmpty || only |> List.exists (fun part -> name.ToLowerInvariant().Contains part)
 let root = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, ".."))
@@ -113,14 +129,27 @@ let text (url: string) =
         if response.IsSuccessStatusCode then Some(response.Content.ReadAsStringAsync().Result) else None
     with _ -> None
 
-/// Saves url as file under out (unless it's there already, or it's a dry run); its size in bytes.
+/// f's result, trying it up to four times while it fails, waiting longer each time: servers
+/// (googlesource, GitLab) answer 503 now and then.
+let retrying (f: unit -> Result<'T, string>) =
+    let rec attempt n =
+        match f () with
+        | Error why when n < 4 ->
+            eprintfn $"  ({why}: trying again)"
+            Threading.Thread.Sleep(TimeSpan.FromSeconds(5.0 * 3.0 ** float (n - 1)))
+            attempt (n + 1)
+        | result -> result
+    attempt 1
+
+/// Saves url as file under out (unless it's there already, or it's only looked up); its size in bytes.
 let fetch (url: string) (file: string) : Result<string, string> =
     let path = Path.Combine(out, file)
     if File.Exists path then
         Ok file
-    elif dryRun then
-        if exists url then Ok file else Error $"not found: {url}"
+    elif lookupOnly then
+        retrying (fun () -> if exists url then Ok file else Error $"not found: {url}")
     else
+      retrying (fun () ->
         try
             Directory.CreateDirectory(Path.GetDirectoryName path |> string) |> ignore
             use response = http.Send(request url, HttpCompletionOption.ResponseHeadersRead)
@@ -135,7 +164,7 @@ let fetch (url: string) (file: string) : Result<string, string> =
                 File.Move(partial, path, true)
                 printfn $"  fetched {file} ({FileInfo(path).Length / 1_000_000L} MB)"
                 Ok file
-        with ex -> Error $"{ex.Message} ({url})"
+        with ex -> Error $"{ex.Message} ({url})")
 
 /// Where some repositories really are, when what refers to them names an old mirror.
 let private moved =
@@ -148,11 +177,13 @@ let fetchGit (url: string) (reference: string) (file: string) : Result<string, s
     let path = Path.Combine(out, file)
     if File.Exists path then
         Ok file
-    elif dryRun then
-        match run "git" $"ls-remote {url}" with
-        | Some _ -> Ok file
-        | None -> Error $"can't reach {url}"
+    elif lookupOnly then
+        retrying (fun () ->
+            match run "git" $"ls-remote {url}" with
+            | Some _ -> Ok file
+            | None -> Error $"can't reach {url}")
     else
+      retrying (fun () ->
         let scratch = Path.Combine(Path.GetTempPath(), $"legibyl-source-{Guid.NewGuid():N}")
         try
             Directory.CreateDirectory scratch |> ignore
@@ -170,7 +201,7 @@ let fetchGit (url: string) (reference: string) (file: string) : Result<string, s
             else
                 Error $"git couldn't fetch {reference} from {url}"
         finally
-            try Directory.Delete(scratch, true) with _ -> ()
+            try Directory.Delete(scratch, true) with _ -> ())
 
 // ---- The manifest ----
 
@@ -474,19 +505,27 @@ for name, version, licence, source in
 // ---- The manifest ----
 
 let cell (s: string) = s.Replace("|", "\\|")
+let row (e: Entry) =
+    let here = match e.Fetched with Ok file -> $"`{file}`" | Error why -> $"— {why}"
+    $"| {cell e.Component} | {cell e.Version} | {cell e.Licence} | {cell e.Source} | {cell here} |"
+/// The dependencies' fingerprint: their rows (all but Legibyl's own), sorted, hashed.
+let fingerprint =
+    let rows = entries |> Seq.filter (fun e -> e.Component <> "Legibyl") |> Seq.map row |> Seq.sort |> String.concat "\n"
+    let hash = Convert.ToHexString(SHA256.HashData(Text.Encoding.UTF8.GetBytes rows)).ToLowerInvariant()
+    $"deps-{hash.Substring(0, 12)}"
 let today = DateTime.UtcNow.ToString "yyyy-MM-dd"
-let dry = if dryRun then " (a dry run: nothing fetched)" else ""
+let dry = if lookupOnly then " (its dependencies looked up: not fetched)" else ""
 let lines =
     [ $"# Source for Legibyl {version}"
       ""
       $"Built from commit `{commit}`. Gathered by `tools/source-bundle.fsx` on {today}{dry}."
       $"Each component, at the version Legibyl {version} is built with; the file here with its source, or why there's none."
       ""
+      $"The dependencies' source (all but Legibyl's own) is the release `{fingerprint}`: the fingerprint of their rows below, the same for every release of Legibyl built with them."
+      ""
       "| Component | Version | Licence | Source | Here |"
       "|---|---|---|---|---|" ]
-    @ [ for e in entries ->
-            let here = match e.Fetched with Ok file -> $"`{file}`" | Error why -> $"— {why}"
-            $"| {cell e.Component} | {cell e.Version} | {cell e.Licence} | {cell e.Source} | {cell here} |" ]
+    @ [ for e in entries -> row e ]
 Directory.CreateDirectory out |> ignore
 File.WriteAllLines(Path.Combine(out, "MANIFEST.md"), lines)
 let missing = entries |> Seq.filter (fun e -> match e.Fetched with Error why -> not (why.StartsWith "data") && not (why.Contains "--all") | Ok _ -> false) |> List.ofSeq
@@ -496,6 +535,13 @@ for e in missing do
     match e.Fetched with
     | Error why -> printfn $"  {e.Component.Trim()} {e.Version}: {why}"
     | Ok _ -> ()
+if not missing.IsEmpty then
+    eprintfn "Some sources couldn't be found (above): not packed, and no fingerprint."
+    exit 1
+printfn $"The dependencies' fingerprint: {fingerprint}"
+if fingerprintOnly then
+    printfn $"{fingerprint}"
+    exit 0
 
 // ---- Packing for a release ----
 
@@ -558,58 +604,63 @@ if not dryRun && only.IsEmpty then
     let files (folder: string) =
         let prefix = Path.Combine(out, folder) + string Path.DirectorySeparatorChar
         listed |> List.filter (fun file -> file.StartsWith prefix)
-    let add (writer: TarWriter) (file: string) =
+    let manifest = Path.Combine(out, "MANIFEST.md")
+    let add (writer: TarWriter) (top: string) (file: string) =
         let relative = Path.GetRelativePath(out, file).Replace(Path.DirectorySeparatorChar, '/')
-        writer.WriteEntry(file, $"{name}-source/{relative}")
-    // Legibyl's own, with the manifest: small, one file.
+        writer.WriteEntry(file, $"{top}/{relative}")
+    let sums (files: string list) =
+        [ for file in files ->
+              use stream = File.OpenRead file
+              $"{Convert.ToHexString(SHA256.HashData stream).ToLowerInvariant()}  {Path.GetFileName file}" ]
+    let gib (bytes: int64) = float bytes / 1073741824.0
+    // Legibyl's own, with the manifest: small, one file, for the release of Legibyl.
     let own = Path.Combine(release, $"{name}-source.tar")
     do
         use stream = File.Create own
         use writer = new TarWriter(stream, TarEntryFormat.Pax, false)
-        for file in Path.Combine(out, "MANIFEST.md") :: files "legibyl" do add writer file
-    // The rest, in parts under 1.9 GiB.
-    let partSize = 1900L * 1024L * 1024L
-    let dependencies = Path.Combine(release, $"{name}-dependencies-source.tar")
-    for old in Directory.GetFiles(release, $"{name}-dependencies-source.tar.part*") do File.Delete old
-    let parts = new Parts(dependencies, partSize)
-    do
-        use writer = new TarWriter(parts, TarEntryFormat.Pax, true)
-        for file in Path.Combine(out, "MANIFEST.md") :: (List.concat [ files "github"; files "git"; files "maven"; files "pdfium" ]) do add writer file
-    parts.Flush()
-    let partFiles = parts.Files
-    parts.Dispose()
-    let all = own :: partFiles
-    let sums =
-        [ for file in all ->
-              use stream = File.OpenRead file
-              $"{Convert.ToHexString(SHA256.HashData stream).ToLowerInvariant()}  {Path.GetFileName file}" ]
-    File.WriteAllLines(Path.Combine(release, "SHA256SUMS"), sums)
-    let partNames = partFiles |> List.map Path.GetFileName |> String.concat " "
-    let windowsParts = partFiles |> List.map Path.GetFileName |> String.concat "+"
-    File.WriteAllLines(
-        Path.Combine(release, "SOURCE-README.md"),
-        [ $"# Source for Legibyl {version}"
-          ""
-          $"The corresponding source for Legibyl {version} (commit `{commit}`) and everything it's built with."
-          ""
-          $"- `{name}-source.tar`: Legibyl's own source, and `MANIFEST.md`, which lists every component: its version, licence, and where its source is in these files."
-          $"- `{name}-dependencies-source.tar.part*`: every dependency's source, one tar in {partFiles.Length} parts (each under 2 GiB, for GitHub). Join them, then unpack:"
-          ""
-          "```sh"
-          $"cat {partNames} > {name}-dependencies-source.tar"
-          $"tar xf {name}-dependencies-source.tar"
-          "```"
-          ""
-          $"(On Windows: `copy /b {windowsParts} {name}-dependencies-source.tar`.) `SHA256SUMS` has each file's checksum." ])
-    let total = all |> List.sumBy (fun f -> FileInfo(f).Length)
-    let gib (bytes: int64) = float bytes / 1073741824.0
+        for file in manifest :: files "legibyl" do add writer $"{name}-source" file
     printfn ""
-    printfn $"Packed for a release in {release}: {all.Length} files, {gib total:F2} GiB in all"
-    for file in all do printfn $"  {Path.GetFileName file}: {gib (FileInfo(file).Length):F2} GiB"
-    let largest =
-        listed
-        |> List.map (fun f -> f, FileInfo(f).Length)
-        |> List.sortByDescending snd
-        |> List.truncate 8
-    printfn "Largest sources:"
-    for file, size in largest do printfn $"  {Path.GetRelativePath(out, file)}: {float size / 1048576.0:F0} MB"
+    printfn $"Legibyl's own source, for its release: {own} ({gib (FileInfo(own).Length):F2} GiB)"
+    if not ownOnly then
+        // The dependencies', for their own release: one tar in parts under 1.9 GiB, with the
+        // manifest, their checksums and how to join them.
+        let folder = Path.Combine(release, fingerprint)
+        if Directory.Exists folder then Directory.Delete(folder, true)
+        Directory.CreateDirectory folder |> ignore
+        let partSize = 1900L * 1024L * 1024L
+        let parts = new Parts(Path.Combine(folder, $"{fingerprint}-source.tar"), partSize)
+        do
+            use writer = new TarWriter(parts, TarEntryFormat.Pax, true)
+            for file in manifest :: (List.concat [ files "github"; files "git"; files "maven"; files "pdfium" ]) do add writer $"{fingerprint}-source" file
+        parts.Flush()
+        let partFiles = parts.Files
+        parts.Dispose()
+        File.Copy(manifest, Path.Combine(folder, "MANIFEST.md"))
+        File.WriteAllLines(Path.Combine(folder, "SHA256SUMS"), sums (partFiles @ [ Path.Combine(folder, "MANIFEST.md") ]))
+        let partNames = partFiles |> List.map Path.GetFileName |> String.concat " "
+        let windowsParts = partFiles |> List.map Path.GetFileName |> String.concat "+"
+        File.WriteAllLines(
+            Path.Combine(folder, "SOURCE-README.md"),
+            [ $"# Legibyl's dependencies' source: {fingerprint}"
+              ""
+              $"The source of everything Legibyl is built with and ships, for each release of Legibyl that names `{fingerprint}`: every release built with this set of dependencies. (Gathered at Legibyl {version}, commit `{commit}`.) Each release of Legibyl has its own source, `legibyl-<version>-source.tar`."
+              ""
+              $"- `MANIFEST.md` lists every component: its version, licence, and where its source is in the tar."
+              $"- `{fingerprint}-source.tar.part*`: their source, one tar in {partFiles.Length} parts (each under 2 GiB, for GitHub). Join them, then unpack:"
+              ""
+              "```sh"
+              $"cat {partNames} > {fingerprint}-source.tar"
+              $"tar xf {fingerprint}-source.tar"
+              "```"
+              ""
+              $"(On Windows: `copy /b {windowsParts} {fingerprint}-source.tar`.) `SHA256SUMS` has each file's checksum." ])
+        let total = partFiles |> List.sumBy (fun f -> FileInfo(f).Length)
+        printfn $"The dependencies' source, for the release {fingerprint}: {folder}, {partFiles.Length} parts, {gib total:F2} GiB in all"
+        for file in partFiles do printfn $"  {Path.GetFileName file}: {gib (FileInfo(file).Length):F2} GiB"
+        let largest =
+            listed
+            |> List.map (fun f -> f, FileInfo(f).Length)
+            |> List.sortByDescending snd
+            |> List.truncate 8
+        printfn "Largest sources:"
+        for file, size in largest do printfn $"  {Path.GetRelativePath(out, file)}: {float size / 1048576.0:F0} MB"

@@ -29,12 +29,27 @@ let libraryVersion (assembly: Assembly) =
         attribute.InformationalVersion.Split('+').[0]
     | _ -> string (assembly.GetName().Version)
 
-/// A version this assembly was stamped with (from Directory.Build.props).
-let private stamped (key: string) =
+/// A value this assembly was stamped with, if it was (from Directory.Build.props, or the build).
+let private stampedValue (key: string) =
     typeof<VeraPdfValidator>.Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
     |> Seq.tryFind (fun a -> a.Key = key)
     |> Option.bind (fun a -> Option.ofObj a.Value)
-    |> Option.defaultValue "unknown"
+    |> Option.filter (System.String.IsNullOrWhiteSpace >> not)
+
+/// A version this assembly was stamped with (from Directory.Build.props).
+let private stamped (key: string) = stampedValue key |> Option.defaultValue "unknown"
+
+/// The release on GitHub with the source of everything this build is built with but Legibyl itself:
+/// deps-<fingerprint> (see tools/source-bundle.fsx). Only a released build has one (the release
+/// workflow sets DependencySource); one built here has none.
+let dependencySource = stampedValue "DependencySource"
+
+/// That release's page.
+let dependencySourceAddress =
+    dependencySource |> Option.map (fun release -> $"https://github.com/ekonbenefits/Legibyl/releases/tag/{release}")
+
+/// Where to get it, as `legibyl --version` says it; None without one.
+let dependencySourceLine = dependencySourceAddress |> Option.map (fun address -> $"Its dependencies' source: {address}")
 
 /// What validating and fixing run on, each with its version and what it does here.
 let validationComponents () =

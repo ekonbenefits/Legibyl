@@ -1174,6 +1174,7 @@ EXAMPLES:
 let private printVersion _ =
     printfn $"{BuildInfo.versionLine}"
     printfn $"{BuildInfo.copyright} <{BuildInfo.contact}>"
+    BuildInfo.dependencySourceLine |> Option.iter (fun line -> printfn $"{line}")
     ExitCodes.Success
 
 /// Reports a parse error the same way as the CLI's other usage errors.

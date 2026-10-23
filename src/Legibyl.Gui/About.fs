@@ -192,6 +192,10 @@ let show (owner: Window) : Task =
                     heading "Links"
                     link "Project page" projectPage
                     link "Report a problem" issuesPage
+                    // A released build's: the source of everything it's built with but Legibyl itself.
+                    match BuildInfo.dependencySource, BuildInfo.dependencySourceAddress with
+                    | Some release, Some address -> link $"Its dependencies' source ({release})" address
+                    | _ -> ()
                     heading "Its files"
                     line $"Recent PDFs, in {dataFolder}" true
                     StackPanel.create [

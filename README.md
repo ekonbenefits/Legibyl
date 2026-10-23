@@ -293,7 +293,8 @@ Then it signs the Windows builds and makes a
 draft release of them all, with a `SHA256SUMS`, for a person to publish. Run by
 hand (Actions › Release › Run workflow) on a branch, it builds and tests
 everything and keeps the builds as the run's artifacts, without signing or a
-release.
+release. Each release has its source: Legibyl's own, and a link to its
+dependencies' (see Source for a release).
 
 The Windows builds are signed with Azure Artifact Signing, by **Qualified
 Benefits Consultants, Inc.** (doing business as Ekon Benefits): that's the
@@ -1703,9 +1704,30 @@ isn't part of the work is listed, not fetched: the .NET runtime's own libraries
 tooling (compilers, depot_tools, code generators, test suites); `--all` fetches
 them too. It's several GB (iText's repository alone is about 900 MB).
 
-Then it packs them for a GitHub release, where each file must be under 2 GiB,
-into `artifacts/source/release/`: `legibyl-<version>-source.tar` (Legibyl's
-own source and the manifest), `legibyl-<version>-dependencies-source.tar` in
-parts under 1.9 GiB (`.part01`, `.part02`...), `SHA256SUMS`, and a
-`SOURCE-README.md` saying how to join the parts. Attach those to the release
-next to the app's downloads: they're what to give anyone who asks.
+The dependencies' source changes far less often than Legibyl, so it's
+released on its own, once for each set of dependencies, and each release of
+Legibyl points to it. The set is named by a fingerprint: a hash of the
+manifest's lines other than Legibyl's own, `deps-<12 hex digits>`, the same for
+the same dependencies however much else changed. A changed package, submodule,
+jar, PDFium version or pinned file is a new fingerprint.
+
+```sh
+dotnet fsi tools/source-bundle.fsx --fingerprint  # prints it (a dry run)
+dotnet fsi tools/source-bundle.fsx --own          # Legibyl's own source only
+```
+
+Then it packs them, where each file on GitHub must be under 2 GiB, into
+`artifacts/source/release/`: `legibyl-<version>-source.tar` (Legibyl's own
+source and the manifest), for the release of Legibyl; and `deps-<fingerprint>/`,
+for the dependencies' own release: their source as
+`deps-<fingerprint>-source.tar` in parts under 1.9 GiB (`.part01`,
+`.part02`...), the manifest, `SHA256SUMS`, and a `SOURCE-README.md` saying how
+to join the parts. It fails if any source can't be found.
+
+The release workflow does this (see Releases): every release gets its own
+source, and the first release built with a new set of dependencies makes their
+release too, as a draft prerelease named by the fingerprint, to publish with
+it. A released build names it in About and `legibyl --version`. Never delete a
+`deps-*` release while any release that points to it can still be downloaded,
+and never change one: a changed dependency is a new fingerprint and a new
+release.
