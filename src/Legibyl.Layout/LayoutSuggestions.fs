@@ -44,7 +44,8 @@ type PageSuggestion =
       Blocks: SuggestedBlock list
       /// False when the page has no text to tag (a scan, say): it would need OCR first.
       HasText: bool
-      /// A rotated page isn't detected yet: its rendering's coordinates are turned.
+      /// A layout saved by an earlier version, which didn't detect rotated pages, has them
+      /// with no regions and this set.
       Rotated: bool }
 
 module LayoutSuggestions =
@@ -144,6 +145,11 @@ module LayoutSuggestions =
 
     /// Whether a suggested tag is for text (so a region with none as text needs OCR).
     let holdsText (tag: string) = tag <> Tags.Figure && tag <> Tags.Table && tag <> Tags.Artifact
+
+    /// A page as it's shown: its crop box, turned as it says.
+    let internal frameOf (page: UglyToad.PdfPig.Content.Page) =
+        let crop = page.CropBox.Bounds
+        PageFrame.create crop.Left crop.Bottom crop.Right crop.Top page.Rotation.Value
 
     /// The bands of region, full width (bottom, top in points, highest first), that none of its
     /// words cover and that are tall enough for a line of their size: where a region with some
@@ -552,20 +558,21 @@ type LayoutSuggester(pdfPath: string, language: string option) =
     // a logo in the middle) need the detail.
     let qrScale = 400.0 / 72.0
 
-    /// Reads each region that's asked for (Some) from a high-resolution rendering of the page,
-    /// made at scale pixels per point.
-    let readRegions (bitmap: SKBitmap) (scale: float) (crop: UglyToad.PdfPig.Core.PdfRectangle) (regions: ((SKBitmap -> 'T option) option * StructureGeometry) list) =
+    /// Reads each region that's asked for (Some) from a high-resolution rendering of the page
+    /// (as it's shown: frame), made at scale pixels per point.
+    let readRegions (bitmap: SKBitmap) (scale: float) (frame: PageFrame.Frame) (regions: ((SKBitmap -> 'T option) option * StructureGeometry) list) =
             [ for read, geometry in regions ->
                   match read with
                   | None -> None
                   | Some read ->
-                      let pixels (value: float) = int (Math.Round(value * scale))
+                      let left, top, right, bottom = PageFrame.toPixels frame scale geometry
+                      let pixels (value: float) = int (Math.Round value)
                       let area =
                           SKRectI(
-                              max 0 (pixels (geometry.Left - crop.Left)),
-                              max 0 (pixels (crop.Top - geometry.Top)),
-                              min bitmap.Width (pixels (geometry.Right - crop.Left)),
-                              min bitmap.Height (pixels (crop.Top - geometry.Bottom))
+                              max 0 (pixels left),
+                              max 0 (pixels top),
+                              min bitmap.Width (pixels right),
+                              min bitmap.Height (pixels bottom)
                           )
                       if area.Width < 4 || area.Height < 4 then
                           None
@@ -585,24 +592,25 @@ type LayoutSuggester(pdfPath: string, language: string option) =
         | None -> None
 
     /// The cells the table-structure model finds in a table's region on the page (rendered at
-    /// bitmap's ocrScale; crop the page's crop box), each a header cell or not and where it is,
-    /// in reading order: rows down the page, then across. None without the model.
-    let cellsIn (bitmap: SKBitmap) (crop: UglyToad.PdfPig.Core.PdfRectangle) (pageNumber: int) (margin: float) (g: StructureGeometry) =
+    /// bitmap's ocrScale; frame the page as it's shown), each a header cell or not and where it is,
+    /// in reading order: rows down the shown page, then across. None without the model.
+    let cellsIn (bitmap: SKBitmap) (frame: PageFrame.Frame) (pageNumber: int) (margin: float) (g: StructureGeometry) =
         match tables.Value with
         | None -> None
         | Some session ->
             let framed = { g with Left = g.Left - margin; Right = g.Right + margin; Top = g.Top + margin; Bottom = g.Bottom - margin }
             // Where the picture's top-left is in the page's rendering (as readRegions crops it).
-            let left = max 0 (int (Math.Round((framed.Left - crop.Left) * ocrScale)))
-            let top = max 0 (int (Math.Round((crop.Top - framed.Top) * ocrScale)))
-            match readRegions bitmap ocrScale crop [ Some(fun picture -> Some(TableStructure.grid (TableStructure.find session picture))), framed ] with
+            let pictureLeft, pictureTop, _, _ = PageFrame.toPixels frame ocrScale framed
+            let left = max 0 (int (Math.Round pictureLeft))
+            let top = max 0 (int (Math.Round pictureTop))
+            match readRegions bitmap ocrScale frame [ Some(fun picture -> Some(TableStructure.grid (TableStructure.find session picture))), framed ] with
             | [ Some cells ] ->
                 let geometry (box: SKRect) : StructureGeometry =
-                    { PageNumber = pageNumber
-                      Left = crop.Left + (float left + float box.Left) / ocrScale
-                      Right = crop.Left + (float left + float box.Right) / ocrScale
-                      Top = crop.Top - (float top + float box.Top) / ocrScale
-                      Bottom = crop.Top - (float top + float box.Bottom) / ocrScale }
+                    PageFrame.fromPixels
+                        frame
+                        pageNumber
+                        ocrScale
+                        (float left + float box.Left, float top + float box.Top, float left + float box.Right, float top + float box.Bottom)
                 Some(
                     cells
                     |> List.map (fun cell -> cell.Header, geometry cell.Box)
@@ -620,20 +628,15 @@ type LayoutSuggester(pdfPath: string, language: string option) =
     member _.TableCells(pageNumber: int, region: StructureGeometry) : (bool * StructureGeometry) list option =
         lock gate (fun () ->
             let page = document.GetPage pageNumber
-            // A turned page is drawn turned: its region isn't where the crop box says (Suggest
-            // passes them over too).
-            if page.Rotation.Value % 360 <> 0 then
-                raise (InvalidOperationException "its page is turned (rotated), which finding a table's cells doesn't handle yet")
-            let crop = page.CropBox.Bounds
             use bitmap = pages.Render(pageNumber, float32 ocrScale)
-            cellsIn bitmap crop pageNumber taggedTableMargin region)
+            cellsIn bitmap (LayoutSuggestions.frameOf page) pageNumber taggedTableMargin region)
 
     /// The text in each of cells on pageNumber: the page's words in it, else (text drawn as
     /// outlines or pixels, or a font without its characters' Unicode) what OCR reads there.
     member _.CellTexts(pageNumber: int, cells: StructureGeometry list) : string list =
         lock gate (fun () ->
             let page = document.GetPage pageNumber
-            if page.Rotation.Value % 360 <> 0 || cells.IsEmpty then
+            if cells.IsEmpty then
                 cells |> List.map (fun _ -> "")
             else
                 let words =
@@ -646,23 +649,23 @@ type LayoutSuggester(pdfPath: string, language: string option) =
                 else
                     use bitmap = pages.Render(pageNumber, float32 ocrScale)
                     let read =
-                        readRegions bitmap ocrScale page.CropBox.Bounds [ for text, g in List.zip texts cells -> (if text = "" then Some recognize else None), g ]
+                        readRegions bitmap ocrScale (LayoutSuggestions.frameOf page) [ for text, g in List.zip texts cells -> (if text = "" then Some recognize else None), g ]
                     [ for text, read in List.zip texts read -> defaultArg read text ])
 
     /// Detects pageNumber's regions. The model must be downloaded (see LayoutModel).
     member _.Suggest(pageNumber: int) : PageSuggestion =
         lock gate (fun () ->
             let page = document.GetPage pageNumber
-            let rotated = page.Rotation.Value % 360 <> 0
+            // A page turned for display (a scan stored sideways, say) is detected as it's shown,
+            // where PdfPig's words are too.
+            let frame = LayoutSuggestions.frameOf page
             let boxes =
-                if rotated then
-                    [||] :> IReadOnlyList<_>
-                else
-                    use bitmap = pages.Render(pageNumber, float32 scale)
-                    use image = LayoutSuggestions.rgbImage bitmap
-                    detector.Value.Detect image
-            let crop = page.CropBox.Bounds
-            let regions = [ for box in boxes -> LayoutSuggestions.toGeometry pageNumber (crop.Left, crop.Top) scale box ]
+                use bitmap = pages.Render(pageNumber, float32 scale)
+                use image = LayoutSuggestions.rgbImage bitmap
+                detector.Value.Detect image
+            let crop = frame
+            let regions =
+                [ for box in boxes -> PageFrame.fromPixels frame pageNumber scale (float box.Left, float box.Top, float box.Right, float box.Bottom) ]
             let words =
                 [ for word in page.GetWords() do
                       let centre = word.BoundingBox.Centroid
@@ -726,11 +729,7 @@ type LayoutSuggester(pdfPath: string, language: string option) =
                 else
                     use bitmap = pages.Render(pageNumber, float32 qrScale)
                     let points (left, top, right, bottom) : StructureGeometry =
-                        { PageNumber = pageNumber
-                          Left = crop.Left + left / qrScale
-                          Right = crop.Left + right / qrScale
-                          Top = crop.Top - top / qrScale
-                          Bottom = crop.Top - bottom / qrScale }
+                        PageFrame.fromPixels frame pageNumber qrScale (left, top, right, bottom)
                     let inFigures =
                         readRegions
                             bitmap
@@ -779,7 +778,7 @@ type LayoutSuggester(pdfPath: string, language: string option) =
                 | _ -> blocks
             { PageNumber = pageNumber
               HasText = not words.IsEmpty
-              Rotated = rotated
+              Rotated = false
               Blocks =
                 [ for i, ((box, region, text), (recognized, completed)) in
                       List.indexed (List.zip (List.zip3 (List.ofSeq boxes) regions texts) (List.zip recognized completed)) ->
@@ -890,15 +889,9 @@ type LinkScanner(pdfPath: string) =
 
     /// The QR codes on a page: what each encodes, and where, in PDF points.
     member _.QrCodes(pageNumber: int) : (string * StructureGeometry) list =
-        let crop = document.GetPage(pageNumber).CropBox.Bounds
+        let frame = LayoutSuggestions.frameOf (document.GetPage pageNumber)
         use bitmap = pages.Render(pageNumber, float32 qrScale)
-        [ for text, (left, top, right, bottom) in QrCodes.decodeAll bitmap ->
-              text,
-              { PageNumber = pageNumber
-                Left = crop.Left + left / qrScale
-                Right = crop.Left + right / qrScale
-                Top = crop.Top - top / qrScale
-                Bottom = crop.Top - bottom / qrScale } ]
+        [ for text, bounds in QrCodes.decodeAll bitmap -> text, PageFrame.fromPixels frame pageNumber qrScale bounds ]
 
     interface IDisposable with
         member _.Dispose() =

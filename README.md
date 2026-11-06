@@ -1041,8 +1041,11 @@ CLI: the build fetches them, each file pinned to a revision by its SHA-256 in
 output's `models` folder. (A build without them downloads them once, when
 asked, into PaddleOCR's cache, `~/.cache/paddleocr-sharp`, and Legibyl's own
 folder.) They run locally; each page takes several seconds on the CPU, so pages are
-found in the background, in order, and added to the structure as they are. A page without a text layer (a scan) is flagged, since
-tagging it would need OCR first. The model tests run on the bundled models (a
+found in the background, in order, and added to the structure as they are. A page turned for display
+(`/Rotate`) is detected as it's shown: regions, like the page's words and the tags' boxes, are where
+the page shows them, and tagging turns them into the page's own space. A page without
+a text layer (a scan) has its text regions and table cells read with OCR; one where nothing can be
+read is flagged. The model tests run on the bundled models (a
 build without them skips them).
 
 Some PDFs draw text as outlines (or pixels) rather than as text, so there's
@@ -1085,7 +1088,13 @@ rows of `TH`/`TD` cells, each with what's drawn in it, a header cell with
 `/ColSpan` (from where its edges fall among the table's, `TableGrid.fs`); its
 rules are artifacts. What it can't do is reported: figures still need alt text,
 a table without cells is tagged as text (its rows and cells need tagging by
-hand), and a page without text (a scan) is tagged as a figure that needs OCR. Text drawn as outlines is tagged as its region's element, with
+hand), and a page without text where OCR read nothing is tagged as a figure that needs OCR. A
+scan (an image holding two or more regions read with OCR, or one on a page with no text) is marked as an artifact, and each
+of those regions' text is written over it as invisible text (render mode 3), tagged as its
+element, so it can be read, searched and selected and the page still looks the same. A figure in a
+scan keeps its content, the scan drawn again, clipped to the figure, so its alt text stays; where the
+scan is see-through or masked, drawing it again would change the page, so the report says the figure
+needs tagging by hand. Text drawn as outlines is tagged as its region's element, with
 the OCR'd text as its `/ActualText` (and `/Lang en`, since OCR reads English),
 and the report asks for it to be checked. It doesn't describe links outside a table of contents.
 

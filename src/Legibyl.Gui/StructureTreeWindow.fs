@@ -1837,7 +1837,7 @@ module private StructureView =
                       for page in review.Pages.Values |> Seq.sortBy _.PageNumber do
                           if page.Rotated then $"Page {page.PageNumber} is rotated, and rotated pages aren't detected yet."
                           elif page.Blocks.IsEmpty then $"Nothing was found on page {page.PageNumber}."
-                          elif not page.HasText then
+                          elif not page.HasText && not (page.Blocks |> List.exists (fun block -> block.Recognized && LayoutSuggestions.holdsText block.Tag)) then
                               $"Page {page.PageNumber} has no text layer (it may be a scan), so tagging it would need OCR first."
                       for KeyValue(page, reason) in failures.Current do
                           $"Couldn't find page {page}'s layout: {reason}" ]
