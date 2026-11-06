@@ -742,3 +742,74 @@ let ``a table without cells is still tagged as text, and so is a cell outside ev
     result.AppliedFixes |> should contain "1 table was tagged as text: rows and cells need tagging by hand"
     let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
     flatten root |> List.map _.Tag |> List.filter (fun tag -> tag = "Table" || tag = "TR" || tag = "TD") |> should be Empty
+
+/// A scan: one image over the whole page, and no text. rotation turns the page for display, as a
+/// scan stored sideways is.
+let private createScan (path: string) (rotation: int) =
+    use document = new PdfDocument(new PdfWriter(path))
+    let page = document.AddNewPage PageSize.LETTER
+    page.SetRotation rotation |> ignore
+    let pixels = [| for _ in 1..4 do yield! [| 230uy; 230uy; 230uy |] |]
+    PdfCanvas(page).AddImageWithTransformationMatrix(ImageDataFactory.Create(2, 2, 3, 8, pixels, null), 612f, 0f, 0f, 792f, 0f, 0f, true) |> ignore
+
+let private read tag box text = { region tag box null with ActualText = text }
+
+[<Fact>]
+let ``a scan's text read with OCR is written over it as invisible text, tagged, with the scan as its background`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createScan input.Path 0
+    let regions =
+        [ read "P" (72.0, 720.0, 400.0, 740.0) "Hours for October"
+          region "Table" (70.0, 618.0, 402.0, 702.0) null
+          read "TH" (72.0, 660.0, 236.0, 700.0) "Name"
+          read "TH" (236.0, 660.0, 400.0, 700.0) "Hours"
+          read "TD" (72.0, 620.0, 236.0, 660.0) "Ann"
+          read "TD" (236.0, 620.0, 400.0, 660.0) "12" ]
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout regions))
+
+    result.AppliedFixes
+    |> should contain "5 elements' text, read from a scan, written over it as invisible text, so it can be searched and selected"
+    result.AppliedFixes |> Seq.exists (fun line -> line.Contains "needs OCR") |> should be False
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let document = root.Children |> Seq.exactlyOne
+    [ for element in document.Children -> element.Tag ] |> should equal [ "P"; "Table" ]
+    // The text is the page's own now, in reading order.
+    use pdf = new PdfDocument(new PdfReader(output.Path))
+    let text = iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(pdf.GetPage 1)
+    [ for word in [ "Hours for October"; "Name"; "Hours"; "Ann"; "12" ] -> text.IndexOf word ]
+    |> List.forall (fun i -> i >= 0)
+    |> should be True
+    text.IndexOf "Name" |> should be (lessThan (text.IndexOf "Ann"))
+    // The page looks the same: the text is invisible.
+    use renderer = new PdfRegionRenderer()
+    let offPage = { PageNumber = 1; Left = -20.0; Bottom = -20.0; Right = -10.0; Top = -10.0 }
+    use before = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(input.Path, offPage).PngBytes)
+    use after = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(output.Path, offPage).PngBytes)
+    after.Pixels |> should equal before.Pixels
+    // Everything's tagged (the scan as an artifact), and its font is embedded.
+    let rules = failedRules output.Path
+    for rule in [ "7.1-3"; "7.21.4.1-1"; "7.3-1" ] do
+        rules |> should not' (contain rule)
+
+[<Fact>]
+let ``a scan stored sideways has its table's rows as the page is shown`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createScan input.Path 90
+    // Turned a quarter clockwise for display: a row across the shown page is a band across the
+    // page's own x, the top row at the left.
+    let regions =
+        [ region "Table" (70.0, 48.0, 154.0, 352.0) null
+          read "TH" (72.0, 50.0, 112.0, 200.0) "Name"
+          read "TH" (72.0, 200.0, 112.0, 350.0) "Hours"
+          read "TD" (112.0, 50.0, 152.0, 200.0) "Ann"
+          read "TD" (112.0, 200.0, 152.0, 350.0) "12" ]
+
+    tagFromLayout input.Path output.Path (Some(FixedLayout regions)) |> ignore
+
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let table = (root.Children |> Seq.exactlyOne).Children |> Seq.exactlyOne
+    [ for row in table.Children -> [ for cell in row.Children -> cell.Tag, cell.ActualText ] ]
+    |> should equal [ [ "TH", "Name"; "TH", "Hours" ]; [ "TD", "Ann"; "TD", "12" ] ]

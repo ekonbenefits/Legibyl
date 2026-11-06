@@ -92,16 +92,81 @@ let private ownerOf (regions: (LayoutRegion * Rectangle) array) (cellsOf: int ->
         |> Option.map (fun (index, _) -> Region index)
         |> Option.defaultValue (Region LeftoverText)
 
+/// A region whose text OCR read from the page's pixels (not a figure's or a whole table's).
+let private isRead (region: LayoutRegion) =
+    isTextRegion region.Tag && region.Tag <> Tags.Table && not (String.IsNullOrWhiteSpace region.ActualText)
+
+/// Whether an image is a scan: two or more regions OCR read from are drawn in it. It's the page's
+/// background; what's read from it is written over it as invisible text, tagged.
+let private isScan (regions: (LayoutRegion * Rectangle) array) (image: Rectangle) =
+    regions
+    |> Array.filter (fun (region, box) -> isRead region && containsPoint image (centre box))
+    |> Array.length
+    >= 2
+
 /// The owner of an operator's content: the owner most of its pieces have.
 let private operatorOwner regions cellsOf pageHasText (drawn: List<Drawn>) =
     drawn
     |> Seq.map (fun piece ->
         match piece.Kind, ownerOf regions cellsOf piece with
+        | Image, _ when isScan regions piece.Box -> Artifact
         | Image, Region _ when not pageHasText -> Region PageFigure
         | _, owner -> owner)
     |> Seq.countBy id
     |> Seq.maxBy snd
     |> fst
+
+
+// ---- Text read from a scan ----
+
+/// The font text read from a scan is written in: the bundled Liberation Sans, embedded (its
+/// glyphs are never drawn, but PDF/UA wants a font's program), else Helvetica.
+let private scanTextFont () =
+    let path = Path.Combine(AppContext.BaseDirectory, "fonts", "LiberationSans-Regular.ttf")
+    if File.Exists path then
+        iText.Kernel.Font.PdfFontFactory.CreateFont(path, PdfEncodings.IDENTITY_H, iText.Kernel.Font.PdfFontFactory.EmbeddingStrategy.FORCE_EMBEDDED)
+    else
+        iText.Kernel.Font.PdfFontFactory.CreateFont iText.IO.Font.Constants.StandardFonts.HELVETICA
+
+/// Text as invisible text (rendering mode 3) filling a region, as a searchable scan has it: in as
+/// many lines as fit its shape, each stretched to the region's width. The operators, BT to ET.
+let private invisibleText (font: iText.Kernel.Font.PdfFont) (fontName: PdfName) (text: string) (g: StructureGeometry) =
+    let words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+    let width, height = g.Right - g.Left, g.Top - g.Bottom
+    if words.Length = 0 || width <= 0.0 || height <= 0.0 then
+        ""
+    else
+        let widthAt (s: string) (size: float) = float (font.GetWidth(s, float32 size))
+        let n (value: float) = value.ToString("0.###", Globalization.CultureInfo.InvariantCulture)
+        // A size whose lines, stretched to the width, fill the height.
+        let unit = max 0.01 (widthAt (String.Join(" ", words)) 1.0)
+        let size = min height (sqrt (height * width / (1.2 * unit)))
+        let lineCount = max 1 (min words.Length (int (Math.Round(height / (1.2 * size)))))
+        // Words to lines, each about an equal share of the text's width.
+        let share = widthAt (String.Join(" ", words)) size / float lineCount
+        let lines =
+            let lines = List<List<string>>([ List<string>() ])
+            let mutable used = 0.0
+            for word in words do
+                let line = lines[lines.Count - 1]
+                let wide = widthAt (word + " ") size
+                if line.Count > 0 && used + wide / 2.0 > share * float lines.Count && lines.Count < lineCount then
+                    lines.Add(List [ word ])
+                else
+                    line.Add word
+                used <- used + wide
+            [ for line in lines -> String.Join(" ", line) ]
+        let lineHeight = height / float lines.Length
+        let fontSize = min size (lineHeight / 1.2)
+        let out = StringBuilder()
+        out.Append($"BT\n3 Tr\n/{fontName.GetValue()} {n fontSize} Tf\n") |> ignore
+        for i, line in List.indexed lines do
+            let drawnWidth = widthAt line fontSize
+            let stretch = if drawnWidth > 0.0 then width / drawnWidth * 100.0 else 100.0
+            let baseline = g.Top - lineHeight * float i - (lineHeight + fontSize * 0.6) / 2.0
+            let hex = Convert.ToHexString(font.ConvertToBytes line)
+            out.Append($"{n stretch} Tz\n1 0 0 1 {n g.Left} {n baseline} Tm\n<{hex}> Tj\n") |> ignore
+        out.Append("ET\n").ToString()
 
 
 // ---- Building the structure ----
@@ -145,7 +210,9 @@ type private Tally =
       /// Links without a description given one by the source.
       mutable LinksDescribed: int
       /// Tables written with their rows and cells (those without cells count in Tables).
-      mutable TablesWithCells: int }
+      mutable TablesWithCells: int
+      /// Elements whose text, read from a scan, was written over it as invisible text.
+      mutable ScanText: int }
 
 /// The tag written for a region, given whether the document has a title (H1) already.
 let private writtenTag (region: LayoutRegion) hasTitle =
@@ -207,7 +274,8 @@ let tag
 
         let parentTree = PdfArray()
         let tally =
-            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0; WrittenAlt = 0; LinksDescribed = 0; TablesWithCells = 0 }
+            { Pages = 0; Headings = 0; Paragraphs = 0; ListItems = 0; Figures = 0; Tables = 0; Links = 0; UntaggedAnnotations = 0; PagesWithoutText = 0; Recognized = 0; QrCodes = 0; QrLinks = 0; QrTitles = 0; WrittenAlt = 0; LinksDescribed = 0; TablesWithCells = 0; ScanText = 0 }
+        let scanTextFont = lazy (scanTextFont ())
         let pageCount = document.GetNumberOfPages()
         let regionsByPage =
             [| for page in 1 .. pageCount ->
@@ -253,6 +321,9 @@ let tag
 
         for pageNumber in 1 .. pageCount do
             let page = document.GetPage pageNumber
+            let frame =
+                let crop = page.GetCropBox()
+                PageFrame.create (float (crop.GetLeft())) (float (crop.GetBottom())) (float (crop.GetRight())) (float (crop.GetTop())) (page.GetRotation())
             let resources = page.GetResources()
             let bytes = page.GetContentBytes()
             let regions = [| for region in regionsByPage[pageNumber - 1] -> region, rectangleOf region.Geometry |]
@@ -286,6 +357,14 @@ let tag
                 if pathPainting.Contains name then painter <- owners[i]
                 elif pathConstruction.Contains name then owners[i] <- painter
                 else painter <- None
+            // Regions read from a scan, in reading order: their text is written over it.
+            let scans =
+                [ for pieces in drawn.Values do
+                      for piece in pieces do
+                          if piece.Kind = Image && isScan regions piece.Box then piece.Box ]
+            let readFromScan =
+                [ for i, (region, box) in Array.indexed regions do
+                      if isRead region && scans |> List.exists (fun scan -> containsPoint scan (centre box)) then i ]
 
             // The page's elements, made as content turns up for them, and added to the
             // document in reading order once the page is done.
@@ -318,7 +397,8 @@ let tag
                     elements[table] <- element
                     tally.TablesWithCells <- tally.TablesWithCells + 1
                     let cells = cellsOf table
-                    let places = TableGrid.place [ for cell in cells -> (fst regions[cell]).Geometry ]
+                    // Rows and columns as the page is shown (a scan may be stored sideways).
+                    let places = TableGrid.place [ for cell in cells -> PageFrame.boxToUpright frame (fst regions[cell]).Geometry ]
                     let rowCount = places |> List.map (fun p -> p.Row + p.RowSpan) |> List.max
                     let rows = [| for _ in 1..rowCount -> newElement document Tags.TR element.Dictionary (Some page) |]
                     for row in rows do element.Kids.Add row.Dictionary
@@ -468,6 +548,9 @@ let tag
                     write $"\n/{tag} <</MCID {mcid}>> BDC\n"
                 current <- Some owner
             let mutable insideArtifact = 0
+            // With text to write over a scan, the page's drawing is in a saved graphics state, so
+            // the text is placed in the page's own coordinates.
+            if not readFromScan.IsEmpty then write "q\n"
             let mutable i = 0
             while i < operations.Count do
                 match uniformBlocks.TryGetValue i with
@@ -499,6 +582,25 @@ let tag
             // Anything after the last operator (trailing whitespace).
             let last = if operations.Count > 0 then operations[operations.Count - 1].End else 0L
             output.Write(bytes, int last, int (length - last))
+            // The text read from a scan, invisible, each region's under its element.
+            if not readFromScan.IsEmpty then
+                write "\nQ\n"
+                let font = scanTextFont.Value
+                let fontName = resources.AddFont(document, font)
+                // The text runs across the page as it's shown.
+                let a, b, c, d, e, f = PageFrame.uprightMatrix frame
+                let n (value: float) = value.ToString("0.###", Globalization.CultureInfo.InvariantCulture)
+                write $"q\n{n a} {n b} {n c} {n d} {n e} {n f} cm\n"
+                for index in readFromScan do
+                    let region = fst regions[index]
+                    match invisibleText font fontName region.ActualText (PageFrame.boxToUpright frame region.Geometry) with
+                    | "" -> ()
+                    | text ->
+                        openFor (Region index)
+                        write text
+                        close ()
+                        tally.ScanText <- tally.ScanText + 1
+                write "Q\n"
 
             // Each region's element, with the box of what it holds.
             let held = Dictionary<int, Rectangle>()
@@ -511,6 +613,11 @@ let tag
                             | true, box -> Rectangle.GetCommonRectangle(box, piece.Box)
                             | _ -> piece.Box
                 | _ -> ()
+            for index in readFromScan do
+                held[index] <-
+                    match held.TryGetValue index with
+                    | true, box -> Rectangle.GetCommonRectangle(box, snd regions[index])
+                    | _ -> snd regions[index]
             for KeyValue(index, element) in elements do
                 if index >= 0 then
                     tagged.Add
@@ -563,7 +670,7 @@ let tag
             parentTree.Add(PdfNumber(pageNumber - 1))
             parentTree.Add pageElements
             tally.Pages <- tally.Pages + 1
-            if not pageHasText then
+            if not pageHasText && readFromScan.IsEmpty then
                 tally.PagesWithoutText <- tally.PagesWithoutText + 1
 
             // Links: a Link element in the region the link is over, holding the annotation.
@@ -681,6 +788,9 @@ let tag
               if tally.Recognized > 0 then
                   let recognized = plural tally.Recognized "element's text is" "elements' text is"
                   yield $"{recognized} drawn as outlines or pixels: read with OCR into /ActualText, to check"
+              if tally.ScanText > 0 then
+                  let written = plural tally.ScanText "element's text" "elements' text"
+                  yield $"{written}, read from a scan, written over it as invisible text, so it can be searched and selected"
               if tally.QrCodes > 0 then
                   let described = plural tally.QrCodes "QR code" "QR codes"
                   yield $"Described {described} by what they encode"
