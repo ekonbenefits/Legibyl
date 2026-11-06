@@ -9,12 +9,15 @@
   <ItemGroup>
     <!-- Layout suggestions reuse the list marker rules (ParagraphLists). -->
     <InternalsVisibleTo Include="Legibyl.Layout" />
+    <!-- Drawing regions on pages as they're shown (PageFrame). -->
+    <InternalsVisibleTo Include="Legibyl.Rendering" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="Tags.fs" />
     <Compile Include="Destinations.fs" />
     <Compile Include="Types.fs" />
+    <Compile Include="PageFrame.fs" />
     <Compile Include="PdfFiles.fs" />
     <Compile Include="PdfUaTarget.fs" />
     <Compile Include="PdfLocationParser.fs" />

@@ -54,10 +54,13 @@ let ``the same row found twice is one, and one cell is no table`` () =
 // ---- The model ----
 
 /// An untagged page with a ruled table: a header row and four rows of three columns.
-let private createTable (path: string) =
+let private createTableOn (turned: bool) (path: string) =
     use document = new PdfDocument(new PdfWriter(path))
-    let page = document.AddNewPage PageSize.LETTER
+    // Turned: stored sideways, with /Rotate 90, and drawn so it's shown as the other is.
+    let page =
+        if turned then document.AddNewPage(PageSize(792f, 612f)).SetRotation 90 else document.AddNewPage PageSize.LETTER
     let canvas = PdfCanvas page
+    if turned then canvas.ConcatMatrix(0.0, 1.0, -1.0, 0.0, 792.0, 0.0) |> ignore
     let font = PdfFontFactory.CreateFont StandardFonts.HELVETICA
     let bold = PdfFontFactory.CreateFont StandardFonts.HELVETICA_BOLD
     let text (f: PdfFont) (x: float) (y: float) (value: string) =
@@ -76,6 +79,8 @@ let private createTable (path: string) =
     for r in 0..5 do canvas.MoveTo(72.0, 696.0 - float r * 24.0).LineTo(520.0, 696.0 - float r * 24.0).Stroke() |> ignore
     for x in [ 72.0; 220.0; 370.0; 520.0 ] do canvas.MoveTo(x, 576.0).LineTo(x, 696.0).Stroke() |> ignore
     text font 72.0 540.0 "Water the beds in the morning."
+
+let private createTable = createTableOn false
 
 let private withTableModel test =
     if not (TableModel.isDownloaded ()) then
@@ -227,16 +232,21 @@ let ``a tagged table tagged wrongly is rebuilt from the cells the model finds, a
         failed output.Path |> Set.filter (fun r -> r.StartsWith "7.2-") |> should be Empty)
 
 [<Fact>]
-let ``a turned page's table cells aren't looked for, and it's said why`` () =
-    use pdf = new TempPdf()
-    do
-        use document = new PdfDocument(new PdfWriter(pdf.Path))
-        document.AddNewPage(PageSize.LETTER).SetRotation 90 |> ignore
-    use suggester = new LayoutSuggester(pdf.Path)
-    let region: Legibyl.Validation.StructureGeometry = { PageNumber = 1; Left = 72.0; Bottom = 576.0; Right = 520.0; Top = 696.0 }
+let ``a turned page's table cells are found as it's shown, in the page's own points`` () =
+    withTableModel (fun () ->
+        use pdf = new TempPdf()
+        createTableOn true pdf.Path
+        use suggester = new LayoutSuggester(pdf.Path)
+        // The table's box as stored: shown 72–520 across and 576–696 up, it's 96–216 across and 72–520 up.
+        let region: Legibyl.Validation.StructureGeometry = { PageNumber = 1; Left = 96.0; Bottom = 72.0; Right = 216.0; Top = 520.0 }
 
-    (fun () -> suggester.TableCells(1, region) |> ignore)
-    |> should (throwWithMessage "its page is turned (rotated), which finding a table's cells doesn't handle yet") typeof<InvalidOperationException>
+        let cells = suggester.TableCells(1, region) |> Option.get
+
+        cells |> List.length |> should equal 15
+        // The header is the row at the top as shown: the left-hand edge as stored, 96–120 across.
+        cells |> List.take 3 |> List.forall fst |> should be True
+        cells |> List.take 3 |> List.forall (fun (_, g) -> g.Right <= 125.0) |> should be True
+        cells |> List.forall (fun (_, g) -> g.Left >= 84.0 && g.Right <= 228.0 && g.Bottom >= 60.0 && g.Top <= 532.0) |> should be True)
 
 [<Fact>]
 let ``a cell's text is the page's words in it, and only an empty cell is read by OCR`` () =

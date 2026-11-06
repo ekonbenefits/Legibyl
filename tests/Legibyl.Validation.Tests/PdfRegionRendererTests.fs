@@ -186,6 +186,28 @@ let ``RenderRegion renders just the region, with a margin, at twice its size in 
     (image.Width, image.Height) |> should equal (240, 140)
 
 [<Fact>]
+let ``RenderRegion on a page turned for display crops the region as the page is shown`` () =
+    use renderer = new PdfRegionRenderer()
+    use input = new TempPdf()
+    do
+        use pdf = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(input.Path))
+        let page = pdf.AddNewPage(iText.Kernel.Geom.PageSize(300f, 500f))
+        page.SetRotation 90 |> ignore
+        iText.Kernel.Pdf.Canvas.PdfCanvas(page)
+            .SetFillColor(iText.Kernel.Colors.ColorConstants.RED)
+            .Rectangle(100.0, 300.0, 100.0, 50.0)
+            .Fill()
+        |> ignore
+
+    let png = renderer.RenderRegion(input.Path, area (100.0, 300.0, 200.0, 350.0), 0.0)
+
+    use image = SkiaSharp.SKBitmap.Decode png
+    // 100 points wide and 50 high on the page, shown turned: 50 wide and 100 high.
+    (image.Width, image.Height) |> should equal (100, 200)
+    let middle = image.GetPixel(50, 100)
+    (middle.Red, middle.Green) |> should equal (255uy, 0uy)
+
+[<Fact>]
 let ``RenderRegion keeps a large region's longest side to the size asked for`` () =
     use renderer = new PdfRegionRenderer()
 

@@ -80,6 +80,12 @@ module private Documents =
         document.Pages.Render(pageNumber, scale)
 
 module private Rendering =
+    /// A page as it's drawn: its crop box, turned as it says.
+    let frameOf (reader: PdfDocument) (pageNumber: int) =
+        let page = reader.GetPage pageNumber
+        let crop = page.CropBox.Bounds
+        PageFrame.create crop.Left crop.Bottom crop.Right crop.Top page.Rotation.Value
+
     /// A finding or selected element.
     let highlightColor = SKColor(0xE8uy, 0x1Buy, 0x23uy)
     /// Where a link goes, so it reads differently from the link itself.
@@ -90,20 +96,18 @@ module private Rendering =
         use encoded = image.Encode(SKEncodedImageFormat.Png, 100)
         encoded.ToArray()
 
-    let drawHighlight (color: SKColor) (bitmap: SKBitmap) (rect: PdfRectangle) (scale: float32) =
+    /// A box in the page's space as the rendering's pixels (top-left origin), the page drawn turned
+    /// as it says.
+    let pixelBox (frame: PageFrame.Frame) (scale: float32) (left: float, bottom: float, right: float, top: float) =
+        let l, t, r, b =
+            PageFrame.toPixels frame (float scale) { PageNumber = 0; Left = min left right; Right = max left right; Bottom = min bottom top; Top = max bottom top }
+        SKRect(float32 l, float32 t, float32 r, float32 b)
+
+    let drawHighlight (color: SKColor) (frame: PageFrame.Frame) (bitmap: SKBitmap) (rect: PdfRectangle) (scale: float32) =
         use canvas = new SKCanvas(bitmap)
-
-        let left = min rect.Left rect.Right
-        let right = max rect.Left rect.Right
-        let bottom = min rect.Top rect.Bottom
-        let top = max rect.Top rect.Bottom
-
-        // PdfPig's rectangle is bottom-left-origin, y-up; convert to the bitmap's top-left-origin, y-down space.
         let padding = 4f
-        let scaled (value: float) = float32 (value * float scale)
-        let height = float32 bitmap.Height
-        let box =
-            SKRect(scaled left - padding, height - scaled top - padding, scaled right + padding, height - scaled bottom + padding)
+        let shown = pixelBox frame scale (rect.Left, rect.Bottom, rect.Right, rect.Top)
+        let box = SKRect(shown.Left - padding, shown.Top - padding, shown.Right + padding, shown.Bottom + padding)
 
         use fill = new SKPaint(Color = color.WithAlpha 40uy, Style = SKPaintStyle.Fill, IsAntialias = true)
         use stroke = new SKPaint(Color = color, Style = SKPaintStyle.Stroke, StrokeWidth = 3f, IsAntialias = true)
@@ -112,12 +116,10 @@ module private Rendering =
 
     /// A labelled region: an outline, filled when emphasised, with its label on a tab above
     /// its top-left corner.
-    let drawRegion (bitmap: SKBitmap) (region: PageRegion) (scale: float32) =
+    let drawRegion (frame: PageFrame.Frame) (bitmap: SKBitmap) (region: PageRegion) (scale: float32) =
         use canvas = new SKCanvas(bitmap)
         let geometry = region.Geometry
-        let scaled (value: float) = float32 (value * float scale)
-        let height = float32 bitmap.Height
-        let box = SKRect(scaled geometry.Left, height - scaled geometry.Top, scaled geometry.Right, height - scaled geometry.Bottom)
+        let box = pixelBox frame scale (geometry.Left, geometry.Bottom, geometry.Right, geometry.Top)
         let color = SKColor(byte (region.Color >>> 16), byte (region.Color >>> 8), byte region.Color)
         use fill = new SKPaint(Color = color.WithAlpha(if region.Emphasised then 70uy else 18uy), Style = SKPaintStyle.Fill)
         use stroke =
@@ -139,7 +141,7 @@ module private Rendering =
             let radius = 8f * scale
             // On the page, over the corner.
             let x = min (float32 bitmap.Width - radius) (max radius box.Right)
-            let y = min (height - radius) (max radius box.Top)
+            let y = min (float32 bitmap.Height - radius) (max radius box.Top)
             use dot = new SKPaint(Color = SKColor(byte (markerColor >>> 16), byte (markerColor >>> 8), byte markerColor), Style = SKPaintStyle.Fill, IsAntialias = true)
             use ring = new SKPaint(Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f * scale, IsAntialias = true)
             canvas.DrawCircle(x, y, radius, dot)
@@ -253,8 +255,8 @@ type PdfRegionRenderer() =
             pdfPath,
             geometry.PageNumber,
             scale,
-            fun _ bitmap ->
-                drawHighlight highlightColor bitmap (PdfRectangle(geometry.Left, geometry.Bottom, geometry.Right, geometry.Top)) scale
+            fun document bitmap ->
+                drawHighlight highlightColor (frameOf document geometry.PageNumber) bitmap (PdfRectangle(geometry.Left, geometry.Bottom, geometry.Right, geometry.Top)) scale
 
                 { PngBytes = encodePng bitmap
                   PageNumber = geometry.PageNumber
@@ -280,7 +282,7 @@ type PdfRegionRenderer() =
                 let hasPreciseRegion, note =
                     match tryFindAnnotationRect document pageNumber location with
                     | Some(rect, note) ->
-                        drawHighlight highlightColor bitmap rect scale
+                        drawHighlight highlightColor (frameOf document pageNumber) bitmap rect scale
                         true, note
                     | None ->
                         false,
@@ -302,9 +304,8 @@ type PdfRegionRenderer() =
             pdfPath,
             destination.PageNumber,
             scale,
-            fun _ bitmap ->
-                let width = float bitmap.Width / float scale
-                let height = float bitmap.Height / float scale
+            fun document bitmap ->
+                let frame = frameOf document destination.PageNumber
                 // How much of the page below a destination's top edge to mark.
                 let band = 28.0
                 let rect, note =
@@ -313,15 +314,15 @@ type PdfRegionRenderer() =
                         PdfRectangle(destination.Left.Value, destination.Bottom.Value, destination.Right.Value, destination.Top.Value),
                         "Highlighted the area the link shows."
                     elif destination.Top.HasValue then
-                        let left = if destination.Left.HasValue then destination.Left.Value else 0.0
-                        PdfRectangle(left, destination.Top.Value - band, width, destination.Top.Value),
+                        let left = if destination.Left.HasValue then destination.Left.Value else frame.Left
+                        PdfRectangle(left, destination.Top.Value - band, frame.Right, destination.Top.Value),
                         "Highlighted where the link goes: the view starts at this line."
                     elif destination.Left.HasValue then
-                        PdfRectangle(destination.Left.Value, 0.0, destination.Left.Value + band, height),
+                        PdfRectangle(destination.Left.Value, frame.Bottom, destination.Left.Value + band, frame.Top),
                         "Highlighted where the link goes: the view starts at this edge."
                     else
-                        PdfRectangle(0.0, 0.0, width, height), "The link goes to this page, without a position on it."
-                drawHighlight targetColor bitmap rect scale
+                        PdfRectangle(frame.Left, frame.Bottom, frame.Right, frame.Top), "The link goes to this page, without a position on it."
+                drawHighlight targetColor frame bitmap rect scale
 
                 { PngBytes = encodePng bitmap
                   PageNumber = destination.PageNumber
@@ -343,18 +344,14 @@ type PdfRegionRenderer() =
             pdfPath,
             geometry.PageNumber,
             scale,
-            fun _ bitmap ->
-                let scaled (value: float) = int (Math.Round(value * float scale))
+            fun document bitmap ->
+                let pixels (value: float32) = int (MathF.Round value)
                 let clampX value = max 0 (min bitmap.Width value)
                 let clampY value = max 0 (min bitmap.Height value)
-                // Bottom-left-origin points to the bitmap's top-left-origin pixels, as drawHighlight does.
+                let shown =
+                    pixelBox (frameOf document geometry.PageNumber) scale (geometry.Left - margin, geometry.Bottom - margin, geometry.Right + margin, geometry.Top + margin)
                 let area =
-                    SKRectI(
-                        clampX (scaled (geometry.Left - margin)),
-                        clampY (bitmap.Height - scaled (geometry.Top + margin)),
-                        clampX (scaled (geometry.Right + margin)),
-                        clampY (bitmap.Height - scaled (geometry.Bottom - margin))
-                    )
+                    SKRectI(clampX (pixels shown.Left), clampY (pixels shown.Top), clampX (pixels shown.Right), clampY (pixels shown.Bottom))
                 if area.Width <= 0 || area.Height <= 0 then
                     raise (InvalidOperationException $"The region is outside page {geometry.PageNumber}.")
                 use cropped = new SKBitmap()
@@ -381,10 +378,11 @@ type PdfRegionRenderer() =
             pdfPath,
             pageNumber,
             scale,
-            fun _ bitmap ->
+            fun document bitmap ->
+                let frame = frameOf document pageNumber
                 // The emphasised region last, so it's on top.
                 for region in regions |> Seq.sortBy _.Emphasised do
-                    drawRegion bitmap region scale
+                    drawRegion frame bitmap region scale
                 encodePng bitmap
         )
 
