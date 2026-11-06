@@ -109,11 +109,15 @@ let private transform (matrix: Matrix) (x: float32, y: float32) =
 /// the clip they're painted in.
 type DrawnByOperator(?forRegion: bool) =
     let drawn = Dictionary<int, List<Drawn>>()
+    let images = Dictionary<int, Matrix>()
     let mutable current = -1
 
     member val Depth = 0 with get, set
     member _.Current with set value = current <- value
     member _.Drawn = drawn
+    /// Top-level operators that draw an image that drawing again, over itself, leaves the page
+    /// looking the same (opaque, unmasked, not blended): the matrix it's drawn with.
+    member _.Images = images
     /// Whether a shading (sh) is measured by the clip it's painted in (for a region's ownership:
     /// see FigureRegion), rather than left unmeasured.
     member _.MeasuresShadings = defaultArg forRegion false
@@ -148,6 +152,18 @@ type DrawnByOperator(?forRegion: bool) =
             | EventType.RENDER_IMAGE, (:? ImageRenderInfo as image) ->
                 let ctm = image.GetImageCtm()
                 this.Add(Image, boxOf [ for corner in [ 0f, 0f; 1f, 0f; 0f, 1f; 1f, 1f ] -> transform ctm corner ])
+                if this.Depth = 1 && current >= 0 then
+                    let dictionary = image.GetImage().GetPdfObject()
+                    let state = image.GetGraphicsState()
+                    let blend = state.GetBlendMode()
+                    let opaque =
+                        isNull (dictionary.Get PdfName.SMask)
+                        && isNull (dictionary.Get PdfName.Mask)
+                        && not (PdfBoolean.TRUE.Equals(dictionary.GetAsBoolean PdfName.ImageMask))
+                        && state.GetFillOpacity() = 1f
+                        && (isNull (state.GetSoftMask()) || PdfName.None.Equals(state.GetSoftMask()))
+                        && (isNull blend || PdfName.Normal.Equals blend || PdfName.Compatible.Equals blend)
+                    if opaque then images[current] <- ctm
             | EventType.RENDER_PATH, (:? PathRenderInfo as path) when path.GetOperation() <> PathRenderInfo.NO_OP ->
                 let ctm = path.GetCtm()
                 let points =
@@ -209,9 +225,15 @@ let private collectDrawn forRegion (bytes: byte array) (resources: PdfResources)
         everywhere.Rectangle(Rectangle(-1.0e5f, -1.0e5f, 2.0e5f, 2.0e5f))
         processor.GetGraphicsState().SetClippingPath everywhere
     processor.ProcessContent(bytes, resources)
-    recorder.Drawn
+    recorder
 
-let drawnByOperator bytes resources = collectDrawn false bytes resources
+let drawnByOperator bytes resources = (collectDrawn false bytes resources).Drawn
+
+/// What each operator draws (as drawnByOperator), and the images among them that can be drawn
+/// again over themselves without changing the page (DrawnByOperator.Images).
+let drawnWithImages bytes resources =
+    let recorder = collectDrawn false bytes resources
+    recorder.Drawn, recorder.Images
 
 /// Conservative painted bounds for a user-selected ownership edit, including stroke widths.
-let drawnForRegion bytes resources = collectDrawn true bytes resources
+let drawnForRegion bytes resources = (collectDrawn true bytes resources).Drawn

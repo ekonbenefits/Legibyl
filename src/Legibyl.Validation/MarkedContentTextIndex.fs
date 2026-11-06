@@ -99,9 +99,25 @@ let private geometryFromLetters pageNumber (letters: IReadOnlyList<Letter>) =
         )
 
 let private geometryFromMarkedContent pageNumber (element: MarkedContentElement) =
+    // An image clipped in its own marked content shows only where the clip is (a figure cut
+    // from a scan): its box is the clip's, where they meet.
+    let clip =
+        element.Paths
+        |> Seq.filter _.IsClipping
+        |> Seq.choose (fun path -> Option.ofNullable (path.GetBoundingRectangle()))
+        |> Seq.fold
+            (fun (clip: (float * float * float * float) option) b ->
+                match clip with
+                | None -> Some(b.Left, b.Bottom, b.Right, b.Top)
+                | Some(l, bottom, r, t) -> Some(max l b.Left, max bottom b.Bottom, min r b.Right, min t b.Top))
+            None
     let images =
         [ for image in element.Images ->
-              geometry pageNumber image.Bounds.Left image.Bounds.Bottom image.Bounds.Right image.Bounds.Top ]
+              let b = image.Bounds
+              match clip with
+              | Some(l, bottom, r, t) when max l b.Left < min r b.Right && max bottom b.Bottom < min t b.Top ->
+                  geometry pageNumber (max l b.Left) (max bottom b.Bottom) (min r b.Right) (min t b.Top)
+              | _ -> geometry pageNumber b.Left b.Bottom b.Right b.Top ]
 
     let paths =
         [ for path in element.Paths do

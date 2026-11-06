@@ -614,9 +614,7 @@ type LayoutSuggester(pdfPath: string, language: string option) =
                 Some(
                     cells
                     |> List.map (fun cell -> cell.Header, geometry cell.Box)
-                    |> List.sortBy (fun (_, g) ->
-                        let shown = PageFrame.boxToUpright frame g
-                        -(Math.Round(shown.Top, 1)), shown.Left)
+                    |> List.sortBy (fun (_, g) -> -(Math.Round(g.Top, 1)), g.Left)
                 )
             | _ -> Some []
 
@@ -659,7 +657,7 @@ type LayoutSuggester(pdfPath: string, language: string option) =
         lock gate (fun () ->
             let page = document.GetPage pageNumber
             // A page turned for display (a scan stored sideways, say) is detected as it's shown,
-            // and its regions turned back into the page's space.
+            // where PdfPig's words are too.
             let frame = LayoutSuggestions.frameOf page
             let boxes =
                 use bitmap = pages.Render(pageNumber, float32 scale)
@@ -696,22 +694,18 @@ type LayoutSuggester(pdfPath: string, language: string option) =
                 match highResolution with
                 | null -> texts |> List.map (fun _ -> None)
                 | bitmap ->
-                    // In the shown page's space, where its lines run across.
                     let wordBoxes: StructureGeometry list =
                         [ for word in page.GetWords() ->
-                              PageFrame.boxToUpright
-                                  frame
-                                  { PageNumber = pageNumber
-                                    Left = word.BoundingBox.Left
-                                    Bottom = word.BoundingBox.Bottom
-                                    Right = word.BoundingBox.Right
-                                    Top = word.BoundingBox.Top } ]
-                    [ for box, pageRegion, text in List.zip3 (List.ofSeq boxes) regions texts ->
-                          let region = PageFrame.boxToUpright frame pageRegion
+                              { PageNumber = pageNumber
+                                Left = word.BoundingBox.Left
+                                Bottom = word.BoundingBox.Bottom
+                                Right = word.BoundingBox.Right
+                                Top = word.BoundingBox.Top } ]
+                    [ for box, region, text in List.zip3 (List.ofSeq boxes) regions texts ->
                           match LayoutSuggestions.uncoveredBands region wordBoxes with
                           | bands when text <> "" && LayoutSuggestions.holdsText (LayoutSuggestions.tagFor box.Label) && not bands.IsEmpty ->
                               let read =
-                                  readRegions bitmap ocrScale crop [ for bottom, top in bands -> Some recognize, PageFrame.boxFromUpright frame { region with Bottom = bottom; Top = top } ]
+                                  readRegions bitmap ocrScale crop [ for bottom, top in bands -> Some recognize, { region with Bottom = bottom; Top = top } ]
                               let found =
                                   List.zip bands read
                                   |> List.choose (fun ((_, top), read) -> read |> Option.filter LayoutSuggestions.looksLikeText |> Option.map (fun r -> top, r))

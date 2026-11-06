@@ -798,14 +798,13 @@ let ``a scan stored sideways has its table's rows as the page is shown`` () =
     use input = new TempPdf()
     use output = new TempPdf()
     createScan input.Path 90
-    // Turned a quarter clockwise for display: a row across the shown page is a band across the
-    // page's own x, the top row at the left.
+    // Turned a quarter clockwise for display, 792 across and 612 up as shown, where the regions are.
     let regions =
-        [ region "Table" (70.0, 48.0, 154.0, 352.0) null
-          read "TH" (72.0, 50.0, 112.0, 200.0) "Name"
-          read "TH" (72.0, 200.0, 112.0, 350.0) "Hours"
-          read "TD" (112.0, 50.0, 152.0, 200.0) "Ann"
-          read "TD" (112.0, 200.0, 152.0, 350.0) "12" ]
+        [ region "Table" (70.0, 498.0, 402.0, 582.0) null
+          read "TH" (72.0, 540.0, 236.0, 580.0) "Name"
+          read "TH" (236.0, 540.0, 400.0, 580.0) "Hours"
+          read "TD" (72.0, 500.0, 236.0, 540.0) "Ann"
+          read "TD" (236.0, 500.0, 400.0, 540.0) "12" ]
 
     tagFromLayout input.Path output.Path (Some(FixedLayout regions)) |> ignore
 
@@ -813,3 +812,50 @@ let ``a scan stored sideways has its table's rows as the page is shown`` () =
     let table = (root.Children |> Seq.exactlyOne).Children |> Seq.exactlyOne
     [ for row in table.Children -> [ for cell in row.Children -> cell.Tag, cell.ActualText ] ]
     |> should equal [ [ "TH", "Name"; "TH", "Hours" ]; [ "TD", "Ann"; "TD", "12" ] ]
+    // The tags' boxes are where the page shows them, as the regions were.
+    let firstCell = table.Children[0].Children[0].Geometry |> notNull
+    (firstCell.Left, firstCell.Bottom, firstCell.Right, firstCell.Top)
+    |> fun (l, b, r, t) -> l >= 70.0 && b >= 538.0 && r <= 238.0 && t <= 582.0
+    |> should be True
+
+[<Fact>]
+let ``a scan with only one paragraph read from it still gets its text`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createScan input.Path 0
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout [ read "P" (72.0, 720.0, 400.0, 740.0) "Hours for October" ]))
+
+    result.AppliedFixes
+    |> should contain "1 element's text, read from a scan, written over it as invisible text, so it can be searched and selected"
+    use pdf = new PdfDocument(new PdfReader(output.Path))
+    iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(pdf.GetPage 1) |> should haveSubstring "Hours for October"
+
+[<Fact>]
+let ``a figure in a scan keeps its content and its description, and the page looks the same`` () =
+    use input = new TempPdf()
+    use output = new TempPdf()
+    createScan input.Path 0
+    let regions =
+        [ read "P" (72.0, 720.0, 400.0, 740.0) "Hours for October"
+          read "P" (72.0, 690.0, 400.0, 710.0) "Signed by the steward"
+          { region "Figure" (72.0, 500.0, 200.0, 640.0) null with Alt = "The union's seal" } ]
+
+    let result = tagFromLayout input.Path output.Path (Some(FixedLayout regions))
+
+    result.AppliedFixes |> Seq.filter (fun line -> line.Contains "in a scan") |> should be Empty
+    let root = VeraPdfValidator().ReadStructureTree output.Path |> notNull
+    let document = root.Children |> Seq.exactlyOne
+    [ for element in document.Children -> element.Tag ] |> should equal [ "P"; "P"; "Figure" ]
+    let figure = document.Children[2]
+    figure.AlternateDescription |> should equal "The union's seal"
+    let box = figure.Geometry |> notNull
+    (box.Left, box.Bottom, box.Right, box.Top) |> should equal (72.0, 500.0, 200.0, 640.0)
+    use renderer = new PdfRegionRenderer()
+    let offPage = { PageNumber = 1; Left = -20.0; Bottom = -20.0; Right = -10.0; Top = -10.0 }
+    use before = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(input.Path, offPage).PngBytes)
+    use after = SkiaSharp.SKBitmap.Decode(renderer.RenderPageWithHighlight(output.Path, offPage).PngBytes)
+    after.Pixels |> should equal before.Pixels
+    let rules = failedRules output.Path
+    for rule in [ "7.1-3"; "7.3-1" ] do
+        rules |> should not' (contain rule)

@@ -232,21 +232,24 @@ let ``a tagged table tagged wrongly is rebuilt from the cells the model finds, a
         failed output.Path |> Set.filter (fun r -> r.StartsWith "7.2-") |> should be Empty)
 
 [<Fact>]
-let ``a turned page's table cells are found as it's shown, in the page's own points`` () =
+let ``a turned page's table cells are found as it's shown, where its words are`` () =
     withTableModel (fun () ->
         use pdf = new TempPdf()
         createTableOn true pdf.Path
         use suggester = new LayoutSuggester(pdf.Path)
-        // The table's box as stored: shown 72–520 across and 576–696 up, it's 96–216 across and 72–520 up.
-        let region: Legibyl.Validation.StructureGeometry = { PageNumber = 1; Left = 96.0; Bottom = 72.0; Right = 216.0; Top = 520.0 }
+        // The table's box as the page is shown, as PdfPig gives its words: 72–520 across, 576–696 up.
+        let region: Legibyl.Validation.StructureGeometry = { PageNumber = 1; Left = 72.0; Bottom = 576.0; Right = 520.0; Top = 696.0 }
 
         let cells = suggester.TableCells(1, region) |> Option.get
 
         cells |> List.length |> should equal 15
-        // The header is the row at the top as shown: the left-hand edge as stored, 96–120 across.
+        // The header is the row at the top as shown.
         cells |> List.take 3 |> List.forall fst |> should be True
-        cells |> List.take 3 |> List.forall (fun (_, g) -> g.Right <= 125.0) |> should be True
-        cells |> List.forall (fun (_, g) -> g.Left >= 84.0 && g.Right <= 228.0 && g.Bottom >= 60.0 && g.Top <= 532.0) |> should be True)
+        cells |> List.take 3 |> List.forall (fun (_, g) -> g.Bottom >= 665.0) |> should be True
+        cells |> List.forall (fun (_, g) -> g.Left >= 60.0 && g.Right <= 532.0 && g.Bottom >= 564.0 && g.Top <= 708.0) |> should be True
+        // Each cell has its words: they're found where the cells are.
+        let texts = suggester.CellTexts(1, cells |> List.map snd)
+        texts |> List.take 3 |> should equal [ "Plant"; "Sow"; "Harvest" ])
 
 [<Fact>]
 let ``a cell's text is the page's words in it, and only an empty cell is read by OCR`` () =

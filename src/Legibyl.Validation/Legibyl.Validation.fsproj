@@ -9,8 +9,6 @@
   <ItemGroup>
     <!-- Layout suggestions reuse the list marker rules (ParagraphLists). -->
     <InternalsVisibleTo Include="Legibyl.Layout" />
-    <!-- Drawing regions on pages as they're shown (PageFrame). -->
-    <InternalsVisibleTo Include="Legibyl.Rendering" />
   </ItemGroup>
 
   <ItemGroup>

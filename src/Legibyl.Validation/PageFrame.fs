@@ -1,8 +1,8 @@
 /// A page as it's shown: its visible area (crop box) turned as its /Rotate says (clockwise, a
 /// multiple of 90). A scan is often stored sideways and turned for display. Boxes in the
-/// structure are in the page's own space (PDF user space); a rendering, and the rows and
-/// lines a reader sees, are in the page's shown, upright space: points from the shown page's
-/// bottom-left corner, y up.
+/// structure and the layout (StructureGeometry) are in the shown, upright space, as PdfPig
+/// reads the page and as it's rendered: points from the shown page's bottom-left corner, y up.
+/// The content stream is in the page's own space (PDF user space), which iText works in.
 module internal Legibyl.Validation.PageFrame
 
 type Frame =
@@ -63,19 +63,16 @@ let boxFromUpright frame (g: StructureGeometry) =
     boxOf g.PageNumber (fromUpright frame (g.Left, g.Bottom), fromUpright frame (g.Right, g.Top))
 
 /// A box in a rendering of the shown page (pixels, top-left origin, scale pixels per point:
-/// left, top, right, bottom), in the page's space.
-let fromPixels frame pageNumber (scale: float) (left: float, top: float, right: float, bottom: float) =
+/// left, top, right, bottom), in the shown page's points.
+let fromPixels frame pageNumber (scale: float) (left: float, top: float, right: float, bottom: float) : StructureGeometry =
     let _, height = shownSize frame
-    boxFromUpright
-        frame
-        { PageNumber = pageNumber
-          Left = left / scale
-          Right = right / scale
-          Top = height - top / scale
-          Bottom = height - bottom / scale }
+    { PageNumber = pageNumber
+      Left = left / scale
+      Right = right / scale
+      Top = height - top / scale
+      Bottom = height - bottom / scale }
 
-/// A box in the page's space, in a rendering of the shown page: left, top, right, bottom pixels.
+/// A box in the shown page's points, in a rendering of it: left, top, right, bottom pixels.
 let toPixels frame (scale: float) (g: StructureGeometry) =
     let _, height = shownSize frame
-    let u = boxToUpright frame g
-    u.Left * scale, (height - u.Top) * scale, u.Right * scale, (height - u.Bottom) * scale
+    g.Left * scale, (height - g.Top) * scale, g.Right * scale, (height - g.Bottom) * scale
